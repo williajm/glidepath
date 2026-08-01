@@ -1,0 +1,3 @@
+# This checkout is shared between Windows and WSL: normalise everything to
+# LF in the working tree so the two platforms' git defaults don't fight.
+* text=auto eol=lf

@@ -1,0 +1,91 @@
+[project]
+name = "glidepath"
+version = "0.1.0"
+description = "Desktop retirement and investment planner (UK-first, region-extensible)."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "hypothesis",
+    "mypy",
+    "pip-audit",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.13"]
+build-backend = "uv_build"
+
+# --- uv ---------------------------------------------------------------------
+[tool.uv]
+# Supply-chain cooldown: resolution ignores anything published to PyPI after
+# this timestamp (now minus 7 days). Updated ONLY by `make deps`.
+exclude-newer = "2026-07-25T14:56:00Z"
+
+# PyPI is the ONLY permitted index (supply-chain policy; see CLAUDE.md).
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
+# --- ruff -------------------------------------------------------------------
+[tool.ruff]
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812", # Redundant with (and conflicts with) the ruff formatter.
+    "ISC001", # Redundant with (and conflicts with) the ruff formatter.
+    "CPY001", # No per-file copyright headers; repository-level licensing applies.
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",    # pytest tests use bare assert by design.
+    "PLR2004", # Literal expected values in assertions are idiomatic in tests.
+    "INP001",  # tests/ is intentionally not a package (pytest src-layout).
+]
+"scripts/**" = [
+    "T201",   # Standalone CLI scripts report via print.
+    "INP001", # scripts/ is intentionally not a package.
+]
+
+# --- mypy -------------------------------------------------------------------
+[tool.mypy]
+strict = true
+warn_unused_ignores = true
+python_version = "3.14"
+files = ["src", "tests", "scripts"]
+
+# --- pytest / coverage ------------------------------------------------------
+[tool.pytest.ini_options]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=glidepath",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
