@@ -32,5 +32,7 @@ make audit   # pip-audit the lockfile for known CVEs
 ```
 
 Dependencies are never added with plain `uv add`/`uv lock`: run `make deps`
-so the 7-day supply-chain cooldown is applied. CI enforces all of the above
-on every push and PR. See `CLAUDE.md` for the full policies.
+so the 7-day supply-chain cooldown is applied. CI runs every `make check`
+gate plus `make audit` and the SonarCloud quality gate on each PR — so a
+clean `make check` locally does not quite guarantee a green pipeline. See
+`CLAUDE.md` for the full policies.

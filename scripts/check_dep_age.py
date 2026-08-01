@@ -23,16 +23,29 @@ _HTTP_TIMEOUT_SECONDS = 30.0
 _MAX_WORKERS = 8
 
 
-def _lockfile_reference_date() -> datetime:
-    """Return the lockfile's last git commit date, or now (UTC) if uncommitted."""
-    result = subprocess.run(  # noqa: S603 -- fixed argv, no untrusted input.
-        ["git", "log", "-1", "--format=%cI", "--", str(LOCKFILE)],  # noqa: S607 -- git resolved from PATH by design.
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run a fixed git subcommand and capture its output."""
+    return subprocess.run(  # noqa: S603 -- fixed argv, no untrusted input.
+        ["git", *args],  # noqa: S607 -- git resolved from PATH by design.
         capture_output=True,
         text=True,
         check=False,
     )
-    stamp = result.stdout.strip()
-    if result.returncode != 0 or not stamp:
+
+
+def _lockfile_reference_date() -> datetime:
+    """Return the date the current lockfile content was produced.
+
+    A freshly re-locked (dirty or uncommitted) lockfile must be judged
+    against the present; the last commit date applies only to a clean,
+    committed lockfile — the case CI checks.
+    """
+    status = _git("status", "--porcelain", "--", str(LOCKFILE))
+    if status.returncode != 0 or status.stdout.strip():
+        return datetime.now(tz=UTC)
+    log = _git("log", "-1", "--format=%cI", "--", str(LOCKFILE))
+    stamp = log.stdout.strip()
+    if log.returncode != 0 or not stamp:
         return datetime.now(tz=UTC)
     return datetime.fromisoformat(stamp)
 
@@ -56,11 +69,15 @@ def _first_upload_time(package: tuple[str, str]) -> datetime | None:
     if not url.startswith("https://pypi.org/"):
         msg = f"refusing non-PyPI URL: {url}"
         raise ValueError(msg)
-    with urllib.request.urlopen(
-        url,
-        timeout=_HTTP_TIMEOUT_SECONDS,
-    ) as response:
-        payload = json.load(response)
+    try:
+        with urllib.request.urlopen(
+            url,
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        ) as response:
+            payload = json.load(response)
+    except OSError as exc:  # URLError/HTTPError/timeouts are all OSError.
+        msg = f"PyPI query failed for {name}=={version}: {exc}"
+        raise RuntimeError(msg) from exc
     times = [
         datetime.fromisoformat(file["upload_time_iso_8601"]) for file in payload["urls"]
     ]
@@ -78,7 +95,12 @@ def main() -> int:
     )
     violations: list[str] = []
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
-        upload_times = list(pool.map(_first_upload_time, packages))
+        try:
+            upload_times = list(pool.map(_first_upload_time, packages))
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            print("Could not verify dependency ages; failing closed.")
+            return 2
     for (name, version), uploaded in zip(packages, upload_times, strict=True):
         if uploaded is None:
             print(f"WARNING: no files on PyPI for {name}=={version}; skipping")

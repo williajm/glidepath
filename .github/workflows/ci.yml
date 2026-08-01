@@ -2,9 +2,12 @@
 # (supply-chain policy — tags can be moved, SHAs cannot).
 name: CI
 
+# Feature work always goes through a PR (branch protection), so PR events
+# cover dev; push covers main after merge (keeps badges and the Sonar main
+# analysis fresh) without duplicating runs on dev.
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
 
 concurrency:
