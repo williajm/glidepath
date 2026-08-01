@@ -121,8 +121,13 @@ is a read, not a computation — and base-fact corrections propagate to every
 what-if automatically. **Rejected:** deep-copied plan per scenario (drift,
 needs structural diffing); event-sourced log (heavy, not human-readable);
 scenario DSL (unserialisable). **Accepted cost:** what-ifs outside the
-whitelist need a model change; facts themselves are not scenario-overridable
-(a different balance is a different plan).
+whitelist need a model change. To be precise about the boundary: *recorded*
+facts (balances, DOB, NI record, accrued DB) are never scenario-overridable
+— a different balance is a different plan. The whitelist targets
+**decision variables** (§5.1) plus, for contribution rates specifically,
+the stated contribution amounts: a whitelist override replaces the value
+for that scenario's run and carries `SCENARIO_OVERRIDE` provenance, so the
+result still reports exactly what was changed.
 
 ### 4.4 Household and couples
 
@@ -166,10 +171,14 @@ no I/O, no clock reads (`today` is an input), no global state. `Decimal`
 end-to-end — money quantized to pennies (`ROUND_HALF_EVEN`) at every ledger
 write; rates/factors unquantized. Randomness only via an injected
 `RandomSource` protocol wrapping `random.Random(seed)`; the seed lives in
-`RunConfig` and is persisted with results; Monte Carlo path *i* uses
-substream `(seed, i)` so paths are order-independent and individually
-re-runnable. Reproducibility — `(plan, assumptions, region data version,
-seed) → identical output` — is a Hypothesis property test.
+`RunConfig` and is persisted with results; Monte Carlo path *i* uses a
+substream derived from `(seed, i)` so paths are order-independent and
+individually re-runnable. The derivation must be an explicit integer/bytes
+function (e.g. a fixed-width digest of seed and path index) — **never**
+`random.Random((seed, i))`, since tuple seeding goes through `hash()`,
+which is randomized per process and would silently break reproducibility.
+Reproducibility — `(plan, assumptions, region data version, seed) →
+identical output` — is a Hypothesis property test.
 
 **Why.** Purity makes provenance trustworthy (results depend only on
 declared inputs) and the ≥90% coverage bar cheap (no mocking); seeding
@@ -218,16 +227,27 @@ class Assumption[T]:
     description: str
 ```
 
+Alongside facts and assumptions there is a third, deliberately named kind:
+**decision variables** — user *choices* rather than statements about the
+world (`target_retirement_age`, `DBPension.taken_at_age`,
+`commuted_fraction`, `AnnuityPurchase`, withdrawal strategy, state pension
+deferral). They are plain typed fields (no `Fact`/`Assumption` wrapper),
+are exactly the scenario what-if whitelist (§4.3), and surface in the UI
+as "your choices" — a third column beside stated facts and assumptions.
+
 Rules: `AssumptionKey` is a stable enum of dotted ids catalogued in §7.
 `AssumptionSet` is a typed registry — **the engine may not read a tunable
 number any other way** (step functions receive only `Plan` +
-`AssumptionSet` + `Region` + `RunConfig`) — and it records every key
-actually read during a run. `ProjectionResult.provenance` therefore lists
-facts used, assumptions used (default vs overridden), region data version,
-and seed: exactly the payload the UI's "stated vs assumed" inspector
-renders, with no UI-side bookkeeping. Future-policy uncertainty (state
-pension uprating, post-freeze tax indexation) is just assumptions with
-keys, so scenarios can flip them.
+`AssumptionSet` + `Region` + `RunConfig`). Every key actually read during a
+run is tracked without compromising engine purity: reads accumulate in a
+per-run recorder created inside `run()` and returned as part of the result
+(the frozen `AssumptionSet` itself is never mutated), so
+`ProjectionResult.provenance` lists facts used, assumptions used (default
+vs overridden), decision variables in effect, region data version, and
+seed: exactly the payload the UI's "stated vs assumed" inspector renders,
+with no UI-side bookkeeping. Future-policy uncertainty (state pension
+uprating, post-freeze tax indexation) is just assumptions with keys, so
+scenarios can flip them.
 
 **Entities:**
 
@@ -242,10 +262,10 @@ class Household:  # 4.4: 1..2 persons; v1 validates == 1
 @dataclass(frozen=True)
 class Person:
     date_of_birth: Fact[date]
-    sex_for_longevity: Fact[str] | None  # optional, longevity default only
+    sex_for_longevity: Fact[Sex] | None  # enum; longevity default only
     tax_residency: TaxResidency  # rUK | SCOTLAND (designed-for)
     employment_income: Fact[Money] | None
-    target_retirement_age: int  # what-if-overridable (4.3)
+    target_retirement_age: int  # decision variable (5.1), what-if (4.3)
     wrappers: tuple[Wrapper, ...]
     db_pensions: tuple[DBPension, ...]
     state_pension: StatePensionRecord
@@ -375,9 +395,10 @@ inflation truth per run.
 **Withdrawal strategies** are a protocol
 (`withdraw(state, need) -> WithdrawalPlan`): v1 fixed-real and fixed-%;
 then guardrails (Guyton–Klinger-style bands) and natural yield. Strategies
-also encode wrapper ordering (default GIA/cash → ISA → pension, tax-aware;
-configurable) and the tax-free cash strategy (PCLS up front vs UFPLS-style
-phased).
+also encode wrapper ordering (tax-aware, configurable; the full default is
+GIA/cash → ISA → pension, which in v1 — before the GIA/cash wrappers land
+in Phase 9 — reduces to ISA → pension) and the tax-free cash strategy
+(PCLS up front vs UFPLS-style phased).
 
 **Return model and Monte Carlo.** `ReturnModel.returns_for(period, path)`:
 deterministic impl = expected real returns + CPI → nominal, same every
@@ -461,12 +482,12 @@ lisa_withdrawal_charge = "0.25"
 new_full_weekly       = "241.30"
 qualifying_years_full = 35
 qualifying_years_min  = 10
-deferral_increment_per_9_weeks = "0.01"
 ```
 
-`age_rules.toml` holds effective-dated schedules: NMPA (55; 57 from
-2028-04-06), the SPA DOB-band table (§6), LISA ages (open 18–39,
-contribute to 50, access 60).
+`age_rules.toml` holds the durable, effective-dated policy parameters that
+are not re-set each tax year: NMPA (55; 57 from 2028-04-06), the SPA
+DOB-band table (§6), LISA ages (open 18–39, contribute to 50, access 60),
+and the state pension deferral increment (1% per 9 weeks).
 
 **Future years:** past the last shipped file, the region extends the final
 year per the `policy.tax.future_years` assumption (`frozen` vs

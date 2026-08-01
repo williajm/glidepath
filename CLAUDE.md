@@ -58,12 +58,13 @@ releases). Rules:
   from its roadmap section. Update it when any of those change.
 - FACTS vs ASSUMPTIONS is a load-bearing product principle: user-entered
   data is `Fact[T]`; every other input is `Assumption[T]` with value,
-  source, date recorded, and default/overridden provenance
-  (`docs/planning.md` §5.1).
+  source, date recorded, and default/overridden provenance (see the
+  "Domain model" section of `docs/planning.md`).
 - UK policy figures (tax bands, allowances, state pension rates, age rules)
   are NEVER hardcoded — they live in TOML data files under
-  `src/glidepath/regions/uk/data/` with `verified_on` + `sources`
-  (`docs/planning.md` §5.3). A guard test enforces this.
+  `src/glidepath/regions/uk/data/` with `verified_on` + `sources` (see the
+  "UK region data files" section of `docs/planning.md`). A guard test
+  enforces this.
 - Product disclaimer: glidepath is a personal modelling tool, not regulated
   financial advice; the disclaimer must be preserved in the UI, exports,
   and README.
