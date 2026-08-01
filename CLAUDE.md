@@ -50,6 +50,28 @@ releases). Rules:
 - Pre-commit hooks are required locally (`make hooks`); ruff/mypy run via
   `uv run` so they always match the locked versions.
 
+## Documentation & design (read before feature work)
+
+- `docs/planning.md` is the single planning document and the source of
+  truth for scope, design decisions, verified UK figures, default
+  assumptions, and the phased roadmap; implementation issues are raised
+  from its roadmap section. Update it when any of those change.
+- FACTS vs ASSUMPTIONS vs DECISIONS is a load-bearing product principle:
+  user-entered data is `Fact[T]`; estimated/defaulted inputs are
+  `Assumption[T]` with value, source, date recorded, and
+  default/overridden provenance; user *choices* (retirement age,
+  contributions, planned outflows) are `Decision[T]` — the only
+  scenario-overridable plan fields (see the "Domain model" section of
+  `docs/planning.md`).
+- UK policy figures (tax bands, allowances, state pension rates, age rules)
+  are NEVER hardcoded — they live in TOML data files under
+  `src/glidepath/regions/uk/data/` with `verified_on` + `sources` (see the
+  "UK region data files" section of `docs/planning.md`). A guard test
+  enforces this.
+- Product disclaimer: glidepath is a personal modelling tool, not regulated
+  financial advice; the disclaimer must be preserved in the UI, exports,
+  and README.
+
 ## Coding conventions
 
 - Money is `Decimal`, never float.
