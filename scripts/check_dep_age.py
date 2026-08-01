@@ -25,8 +25,8 @@ _MAX_WORKERS = 8
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     """Run a fixed git subcommand and capture its output."""
-    return subprocess.run(  # noqa: S603 -- fixed argv, no untrusted input.
-        ["git", *args],  # noqa: S607 -- git resolved from PATH by design.
+    return subprocess.run(  # noqa: S603  # Fixed argv, no untrusted input.
+        ["git", *args],  # noqa: S607  # git is resolved from PATH by design.
         capture_output=True,
         text=True,
         check=False,
