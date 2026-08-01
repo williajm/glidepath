@@ -15,44 +15,51 @@ export UV_PROJECT_ENVIRONMENT := .venv-wsl
 endif
 
 help:
+	@echo "make sync   - install the locked dependencies into the platform venv"
 	@echo "make check  - run all merge gates (ruff, mypy, pytest+coverage, dep age)"
 	@echo "make fix    - auto-fix lint issues and format"
 	@echo "make test   - run tests with coverage"
-	@echo "make deps   - (re)lock dependencies with the 7-day cooldown, sync, verify"
+	@echo "make deps   - upgrade/lock dependencies with the 7-day cooldown, sync, verify"
 	@echo "make audit  - pip-audit the lockfile for known CVEs"
 	@echo "make sonar  - run tests then a local SonarQube scan (needs sonar-scanner)"
 	@echo "make hooks  - install pre-commit hooks"
 
+# All non-dependency commands use `uv run --locked` so they can never
+# silently re-resolve the lockfile — only `make deps` may change it.
+sync:
+	uv sync --locked
+
 check:
-	uv run ruff check .
-	uv run ruff format --check .
-	uv run mypy
-	uv run pytest
-	uv run python scripts/check_dep_age.py
+	uv run --locked ruff check .
+	uv run --locked ruff format --check .
+	uv run --locked mypy
+	uv run --locked pytest
+	uv run --locked python scripts/check_dep_age.py
 
 fix:
-	uv run ruff check --fix .
-	uv run ruff format .
+	uv run --locked ruff check --fix .
+	uv run --locked ruff format .
 
 test:
-	uv run pytest
+	uv run --locked pytest
 
 # The ONLY sanctioned way to add or upgrade dependencies (see CLAUDE.md).
-# Bumps the exclude-newer cooldown cutoff in pyproject.toml, re-locks against
-# it, syncs, then independently verifies upload ages via the PyPI API.
+# Bumps the exclude-newer cooldown cutoff in pyproject.toml, re-resolves
+# everything against it (--upgrade, or existing pins are kept forever),
+# syncs, then independently verifies artifact upload ages via the PyPI API.
 deps:
 	uv run --no-project python scripts/update_exclude_newer.py
-	uv lock
+	uv lock --upgrade
 	uv sync --locked
-	uv run python scripts/check_dep_age.py
+	uv run --locked python scripts/check_dep_age.py
 
 audit:
 	uv export --frozen --no-emit-project --output-file requirements-audit.txt
-	uv run pip-audit --disable-pip --requirement requirements-audit.txt
+	uv run --locked pip-audit --disable-pip --requirement requirements-audit.txt
 
 sonar:
-	uv run pytest
+	uv run --locked pytest
 	sonar-scanner
 
 hooks:
-	uv run pre-commit install
+	uv run --locked pre-commit install

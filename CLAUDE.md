@@ -22,12 +22,18 @@ No dependency — direct or transitive — may be locked to a version published
 to PyPI within the last 7 days (cooldown against freshly compromised
 releases). Rules:
 
-- Add/upgrade dependencies ONLY via `make deps`, which runs
-  `uv lock --exclude-newer <UTC now minus 7 days>`, syncs, and then runs
-  `scripts/check_dep_age.py` to verify. Never run bare `uv add`,
-  `uv lock`, or `uv lock --upgrade`.
-- `scripts/check_dep_age.py` re-verifies the lockfile against the PyPI JSON
-  API and runs in CI — a violating lockfile cannot merge.
+- Add/upgrade dependencies ONLY via `make deps`, which bumps the
+  `exclude-newer` cutoff in `pyproject.toml` to UTC now minus 7 days, runs
+  `uv lock --upgrade`, syncs, and then runs `scripts/check_dep_age.py` to
+  verify. Never run bare `uv add`, `uv lock`, or `uv lock --upgrade`.
+- All other commands (make targets, pre-commit hooks) use
+  `uv run --locked`, so nothing outside `make deps` can rewrite the
+  lockfile.
+- `scripts/check_dep_age.py` independently verifies the lockfile: the
+  embedded cutoff must be ≥7 days old right now, every package must come
+  from PyPI (root project excepted), and every locked wheel/sdist's PyPI
+  upload time must predate the cutoff. It runs in CI — a violating
+  lockfile cannot merge.
 - PyPI is the only permitted package index; uv hash verification stays on.
 - The uv binary itself follows the same cooldown: install/update it only to
   releases at least 7 days old (CI pins the exact version in `ci.yml`).

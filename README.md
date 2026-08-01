@@ -17,9 +17,13 @@ regions can be added later. Early scaffolding — no app features yet.
 Requires [uv](https://docs.astral.sh/uv/) and GNU Make.
 
 ```sh
-uv sync            # creates the venv and installs locked dependencies
+make sync          # creates the platform venv and installs locked dependencies
 make hooks         # installs the pre-commit hooks (required)
 ```
+
+One-time per machine: set `UV_PROJECT_ENVIRONMENT` user-wide (`.venv-win`
+on Windows, `.venv-wsl` in WSL) so bare `uv` commands and the git hooks use
+the same venv as make. See `CLAUDE.md`.
 
 ## Everyday commands
 
