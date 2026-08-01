@@ -1,5 +1,14 @@
 # glidepath
 
+[![CI](https://github.com/williajm/glidepath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/williajm/glidepath/actions/workflows/ci.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=williajm_glidepath&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=williajm_glidepath)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=williajm_glidepath&metric=coverage)](https://sonarcloud.io/summary/new_code?id=williajm_glidepath)
+[![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://github.com/williajm/glidepath/blob/main/.python-version)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
+[![License: MIT](https://img.shields.io/github/license/williajm/glidepath)](LICENSE)
+
 A desktop retirement and investment planner. UK-first, built so other
 regions can be added later. Early scaffolding — no app features yet.
 
