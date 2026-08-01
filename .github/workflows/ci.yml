@@ -1,0 +1,59 @@
+# Merge gates: every step must pass. Actions are pinned to commit SHAs
+# (supply-chain policy — tags can be moved, SHAs cannot).
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history — Sonar and the dep-age check need it)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.32" # Newest uv release >= 7 days old when pinned.
+          enable-cache: true
+
+      - name: Sync locked dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy (strict)
+        run: uv run mypy
+
+      - name: Tests with coverage (fail under 90%)
+        run: uv run pytest
+
+      - name: Dependency age check (7-day supply-chain cooldown)
+        run: uv run python scripts/check_dep_age.py
+
+      - name: Export lockfile for audit
+        run: uv export --frozen --no-emit-project --output-file requirements-audit.txt
+
+      - name: pip-audit (known CVEs)
+        run: uv run pip-audit --disable-pip --requirement requirements-audit.txt
+
+      - name: SonarQube scan
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
