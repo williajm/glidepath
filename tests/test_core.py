@@ -20,5 +20,7 @@ def test_project_balance_zero_years_is_identity() -> None:
 
 def test_project_balance_rejects_negative_years() -> None:
     """Negative projection horizons are invalid."""
+    balance = Decimal(1)
+    rate = Decimal(0)
     with pytest.raises(ValueError, match="non-negative"):
-        project_balance(Decimal(1), Decimal(0), -1)
+        project_balance(balance, rate, -1)
