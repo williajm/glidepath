@@ -56,10 +56,13 @@ releases). Rules:
   truth for scope, design decisions, verified UK figures, default
   assumptions, and the phased roadmap; implementation issues are raised
   from its roadmap section. Update it when any of those change.
-- FACTS vs ASSUMPTIONS is a load-bearing product principle: user-entered
-  data is `Fact[T]`; every other input is `Assumption[T]` with value,
-  source, date recorded, and default/overridden provenance (see the
-  "Domain model" section of `docs/planning.md`).
+- FACTS vs ASSUMPTIONS vs DECISIONS is a load-bearing product principle:
+  user-entered data is `Fact[T]`; estimated/defaulted inputs are
+  `Assumption[T]` with value, source, date recorded, and
+  default/overridden provenance; user *choices* (retirement age,
+  contributions, planned outflows) are `Decision[T]` — the only
+  scenario-overridable plan fields (see the "Domain model" section of
+  `docs/planning.md`).
 - UK policy figures (tax bands, allowances, state pension rates, age rules)
   are NEVER hardcoded — they live in TOML data files under
   `src/glidepath/regions/uk/data/` with `verified_on` + `sources` (see the
