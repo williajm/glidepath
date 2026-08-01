@@ -1,77 +1,616 @@
 # Glidepath planning
 
-> Status: master plan — implementation issues are raised from this doc ·
-> Last updated 2026-08-01
+> Status: master planning document — implementation issues are raised from
+> §8 · Last updated 2026-08-01 · All UK figures verified against primary
+> sources on 2026-08-01 (§6).
 
-## Vision and product principles
+Contents: [1 Vision](#1-vision-and-product-principles) ·
+[2 Scope](#2-scope) · [3 Architecture](#3-architecture) ·
+[4 Decisions](#4-decision-records-proposed--awaiting-approval) ·
+[5 Design](#5-design) · [6 Verified figures](#6-verified-uk-policy-figures-202627) ·
+[7 Default assumptions](#7-default-assumptions-proposed) ·
+[8 Roadmap](#8-phased-roadmap--issue-basis) ·
+[9 Open questions](#9-open-questions)
+
+---
+
+## 1. Vision and product principles
 
 Glidepath is a desktop retirement/investment planner: model a person moving
-through life stages — accumulation, de-risking glide path, decumulation —
-under explicit, inspectable inputs.
+through life stages — accumulation, de-risking glide path (the namesake),
+decumulation — under explicit, inspectable inputs.
 
-1. **Facts vs assumptions is the product.** Every number is either a fact
-   the user stated or an assumption the app made — first-class in the data
-   model, carried through every projection, always surfaceable in the UI.
-   See [domain-model.md §1](design/domain-model.md).
+1. **Facts vs assumptions is the product.** Every number is either a
+   **fact** the user stated (DOB, balances, contributions, accrued DB
+   entitlement, NI record) or an **assumption** the app defaulted or
+   estimated (returns, inflation, annuity rates, future tax rules,
+   longevity). The distinction is first-class in the data model, flows
+   through every projection, and is surfaceable in the UI: a user can
+   always ask *"which of these numbers did I state, and which did you
+   assume?"* Every assumption carries value, source, date recorded, and
+   whether the user overrode the default.
 2. **Not financial advice.** Glidepath is a personal modelling tool, not
    regulated financial advice. A disclaimer to this effect is a **product
-   requirement**: it must appear in the UI (first run and About), in any
-   exported output, and in the README.
-3. **Private by construction.** All user data stays on the user's machine;
-   nothing is transmitted ([ADR-0005](adr/0005-persistence-format.md)).
+   requirement**: UI (first run + About), any exported output, README.
+3. **Private by construction.** All user data stays local; nothing is
+   transmitted.
 4. **Region-agnostic core.** UK specifics live in `regions/uk` behind typed
-   protocols ([ADR-0002](adr/0002-core-region-boundary.md)); policy figures
-   live in data files, never logic ([uk-region.md](design/uk-region.md)).
+   protocols; policy figures live in data files, never logic.
 
-## Scope
+## 2. Scope
 
 | | Contents |
 | --- | --- |
 | **v1** | Single person, UK (rUK tax). Wrappers: workplace DC, SIPP, S&S ISA. DB pensions. State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
-| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities (incl. partial annuitisation); LISA/GIA/cash wrappers; Scottish bands (designed-for now); dividend/savings taxation (needs GIA); AA carry-forward; couples activation ([ADR-0004](adr/0004-household-and-couples.md)); announced future rules (2027 cash-ISA reform, 2029 salary-sacrifice NICs). |
-| **Out of scope** | Financial advice or recommendations; live market data; non-UK regions (architecture allows them later); protected pension ages (noted in UI copy). |
+| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; LISA/GIA/cash wrappers; Scottish bands (designed-for now); dividend/savings taxation (needs GIA); AA carry-forward; couples activation; announced future rules (2027 cash-ISA reform, 2029 salary-sacrifice NICs). |
+| **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); protected pension ages (noted in UI copy). |
 
-## Architecture overview
+## 3. Architecture
 
 ```
-┌──────────────┐   ┌───────────────────┐   ┌──────────────────────────┐
-│  GUI (PySide6)│──▶│ Scenario layer     │──▶│ Core engine (pure,       │
-│  facts entry, │   │ base ⊕ overrides   │   │ Decimal, seeded RNG)     │
-│  "stated vs   │   │ (ADR-0003)         │   │ run(plan, assumptions,   │
-│  assumed" view│   └───────────────────┘   │     region, config)      │
-└──────────────┘                            └───────────┬──────────────┘
+┌───────────────┐   ┌───────────────────┐   ┌──────────────────────────┐
+│ GUI (PySide6) │──▶│ Scenario layer    │──▶│ Core engine (pure,       │
+│ facts entry,  │   │ base ⊕ overrides  │   │ Decimal, seeded RNG)     │
+│ "stated vs    │   │ (§4.3)            │   │ run(plan, assumptions,   │
+│ assumed" view │   └───────────────────┘   │     region, config)      │
+└───────────────┘                           └───────────┬──────────────┘
         ▲                                               │ typed protocols
-        │ provenance record                             ▼ (ADR-0002)
-┌──────────────┐                            ┌──────────────────────────┐
-│ .glidepath.json│◀──────────────────────── │ regions/uk  ◀── TOML data │
-│ (local only)  │        ADR-0005           │ (tax years, age rules)   │
-└──────────────┘                            └──────────────────────────┘
+        │ provenance record                             ▼ (§4.2)
+┌────────────────┐                          ┌──────────────────────────┐
+│ .glidepath.json│◀──────────────────────── │ regions/uk ◀── TOML data │
+│ (local only)   │        (§4.5)            │ (tax years, age rules)   │
+└────────────────┘                          └──────────────────────────┘
 ```
 
-Decision records: [ADR index](adr/README.md). Specs:
-[domain model](design/domain-model.md) ·
-[projection engine](design/projection-engine.md) ·
-[UK region](design/uk-region.md). Defaults and verified figures:
-[assumptions register](assumptions.md). Terms: [glossary](glossary.md).
+## 4. Decision records (Proposed — awaiting approval)
 
-## Phased roadmap
+Each records: decision, rationale, rejected alternatives, accepted costs.
+Once approved, a decision changes only by a superseding entry here.
 
-Each unchecked item below becomes one GitHub issue (~½–2 days). Format:
-item — *acceptance criterion*. Items within a phase are mostly
-parallelisable; phases are ordered by dependency.
+### 4.1 Time step and calendar
+
+**Decision.** Annual steps, where each step is a *period* supplied by the
+region's `FiscalCalendar` protocol (UK: tax years, 6 Apr–5 Apr; core never
+knows what "6 April" is). Age-triggered events (NMPA, SPA, LISA access, DB
+NPA) take effect in the period *in which the birthday falls* — one
+documented convention, tested at boundaries. Partial years (starting work,
+retiring mid-year) are pro-rated by whole months as a `Decimal` fraction;
+no sub-stepping.
+
+**Why.** All UK tax and allowances are assessed per tax year, so a tax-year
+step makes tax exact where it matters and keeps state small and auditable.
+**Rejected:** monthly steps (12× state, false precision — tax must still be
+annualised); calendar years (permanent mismatch with UK tax); birthday
+years (breaks tax years *and* couples). **Accepted cost:** intra-year
+sequence-of-returns effects invisible (year-order sequence risk still
+captured by Monte Carlo).
+
+### 4.2 Core/region boundary
+
+**Decision.** `glidepath.core` defines typed Protocols crossing the
+boundary — `FiscalCalendar`, `TaxSystem` (`assess(period, TaxInput) ->
+TaxResult` with *generic* categorised income shapes, no UK band names),
+`WrapperRuleset` (limits, relief mechanics, access ages, in/during/out tax
+treatment per wrapper kind), `StatePensionScheme`, `AgeRules` — plus the
+region-agnostic value types (`Money`, `Rate`, `Period`, `Fact`,
+`Assumption`). `glidepath.regions.uk` (promoted from `uk.py` to a package)
+implements them, loading every figure from data files (§5.3). A `Region`
+aggregate is injected at run construction. Dependency direction is region →
+core only, enforced by a test (core must not import `regions.*`) plus a
+grep guard (no policy-figure literals outside `regions/uk/data/`).
+
+**Why.** Protocol injection is what mypy `--strict` fully verifies, and it
+turns the CLAUDE.md isolation rule into a cheap failing test. **Rejected:**
+ABC inheritance into the engine (couples internals to regions); plugin
+discovery (over-engineering for one region); region enum + branches in core
+(banned by repo policy).
+
+### 4.3 Scenario model
+
+**Decision.** A user file holds one base `Plan` (facts) + one base
+`AssumptionSet`, plus named `Scenario`s, each a list of typed
+`Override(target, value, note)` records. Targets are assumption keys or a
+**whitelisted** set of plan-level what-if fields (retirement age,
+contribution rates, one-off outflows, withdrawal strategy, annuitisation,
+state pension deferral). Effective inputs = base ⊕ overrides at run time;
+scenario-overridden assumptions carry `SCENARIO_OVERRIDE` provenance.
+Comparison is a per-period metrics report across scenarios.
+
+**Why.** A scenario stored as deltas *is* its own diff — "what's different?"
+is a read, not a computation — and base-fact corrections propagate to every
+what-if automatically. **Rejected:** deep-copied plan per scenario (drift,
+needs structural diffing); event-sourced log (heavy, not human-readable);
+scenario DSL (unserialisable). **Accepted cost:** what-ifs outside the
+whitelist need a model change; facts themselves are not scenario-overridable
+(a different balance is a different plan).
+
+### 4.4 Household and couples
+
+**Decision.** Model `Household{persons: 1..2}` in the schema and engine
+signatures **now**; everything taxed or age-gated (wrappers, DB, NI/state
+pension, tax assessment) hangs off a `Person`; shared economics (spending
+plan, one-off outflows, success metrics) hang off the `Household`. v1
+validates `len(persons) == 1`. No couples UI, transfers, or
+survivor/death modelling until a later couples spike adds its own decision
+record.
+
+**Why.** UK tax is individual, so computation is per-person anyway; the
+expensive-to-retrofit fork is where spending and goals live, and placing
+them at household level costs nothing today but avoids a schema + engine
+migration later. **Rejected:** pure single-person schema (the corner the
+brief warns about); full couples in v1 (drags in survivorship modelling
+prematurely).
+
+### 4.5 Persistence
+
+**Decision.** Two stdlib-only formats for two jobs. **User data:** one JSON
+document per plan, `.glidepath.json` — `schema_version`, sorted keys,
+2-space indent, `\n` endings, `Decimal` as strings, ISO-8601 tz-aware
+datetimes; deterministic output → clean diffs. Stored wherever the user
+chooses; never transmitted. **Shipped region data:** TOML read with stdlib
+`tomllib` (read-only at runtime — no TOML writer needed; comments carry
+citations). User files store only assumption *overrides*; defaults
+re-resolve on load against shipped data, and the file records the data
+version it was last resolved against so default changes surface visibly.
+
+**Why.** Zero runtime dependencies preserved for read and write; JSON is
+the right app-owned canonical format, TOML the right hand-maintained one.
+**Rejected:** TOML for user files (needs `tomli-w`); YAML (dependency +
+coercion footguns); SQLite (opaque, not diffable). **Accepted cost:** a
+versioned migration harness from day one (v1→v1 no-op).
+
+### 4.6 Engine purity and reproducibility
+
+**Decision.** The engine is pure typed functions over frozen dataclasses:
+no I/O, no clock reads (`today` is an input), no global state. `Decimal`
+end-to-end — money quantized to pennies (`ROUND_HALF_EVEN`) at every ledger
+write; rates/factors unquantized. Randomness only via an injected
+`RandomSource` protocol wrapping `random.Random(seed)`; the seed lives in
+`RunConfig` and is persisted with results; Monte Carlo path *i* uses
+substream `(seed, i)` so paths are order-independent and individually
+re-runnable. Reproducibility — `(plan, assumptions, region data version,
+seed) → identical output` — is a Hypothesis property test.
+
+**Why.** Purity makes provenance trustworthy (results depend only on
+declared inputs) and the ≥90% coverage bar cheap (no mocking); seeding
+makes MC debuggable ("re-run path 4711"). **Rejected:** numpy (runtime
+dep, float-based, breaks the Decimal rule); module-level `random`; floats
+internally. **Accepted cost:** Decimal MC is slow — annual steps and small
+state keep it tractable; a measurement task gates any revisit (§8, 7.2).
+
+## 5. Design
+
+### 5.1 Domain model
+
+Typed sketches (signatures, not implementations). All dataclasses frozen;
+money `Decimal`; datetimes tz-aware.
+
+**Facts vs assumptions — the type-level core:**
+
+```python
+class Provenance(Enum):
+    USER_FACT = auto()  # the user stated it
+    DEFAULT_ASSUMPTION = auto()  # shipped default, not overridden
+    USER_OVERRIDE = auto()  # user overrode the default
+    SCENARIO_OVERRIDE = auto()  # a scenario overrode it (see 4.3)
+
+
+@dataclass(frozen=True)
+class Fact[T]:
+    """A value the user stated."""
+
+    value: T
+    as_of: date  # when it was true (e.g. balance date)
+    recorded_on: datetime  # tz-aware
+    note: str | None = None
+
+
+@dataclass(frozen=True)
+class Assumption[T]:
+    """A value the app defaulted or estimated. Always overridable."""
+
+    key: AssumptionKey  # stable dotted id, e.g. "returns.equity.real"
+    value: T
+    default_value: T  # what the shipped default was
+    provenance: Provenance
+    source: str  # citation/URL for the default's basis
+    recorded_on: datetime
+    description: str
+```
+
+Rules: `AssumptionKey` is a stable enum of dotted ids catalogued in §7.
+`AssumptionSet` is a typed registry — **the engine may not read a tunable
+number any other way** (step functions receive only `Plan` +
+`AssumptionSet` + `Region` + `RunConfig`) — and it records every key
+actually read during a run. `ProjectionResult.provenance` therefore lists
+facts used, assumptions used (default vs overridden), region data version,
+and seed: exactly the payload the UI's "stated vs assumed" inspector
+renders, with no UI-side bookkeeping. Future-policy uncertainty (state
+pension uprating, post-freeze tax indexation) is just assumptions with
+keys, so scenarios can flip them.
+
+**Entities:**
+
+```python
+@dataclass(frozen=True)
+class Household:  # 4.4: 1..2 persons; v1 validates == 1
+    persons: tuple[Person, ...]
+    spending: SpendingPlan  # household-level
+    planned_outflows: tuple[PlannedOutflow, ...]  # household-level
+
+
+@dataclass(frozen=True)
+class Person:
+    date_of_birth: Fact[date]
+    sex_for_longevity: Fact[str] | None  # optional, longevity default only
+    tax_residency: TaxResidency  # rUK | SCOTLAND (designed-for)
+    employment_income: Fact[Money] | None
+    target_retirement_age: int  # what-if-overridable (4.3)
+    wrappers: tuple[Wrapper, ...]
+    db_pensions: tuple[DBPension, ...]
+    state_pension: StatePensionRecord
+    glide_path: GlidePathConfig
+
+
+class WrapperKind(Enum):
+    WORKPLACE_DC = auto()
+    SIPP = auto()
+    ISA = auto()  # v1 above; extensions below
+    LISA = auto()
+    GIA = auto()
+    CASH = auto()
+
+
+@dataclass(frozen=True)
+class Wrapper:
+    kind: WrapperKind
+    balance: Fact[Money]
+    allocation: AssetAllocation  # or supplied by glide path
+    fees: FeeSchedule  # platform + fund, annual %
+    contributions: ContributionSchedule | None
+
+
+@dataclass(frozen=True)
+class ContributionSchedule:
+    employee_amount: Fact[Money]  # per year; % of salary variant too
+    employer_amount: Fact[Money] | None  # incl. match rules
+    relief_mechanic: ReliefMechanic  # RELIEF_AT_SOURCE | NET_PAY (region)
+    escalation: AssumptionRef | None  # e.g. grows with earnings assumption
+
+
+@dataclass(frozen=True)
+class DBPension:
+    accrued_annual_pension: Fact[Money]  # at date of leaving / statement
+    statement_date: date
+    normal_pension_age: Fact[int]  # scheme fact
+    revaluation_basis: RevaluationBasis  # scheme fact (e.g. CPI capped 5%)
+    early_late_factors: FactorTable  # scheme facts, user-entered
+    commutation_factor: Fact[Decimal] | None  # £ lump sum per £1 pension
+    taken_at_age: int | None  # decision variable (what-if)
+    commuted_fraction: Decimal  # decision variable (what-if)
+
+
+@dataclass(frozen=True)
+class StatePensionRecord:
+    forecast_weekly_amount: Fact[Money] | None  # official forecast wins
+    qualifying_years: Fact[int] | None  # NI record, if no forecast
+    planned_extra_years: int  # what-if: years still to accrue
+    deferral_years: Decimal  # what-if
+    # SPA derives from DOB via region AgeRules; uprating is an assumption key.
+
+
+@dataclass(frozen=True)
+class SpendingPlan:
+    annual_spending_real: Fact[Money]  # today's money
+    stage_multipliers: Mapping[LifeStage, Decimal] | None  # e.g. go-go years
+
+
+@dataclass(frozen=True)
+class PlannedOutflow:  # mortgage payoff, gift, purchase
+    label: str
+    amount_real: Fact[Money]
+    at_age_of: tuple[PersonRef, int]  # person + age it occurs
+
+
+@dataclass(frozen=True)
+class AnnuityPurchase:  # what-if decision variable
+    at_age: int
+    fraction_of_pot: Decimal  # partial annuitisation supported
+    annuity_type: AnnuityType  # LEVEL | ESCALATING | INFLATION_LINKED
+    basis: AnnuityBasis  # SINGLE | JOINT
+    # rate comes from the annuity-rate assumption table by age/type
+```
+
+DB scheme parameters (revaluation basis, NPA, early/late factors,
+commutation factor) are user-entered **facts** — schemes vary too much to
+ship as data.
+
+**Life stages and glide path.** A person is not a snapshot: the projection
+moves them through `EARLY_ACCUMULATION → MID_ACCUMULATION → PRE_RETIREMENT
+(de-risking) → DECUMULATION`. Stage is *derived* each period from
+years-to-target-retirement, not stored. The glide path maps
+years-to-retirement → asset allocation by interpolating a factor table;
+the default shape is an assumption (`glidepath.default_shape`),
+overridable per person.
+
+### 5.2 Projection engine
+
+```python
+def run(
+    plan: Plan, assumptions: AssumptionSet, region: Region, config: RunConfig
+) -> ProjectionResult: ...
+```
+
+Pure and deterministic (§4.6). `config`: `today`, horizon end (default from
+longevity assumption), mode (deterministic | monte-carlo), seed, paths,
+withdrawal strategy. **The same step function runs under both modes; only
+the `ReturnModel` differs** — a design invariant, not an aspiration.
+
+**Order of operations within a period is part of the spec** (tested):
+
+1. **Open period** — resolve ages (birthday-in-period), stage, glide-path
+   allocation; apply age events (NMPA/SPA/LISA access, DB NPA).
+2. **Income** — DB in payment (revalued/uprated), state pension (uprating
+   assumption), annuity income, employment income.
+3. **Contributions** — employee + employer, relief mechanics, AA/taper/MPAA
+   checks (region ruleset).
+4. **Withdrawals** — per strategy, respecting access rules and the tax-free
+   cash strategy.
+5. **Tax** — one `TaxSystem.assess` call per person on the period's full
+   categorised income picture.
+6. **Fees** — platform + fund on average balances.
+7. **Growth** — apply the period's returns to each wrapper's allocation.
+8. **Close period** — quantize ledger, emit `PeriodSnapshot`.
+
+Income/contributions before tax (tax needs the full picture); fees before
+growth approximates intra-year accrual acceptably at annual resolution.
+`PeriodSnapshot` records per person/wrapper: opening/closing balances,
+flows by category, tax with breakdown, ages, stage, allocation.
+
+**Real vs nominal.** The engine computes nominal (tax bands are nominal
+objects); the reporting layer deflates by the run's CPI path. **Real
+(today's money) is the default presentation**; nominal available. One
+inflation truth per run.
+
+**Withdrawal strategies** are a protocol
+(`withdraw(state, need) -> WithdrawalPlan`): v1 fixed-real and fixed-%;
+then guardrails (Guyton–Klinger-style bands) and natural yield. Strategies
+also encode wrapper ordering (default GIA/cash → ISA → pension, tax-aware;
+configurable) and the tax-free cash strategy (PCLS up front vs UFPLS-style
+phased).
+
+**Return model and Monte Carlo.** `ReturnModel.returns_for(period, path)`:
+deterministic impl = expected real returns + CPI → nominal, same every
+path; stochastic impl (MC phase) = lognormal draws with assumed
+volatilities and correlation matrix (Cholesky in `Decimal`; performance
+measured before optimising), randomness only from the injected seeded
+source. Success metrics over paths: **probability of ruin**, **sustainable
+income** (highest starting withdrawal meeting a target success rate, by
+bisection), **ending-pot percentiles**. Sequence-of-returns risk is
+demonstrated by fixtures: same returns, different order → different
+outcome.
+
+### 5.3 UK region data files
+
+Location: `src/glidepath/regions/uk/data/`, loaded via
+`importlib.resources` + stdlib `tomllib`. One file per tax year
+(`tax_year_2026_27.toml`), plus effective-dated `age_rules.toml` and
+`assumptions_default.toml` (machine mirror of §7; a doc-sync test keeps
+them aligned). Loader rules: money/rates are TOML **strings** parsed to
+`Decimal` (bare floats in money positions are load errors); mandatory
+`[meta]` with `verified_on` + `sources`; `schema_version`; strict
+validation into frozen dataclasses, unknown keys error.
+
+```toml
+schema_version = 1
+
+[meta]
+tax_year    = "2026/27"
+start_date  = 2026-04-06
+end_date    = 2027-04-05
+verified_on = 2026-08-01
+sources = [
+  "https://www.gov.uk/income-tax-rates",
+  "https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027",
+  "https://www.gov.uk/scottish-income-tax",
+]
+
+[income_tax.ruk]
+personal_allowance = "12570"
+pa_taper_threshold = "100000"  # adjusted net income; PA -£1 per £2 above
+pa_taper_rate      = "0.5"
+# Band widths are TAXABLE income above the personal allowance, ascending.
+bands = [
+  { name = "basic", rate = "0.20", upper = "37700" },
+  { name = "higher", rate = "0.40", upper = "125140" },
+  { name = "additional", rate = "0.45" },  # no upper = unbounded
+]
+
+[income_tax.scotland]  # non-savings/non-dividend income only
+personal_allowance = "12570"
+pa_taper_threshold = "100000"
+pa_taper_rate      = "0.5"
+bands = [
+  { name = "starter", rate = "0.19", upper = "3967" },
+  { name = "basic", rate = "0.20", upper = "16956" },
+  { name = "intermediate", rate = "0.21", upper = "31092" },
+  { name = "higher", rate = "0.42", upper = "62430" },
+  { name = "advanced", rate = "0.45", upper = "125140" },
+  { name = "top", rate = "0.48" },
+]
+
+[pension]
+annual_allowance           = "60000"
+aa_taper_threshold_income  = "200000"
+aa_taper_adjusted_income   = "260000"
+aa_taper_rate              = "0.5"
+aa_taper_floor             = "10000"
+mpaa                       = "10000"
+relief_at_source_rate      = "0.20"
+tax_free_lump_sum_fraction = "0.25"
+lump_sum_allowance         = "268275"
+lump_sum_death_benefit_allowance = "1073100"
+
+[isa]
+annual_allowance = "20000"
+lisa_allowance   = "4000"  # counts within the overall ISA allowance
+lisa_bonus_rate  = "0.25"
+lisa_withdrawal_charge = "0.25"
+
+[state_pension]
+new_full_weekly       = "241.30"
+qualifying_years_full = 35
+qualifying_years_min  = 10
+deferral_increment_per_9_weeks = "0.01"
+```
+
+`age_rules.toml` holds effective-dated schedules: NMPA (55; 57 from
+2028-04-06), the SPA DOB-band table (§6), LISA ages (open 18–39,
+contribute to 50, access 60).
+
+**Future years:** past the last shipped file, the region extends the final
+year per the `policy.tax.future_years` assumption (`frozen` vs
+`cpi_indexed`, scenario-flippable). Legislated future changes (freeze end,
+pre-announced rates) ship as data in the relevant year's file, so
+legislated data always beats extrapolation. **Recurring task** after each
+Budget: copy previous year's file, re-verify every figure, update
+`verified_on`/`sources`, update §6.
+
+## 6. Verified UK policy figures (2026/27)
+
+All verified **2026-08-01** from live-fetched primary pages (gov.uk / HMRC
+manuals / DWP / OBR / FCA) — no figures from model training data. These
+become the Phase 2 data files.
+
+### Income tax (rUK)
+
+| Figure | Value | Source |
+| --- | --- | --- |
+| Personal allowance | £12,570 | [gov.uk/income-tax-rates](https://www.gov.uk/income-tax-rates); [employer rates 2026–27](https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027) |
+| PA taper | −£1 per £2 of adjusted net income above £100,000; PA = £0 at £125,140 | [gov.uk/income-tax-rates](https://www.gov.uk/income-tax-rates) |
+| Basic rate | 20% on taxable income £0–£37,700 above PA | both above (conventions cross-check: 12,570 + 37,700 = 50,270) |
+| Higher rate | 40% on £37,701–£125,140 | same |
+| Additional rate | 45% above £125,140 | same |
+| Threshold freeze | PA + higher-rate threshold frozen to **5 April 2031** (Budget 2025 extension) | [threshold-maintenance policy paper](https://www.gov.uk/government/publications/maintaining-income-tax-and-equivalent-national-insurance-contributions-thresholds-until-5-april-2031/income-tax-maintaining-the-personal-allowance-and-the-basic-rate-limit-for-income-tax-and-equivalent-national-insurance-contributions-thresholds-unt) |
+| Starting rate for savings limit | £5,000 (2026/27–2030/31) | [Budget 2025 OOTLAR](https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar) |
+| Marriage allowance | £1,260 transferable (max £252/yr) | [gov.uk/marriage-allowance](https://www.gov.uk/marriage-allowance) — current, not year-stamped; arithmetically fixed while PA frozen |
+
+### Income tax (Scotland — designed-for; non-savings/non-dividend income)
+
+| Band | Rate | Taxable income above PA | Source |
+| --- | --- | --- | --- |
+| Starter | 19% | £0–£3,967 | [gov.uk/scottish-income-tax](https://www.gov.uk/scottish-income-tax); [employer rates 2026–27](https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027) |
+| Basic | 20% | £3,968–£16,956 | same |
+| Intermediate | 21% | £16,957–£31,092 | same |
+| Higher | 42% | £31,093–£62,430 | same |
+| Advanced | 45% | £62,431–£125,140 | same |
+| Top | 48% | above £125,140 | same |
+
+### Announced future-dated changes (model as data, not code)
+
+| Change | Effective | Source |
+| --- | --- | --- |
+| Dividend rates +2ppt: ordinary 10.75%, upper 35.75% (additional 39.35% unchanged) | **2026/27 (in force)** | [Budget 2025 OOTLAR](https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar) |
+| Savings income rates 22% / 42% / 47% | 6 April 2027 | same |
+| Separate property income rates 22% / 42% / 47% | 6 April 2027 | same |
+| Cash ISA limit £12,000 for under-65s (overall £20,000 unchanged) | 6 April 2027 | [ISA reform factsheet](https://www.gov.uk/government/publications/fiscal-events-2026-factsheets/isa-reform-2027-anti-circumvention-rules-factsheet) |
+| NICs on salary-sacrificed pension contributions above £2,000/yr | April 2029 | [Employer Bulletin Dec 2025](https://www.gov.uk/government/publications/employer-bulletin-december-2025/december-2025-issue-of-the-employer-bulletin) |
+
+### Pensions
+
+| Figure | Value | Source |
+| --- | --- | --- |
+| Annual allowance | £60,000 (capped at 100% of earnings) | [pension scheme rates](https://www.gov.uk/government/publications/rates-and-allowances-pension-schemes/pension-schemes-rates); [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance) |
+| AA taper | threshold income £200,000; adjusted income £260,000; −£1 per £2; floor £10,000 | rates page; [tapered AA guidance](https://www.gov.uk/guidance/pension-schemes-work-out-your-tapered-annual-allowance) |
+| MPAA | £10,000; triggered by first FAD income payment, first UFPLS, etc. (not by PCLS-only or standard lifetime annuity) | rates page; [PTM056520](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm056520) |
+| AA carry-forward | unused AA from previous 3 tax years (detail re-verify at implementation) | [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance) |
+| Relief at source | provider adds 20% basic-rate relief (25% top-up on net); higher/additional via assessment; Scottish variants | [pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief) |
+| Net pay | pre-tax deduction; full marginal relief automatic | same |
+| Tax-free lump sum | up to 25%, capped by LSA £268,275 | [lump sum allowance](https://www.gov.uk/tax-on-your-private-pension/lump-sum-allowance); rates page |
+| LSDBA | £1,073,100 | same |
+| UFPLS | 25% of each payment tax-free, 75% taxed as income; triggers MPAA | [PTM063300](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm063300) |
+| Flexi-access drawdown | 25% PCLS at designation; income taxed at marginal rate (PAYE); MPAA on first income draw | [PTM062730](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm062730) |
+| NMPA | 55 now; **57 from 6 April 2028**; protected pension ages exist (out of scope v1) | [taking your pension](https://www.gov.uk/personal-pensions-your-rights/how-you-can-take-pension); [NMPA policy paper](https://www.gov.uk/government/publications/increasing-normal-minimum-pension-age) |
+
+### ISA / LISA
+
+| Figure | Value | Source |
+| --- | --- | --- |
+| ISA annual allowance | £20,000 (2026/27 stated explicitly) | [gov.uk/individual-savings-accounts](https://www.gov.uk/individual-savings-accounts) |
+| LISA allowance | £4,000/yr, inside the £20,000 | [gov.uk/lifetime-isa](https://www.gov.uk/lifetime-isa) |
+| LISA bonus | 25%, max £1,000/yr | same |
+| LISA ages | open 18–39; contribute to 50; charge-free access at 60 (or first home ≤£450k, terminal illness, death) | same; [who can open](https://www.gov.uk/lifetime-isa/who-can-open-a-lifetime-isa); [withdrawing](https://www.gov.uk/lifetime-isa/withdrawing-money-from-your-lifetime-isa) |
+| LISA withdrawal charge | 25% of amount withdrawn | [withdrawing](https://www.gov.uk/lifetime-isa/withdrawing-money-from-your-lifetime-isa) |
+
+### State pension
+
+| Figure | Value | Source |
+| --- | --- | --- |
+| Full new state pension | **£241.30/week** (£12,547.60/yr) 2026/27 | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [DWP rates 2026–27](https://www.gov.uk/government/publications/benefit-and-pension-rates-2026-to-2027/proposed-benefit-and-pension-rates-2026-to-2027) |
+| April 2026 uprating | 4.8%, earnings-driven (AWE 4.8% > CPI 3.8% > 2.5%) | [Government Actuary report, 2026 up-rating order](https://www.gov.uk/government/publications/report-to-parliament-on-the-2026-re-rating-and-up-rating-orders/report-by-the-government-actuary-on-the-draft-social-security-benefits-up-rating-order-2026-and-the-draft-social-security-contributions-regulation) |
+| Full basic (old) state pension | £184.90/week (context) | DWP rates page |
+| Qualifying years | 35 full (pre-2016 contracted-out caveats); 10 minimum | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [new state pension](https://www.gov.uk/new-state-pension) |
+| Deferral | +1% per 9 weeks (~5.8%/yr); increments CPI-uprated | [deferring (post-2016)](https://www.gov.uk/deferring-state-pension/if-you-reach-state-pension-age-on-or-after-6-april-2016) |
+| SPA 66→67 | phased Apr 2026–Mar 2028: DOB 1960-04-06–1960-05-05 → 66y 1m, +1 month per DOB month to 1961-02-06–1961-03-05 → 66y 11m; DOB 1961-03-06–1977-04-05 → **67** | [SPA timetable](https://www.gov.uk/government/publications/state-pension-age-timetable/state-pension-age-timetable) |
+| SPA 67→68 | legislated 2044–2046: DOB 1977-04-06–1978-04-05 phased; DOB ≥ 1978-04-06 → 68 | same |
+| SPA review | third review launched July 2025, ongoing; no change legislated as of 2026-08-01 | [third SPA review](https://www.gov.uk/government/collections/third-state-pension-age-review) |
+| Triple lock | committed "for this parliament" (~2029); nothing legislated beyond | [Budget 2025 fact sheet](https://www.gov.uk/government/news/budget-2025-fact-sheet-cutting-the-cost-of-living) |
+
+## 7. Default assumptions (proposed)
+
+Every row is a shipped default the user can override; each carries its
+basis. Recorded 2026-08-01. This table is the human-readable mirror of the
+future `regions/uk/data/assumptions_default.toml` (doc-sync test in
+Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
+
+### Economic
+
+| Key | Default | Basis |
+| --- | --- | --- |
+| `inflation.cpi` | 2.0%/yr | OBR EFO March 2026: CPI at target from 2027 ([obr.uk EFO](https://obr.uk/efo/economic-and-fiscal-outlook-march-2026/)) |
+| `earnings.growth.real` | 0.5%/yr | OBR EFO March 2026 medium-term real earnings growth |
+| `returns.equity.real` | 4.0%/yr | Below long-run global equity history (~5% real); above FCA intermediate (5% nominal − 2% CPI = 3% real) as conservative cross-check ([COBS 13 Annex 2](https://www.handbook.fca.org.uk/handbook/COBS/13/Annex2.html): 2/5/8% nominal maxima, tax-advantaged) |
+| `returns.bonds.real` | 0.5%/yr | Consistent with current gilt real-yield ballpark and FCA lower rate |
+| `returns.cash.real` | −0.5%/yr | Cash trails inflation after fees over long horizons |
+| `volatility.equity` | 18%/yr | Long-run global equity annual volatility (commonly cited 15–20%) |
+| `volatility.bonds` | 7%/yr | Long-run gilt/IG portfolio volatility |
+| `volatility.cash` | 1%/yr | Near-riskless nominal |
+| `correlation.equity_bonds` | 0.2 | Long-run average; regime-dependent (label prominently) |
+| `correlation.equity_cash` | 0.0 | — |
+| `correlation.bonds_cash` | 0.2 | — |
+| `fees.platform` | 0.25%/yr | Typical UK platform fee |
+| `fees.fund` | 0.15%/yr | Typical index-tracker OCF |
+
+### Longevity, policy futures, annuities
+
+| Key | Default | Basis |
+| --- | --- | --- |
+| `horizon.planning_age` | 95 | ~1-in-4 longevity risk at 65 per ONS cohort life expectancy ([ONS calculator](https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07); exact values from 2024-based cohort tables at implementation) |
+| `policy.state_pension.uprating` | `triple_lock` (modelled CPI + 0.5%) | Alternative scenario: `cpi`. Triple lock committed only to ~2029 (§6) |
+| `policy.tax.future_years` | frozen to 2030/31 (legislated), then CPI-indexed | Freeze is fact (§6); post-2031 indexation is assumption. Alternative: frozen indefinitely |
+| `annuity.level.single.65` | 7.75%/yr per £ purchase | Which? market table, snapshot 2026-07-27, retrieved 2026-08-01 ([which.co.uk](https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm)); best rate 7.946% — volatile market snapshot, refresh before relying on |
+| `annuity.escalating3.single.65` | 5.47%/yr | same snapshot |
+| `annuity.inflation_linked.single.65` | 5.5%/yr | Indicative only — secondary source ([IFA Magazine](https://ifamagazine.com/annuity-rates-hit-7-75-as-retirement-incomes-reach-18-year-high/)); weakest-sourced default here |
+| `annuity.age_adjustment` | table TBD Phase 5 | Per-age/type + joint-life table from a current market source when annuities are implemented |
+
+## 8. Phased roadmap — issue basis
+
+Each unchecked item becomes one GitHub issue (~½–2 days). Format: item —
+*acceptance criterion*. Items within a phase are mostly parallelisable;
+phases are dependency-ordered. Labels: `core`, `region:uk`, `data-files`,
+`docs`, `gui`, `needs-verification`.
 
 ### Phase 1 — Core primitives (no UK anything)
 
 - [ ] 1.1 `Money`/`Rate` value types + rounding policy — *quantization rules
-  of [projection-engine.md §6](design/projection-engine.md) enforced and
-  property-tested (Hypothesis).*
-- [ ] 1.2 `Period` + `FiscalCalendar` protocol + a generic annual calendar —
-  *periods iterate over an arbitrary horizon; birthday-in-period convention
-  helpers tested at boundaries ([ADR-0001](adr/0001-time-step-and-calendar.md)).*
+  of §5.2 enforced and property-tested (Hypothesis).*
+- [ ] 1.2 `Period` + `FiscalCalendar` protocol + generic annual calendar —
+  *periods iterate an arbitrary horizon; birthday-in-period helpers tested
+  at boundaries (§4.1).*
 - [ ] 1.3 `Fact[T]`, `Assumption[T]`, `AssumptionKey`, `AssumptionSet` with
-  read-tracking — *engine-side reads are recorded; provenance enum round-trips.*
+  read-tracking — *engine-side reads recorded; provenance enum round-trips.*
 - [ ] 1.4 `Household`/`Person` skeleton — *1–2 persons representable; v1
-  validator rejects 2 ([ADR-0004](adr/0004-household-and-couples.md)).*
+  validator rejects 2 (§4.4).*
 - [ ] 1.5 Boundary guard tests — *test fails if `core` imports `regions.*`;
   grep test fails on policy-figure literals outside `regions/uk/data/`.*
 
@@ -79,132 +618,127 @@ parallelisable; phases are ordered by dependency.
 
 - [ ] 2.1 Promote `regions/uk.py` → package; TOML loader with strict
   validation — *unknown keys, missing meta, or float-typed money are load
-  errors ([uk-region.md §2](design/uk-region.md)).*
-- [ ] 2.2 `tax_year_2026_27.toml` + `age_rules.toml` populated from the
-  verified figures in [assumptions.md](assumptions.md) — *loader tests pass;
-  `verified_on` + `sources` present.*
+  errors (§5.3).*
+- [ ] 2.2 `tax_year_2026_27.toml` + `age_rules.toml` +
+  `assumptions_default.toml` from §6/§7 — *loader tests pass; `verified_on`
+  + `sources` present; doc-sync test keeps §7 aligned with the defaults
+  file.*
 - [ ] 2.3 rUK income tax assessment (bands + PA taper) — *golden tests match
-  hand-worked HMRC examples incl. the £100k–£125,140 taper zone.*
+  hand-worked HMRC examples incl. the £100k–£125,140 zone.*
 - [ ] 2.4 `AgeRules`: SPA from DOB (banded), NMPA schedule, LISA ages —
-  *boundary tests either side of every band edge and the 2028-04-06 NMPA step.*
-- [ ] 2.5 Future-year extension policy — *`policy.tax.future_years` assumption
-  (frozen vs CPI-indexed) drives band extrapolation past the last data file
-  ([uk-region.md §3](design/uk-region.md)).*
+  *boundary tests either side of every band edge and the 2028-04-06 step.*
+- [ ] 2.5 Future-year extension policy — *`policy.tax.future_years` drives
+  extrapolation past the last data file (§5.3).*
 
 ### Phase 3 — Wrappers and accumulation
 
-- [ ] 3.1 Wrapper model (DC/SIPP/ISA) + region `WrapperRuleset` descriptors —
-  *tax treatment in/during/out resolved per wrapper kind.*
+- [ ] 3.1 Wrapper model (DC/SIPP/ISA) + region `WrapperRuleset` — *tax
+  treatment in/during/out resolved per wrapper kind.*
 - [ ] 3.2 Contribution schedules: employee/employer, relief at source vs net
-  pay — *RAS top-up and net-pay mechanics match gov.uk worked examples;
-  higher-rate relief handled via tax assessment.*
+  pay — *mechanics match gov.uk worked examples; higher-rate relief via tax
+  assessment.*
 - [ ] 3.3 Annual allowance + taper + MPAA — *taper arithmetic golden-tested;
-  MPAA state flips on first flexible access and persists.*
-- [ ] 3.4 Fees and growth application — *platform + fund fees applied per
-  [projection-engine.md §2](design/projection-engine.md) order.*
+  MPAA flips on first flexible access and persists.*
+- [ ] 3.4 Fees and growth application — *applied per §5.2 operation order.*
 - [ ] 3.5 Glide-path / life-stage allocation — *allocation interpolates the
   years-to-retirement table; stage derived, not stored.*
 
 ### Phase 4 — Deterministic projection (first end-to-end result)
 
 - [ ] 4.1 Engine step loop with specified operation order + `PeriodSnapshot`
-  / `ProjectionResult` incl. provenance — *order-of-operations test fixes the
-  spec; provenance lists every assumption read.*
+  / `ProjectionResult` incl. provenance — *order-of-operations test fixes
+  the spec; provenance lists every assumption read.*
 - [ ] 4.2 DB pension: revaluation in deferment, NPA, early/late factors,
-  commutation — *user-entered scheme facts drive results; commutation trades
-  pension for lump sum at the stated factor.*
+  commutation — *scheme facts drive results; commutation trades pension for
+  lump sum at the stated factor.*
 - [ ] 4.3 State pension: forecast-as-fact, qualifying-years derivation, SPA,
-  deferral, uprating assumption — *forecast wins over derivation when present.*
-- [ ] 4.4 Real/nominal reporting layer — *real is default; nominal available;
+  deferral, uprating assumption — *forecast wins over derivation when
+  present.*
+- [ ] 4.4 Real/nominal reporting layer — *real default; nominal available;
   one CPI path per run.*
 - [ ] 4.5 End-to-end golden scenario — *"35-year-old, DC + ISA, retires at
   60" produces a reviewed, checked-in expected output.*
 
 ### Phase 5 — Decumulation
 
-- [ ] 5.1 `WithdrawalStrategy` protocol + fixed-real + fixed-% — *strategies
-  respect access ages and wrapper ordering.*
+- [ ] 5.1 `WithdrawalStrategy` protocol + fixed-real + fixed-% —
+  *strategies respect access ages and wrapper ordering.*
 - [ ] 5.2 Tax-free cash strategy: PCLS vs UFPLS vs FAD + LSA tracking —
   *25%/LSA cap enforced; UFPLS payments split 25/75; MPAA triggers fire.*
-- [ ] 5.3 Guardrails + natural-yield strategies — *guardrail band crossings
-  adjust spending per configured rules.*
-- [ ] 5.4 One-off planned outflows — *outflows hit the chosen period, tax-aware.*
-- [ ] 5.5 Annuity purchase — *level/escalating/inflation-linked, single/joint,
-  partial annuitisation mid-drawdown priced from the annuity-rate assumption
-  table.*
+- [ ] 5.3 Guardrails + natural-yield strategies — *band crossings adjust
+  spending per configured rules.*
+- [ ] 5.4 One-off planned outflows — *outflows hit the chosen period,
+  tax-aware.*
+- [ ] 5.5 Annuity purchase — *level/escalating/inflation-linked,
+  single/joint, partial annuitisation mid-drawdown priced from the
+  annuity-rate assumption table.*
 
 ### Phase 6 — Scenarios and persistence
 
 - [ ] 6.1 `Scenario`/`Override` model + resolution — *base ⊕ overrides with
-  `SCENARIO_OVERRIDE` provenance ([ADR-0003](adr/0003-scenario-model.md)).*
-- [ ] 6.2 `.glidepath.json` schema v1 + canonical reader/writer — *round-trip
-  property tests; deterministic byte-identical output.*
+  `SCENARIO_OVERRIDE` provenance (§4.3).*
+- [ ] 6.2 `.glidepath.json` schema v1 + canonical reader/writer —
+  *round-trip property tests; deterministic byte-identical output (§4.5).*
 - [ ] 6.3 Scenario comparison report — *per-period metric diffs across
   scenarios.*
-- [ ] 6.4 Schema migration harness — *versioned upgraders; v1→v1 no-op wired.*
+- [ ] 6.4 Schema migration harness — *versioned upgraders; v1→v1 no-op
+  wired.*
 
 ### Phase 7 — Monte Carlo
 
 - [ ] 7.1 `RandomSource` protocol + seeded impl — *reproducibility property
-  test: same inputs+seed → identical result ([ADR-0006](adr/0006-engine-purity-and-reproducibility.md)).*
+  test: same inputs + seed → identical result (§4.6).*
 - [ ] 7.2 Stochastic `ReturnModel`: lognormal + correlations (Decimal
-  Cholesky) — *includes a performance measurement task with recorded numbers.*
+  Cholesky) — *includes a performance measurement task with recorded
+  numbers.*
 - [ ] 7.3 Path runner + success metrics — *probability of ruin, sustainable
-  income, ending-pot percentiles computed over paths.*
+  income, ending-pot percentiles over paths.*
 - [ ] 7.4 Sequence-of-returns fixtures — *same returns, different order →
   demonstrably different outcome.*
 
 ### Phase 8 — GUI (PySide6)
 
-- [ ] 8.1 `make deps` PySide6; app shell + **disclaimer screen** — *disclaimer
-  shown on first run; product requirement above.*
-- [ ] 8.2 Facts entry forms — *every fact from
-  [domain-model.md](design/domain-model.md) enterable with `as_of` dates.*
-- [ ] 8.3 Assumptions inspector — *the "stated vs assumed" surface, rendered
+- [ ] 8.1 `make deps` PySide6; app shell + **disclaimer screen** —
+  *disclaimer on first run (§1).*
+- [ ] 8.2 Facts entry forms — *every fact in §5.1 enterable with `as_of`
+  dates.*
+- [ ] 8.3 Assumptions inspector — *the "stated vs assumed" surface rendered
   from `ProjectionResult.provenance`; defaults overridable in place.*
 - [ ] 8.4 Projection charts — *real-terms default, nominal toggle.*
-- [ ] 8.5 Scenario manager + diff view — *create/edit scenarios as override
-  lists; comparison report visualised.*
+- [ ] 8.5 Scenario manager + diff view — *scenarios as override lists;
+  comparison report visualised.*
 
 ### Phase 9 — Extensions
 
 - [ ] 9.1 Scottish bands activation — *`tax_residency = SCOTLAND` uses the
   Scottish table already shipped in data.*
 - [ ] 9.2 LISA/GIA/cash wrappers — *LISA bonus/charge/ages; GIA brings
-  dividend/savings taxation (data already shipped for 2026/27).*
+  dividend/savings taxation (2026/27 dividend data already verified in §6).*
 - [ ] 9.3 New tax-year data file after each Budget — *recurring; process in
-  [uk-region.md §4](design/uk-region.md).*
-- [ ] 9.4 Couples activation spike → new ADR — *survivor benefits, marriage
-  allowance, joint annuities scoped before any code.*
+  §5.3.*
+- [ ] 9.4 Couples activation spike — *survivor benefits, marriage allowance,
+  joint annuities scoped; new decision record in §4 before any code.*
 - [ ] 9.5 AA carry-forward — *3-year rule per gov.uk guidance.*
 
-Issue labels: `core`, `region:uk`, `data-files`, `docs`, `gui`,
-`needs-verification`.
+## 9. Open questions
 
-## UK figure verification status
+Carried from the 2026-08-01 research pass:
 
-All current-figure verification lives in the
-[assumptions register](assumptions.md) with per-figure source URLs and
-retrieval dates. Status at 2026-08-01:
-
-| Group | Status |
-| --- | --- |
-| Income tax 2026/27 (PA, taper, rUK + Scottish bands, freeze to 2031) | Verified |
-| Dividend/savings/property announced changes (2026/27, 2027/28) | Verified |
-| Pension allowances (AA, taper, MPAA, LSA, LSDBA, relief mechanics) | Verified |
-| Pension access (UFPLS/FAD mechanics, NMPA → 57 on 2028-04-06) | Verified |
-| ISA/LISA (allowances, bonus, ages, charge; 2027 cash-ISA reform) | Verified |
-| State pension (rate, uprating, qualifying years, deferral, SPA bands) | Verified |
-| Assumption bases (OBR, FCA, ONS longevity, annuity benchmarks) | Recorded (see register's open questions) |
-
-## Doc map
-
-| Doc | Contents | Update when |
-| --- | --- | --- |
-| this file | Scope, roadmap, principles | Scope or phasing changes |
-| [assumptions.md](assumptions.md) | Verified figures + default assumptions | Any figure verified/changed; new default |
-| [adr/](adr/README.md) | Decisions | New decision; supersession |
-| [design/domain-model.md](design/domain-model.md) | Entities, Fact/Assumption typing | Model changes |
-| [design/projection-engine.md](design/projection-engine.md) | Engine spec | Engine semantics change |
-| [design/uk-region.md](design/uk-region.md) | UK rules + data format | Rules/format change; new tax year |
-| [glossary.md](glossary.md) | Terms | New term |
+1. **FCA COBS inflation figure** — a handbook mirror showed 2.00% in COBS
+   13 Annex 2 2.5R (long-standing value 2.5%); canonical page blocked
+   extraction. Re-verify before citing COBS for inflation (the 2/5/8 and
+   1.5/4.5/7.5 return maxima were confirmed twice).
+2. **NMPA enacting statute** — 2028 date + protections confirmed on the
+   gov.uk policy paper; the statute (likely Finance Act 2022) not confirmed
+   on a fetched primary page.
+3. **AA carry-forward mechanics** — 3-year headline verified; ordering and
+   membership rules to re-verify at implementation
+   ([guidance](https://www.gov.uk/guidance/check-if-you-have-unused-annual-allowances-on-your-pension-savings)).
+4. **Third SPA review deadline** (reported March 2029) — secondary sources
+   only; no legislated SPA change as of retrieval.
+5. **ONS exact cohort values** — use the 2024-based cohort life tables
+   dataset when implementing the longevity default (calculator itself is
+   interactive-only).
+6. **OBR 50-year determinants** — medium-term EFO figures verified; the
+   long-term determinants are in Fiscal risks & sustainability July 2026
+   (PDF) — worth extracting for >30-year horizons.
