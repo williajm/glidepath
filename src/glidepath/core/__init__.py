@@ -39,6 +39,16 @@ from glidepath.core.provenance import (
     TrackedAssumptions,
 )
 from glidepath.core.tax import TaxInput, TaxLine, TaxResult, TaxSystem
+from glidepath.core.wrappers import (
+    ContributionTaxTreatment,
+    GrowthTaxTreatment,
+    ReliefMechanic,
+    WithdrawalTaxTreatment,
+    Wrapper,
+    WrapperKindId,
+    WrapperRuleset,
+    WrapperTaxTreatment,
+)
 
 __all__ = [
     "AgeRules",
@@ -47,16 +57,19 @@ __all__ = [
     "AssumptionKey",
     "AssumptionReadRecorder",
     "AssumptionSet",
+    "ContributionTaxTreatment",
     "Decision",
     "EntityId",
     "Fact",
     "FiscalCalendar",
+    "GrowthTaxTreatment",
     "Household",
     "Money",
     "Period",
     "Person",
     "Provenance",
     "Rate",
+    "ReliefMechanic",
     "Sex",
     "TaxInput",
     "TaxLine",
@@ -64,6 +77,11 @@ __all__ = [
     "TaxResult",
     "TaxSystem",
     "TrackedAssumptions",
+    "WithdrawalTaxTreatment",
+    "Wrapper",
+    "WrapperKindId",
+    "WrapperRuleset",
+    "WrapperTaxTreatment",
     "add_months",
     "age_on",
     "birthday_in_year",
