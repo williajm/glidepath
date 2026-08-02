@@ -26,7 +26,7 @@ they do not depend on intermediate synthesized years.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, NoReturn
@@ -34,6 +34,11 @@ from typing import TYPE_CHECKING, NoReturn
 from glidepath.core import Money
 from glidepath.regions.uk.schema import (
     DataFileError,
+    IncomeTaxSchedule,
+    IsaRules,
+    PensionRules,
+    TaxBand,
+    TaxYearFile,
     TaxYearMeta,
     parse_tax_year_label,
     tax_year_end,
@@ -43,14 +48,7 @@ from glidepath.regions.uk.schema import (
 
 if TYPE_CHECKING:
     from glidepath.core import Rate
-    from glidepath.regions.uk.schema import (
-        AssumptionValue,
-        IncomeTaxSchedule,
-        IsaRules,
-        PensionRules,
-        TaxBand,
-        TaxYearFile,
-    )
+    from glidepath.regions.uk.schema import AssumptionValue
 
 _CONTEXT = "policy.tax.future_years"
 _POUND = Decimal(1)
@@ -155,25 +153,24 @@ def _indexed_money(money: Money, factor: Decimal) -> Money:
 def _indexed_band(band: TaxBand, factor: Decimal) -> TaxBand:
     """Index a band's upper bound; the rate never extrapolates."""
     upper = None if band.upper is None else _indexed_money(band.upper, factor)
-    return replace(band, upper=upper)
+    return TaxBand(name=band.name, rate=band.rate, upper=upper)
 
 
 def _indexed_schedule(
     schedule: IncomeTaxSchedule, factor: Decimal
 ) -> IncomeTaxSchedule:
     """Index one regime's allowance, taper threshold, and band uppers."""
-    return replace(
-        schedule,
+    return IncomeTaxSchedule(
         personal_allowance=_indexed_money(schedule.personal_allowance, factor),
         pa_taper_threshold=_indexed_money(schedule.pa_taper_threshold, factor),
+        pa_taper_rate=schedule.pa_taper_rate,
         bands=tuple(_indexed_band(band, factor) for band in schedule.bands),
     )
 
 
 def _indexed_pension(pension: PensionRules, factor: Decimal) -> PensionRules:
     """Index the pension allowances; relief and taper rates are unchanged."""
-    return replace(
-        pension,
+    return PensionRules(
         annual_allowance=_indexed_money(pension.annual_allowance, factor),
         aa_taper_threshold_income=_indexed_money(
             pension.aa_taper_threshold_income, factor
@@ -181,8 +178,11 @@ def _indexed_pension(pension: PensionRules, factor: Decimal) -> PensionRules:
         aa_taper_adjusted_income=_indexed_money(
             pension.aa_taper_adjusted_income, factor
         ),
+        aa_taper_rate=pension.aa_taper_rate,
         aa_taper_floor=_indexed_money(pension.aa_taper_floor, factor),
         mpaa=_indexed_money(pension.mpaa, factor),
+        relief_at_source_rate=pension.relief_at_source_rate,
+        tax_free_lump_sum_fraction=pension.tax_free_lump_sum_fraction,
         lump_sum_allowance=_indexed_money(pension.lump_sum_allowance, factor),
         lump_sum_death_benefit_allowance=_indexed_money(
             pension.lump_sum_death_benefit_allowance, factor
@@ -192,10 +192,11 @@ def _indexed_pension(pension: PensionRules, factor: Decimal) -> PensionRules:
 
 def _indexed_isa(isa: IsaRules, factor: Decimal) -> IsaRules:
     """Index the ISA allowances; the LISA bonus and charge are unchanged."""
-    return replace(
-        isa,
+    return IsaRules(
         annual_allowance=_indexed_money(isa.annual_allowance, factor),
         lisa_allowance=_indexed_money(isa.lisa_allowance, factor),
+        lisa_bonus_rate=isa.lisa_bonus_rate,
+        lisa_withdrawal_charge=isa.lisa_withdrawal_charge,
     )
 
 
@@ -234,13 +235,22 @@ def extend_tax_year(
         base_start_year=base_start_year, target_start_year=target_start_year
     )
     if steps == 0:
-        return replace(base, meta=meta)
+        return TaxYearFile(
+            schema_version=base.schema_version,
+            meta=meta,
+            income_tax_ruk=base.income_tax_ruk,
+            income_tax_scotland=base.income_tax_scotland,
+            pension=base.pension,
+            isa=base.isa,
+            state_pension=base.state_pension,
+        )
     factor = cpi.growth_factor**steps
-    return replace(
-        base,
+    return TaxYearFile(
+        schema_version=base.schema_version,
         meta=meta,
         income_tax_ruk=_indexed_schedule(base.income_tax_ruk, factor),
         income_tax_scotland=_indexed_schedule(base.income_tax_scotland, factor),
         pension=_indexed_pension(base.pension, factor),
         isa=_indexed_isa(base.isa, factor),
+        state_pension=base.state_pension,
     )
