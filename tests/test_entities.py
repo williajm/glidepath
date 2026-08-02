@@ -14,6 +14,8 @@ from glidepath.core.entities import (
     new_entity_id,
     validate_household_v1,
 )
+from glidepath.core.glide import GlidePathConfig, GlidePathPoint
+from glidepath.core.investments import AssetAllocation
 from glidepath.core.money import Money
 from glidepath.core.provenance import Decision, Fact
 from glidepath.core.wrappers import Wrapper, WrapperKindId
@@ -70,6 +72,33 @@ def test_person_carries_mpaa_trigger_fact() -> None:
         mpaa_triggered_on=triggered,
     )
     assert person.mpaa_triggered_on is triggered
+
+
+def test_person_defaults_to_the_default_glide_path() -> None:
+    """No stated glide path means the default-shape assumption supplies it."""
+    assert make_person().glide_path is None
+
+
+def test_person_carries_a_glide_path_override() -> None:
+    """A per-person glide path overrides the default shape (roadmap 3.5)."""
+    config = GlidePathConfig(
+        points=(
+            GlidePathPoint(
+                years_to_retirement=0,
+                allocation=AssetAllocation(equity=Decimal("0.5"), bonds=Decimal("0.5")),
+            ),
+        )
+    )
+    person = Person(
+        id=new_entity_id(),
+        date_of_birth=Fact(
+            value=date(1991, 4, 5), as_of=date(2026, 8, 1), recorded_on=RECORDED
+        ),
+        target_retirement_age=Decision(value=60, recorded_on=RECORDED),
+        tax_residency=TaxResidencyId("uk.ruk"),
+        glide_path=config,
+    )
+    assert person.glide_path is config
 
 
 def test_new_entity_ids_are_unique_strings() -> None:

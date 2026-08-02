@@ -6,9 +6,8 @@ household level avoids a schema + engine migration when couples activate
 (roadmap 9.4). v1 validates exactly one person via
 :func:`validate_household_v1`.
 
-Wrappers attach to :class:`Person` as of roadmap 3.1; DB pensions, state
-pension records and glide-path config follow in later phases (roadmap
-Phases 3-4).
+Wrappers attach to :class:`Person` as of roadmap 3.1 and the glide-path
+config as of 3.5; DB pensions and state pension records follow in Phase 4.
 """
 
 import uuid
@@ -19,6 +18,7 @@ from typing import TYPE_CHECKING, NewType
 if TYPE_CHECKING:
     from datetime import date
 
+    from glidepath.core.glide import GlidePathConfig
     from glidepath.core.money import Money
     from glidepath.core.provenance import Decision, Fact
     from glidepath.core.wrappers import Wrapper
@@ -78,6 +78,12 @@ class Person:
     (roadmap 3.3). In-plan triggers land with decumulation (Phase 5).
     """
     wrappers: tuple[Wrapper, ...] = ()
+    glide_path: GlidePathConfig | None = None
+    """This person's glide path, if they overrode the default.
+
+    ``None`` means the ``glidepath.default_shape`` assumption supplies
+    the factor table (planning §7, roadmap 3.5).
+    """
 
     def __post_init__(self) -> None:
         """Require distinct wrapper ids (they are override targets, §4.3)."""
