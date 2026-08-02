@@ -7,15 +7,20 @@ here (guard-tested). v1 assesses rUK non-savings income only: the
 Scottish schedule ships in data (designed-for) and activates in roadmap
 9.1; savings/dividend taxation needs the GIA wrapper (roadmap 9.2).
 
-The personal-allowance taper follows the statute exactly: the allowance
-is reduced by ``pa_taper_rate`` of adjusted net income above
-``pa_taper_threshold``, with no rounding. With no reliefs modelled yet
+Rounding follows HMRC's published calculation logic (the Tax Logic
+service guide,
+https://developer.service.hmrc.gov.uk/guides/tax-logic-service-guide/):
+the personal-allowance reduction is rounded *down* to the whole pound
+and the resulting allowance *up* to the whole pound, and each band's
+tax is rounded *down* to the penny. These statutory roundings are the
+region's own — the core ledger policy (half-even at ledger writes,
+planning §4.6) is unchanged elsewhere. With no reliefs modelled yet
 (contributions arrive in Phase 3), adjusted net income equals the
 period's non-savings income.
 """
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
@@ -33,6 +38,18 @@ SCOTLAND_RESIDENCY = TaxResidencyId("uk.scotland")
 """Residency id for Scottish taxpayers (activates in roadmap 9.1)."""
 
 _ZERO = Money(Decimal(0))
+_POUND = Decimal(1)
+_PENNY = Decimal("0.01")
+
+
+def _round_down(money: Money, unit: Decimal) -> Money:
+    """HMRC ``roundDown``: truncate a non-negative amount to ``unit``."""
+    return Money(money.amount.quantize(unit, rounding=ROUND_DOWN))
+
+
+def _round_up(money: Money, unit: Decimal) -> Money:
+    """HMRC ``roundUp``: round a non-negative amount up to ``unit``."""
+    return Money(money.amount.quantize(unit, rounding=ROUND_UP))
 
 
 class UkTaxError(ValueError):
@@ -106,23 +123,26 @@ def _tapered_allowance(
 ) -> Money:
     """The personal allowance after the taper (planning §6).
 
-    Reduced by ``pa_taper_rate`` of adjusted net income above
-    ``pa_taper_threshold`` (-£1 per £2 with the shipped rate), floored
-    at zero; exact ``Decimal`` arithmetic, no rounding.
+    Per HMRC's calculation, the reduction (``pa_taper_rate`` of adjusted
+    net income above ``pa_taper_threshold``) is rounded down to the
+    whole pound and the resulting allowance rounded up to the whole
+    pound, so the allowance steps down £1 per full £2 of excess with the
+    shipped rate, floored at zero.
     """
     excess = adjusted_net_income - schedule.pa_taper_threshold
     if excess <= _ZERO:
         return schedule.personal_allowance
-    reduction = schedule.pa_taper_rate.of(excess)
-    return max(schedule.personal_allowance - reduction, _ZERO)
+    reduction = _round_down(schedule.pa_taper_rate.of(excess), _POUND)
+    allowance = _round_up(schedule.personal_allowance - reduction, _POUND)
+    return max(allowance, _ZERO)
 
 
 def _band_lines(bands: tuple[TaxBand, ...], taxable: Money) -> tuple[TaxLine, ...]:
     """Charge ``taxable`` income through the ascending band ladder.
 
     Band uppers are cumulative taxable income above the allowance
-    (§5.3); each line's tax is quantized at the ledger-write boundary
-    (§4.6). Bands with nothing in them are omitted.
+    (§5.3); each band's tax is rounded down to the penny per HMRC's
+    calculation. Bands with nothing in them are omitted.
     """
     lines: list[TaxLine] = []
     lower = _ZERO
@@ -136,7 +156,7 @@ def _band_lines(bands: tuple[TaxBand, ...], taxable: Money) -> tuple[TaxLine, ..
                 band=band.name,
                 rate=band.rate,
                 taxed=in_band,
-                tax=band.rate.of(in_band).quantized(),
+                tax=_round_down(band.rate.of(in_band), _PENNY),
             )
         )
         if band.upper is None or taxable <= band.upper:

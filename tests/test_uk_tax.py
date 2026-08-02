@@ -45,7 +45,8 @@ def ruk_income(amount: str) -> TaxInput:
         ("50271", "7540.40"),  # first pound at 40%
         ("60000", "11432.00"),  # 7,540 + 40% of 9,730
         ("100000", "27432.00"),  # taper threshold: PA still intact
-        ("100001", "27432.60"),  # PA 12,569.50: 60p on the extra pound
+        ("100001", "27432.40"),  # reduction rounds down to nil: PA held at 12,570
+        ("100002", "27433.20"),  # first full 2 of excess: PA 12,569, taxable +3
         ("110000", "33432.00"),  # PA 7,570, taxable 102,430
         ("125140", "42516.00"),  # PA fully tapered to nil
         ("125141", "42516.45"),  # first pound at 45%
@@ -91,10 +92,29 @@ def test_below_allowance_has_no_lines(system: UkTaxSystem) -> None:
     assert result.tax_free_allowance == Money(Decimal(12570))
 
 
-def test_odd_taper_keeps_exact_half_pound(system: UkTaxSystem) -> None:
-    """The taper is exact: £1 of excess reduces the allowance by 50p."""
-    result = system.assess(TAX_YEAR_2026_27, ruk_income("100001"))
-    assert result.tax_free_allowance == Money(Decimal("12569.50"))
+@pytest.mark.parametrize(
+    ("income", "allowance"),
+    [
+        ("100001", "12570"),  # excess 1: reduction rounds down to nil
+        ("100002", "12569"),  # excess 2: first whole-pound step
+        ("100003", "12569"),  # excess 3: reduction still 1
+        ("100004", "12568"),  # excess 4: next step
+    ],
+)
+def test_taper_steps_in_whole_pounds(
+    system: UkTaxSystem, income: str, allowance: str
+) -> None:
+    """HMRC rounds the reduction down and the allowance up to whole pounds."""
+    result = system.assess(TAX_YEAR_2026_27, ruk_income(income))
+    assert result.tax_free_allowance == Money(Decimal(allowance))
+
+
+def test_band_tax_rounds_down_to_the_penny(system: UkTaxSystem) -> None:
+    """20% of 3p taxable is 0.6p: HMRC rounds each band's tax down to nil."""
+    result = system.assess(TAX_YEAR_2026_27, ruk_income("12570.03"))
+    assert result.taxable_income == Money(Decimal("0.03"))
+    assert result.tax_due == Money(Decimal(0))
+    assert [line.tax for line in result.lines] == [Money(Decimal(0))]
 
 
 def test_sub_period_within_tax_year(system: UkTaxSystem) -> None:

@@ -572,7 +572,8 @@ become the Phase 2 data files.
 | Figure | Value | Source |
 | --- | --- | --- |
 | Personal allowance | £12,570 | [gov.uk/income-tax-rates](https://www.gov.uk/income-tax-rates); [employer rates 2026–27](https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027) |
-| PA taper | −£1 per £2 of adjusted net income above £100,000; PA = £0 at £125,140 | [gov.uk/income-tax-rates](https://www.gov.uk/income-tax-rates) |
+| PA taper | −£1 per £2 of adjusted net income above £100,000; PA = £0 at £125,140. Calculation rounding: reduction rounded down to the whole £, resulting allowance rounded up to the whole £ | [gov.uk/income-tax-rates](https://www.gov.uk/income-tax-rates); [HMRC tax logic guide — allowances](https://developer.service.hmrc.gov.uk/guides/tax-logic-service-guide/documentation/allowances-and-reliefs.html) |
+| Per-band tax rounding | Each band's tax is rounded down to the penny (`roundDown(income × rate, 2)`) | [HMRC tax logic guide — tax calculation](https://developer.service.hmrc.gov.uk/guides/tax-logic-service-guide/documentation/tax-calculation.html) |
 | Basic rate | 20% on taxable income £0–£37,700 above PA | both above (conventions cross-check: 12,570 + 37,700 = 50,270) |
 | Higher rate | 40% on £37,701–£125,140 | same |
 | Additional rate | 45% above £125,140 | same |
