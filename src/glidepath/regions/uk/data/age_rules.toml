@@ -1,0 +1,75 @@
+# UK age rules: durable, effective-dated policy parameters that are not
+# re-set each tax year (docs/planning.md §5.3, §6). The SPA timetable was
+# re-verified against the live gov.uk timetable page on 2026-08-02.
+
+schema_version = 1
+
+[meta]
+verified_on = 2026-08-02
+sources = [
+  "https://www.gov.uk/government/publications/state-pension-age-timetable/state-pension-age-timetable",
+  "https://www.gov.uk/government/publications/increasing-normal-minimum-pension-age",
+  "https://www.gov.uk/personal-pensions-your-rights/how-you-can-take-pension",
+  "https://www.gov.uk/lifetime-isa/who-can-open-a-lifetime-isa",
+  "https://www.gov.uk/lifetime-isa/withdrawing-money-from-your-lifetime-isa",
+  "https://www.gov.uk/deferring-state-pension/if-you-reach-state-pension-age-on-or-after-6-april-2016",
+]
+
+# Normal minimum pension age: 55 today, 57 from 6 April 2028. Protected
+# pension ages are out of scope for v1 (planning §6).
+[nmpa]
+steps = [
+  { age = 55 },
+  { age = 57, effective_from = 2028-04-06 },
+]
+
+# State pension age from date of birth (Pensions Act 2011: SPA 66 for
+# DOBs 1954-10-06 to 1960-04-05; Pensions Act 2014: 66 -> 67 bands as
+# ages; Pensions Act 2007: 67 -> 68 bands as fixed SPA dates, exactly
+# as legislated). Coverage deliberately starts at 1954-10-06: earlier
+# cohorts had lower, phased SPAs and different (pre-2016) deferral
+# rules that this forward-looking planner does not model. Age logic
+# must REJECT dates of birth before the first band, never guess.
+[state_pension_age]
+bands = [
+  { dob_from = 1954-10-06, dob_to = 1960-04-05, age = { years = 66 } },
+  { dob_from = 1960-04-06, dob_to = 1960-05-05, age = { years = 66, months = 1 } },
+  { dob_from = 1960-05-06, dob_to = 1960-06-05, age = { years = 66, months = 2 } },
+  { dob_from = 1960-06-06, dob_to = 1960-07-05, age = { years = 66, months = 3 } },
+  { dob_from = 1960-07-06, dob_to = 1960-08-05, age = { years = 66, months = 4 } },
+  { dob_from = 1960-08-06, dob_to = 1960-09-05, age = { years = 66, months = 5 } },
+  { dob_from = 1960-09-06, dob_to = 1960-10-05, age = { years = 66, months = 6 } },
+  { dob_from = 1960-10-06, dob_to = 1960-11-05, age = { years = 66, months = 7 } },
+  { dob_from = 1960-11-06, dob_to = 1960-12-05, age = { years = 66, months = 8 } },
+  { dob_from = 1960-12-06, dob_to = 1961-01-05, age = { years = 66, months = 9 } },
+  { dob_from = 1961-01-06, dob_to = 1961-02-05, age = { years = 66, months = 10 } },
+  { dob_from = 1961-02-06, dob_to = 1961-03-05, age = { years = 66, months = 11 } },
+  { dob_from = 1961-03-06, dob_to = 1977-04-05, age = { years = 67 } },
+  { dob_from = 1977-04-06, dob_to = 1977-05-05, reaches_on = 2044-05-06 },
+  { dob_from = 1977-05-06, dob_to = 1977-06-05, reaches_on = 2044-07-06 },
+  { dob_from = 1977-06-06, dob_to = 1977-07-05, reaches_on = 2044-09-06 },
+  { dob_from = 1977-07-06, dob_to = 1977-08-05, reaches_on = 2044-11-06 },
+  { dob_from = 1977-08-06, dob_to = 1977-09-05, reaches_on = 2045-01-06 },
+  { dob_from = 1977-09-06, dob_to = 1977-10-05, reaches_on = 2045-03-06 },
+  { dob_from = 1977-10-06, dob_to = 1977-11-05, reaches_on = 2045-05-06 },
+  { dob_from = 1977-11-06, dob_to = 1977-12-05, reaches_on = 2045-07-06 },
+  { dob_from = 1977-12-06, dob_to = 1978-01-05, reaches_on = 2045-09-06 },
+  { dob_from = 1978-01-06, dob_to = 1978-02-05, reaches_on = 2045-11-06 },
+  { dob_from = 1978-02-06, dob_to = 1978-03-05, reaches_on = 2046-01-06 },
+  { dob_from = 1978-03-06, dob_to = 1978-04-05, reaches_on = 2046-03-06 },
+  { dob_from = 1978-04-06, age = { years = 68 } },
+]
+
+# Lifetime ISA age gates: open 18-39, contribute to 50, charge-free
+# access at 60 (or first home / terminal illness / death).
+[lisa]
+open_age_min = 18
+open_age_max = 39
+contribute_until_age = 50
+access_age = 60
+
+# Post-2016 deferral: +1% of the weekly rate per 9 weeks deferred
+# (~5.8%/yr); increments are CPI-uprated.
+[state_pension_deferral]
+increment_rate = "0.01"
+per_weeks = 9

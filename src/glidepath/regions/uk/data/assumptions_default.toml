@@ -1,0 +1,116 @@
+# Shipped default assumptions — the machine mirror of the §7 table in
+# docs/planning.md (recorded 2026-08-01). A doc-sync test keeps the two
+# aligned: same keys, same order, same numeric values. Every default is
+# user-overridable in the app; §6 announced-policy items are facts, these
+# are estimates.
+
+schema_version = 1
+
+[meta]
+verified_on = 2026-08-01
+sources = [
+  "https://obr.uk/efo/economic-and-fiscal-outlook-march-2026/",
+  "https://www.handbook.fca.org.uk/handbook/COBS/13/Annex2.html",
+  "https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07",
+  "https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm",
+]
+
+[[assumption]]
+key = "inflation.cpi"
+value = "0.02"
+basis = "OBR EFO March 2026: CPI at target from 2027"
+
+[[assumption]]
+key = "earnings.growth.real"
+value = "0.005"
+basis = "OBR EFO March 2026 medium-term real earnings growth"
+
+[[assumption]]
+key = "returns.equity.real"
+value = "0.04"
+basis = "Below long-run global equity history (~5% real); above the FCA intermediate rate (5% nominal - 2% CPI = 3% real) as a conservative cross-check (FCA COBS 13 Annex 2)"
+
+[[assumption]]
+key = "returns.bonds.real"
+value = "0.005"
+basis = "Consistent with current gilt real-yield ballpark and the FCA lower rate"
+
+[[assumption]]
+key = "returns.cash.real"
+value = "-0.005"
+basis = "Cash trails inflation after fees over long horizons"
+
+[[assumption]]
+key = "volatility.equity"
+value = "0.18"
+basis = "Long-run global equity annual volatility (commonly cited 15-20%)"
+
+[[assumption]]
+key = "volatility.bonds"
+value = "0.07"
+basis = "Long-run gilt/IG portfolio volatility"
+
+[[assumption]]
+key = "volatility.cash"
+value = "0.01"
+basis = "Near-riskless nominal"
+
+[[assumption]]
+key = "correlation.equity_bonds"
+value = "0.2"
+basis = "Long-run average; regime-dependent (label prominently)"
+
+[[assumption]]
+key = "correlation.equity_cash"
+value = "0.0"
+basis = "Near-zero long-run historical correlation"
+
+[[assumption]]
+key = "correlation.bonds_cash"
+value = "0.2"
+basis = "Modest positive long-run historical correlation (short rates feed both)"
+
+[[assumption]]
+key = "fees.platform"
+value = "0.0025"
+basis = "Typical UK platform fee"
+
+[[assumption]]
+key = "fees.fund"
+value = "0.0015"
+basis = "Typical index-tracker OCF"
+
+[[assumption]]
+key = "horizon.planning_age"
+value = 95
+basis = "~1-in-4 longevity risk at 65 per ONS cohort life expectancy (exact values from 2024-based cohort tables at implementation)"
+
+[[assumption]]
+key = "glidepath.default_shape"
+value = { equity_start = "0.80", derisk_years_before_retirement = 15, equity_at_retirement = "0.40", transition = "linear", in_drawdown = "hold" }
+basis = "Typical UK target-date/lifestyling shape; a starting point only - per-person glide paths override it"
+
+[[assumption]]
+key = "policy.state_pension.uprating"
+value = { rule = "triple_lock", floor = "0.025", deterministic_cpi_margin = "0.005" }
+basis = "Triple lock = max(earnings, CPI, floor 2.5%); deterministic mode proxies the long-run earnings premium as CPI + 0.5%; alternative scenario: cpi. Monte Carlo applies the true rule per path. Triple lock committed only to ~2029 (planning §6)"
+
+[[assumption]]
+key = "policy.tax.future_years"
+value = { mode = "frozen_then_cpi_indexed", frozen_until_tax_year = "2030/31" }
+basis = "Freeze to 2030/31 is legislated fact (planning §6); post-2031 CPI indexation is assumption. Alternative: frozen indefinitely"
+
+[[assumption]]
+key = "annuity.level.single.65"
+value = "0.0775"
+basis = "Which? market table, snapshot 2026-07-27, retrieved 2026-08-01; best rate 7.946% - volatile market snapshot, refresh before relying on"
+
+[[assumption]]
+key = "annuity.escalating3.single.65"
+value = "0.0547"
+basis = "Which? market table, same snapshot"
+
+[[assumption]]
+key = "annuity.inflation_linked.single.65"
+value = "0.055"
+basis = "Indicative only - secondary source (IFA Magazine); weakest-sourced default here"
