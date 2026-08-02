@@ -108,8 +108,9 @@ def test_sub_period_within_tax_year(system: UkTaxSystem) -> None:
 def test_period_spanning_tax_years_is_rejected(system: UkTaxSystem) -> None:
     """A period crossing 6 April cannot be assessed."""
     spanning = Period(start=date(2027, 3, 1), end=date(2027, 6, 30))
+    income = ruk_income("60000")
     with pytest.raises(UkTaxError, match="extends beyond"):
-        system.assess(spanning, ruk_income("60000"))
+        system.assess(spanning, income)
 
 
 @pytest.mark.parametrize(
@@ -123,8 +124,10 @@ def test_uncovered_period_is_rejected(
     system: UkTaxSystem, start: date, end: date
 ) -> None:
     """Periods outside the shipped data fail until roadmap 2.5."""
+    uncovered = Period(start=start, end=end)
+    income = ruk_income("60000")
     with pytest.raises(UkTaxError, match="no shipped tax-year data"):
-        system.assess(Period(start=start, end=end), ruk_income("60000"))
+        system.assess(uncovered, income)
 
 
 def test_scottish_residency_not_yet_active(system: UkTaxSystem) -> None:
