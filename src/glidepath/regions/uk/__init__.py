@@ -55,13 +55,24 @@ from glidepath.regions.uk.tax import (
     UkTaxError,
     UkTaxSystem,
 )
+from glidepath.regions.uk.wrappers import (
+    ISA_KIND,
+    SIPP_KIND,
+    WORKPLACE_DC_KIND,
+    UkWrapperError,
+    UkWrapperRuleset,
+)
+from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
 
 __all__ = [
     "AGE_RULES_FILENAME",
     "ASSUMPTIONS_FILENAME",
+    "ISA_KIND",
     "RUK_RESIDENCY",
     "SCHEMA_VERSION",
     "SCOTLAND_RESIDENCY",
+    "SIPP_KIND",
+    "WORKPLACE_DC_KIND",
     "AgeRulesFile",
     "AssumptionDefault",
     "AssumptionValue",
@@ -84,10 +95,14 @@ __all__ = [
     "TaxBand",
     "TaxYearFile",
     "TaxYearMeta",
+    "TaxYearSeries",
     "UkAgeError",
     "UkAgeRules",
     "UkTaxError",
     "UkTaxSystem",
+    "UkTaxYearError",
+    "UkWrapperError",
+    "UkWrapperRuleset",
     "available_tax_years",
     "extend_tax_year",
     "load_age_rules",

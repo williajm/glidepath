@@ -6,8 +6,9 @@ household level avoids a schema + engine migration when couples activate
 (roadmap 9.4). v1 validates exactly one person via
 :func:`validate_household_v1`.
 
-Wrappers, DB pensions, state pension records and glide-path config attach
-to :class:`Person` in later phases (roadmap Phases 3-4).
+Wrappers attach to :class:`Person` as of roadmap 3.1; DB pensions, state
+pension records and glide-path config follow in later phases (roadmap
+Phases 3-4).
 """
 
 import uuid
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 
     from glidepath.core.money import Money
     from glidepath.core.provenance import Decision, Fact
+    from glidepath.core.wrappers import Wrapper
 
 EntityId = NewType("EntityId", str)
 """Stable persisted identifier.
@@ -68,6 +70,14 @@ class Person:
     tax_residency: TaxResidencyId
     sex_for_longevity: Fact[Sex] | None = None
     employment_income: Fact[Money] | None = None
+    wrappers: tuple[Wrapper, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Require distinct wrapper ids (they are override targets, §4.3)."""
+        ids = [wrapper.id for wrapper in self.wrappers]
+        if len(set(ids)) != len(ids):
+            msg = "a person's wrappers must have distinct EntityIds"
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True, slots=True)

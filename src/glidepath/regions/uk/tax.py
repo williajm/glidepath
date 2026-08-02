@@ -21,17 +21,13 @@ period's non-savings income.
 
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
-from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from glidepath.core import Money, TaxInput, TaxLine, TaxResidencyId, TaxResult
-from glidepath.regions.uk.extension import extend_tax_year
 from glidepath.regions.uk.loader import available_tax_years, load_tax_year
-from glidepath.regions.uk.schema import tax_year_start_year
+from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
 
 if TYPE_CHECKING:
-    from datetime import date
-
     from glidepath.core import Period
     from glidepath.regions.uk.extension import FutureYearsExtension
     from glidepath.regions.uk.schema import IncomeTaxSchedule, TaxBand, TaxYearFile
@@ -77,13 +73,10 @@ class UkTaxSystem:
 
     def __post_init__(self) -> None:
         """Require at least one year, ascending and non-overlapping."""
-        if not self.tax_years:
-            msg = "UkTaxSystem needs at least one tax-year file"
-            raise UkTaxError(msg)
-        for previous, current in pairwise(self.tax_years):
-            if current.meta.start_date <= previous.meta.end_date:
-                msg = "tax-year files must be in ascending, non-overlapping order"
-                raise UkTaxError(msg)
+        try:
+            self._series()
+        except UkTaxYearError as exc:
+            raise UkTaxError(str(exc)) from exc
 
     @classmethod
     def from_shipped_data(
@@ -102,37 +95,16 @@ class UkTaxSystem:
         schedule = _schedule_for(year, tax_input.residency)
         return _assess_schedule(schedule, tax_input.non_savings_income)
 
+    def _series(self) -> TaxYearSeries:
+        """The shared year-resolution series over this system's files."""
+        return TaxYearSeries(tax_years=self.tax_years, future_years=self.future_years)
+
     def _tax_year_for(self, period: Period) -> TaxYearFile:
         """The shipped or synthesized file fully containing ``period``."""
-        year = self._year_containing(period.start)
-        if period.end > year.meta.end_date:
-            msg = (
-                f"period {period.start}..{period.end} extends beyond"
-                f" tax year {year.meta.tax_year}"
-            )
-            raise UkTaxError(msg)
-        return year
-
-    def _year_containing(self, day: date) -> TaxYearFile:
-        """The shipped file covering ``day``, or an extension past the last."""
-        for year in self.tax_years:
-            if year.meta.start_date <= day <= year.meta.end_date:
-                return year
-        last = self.tax_years[-1]
-        if self.future_years is not None and day > last.meta.end_date:
-            return extend_tax_year(
-                last,
-                tax_year_start_year(day),
-                policy=self.future_years.policy,
-                cpi=self.future_years.cpi,
-            )
-        problem = (
-            "the future-years extension only reaches past the last shipped year"
-            if self.future_years is not None
-            else "no future-years extension is configured (planning §5.3)"
-        )
-        msg = f"no shipped tax-year data covers {day}; {problem}"
-        raise UkTaxError(msg)
+        try:
+            return self._series().year_for(period)
+        except UkTaxYearError as exc:
+            raise UkTaxError(str(exc)) from exc
 
 
 def _schedule_for(year: TaxYearFile, residency: TaxResidencyId) -> IncomeTaxSchedule:
