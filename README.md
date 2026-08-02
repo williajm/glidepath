@@ -12,6 +12,13 @@
 A desktop retirement and investment planner. UK-first, built so other
 regions can be added later. Early scaffolding — no app features yet.
 
+## Disclaimer
+
+Glidepath is a personal modelling tool for exploring retirement scenarios.
+It is not financial advice and is not regulated; its outputs depend on
+assumptions that will not match reality. Do not make financial decisions
+based solely on this tool.
+
 ## Setup
 
 Requires [uv](https://docs.astral.sh/uv/) and GNU Make.
