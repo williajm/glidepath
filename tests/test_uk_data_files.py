@@ -127,7 +127,7 @@ def test_spa_timetable_shape_and_endpoints() -> None:
 
     first = bands[0]
     assert isinstance(first, SpaAgeBand)
-    assert first.dob_from is None
+    assert first.dob_from == date(1954, 10, 6)
     assert first.dob_to == date(1960, 4, 5)
     assert (first.years, first.months) == (66, 0)
 
@@ -198,18 +198,29 @@ def test_default_assumption_spot_values() -> None:
 
     shape = file.get(AssumptionKey.GLIDEPATH_DEFAULT_SHAPE).value
     assert isinstance(shape, Mapping)
+    assert set(shape) == {
+        "equity_start",
+        "derisk_years_before_retirement",
+        "equity_at_retirement",
+        "transition",
+        "in_drawdown",
+    }
     assert shape["equity_start"] == Decimal("0.80")
     assert shape["equity_at_retirement"] == Decimal("0.40")
     assert shape["derisk_years_before_retirement"] == 15
+    assert shape["transition"] == "linear"
     assert shape["in_drawdown"] == "hold"
 
     uprating = file.get(AssumptionKey.POLICY_STATE_PENSION_UPRATING).value
     assert isinstance(uprating, Mapping)
+    assert set(uprating) == {"rule", "floor", "deterministic_cpi_margin"}
     assert uprating["rule"] == "triple_lock"
+    assert uprating["floor"] == Decimal("0.025")
     assert uprating["deterministic_cpi_margin"] == Decimal("0.005")
 
     future_years = file.get(AssumptionKey.POLICY_TAX_FUTURE_YEARS).value
     assert isinstance(future_years, Mapping)
+    assert set(future_years) == {"mode", "frozen_until_tax_year"}
     assert future_years["mode"] == "frozen_then_cpi_indexed"
     assert future_years["frozen_until_tax_year"] == "2030/31"
 

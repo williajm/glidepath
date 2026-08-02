@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from glidepath.core import AssumptionKey, Money, Rate
 from glidepath.regions.uk.schema import (
+    SCHEMA_VERSION,
     AgeRulesFile,
     AssumptionDefault,
     AssumptionsFile,
@@ -185,8 +186,16 @@ def _load_document(text: str, context: str) -> _Table:
 
 
 def _take_schema_version(root: _Table, context: str) -> int:
-    """Consume the mandatory top-level ``schema_version``."""
-    return _integer(root.take("schema_version"), f"{context}.schema_version", minimum=1)
+    """Consume ``schema_version``; unsupported versions fail before parsing."""
+    version = _integer(
+        root.take("schema_version"), f"{context}.schema_version", minimum=1
+    )
+    if version != SCHEMA_VERSION:
+        _fail(
+            f"{context}.schema_version",
+            f"schema_version {version} is not supported ({SCHEMA_VERSION})",
+        )
+    return version
 
 
 def _parse_file_meta(raw: object, context: str) -> FileMeta:
@@ -548,8 +557,11 @@ def available_tax_years() -> tuple[int, ...]:
     years: list[int] = []
     for entry in _data_directory().iterdir():
         match = _TAX_YEAR_FILE.fullmatch(entry.name)
-        if match:
-            years.append(int(match.group(1)))
+        if match is None:
+            continue
+        start_year = int(match.group(1))
+        if int(match.group(2)) == (start_year + 1) % 100:
+            years.append(start_year)
     return tuple(sorted(years))
 
 

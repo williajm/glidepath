@@ -23,14 +23,16 @@ steps = [
   { age = 57, effective_from = 2028-04-06 },
 ]
 
-# State pension age from date of birth (Pensions Act 2014: 66 -> 67
-# bands as ages; Pensions Act 2007: 67 -> 68 bands as fixed SPA dates,
-# exactly as legislated). The open-ended first band pins everyone born
-# before 6 April 1960 at 66: within this app's scope they have already
-# reached SPA, and modelling the pre-2026 timetable adds nothing.
+# State pension age from date of birth (Pensions Act 2011: SPA 66 for
+# DOBs 1954-10-06 to 1960-04-05; Pensions Act 2014: 66 -> 67 bands as
+# ages; Pensions Act 2007: 67 -> 68 bands as fixed SPA dates, exactly
+# as legislated). Coverage deliberately starts at 1954-10-06: earlier
+# cohorts had lower, phased SPAs and different (pre-2016) deferral
+# rules that this forward-looking planner does not model. Age logic
+# must REJECT dates of birth before the first band, never guess.
 [state_pension_age]
 bands = [
-  { dob_to = 1960-04-05, age = { years = 66 } },
+  { dob_from = 1954-10-06, dob_to = 1960-04-05, age = { years = 66 } },
   { dob_from = 1960-04-06, dob_to = 1960-05-05, age = { years = 66, months = 1 } },
   { dob_from = 1960-05-06, dob_to = 1960-06-05, age = { years = 66, months = 2 } },
   { dob_from = 1960-06-06, dob_to = 1960-07-05, age = { years = 66, months = 3 } },

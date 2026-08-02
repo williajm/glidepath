@@ -92,8 +92,8 @@ basis = "Typical UK target-date/lifestyling shape; a starting point only - per-p
 
 [[assumption]]
 key = "policy.state_pension.uprating"
-value = { rule = "triple_lock", deterministic_cpi_margin = "0.005" }
-basis = "Deterministic mode proxies the long-run earnings premium as CPI + 0.5%; alternative scenario: cpi. Monte Carlo applies the true rule per path. Triple lock committed only to ~2029 (planning §6)"
+value = { rule = "triple_lock", floor = "0.025", deterministic_cpi_margin = "0.005" }
+basis = "Triple lock = max(earnings, CPI, floor 2.5%); deterministic mode proxies the long-run earnings premium as CPI + 0.5%; alternative scenario: cpi. Monte Carlo applies the true rule per path. Triple lock committed only to ~2029 (planning §6)"
 
 [[assumption]]
 key = "policy.tax.future_years"

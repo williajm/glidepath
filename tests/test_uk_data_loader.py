@@ -394,15 +394,16 @@ def test_spa_band_gap_is_an_error() -> None:
         parse_age_rules(broken)
 
 
-def test_spa_first_band_must_be_open_ended() -> None:
-    """The first band covers everyone born before the timetable."""
-    broken = _mutated(
+def test_spa_first_band_may_be_bounded() -> None:
+    """A bounded first band marks where SPA coverage starts."""
+    bounded = _mutated(
         VALID_AGE_RULES,
         "{ dob_to = 1960-04-05, age = { years = 66 } }",
-        "{ dob_from = 1900-01-01, dob_to = 1960-04-05, age = { years = 66 } }",
+        "{ dob_from = 1954-10-06, dob_to = 1960-04-05, age = { years = 66 } }",
     )
-    with pytest.raises(DataFileError, match="first band must omit dob_from"):
-        parse_age_rules(broken)
+    first = parse_age_rules(bounded).spa_bands[0]
+    assert isinstance(first, SpaAgeBand)
+    assert first.dob_from == date(1954, 10, 6)
 
 
 def test_spa_last_band_must_be_open_ended() -> None:
@@ -594,12 +595,13 @@ def test_load_tax_year_rejects_mismatched_meta(
 def test_available_tax_years_matches_shipped_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Only well-named tax-year files are listed, in ascending order."""
+    """Only canonically named tax-year files are listed, in ascending order."""
     for name in (
         "tax_year_2026_27.toml",
         "tax_year_2025_26.toml",
         "age_rules.toml",
         "tax_year_bad.toml",
+        "tax_year_2026_99.toml",
     ):
         (tmp_path / name).write_text("", encoding="utf-8")
     monkeypatch.setattr(loader, "_data_directory", lambda: tmp_path)

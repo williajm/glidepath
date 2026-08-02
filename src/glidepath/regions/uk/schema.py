@@ -296,12 +296,15 @@ def _validate_nmpa_steps(steps: tuple[NmpaStep, ...]) -> None:
 
 
 def _validate_spa_bands(bands: tuple[SpaBand, ...]) -> None:
-    """SPA bands must tile all dates of birth with no gaps or overlaps."""
+    """SPA bands must tile the covered DOB range with no gaps or overlaps.
+
+    The first band may set ``dob_from``: coverage starts there, and age
+    logic must reject earlier dates of birth rather than guess. The last
+    band is always open-ended (future births).
+    """
     owner = "AgeRulesFile.state_pension_age"
     if not bands:
         _fail(owner, "at least one band is required")
-    if bands[0].dob_from is not None:
-        _fail(owner, "the first band must omit dob_from (open-ended)")
     if bands[-1].dob_to is not None:
         _fail(owner, "the last band must omit dob_to (open-ended)")
     for previous, current in pairwise(bands):
