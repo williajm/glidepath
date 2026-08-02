@@ -50,18 +50,20 @@ def test_wrapper_carries_crystallised_balance() -> None:
 
 def test_wrapper_rejects_negative_balance() -> None:
     """A negative balance is a data-entry error, not a plan."""
+    wrapper_id = new_entity_id()
     negative = money_fact("-1")
     with pytest.raises(ValueError, match="balance must be non-negative"):
-        Wrapper(id=new_entity_id(), kind=KIND, balance=negative)
+        Wrapper(id=wrapper_id, kind=KIND, balance=negative)
 
 
 def test_wrapper_rejects_negative_crystallised_balance() -> None:
     """The crystallised balance is bounded the same way."""
+    wrapper_id = new_entity_id()
     balance = money_fact("1000")
     negative = money_fact("-1")
     with pytest.raises(ValueError, match="crystallised_balance must be non-negative"):
         Wrapper(
-            id=new_entity_id(),
+            id=wrapper_id,
             kind=KIND,
             balance=balance,
             crystallised_balance=negative,

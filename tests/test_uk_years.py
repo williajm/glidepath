@@ -76,8 +76,9 @@ def test_extension_never_reaches_backwards() -> None:
     extended = TaxYearSeries(
         tax_years=(load_tax_year(2026),), future_years=FROZEN_EXTENSION
     )
+    before_coverage = date(2026, 4, 5)
     with pytest.raises(UkTaxYearError, match="only reaches past"):
-        extended.year_containing(date(2026, 4, 5))
+        extended.year_containing(before_coverage)
 
 
 def test_empty_series_is_rejected() -> None:
