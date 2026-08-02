@@ -77,14 +77,16 @@ def test_tax_year_meta_rejects_wrong_suffix() -> None:
 
 def test_tax_year_meta_rejects_wrong_start_date() -> None:
     """UK tax years start on 6 April."""
+    bad_start = date(2026, 4, 7)
     with pytest.raises(DataFileError, match="6 April"):
-        make_tax_year_meta(start_date=date(2026, 4, 7))
+        make_tax_year_meta(start_date=bad_start)
 
 
 def test_tax_year_meta_rejects_wrong_end_date() -> None:
     """UK tax years end on 5 April of the following year."""
+    bad_end = date(2027, 4, 6)
     with pytest.raises(DataFileError, match="5 April"):
-        make_tax_year_meta(end_date=date(2027, 4, 6))
+        make_tax_year_meta(end_date=bad_end)
 
 
 def test_file_meta_requires_sources() -> None:
@@ -119,9 +121,10 @@ def test_schedule_requires_increasing_uppers() -> None:
 
 def test_state_pension_rules_reject_min_above_full() -> None:
     """Qualifying-year counts must satisfy 0 < min <= full."""
+    weekly = Money(Decimal(200))
     with pytest.raises(DataFileError, match="min <= full"):
         StatePensionRules(
-            new_full_weekly=Money(Decimal(200)),
+            new_full_weekly=weekly,
             qualifying_years_full=35,
             qualifying_years_min=36,
         )
@@ -147,13 +150,10 @@ def test_spa_age_band_rejects_non_positive_years() -> None:
 
 def test_spa_age_band_rejects_inverted_dob_range() -> None:
     """dob_from must not fall after dob_to."""
+    dob_from = date(1961, 1, 1)
+    dob_to = date(1960, 1, 1)
     with pytest.raises(DataFileError, match="is after"):
-        SpaAgeBand(
-            dob_from=date(1961, 1, 1),
-            dob_to=date(1960, 1, 1),
-            years=66,
-            months=0,
-        )
+        SpaAgeBand(dob_from=dob_from, dob_to=dob_to, years=66, months=0)
 
 
 def test_lisa_ages_must_ascend() -> None:
@@ -169,14 +169,16 @@ def test_lisa_ages_must_ascend() -> None:
 
 def test_deferral_rejects_zero_rate() -> None:
     """A deferral increment of zero is invalid."""
+    zero_rate = Rate(Decimal(0))
     with pytest.raises(DataFileError, match="increment_rate must be positive"):
-        StatePensionDeferral(increment_rate=Rate(Decimal(0)), per_weeks=9)
+        StatePensionDeferral(increment_rate=zero_rate, per_weeks=9)
 
 
 def test_deferral_rejects_zero_weeks() -> None:
     """The increment interval must be positive."""
+    rate = Rate(Decimal("0.01"))
     with pytest.raises(DataFileError, match="per_weeks must be positive"):
-        StatePensionDeferral(increment_rate=Rate(Decimal("0.01")), per_weeks=0)
+        StatePensionDeferral(increment_rate=rate, per_weeks=0)
 
 
 def test_assumptions_file_rejects_duplicate_keys() -> None:

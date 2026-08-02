@@ -52,6 +52,7 @@ ASSUMPTIONS_FILENAME = "assumptions_default.toml"
 
 _DATA_ANCHOR = "glidepath.regions.uk"
 _TAX_YEAR_FILE = re.compile(r"tax_year_(\d{4})_(\d{2})\.toml")
+_MUST_NOT_BE_EMPTY = "must not be empty"
 
 
 def _fail(context: str, problem: str) -> NoReturn:
@@ -149,7 +150,7 @@ def _string(raw: object, context: str) -> str:
     if not isinstance(raw, str):
         _fail(context, f"expected a string, got {type(raw).__name__}")
     if not raw:
-        _fail(context, "must not be empty")
+        _fail(context, _MUST_NOT_BE_EMPTY)
     return raw
 
 
@@ -158,7 +159,7 @@ def _array(raw: object, context: str) -> list[object]:
     if not isinstance(raw, list):
         _fail(context, f"expected an array, got {type(raw).__name__}")
     if not raw:
-        _fail(context, "must not be empty")
+        _fail(context, _MUST_NOT_BE_EMPTY)
     return raw
 
 
@@ -471,7 +472,7 @@ def _assumption_value(raw: object, context: str) -> AssumptionValue:
         return _decimal_or_tag(raw, context)
     if isinstance(raw, dict):
         if not raw:
-            _fail(context, "must not be empty")
+            _fail(context, _MUST_NOT_BE_EMPTY)
         items: dict[str, AssumptionValue] = {
             key: _assumption_value(item, f"{context}.{key}")
             for key, item in raw.items()
@@ -483,7 +484,7 @@ def _assumption_value(raw: object, context: str) -> AssumptionValue:
 def _decimal_or_tag(raw: str, context: str) -> Decimal | str:
     """Parse a string value: numeric strings become ``Decimal``."""
     if not raw:
-        _fail(context, "must not be empty")
+        _fail(context, _MUST_NOT_BE_EMPTY)
     try:
         value = Decimal(raw)
     except InvalidOperation:
