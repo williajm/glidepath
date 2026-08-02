@@ -108,10 +108,10 @@ def uk_region(future_years: FutureYearsExtension | None = None) -> Region:
 def _data_version(future_years: FutureYearsExtension | None) -> str:
     """A deterministic content-version string over the shipped files.
 
-    Names every file with its ``verified_on`` date, plus the
-    future-years mode when an extension is configured — enough to tell
-    two runs apart whenever the data behind them differs (planning
-    §4.6).
+    Names every file with its ``verified_on`` date, plus the full
+    future-years policy (mode, freeze end, CPI) when an extension is
+    configured — enough to tell two runs apart whenever the data
+    behind them differs (planning §4.6).
     """
     parts = [f"uk schema={SCHEMA_VERSION}"]
     for start_year in available_tax_years():
@@ -122,5 +122,8 @@ def _data_version(future_years: FutureYearsExtension | None) -> str:
     assumptions = load_default_assumptions()
     parts.append(f"assumptions verified {assumptions.meta.verified_on}")
     if future_years is not None:
-        parts.append(f"future_years {future_years.policy.mode.value}")
+        detail = future_years.policy.mode.value
+        if future_years.policy.frozen_until_start_year is not None:
+            detail += f" until={future_years.policy.frozen_until_start_year}"
+        parts.append(f"future_years {detail} cpi={future_years.cpi.value}")
     return "; ".join(parts)

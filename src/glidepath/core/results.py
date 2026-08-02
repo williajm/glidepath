@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from glidepath.core.money import Money
 
 if TYPE_CHECKING:
+    from glidepath.core.config import RunConfig
     from glidepath.core.entities import EntityId, Household
     from glidepath.core.glide import LifeStage
     from glidepath.core.investments import AssetAllocation
@@ -192,10 +193,17 @@ class RunProvenance:
 
 @dataclass(frozen=True, slots=True)
 class ProjectionResult:
-    """One deterministic projection: the period ledger plus provenance."""
+    """One deterministic projection: the period ledger plus provenance.
+
+    ``config`` is the exact :class:`~glidepath.core.RunConfig` the run
+    received — today, horizon, mode, seed — so a result carries the
+    configuration part of its §4.6 manifest (the full persisted
+    manifest is Phase 6 work).
+    """
 
     snapshots: tuple[PeriodSnapshot, ...]
     provenance: RunProvenance
+    config: RunConfig
 
 
 def collect_plan_facts(household: Household) -> tuple[LabelledFact, ...]:

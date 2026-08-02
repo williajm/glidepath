@@ -38,17 +38,22 @@ v1 engine conventions, superseded as later phases land:
 - Wrapper balance facts are taken as at the run start; annual-allowance
   measurement joins the loop when the AA charge is modelled
   (roadmap 5.x/9.5).
+- The first and last periods are currently applied whole: a mid-period
+  ``today`` gets a full year of flows despite balances being as-of the
+  run start, and the final period runs past the horizon end. Partial-
+  period pro-rating per §4.1 is roadmap 4.6 (issue #57), sequenced
+  before the 4.5 golden scenario.
 """
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from enum import Enum, auto
 from typing import TYPE_CHECKING
 
+from glidepath.core.config import EngineError, RunConfig
 from glidepath.core.contributions import MemberContributionRequest
 from glidepath.core.entities import validate_household_v1
 from glidepath.core.glide import glide_path_from_shape, years_to_target_retirement
-from glidepath.core.investments import FeeSchedule, apply_fees_and_growth
+from glidepath.core.investments import FeeSchedule, period_fee
 from glidepath.core.money import Money, Rate
 from glidepath.core.periods import age_on, date_age_attained
 from glidepath.core.provenance import (
@@ -75,6 +80,7 @@ from glidepath.core.wrappers import WithdrawalTaxTreatment
 if TYPE_CHECKING:
     from datetime import date
 
+    from glidepath.core.contributions import ContributionSchedule
     from glidepath.core.entities import Household, Person, SpendingPlan
     from glidepath.core.glide import GlidePathConfig, LifeStage
     from glidepath.core.investments import AssetAllocation
@@ -90,39 +96,6 @@ _GROSS_UP_ITERATION_CAP = 48
 """Fixed-point iteration cap for the net-need gross-up (§5.2 step 4)."""
 _NET_TOLERANCE = Money(Decimal("0.005"))
 """Half a penny: residuals below ledger precision are settled, not chased."""
-
-
-class EngineError(ValueError):
-    """A projection request the engine cannot honour."""
-
-
-class RunMode(Enum):
-    """Projection mode (planning §5.2). Monte Carlo lands in Phase 7."""
-
-    DETERMINISTIC = auto()
-
-
-@dataclass(frozen=True, slots=True)
-class RunConfig:
-    """One run's configuration (planning §5.2, §4.6).
-
-    ``today`` anchors the first period and defines "today's money" for
-    the reporting layer. ``horizon_end`` defaults to the date the (v1
-    single) person attains the ``horizon.planning_age`` assumption.
-    ``seed`` is recorded in provenance now and drives the random source
-    once Monte Carlo lands (roadmap 7.1).
-    """
-
-    today: date
-    horizon_end: date | None = None
-    mode: RunMode = RunMode.DETERMINISTIC
-    seed: int | None = None
-
-    def __post_init__(self) -> None:
-        """Reject a horizon that ends before it starts."""
-        if self.horizon_end is not None and self.horizon_end < self.today:
-            msg = f"horizon_end {self.horizon_end} precedes today {self.today}"
-            raise EngineError(msg)
 
 
 @dataclass(slots=True)
@@ -191,9 +164,15 @@ class _NominalFactors:
     __slots__ = ("_factors", "_real_rates")
 
     def __init__(self, tracked: TrackedAssumptions, keys: set[AssumptionKey]) -> None:
-        """Read each key's real rate through the tracked view."""
+        """Read each key's real rate through the tracked view.
+
+        Keys are read in sorted order so the run's recorded read order
+        — and therefore the serialized provenance — is identical across
+        processes (set iteration order is hash-salted; planning §4.6
+        demands byte-identical results from identical inputs).
+        """
         self._real_rates = {
-            key: decimal_assumption_value(tracked.get(key)) for key in keys
+            key: decimal_assumption_value(tracked.get(key)) for key in sorted(keys)
         }
         self._factors = dict.fromkeys(self._real_rates, _ONE)
 
@@ -246,7 +225,7 @@ def run(
         region_data_version=region.data_version,
         seed=config.seed,
     )
-    return ProjectionResult(snapshots=snapshots, provenance=provenance)
+    return ProjectionResult(snapshots=snapshots, provenance=provenance, config=config)
 
 
 @dataclass(slots=True)
@@ -441,6 +420,7 @@ class _Projection:
             schedule = ledger.wrapper.contributions
             if schedule is None:
                 continue
+            self._require_permitted_mechanic(ledger.wrapper, schedule)
             escalation = _ONE
             if schedule.escalation is not None:
                 escalation = factors.factor(schedule.escalation)
@@ -484,6 +464,32 @@ class _Projection:
             ledger.uncrystallised = (
                 ledger.uncrystallised + outcome.gross_to_pot + employer
             )
+
+    def _require_permitted_mechanic(
+        self, wrapper: Wrapper, schedule: ContributionSchedule
+    ) -> None:
+        """Reject a schedule whose relief mechanic the region forbids.
+
+        The region's permitted-mechanics set is the authority (planning
+        §4.2): a mechanic outside it would fabricate relief (e.g.
+        relief at source into an ISA), and a missing mechanic on a
+        kind that operates one would bypass the relief limits entirely.
+        """
+        permitted = self.region.wrappers.permitted_relief_mechanics(wrapper.kind)
+        mechanic = schedule.relief_mechanic
+        if mechanic is None and permitted:
+            names = ", ".join(sorted(entry.name for entry in permitted))
+            msg = (
+                f"wrapper {wrapper.id}: contributions to kind {wrapper.kind!r}"
+                f" require a relief mechanic (one of: {names})"
+            )
+            raise EngineError(msg)
+        if mechanic is not None and mechanic not in permitted:
+            msg = (
+                f"wrapper {wrapper.id}: relief mechanic {mechanic.name} is not"
+                f" permitted for kind {wrapper.kind!r}"
+            )
+            raise EngineError(msg)
 
     def _withdrawal_step(
         self, ledgers: list[_WrapperLedger], period: Period, need: Money
@@ -604,27 +610,32 @@ class _Projection:
     ) -> WrapperPeriodResult:
         """Steps 6-8 for one wrapper: fees, growth, quantize, snapshot.
 
-        Fees and growth apply to each sub-balance separately — both are
-        linear in the balance, so the split changes nothing except that
-        the fee cap correctly binds per sub-balance.
+        The fee (step 6) is charged on the wrapper's aggregate average
+        balance — a provider charges the account, not its sub-balances,
+        and the cannot-exceed-the-holdings cap binds at account level —
+        then allocated across the sub-balances pro rata to their
+        post-flow values. Growth (step 7) applies to each post-fee
+        sub-balance; fees before growth per the §5.2 order.
         """
         fees = self._fees_for(ledger.wrapper)
-        uncrystallised = apply_fees_and_growth(
-            ledger.opening_uncrystallised,
-            ledger.uncrystallised,
-            fees,
-            ledger.allocation,
-            returns.assets,
-        )
-        crystallised = apply_fees_and_growth(
-            ledger.opening_crystallised,
-            ledger.crystallised,
-            fees,
-            ledger.allocation,
-            returns.assets,
-        )
-        closing_uncrystallised = uncrystallised.closing.quantized()
-        closing_crystallised = crystallised.closing.quantized()
+        opening_total = ledger.opening_uncrystallised + ledger.opening_crystallised
+        after_total = ledger.uncrystallised + ledger.crystallised
+        fee_total = period_fee(opening_total, after_total, fees)
+        fee_uncrystallised = _ZERO
+        if after_total > _ZERO:
+            fee_uncrystallised = Money(
+                fee_total.amount * ledger.uncrystallised.amount / after_total.amount
+            )
+        fee_crystallised = fee_total - fee_uncrystallised
+        growth_rate = returns.assets.portfolio_growth_factor(ledger.allocation) - _ONE
+        post_fee_uncrystallised = ledger.uncrystallised - fee_uncrystallised
+        post_fee_crystallised = ledger.crystallised - fee_crystallised
+        growth_uncrystallised = Money(post_fee_uncrystallised.amount * growth_rate)
+        growth_crystallised = Money(post_fee_crystallised.amount * growth_rate)
+        closing_uncrystallised = (
+            post_fee_uncrystallised + growth_uncrystallised
+        ).quantized()
+        closing_crystallised = (post_fee_crystallised + growth_crystallised).quantized()
         self._balances[ledger.wrapper.id] = (
             closing_uncrystallised,
             closing_crystallised,
@@ -641,8 +652,8 @@ class _Projection:
             contribution_shortfall=ledger.contribution_shortfall.quantized(),
             withdrawal_tax_free=ledger.withdrawal_tax_free.quantized(),
             withdrawal_taxable=ledger.withdrawal_taxable.quantized(),
-            fee=(uncrystallised.fee + crystallised.fee).quantized(),
-            growth=(uncrystallised.growth + crystallised.growth).quantized(),
+            fee=fee_total.quantized(),
+            growth=(growth_uncrystallised + growth_crystallised).quantized(),
             closing_uncrystallised=closing_uncrystallised,
             closing_crystallised=closing_crystallised,
         )

@@ -91,11 +91,16 @@ class TestUkRegionBundle:
         assert "assumptions verified" in version
         assert "future_years" not in version
 
-    def test_data_version_records_the_extension_mode(self) -> None:
-        """An extended region is distinguishable from a shipped-only one."""
+    def test_data_version_records_the_full_extension_policy(self) -> None:
+        """Mode, freeze end, and CPI all land in the version string.
+
+        Two policies sharing a mode but differing in freeze end or CPI
+        synthesize different future thresholds, so all three must be
+        distinguishable from provenance.
+        """
         extension = future_years_extension(default_assumption_set())
         version = uk_region(extension).data_version
-        assert "future_years frozen_then_cpi_indexed" in version
+        assert "future_years frozen_then_cpi_indexed until=2030 cpi=0.02" in version
 
 
 def accumulator_household() -> Household:

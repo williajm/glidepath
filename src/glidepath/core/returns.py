@@ -44,9 +44,14 @@ class PeriodReturns:
     cpi: Rate
 
     def __post_init__(self) -> None:
-        """Reject a CPI rate below -100% (prices cannot go negative)."""
-        if self.cpi.value < _MINUS_ONE:
-            msg = "PeriodReturns.cpi must be at least -1"
+        """Reject a CPI at or below -100%.
+
+        Exactly -1 is rejected too: it would zero the cumulative
+        inflation factor and turn an accepted assumption into a
+        runtime failure one period later.
+        """
+        if self.cpi.value <= _MINUS_ONE:
+            msg = "PeriodReturns.cpi must be greater than -1"
             raise ValueError(msg)
 
 

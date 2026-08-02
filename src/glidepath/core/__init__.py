@@ -5,13 +5,14 @@ It never imports region code (planning §4.2) — enforced by a guard test —
 and never contains policy figures, which live in region data files.
 """
 
+from glidepath.core.config import EngineError, RunConfig, RunMode
 from glidepath.core.contributions import (
     ContributionRuleset,
     ContributionSchedule,
     MemberContributionOutcome,
     MemberContributionRequest,
 )
-from glidepath.core.engine import EngineError, RunConfig, RunMode, run
+from glidepath.core.engine import run
 from glidepath.core.entities import (
     EntityId,
     Household,

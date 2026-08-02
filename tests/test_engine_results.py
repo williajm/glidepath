@@ -160,14 +160,18 @@ class TestResultInvariants:
                 persons=(),
             )
 
-    def test_period_returns_rejects_cpi_below_total_deflation(self) -> None:
-        """A CPI below -100% is meaningless."""
+    def test_period_returns_rejects_cpi_at_or_below_total_deflation(self) -> None:
+        """A CPI at or below -100% is rejected up front.
+
+        Exactly -1 would zero the cumulative inflation factor and blow
+        up one period later, so it fails at construction instead.
+        """
         assets = AssetReturns(
             equity=Rate(Decimal(0)), bonds=Rate(Decimal(0)), cash=Rate(Decimal(0))
         )
-        impossible_cpi = Rate(Decimal("-1.5"))
-        with pytest.raises(ValueError, match="at least -1"):
-            PeriodReturns(assets=assets, cpi=impossible_cpi)
+        total_deflation = Rate(Decimal(-1))
+        with pytest.raises(ValueError, match="greater than -1"):
+            PeriodReturns(assets=assets, cpi=total_deflation)
 
 
 class TestSpendingPlanAndRegion:

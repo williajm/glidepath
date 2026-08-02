@@ -449,6 +449,38 @@ class TestContributions:
         assert second.employee_contribution == Money(Decimal("1000.00"))
         assert second.contribution_shortfall == Money(Decimal("3000.00"))
 
+    def test_mechanic_not_permitted_for_the_kind_is_rejected(self) -> None:
+        """Relief at source into a relief-free kind is a plan error.
+
+        The region's permitted-mechanics set is the authority (planning
+        §4.2); without this check the schedule would fabricate provider
+        and assessment relief inside a tax-free account.
+        """
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(1000)), recorded_on=RECORDED),
+            relief_mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
+        )
+        account = wrapper_of(FREE, "0", schedule=schedule)
+        plan = household_of(person_of((account,), employment="20000"))
+        assumptions = assumptions_with()
+        region = stub_region()
+        config = one_period_config()
+        with pytest.raises(EngineError, match="not permitted"):
+            run(plan, assumptions, region, config)
+
+    def test_missing_mechanic_on_a_relieved_kind_is_rejected(self) -> None:
+        """A pension schedule must state its mechanic, not bypass relief."""
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(1000)), recorded_on=RECORDED),
+        )
+        pension = wrapper_of(PENSION, "0", schedule=schedule)
+        plan = household_of(person_of((pension,), employment="20000"))
+        assumptions = assumptions_with()
+        region = stub_region()
+        config = one_period_config()
+        with pytest.raises(EngineError, match="require a relief mechanic"):
+            run(plan, assumptions, region, config)
+
     def test_contributions_stop_at_retirement(self) -> None:
         """No employment income and no contributions once decumulating."""
         schedule = ContributionSchedule(
@@ -683,6 +715,39 @@ class TestWithdrawals:
         assert person_result.spending_need == Money(Decimal("18000.00"))
         assert person_result.net_withdrawn == Money(Decimal("18000.00"))
 
+    def test_fee_is_charged_on_the_aggregate_wrapper_balance(self) -> None:
+        """Emptying one sub-balance must not shrink the account's fee.
+
+        Uncrystallised 100,000 and crystallised 5,000; the withdrawal
+        step empties the crystallised funds (5,000 gross, balance-capped)
+        and draws 307.69 more from uncrystallised funds. The 1% fee
+        applies to the aggregate average of 105,000 and 99,692.31 —
+        1,023.46 — not to each sub-balance with the cap zeroing the
+        crystallised share.
+        """
+        pension = Wrapper(
+            id=EntityId("wrapper-aggregate-fee"),
+            kind=PENSION,
+            balance=money_fact("100000"),
+            crystallised_balance=money_fact("5000"),
+            allocation=EQUITY_ONLY,
+            fees=FeeSchedule(platform=Rate(Decimal("0.01")), fund=Rate(Decimal(0))),
+        )
+        plan = retiree_plan((pension,), spending="4000")
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert person_result.net_withdrawn == Money(Decimal("4000.00"))
+        assert person_result.tax.tax_due == Money(Decimal("1307.69"))
+        assert pension_result.fee == Money(Decimal("1023.46"))
+        assert pension_result.closing_crystallised == ZERO
+        assert pension_result.closing_uncrystallised == Money(Decimal("98668.85"))
+
     def test_spending_need_inflates_with_the_cpi_path(self) -> None:
         """The real spending need is inflated by the run's CPI factor."""
         free_account = wrapper_of(FREE, "100000")
@@ -836,6 +901,7 @@ class TestProvenanceAndDeterminism:
         first = run(plan, assumptions_with(), stub_region(), config)
         second = run(plan, assumptions_with(), stub_region(), config)
         assert first == second
+        assert first.config == config
 
     def test_default_horizon_comes_from_the_planning_age(self) -> None:
         """Without an explicit horizon the planning-age assumption rules."""
