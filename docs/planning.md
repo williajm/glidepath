@@ -82,6 +82,13 @@ dates** and follow one convention, tested at boundaries:
 - **Income entitlements** (state pension from SPA, DB from NPA, annuity
   start) begin at their exact date and are pro-rated by whole months
   within their starting period.
+- **Eligibility windows** (LISA opening 18–39, LISA contributions to
+  age 50) are *not* gates: they run from the exact opening birthday to
+  the day before the closing birthday, with no per-period rounding in
+  either direction. The region exposes the window as exact dates; the
+  consumer intersects it with the period and pro-rates any flow by
+  whole months like other partial years — so a 7-April 18th birthday
+  is eligible from that date within that same tax year.
 
 Other partial years (starting work, retiring mid-year) are pro-rated by
 whole months as a `Decimal` fraction the same way; no sub-stepping.
@@ -424,7 +431,7 @@ the `ReturnModel` differs** — a design invariant, not an aspiration.
 **Order of operations within a period is part of the spec** (tested):
 
 1. **Open period** — resolve ages, stage, glide-path allocation; apply the
-   §4.1 convention: access gates (NMPA/LISA) are open only if attained by
+   §4.1 convention: access gates (NMPA, LISA access) are open only if attained by
    the period's first day; income entitlements starting mid-period are
    marked for pro-rating.
 2. **Income** — DB in payment (revalued/uprated), state pension (uprating

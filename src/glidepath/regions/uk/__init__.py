@@ -8,6 +8,7 @@ this. Shipped default assumptions mirror planning §7 and are kept in
 sync by a doc-sync test.
 """
 
+from glidepath.regions.uk.ages import UkAgeError, UkAgeRules
 from glidepath.regions.uk.loader import (
     AGE_RULES_FILENAME,
     ASSUMPTIONS_FILENAME,
@@ -74,6 +75,8 @@ __all__ = [
     "TaxBand",
     "TaxYearFile",
     "TaxYearMeta",
+    "UkAgeError",
+    "UkAgeRules",
     "UkTaxError",
     "UkTaxSystem",
     "available_tax_years",
