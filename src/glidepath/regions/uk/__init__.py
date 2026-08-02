@@ -37,6 +37,11 @@ from glidepath.regions.uk.loader import (
     parse_tax_year,
     tax_year_filename,
 )
+from glidepath.regions.uk.region import (
+    default_assumption_set,
+    future_years_extension,
+    uk_region,
+)
 from glidepath.regions.uk.schema import (
     SCHEMA_VERSION,
     AgeRulesFile,
@@ -119,7 +124,9 @@ __all__ = [
     "adjusted_income",
     "assess_annual_allowance",
     "available_tax_years",
+    "default_assumption_set",
     "extend_tax_year",
+    "future_years_extension",
     "is_mpaa_active",
     "load_age_rules",
     "load_default_assumptions",
@@ -130,4 +137,5 @@ __all__ = [
     "tapered_annual_allowance",
     "tax_year_filename",
     "threshold_income",
+    "uk_region",
 ]
