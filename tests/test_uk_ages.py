@@ -158,61 +158,49 @@ def test_pension_access_closed(rules: UkAgeRules, dob: date, start_year: int) ->
     assert not rules.is_pension_access_open(dob, tax_year(start_year))
 
 
-@pytest.mark.parametrize(
-    ("dob", "start_year"),
-    [
-        (date(2009, 4, 6), 2027),  # 18 attained exactly on the first day
-        (date(1988, 4, 6), 2027),  # 39 at period start
-        (date(1989, 1, 1), 2028),  # 39 at start; turns 40 mid-period
-    ],
-)
-def test_lisa_opening_allowed(rules: UkAgeRules, dob: date, start_year: int) -> None:
-    """Opening is allowed while 18 is attained and 40 is not (§4.1)."""
-    assert rules.is_lisa_opening_allowed(dob, tax_year(start_year))
+def test_lisa_opening_window_edges(rules: UkAgeRules) -> None:
+    """The opening window runs from the 18th birthday to the eve of 40."""
+    window = rules.lisa_opening_window(date(2009, 4, 7))
+    assert window.start == date(2027, 4, 7)
+    assert window.end == date(2049, 4, 6)
 
 
-@pytest.mark.parametrize(
-    ("dob", "start_year"),
-    [
-        (date(2009, 4, 6), 2026),  # still 17 at period start
-        (date(2009, 4, 7), 2027),  # 18th birthday one day into the period
-        (date(1988, 4, 6), 2028),  # 40 attained exactly on the first day
-    ],
-)
-def test_lisa_opening_not_allowed(
-    rules: UkAgeRules, dob: date, start_year: int
-) -> None:
-    """Opening is refused outside the 18-39 window at period start."""
-    assert not rules.is_lisa_opening_allowed(dob, tax_year(start_year))
+def test_lisa_contribution_window_edges(rules: UkAgeRules) -> None:
+    """The contribution window runs from the 18th birthday to the eve of 50."""
+    window = rules.lisa_contribution_window(date(2009, 4, 7))
+    assert window.start == date(2027, 4, 7)
+    assert window.end == date(2059, 4, 6)
 
 
-@pytest.mark.parametrize(
-    ("dob", "start_year"),
-    [
-        (date(1978, 4, 6), 2027),  # 49 at period start
-        (date(1979, 1, 1), 2028),  # 49 at start; turns 50 mid-period
-        (date(2009, 4, 6), 2027),  # 18 attained exactly on the first day
-    ],
-)
-def test_lisa_contribution_allowed(
-    rules: UkAgeRules, dob: date, start_year: int
-) -> None:
-    """Contributions run from 18 until the 50th birthday (§4.1)."""
-    assert rules.is_lisa_contribution_allowed(dob, tax_year(start_year))
+def test_lisa_window_covers_the_birthday_tax_year(rules: UkAgeRules) -> None:
+    """A 7-April 18th birthday is eligible within that same tax year (§4.1).
+
+    Eligibility windows are exact dates, never rounded to periods: the
+    window opens one day into 2027/28, so that year is partially
+    eligible rather than excluded outright.
+    """
+    window = rules.lisa_opening_window(date(2009, 4, 7))
+    year = tax_year(2027)
+    assert year.contains(window.start)
+    assert not window.contains(year.start)
 
 
-@pytest.mark.parametrize(
-    ("dob", "start_year"),
-    [
-        (date(1978, 4, 6), 2028),  # 50 attained exactly on the first day
-        (date(2009, 4, 7), 2027),  # not yet 18 at period start
-    ],
-)
-def test_lisa_contribution_not_allowed(
-    rules: UkAgeRules, dob: date, start_year: int
-) -> None:
-    """Contributions stop once 50 is attained by the period's first day."""
-    assert not rules.is_lisa_contribution_allowed(dob, tax_year(start_year))
+def test_lisa_window_leap_day_dob(rules: UkAgeRules) -> None:
+    """A 29-Feb DOB opens on the deemed 1 March and closes on 28 February."""
+    window = rules.lisa_opening_window(date(2008, 2, 29))
+    assert window.start == date(2026, 3, 1)  # 18th birthday deemed in non-leap 2026
+    assert window.end == date(2048, 2, 28)  # eve of the real 29-Feb 40th birthday
+
+
+def test_lisa_window_start_feeds_prorata(rules: UkAgeRules) -> None:
+    """A window opening mid-period pro-rates the flow by whole months (§4.1).
+
+    DOB 2009-05-06 turns 18 one month into the 2027/28 tax year, so a
+    contribution flow covers 11 of the 12 months.
+    """
+    window = rules.lisa_contribution_window(date(2009, 5, 6))
+    fraction = prorata_fraction(window.start, tax_year(2027))
+    assert fraction == Decimal(11) / Decimal(12)
 
 
 def test_lisa_access_gate(rules: UkAgeRules) -> None:

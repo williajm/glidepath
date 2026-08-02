@@ -5,12 +5,16 @@ UK-only LISA age gates. Every figure — the SPA timetable, the NMPA
 schedule, the LISA ages — comes from ``age_rules.toml`` (§5.3); nothing
 is hardcoded here (guard-tested).
 
-Every gate follows the §4.1 convention, evaluated on a period's first
-day: an opening gate (NMPA, LISA access) is open for a period only if
-the age is attained on or before that day, and a closing window (LISA
-opening, LISA contributions) is shut for a period once its closing age
-is attained by that day — so a mid-period closing birthday leaves the
-window open for that whole period.
+The three §4.1 conventions appear as three shapes here:
+
+- **Access gates** (NMPA, LISA access at 60) are booleans per period,
+  open only if the age is attained on or before the period's first day.
+- **Income entitlements** (SPA) are exact dates for the core to
+  pro-rate.
+- **Eligibility windows** (LISA opening 18-39, contributions to 50) are
+  exact date spans — never rounded to periods in either direction; the
+  consumer (the wrapper ruleset, roadmap 3.1/9.2) intersects them with
+  the period and pro-rates any flow by whole months.
 
 The NMPA schedule is effective-dated, and the age in force is read on
 the period's first day. Around a legislated step-up this correctly
@@ -21,9 +25,11 @@ Protected pension ages are out of scope for v1 (§6).
 """
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from glidepath.core import (
+    Period,
     add_months,
     date_age_attained,
     is_age_attained_by_period_start,
@@ -34,7 +40,6 @@ from glidepath.regions.uk.schema import SpaAgeBand
 if TYPE_CHECKING:
     from datetime import date
 
-    from glidepath.core import Period
     from glidepath.regions.uk.schema import AgeRulesFile, SpaBand
 
 
@@ -109,30 +114,31 @@ class UkAgeRules:
         age = self.normal_minimum_pension_age(period.start)
         return is_age_attained_by_period_start(date_of_birth, age, period)
 
-    def is_lisa_opening_allowed(self, date_of_birth: date, period: Period) -> bool:
-        """Whether the LISA opening age window is open for ``period``.
+    def lisa_opening_window(self, date_of_birth: date) -> Period:
+        """The exact dates a LISA may be opened (§4.1 eligibility window).
 
-        The window closes on the birthday after the last eligible age.
+        Runs from the opening birthday to the day before the birthday
+        after the last eligible age. Consumers intersect this with the
+        engine period; a mid-period opening birthday makes the rest of
+        that period eligible.
         """
         lisa = self.rules.lisa
-        return _window_open(
-            date_of_birth, lisa.open_age_min, lisa.open_age_max + 1, period
-        )
+        return _age_window(date_of_birth, lisa.open_age_min, lisa.open_age_max + 1)
 
-    def is_lisa_contribution_allowed(self, date_of_birth: date, period: Period) -> bool:
-        """Whether the LISA contribution age window is open for ``period``.
+    def lisa_contribution_window(self, date_of_birth: date) -> Period:
+        """The exact dates LISA contributions may be made (§4.1 window).
 
         The age window only — holding an open LISA is the wrapper's
-        concern (roadmap 9.2). A contributor must have reached the
-        opening age; contributions stop at the closing birthday.
+        concern (roadmap 9.2). It runs from the opening birthday (a
+        contributor must be old enough to hold an account) to the eve
+        of the closing birthday; contribution flows crossing either
+        edge are pro-rated by the consumer like other partial years.
         """
         lisa = self.rules.lisa
-        return _window_open(
-            date_of_birth, lisa.open_age_min, lisa.contribute_until_age, period
-        )
+        return _age_window(date_of_birth, lisa.open_age_min, lisa.contribute_until_age)
 
     def is_lisa_access_open(self, date_of_birth: date, period: Period) -> bool:
-        """Whether charge-free LISA access is open for ``period``.
+        """Whether charge-free LISA access is open for ``period`` (§4.1 gate).
 
         The age gate only; the other charge-free events (first home,
         terminal illness, death) are out of scope for v1 (§6).
@@ -142,10 +148,9 @@ class UkAgeRules:
         )
 
 
-def _window_open(
-    date_of_birth: date, opens_at: int, closes_at: int, period: Period
-) -> bool:
-    """§4.1 on both edges: attained the opening age, not yet the closing one."""
-    return is_age_attained_by_period_start(
-        date_of_birth, opens_at, period
-    ) and not is_age_attained_by_period_start(date_of_birth, closes_at, period)
+def _age_window(date_of_birth: date, opens_at: int, closes_at: int) -> Period:
+    """The inclusive span from one birthday to the eve of a later one."""
+    return Period(
+        start=date_age_attained(date_of_birth, opens_at),
+        end=date_age_attained(date_of_birth, closes_at) - timedelta(days=1),
+    )
