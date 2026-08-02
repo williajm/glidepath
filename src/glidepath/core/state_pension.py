@@ -107,14 +107,19 @@ class StatePensionEntitlement:
     """A region's answer for one record, in rates current at run start.
 
     ``annual_amount`` uprates by the ``policy.state_pension.uprating``
-    assumption; ``cpi_uprated_annual_amount`` (protected payment plus
-    deferral increments) uprates by CPI only (planning §5.1, §6). Both
-    include the deferral uplift and begin on ``start_date``.
+    assumption; ``cpi_uprated_annual_amount`` (any protected payment)
+    uprates by CPI only (planning §5.1, §6). Both begin on
+    ``start_date``. ``deferral_uplift`` is the deferral increment as a
+    *fraction*: the increase applies to the rate payable **at claim**
+    — which includes upratings earned during deferment — so the engine
+    computes the increment amount in the starting period and uprates
+    it by CPI only from then on (planning §5.1, §6).
     """
 
     start_date: date
     annual_amount: Money
     cpi_uprated_annual_amount: Money
+    deferral_uplift: Decimal = _ZERO
 
     def __post_init__(self) -> None:
         """Reject negative entitlements."""
@@ -125,6 +130,9 @@ class StatePensionEntitlement:
             msg = (
                 "StatePensionEntitlement.cpi_uprated_annual_amount must be non-negative"
             )
+            raise ValueError(msg)
+        if self.deferral_uplift < _ZERO:
+            msg = "StatePensionEntitlement.deferral_uplift must be non-negative"
             raise ValueError(msg)
 
 
@@ -211,14 +219,19 @@ class StatePensionUprating:
         return cls(rule=rule, floor=floor, cpi_margin=margin)
 
     def annual_rate(self, cpi: Decimal) -> Decimal:
-        """The main amount's uprating rate in a year whose CPI is ``cpi``."""
+        """The main amount's uprating rate in a year whose CPI is ``cpi``.
+
+        Never negative: statutory uprating leaves rates unchanged when
+        the relevant index falls (planning §5.1), so a deflationary CPI
+        assumption freezes the pension rather than cutting it.
+        """
         if (
             self.rule is UpratingRule.TRIPLE_LOCK
             and self.floor is not None
             and self.cpi_margin is not None
         ):
-            return max(cpi + self.cpi_margin, self.floor)
-        return cpi
+            return max(cpi + self.cpi_margin, self.floor, _ZERO)
+        return max(cpi, _ZERO)
 
 
 def _parse_rule(raw: str) -> UpratingRule:

@@ -281,7 +281,13 @@ per-run recorder created inside `run()` and returned as part of the result
 `ProjectionResult.provenance` lists facts used, assumptions used (default
 vs overridden), decision variables in effect, region data version, and
 seed: exactly the payload the UI's "stated vs assumed" inspector renders,
-with no UI-side bookkeeping. Future-policy uncertainty (state pension
+with no UI-side bookkeeping. The fact and decision lists cover the
+`Fact[T]`/`Decision[T]`-wrapped values; *structural* plan fields that
+also drive results — wrapper kinds, fee schedules, relief mechanics, DB
+scheme structures (statement date, revaluation basis, factor tables) —
+are part of the persisted plan itself and surface entity-level in the
+Phase 6/8 inspector rather than as individual provenance rows.
+Future-policy uncertainty (state pension
 uprating, post-freeze tax indexation) is just assumptions with keys, so
 scenarios can flip them.
 
@@ -417,11 +423,23 @@ weekly amount is the DWP total, of which `protected_payment` is the
 CPI-only slice; the derivation caps stated-plus-planned years at the
 full-rate count and pays nothing below the minimum; amounts are taken in
 the rates of the tax year containing `today` (annualised at 52 weeks)
-and uprated by the engine from the run start. Deferral shifts the start
-past SPA in whole months; increments (+1% per 9 whole weeks, shipped as
-data) are computed on the current-rate weekly amount and land in the
-CPI-only slice alongside protected payments, because deferral increments
-uprate by CPI (§6).
+and uprated by the engine from the run start. Because upratings take
+effect whole each 6 April — exactly a UK period boundary — the state
+pension stream steps by a **full annual uprating at every period
+boundary**, never scaled by a partial period's active fraction (a
+deliberate deviation from the §5.2 linear convention, which models
+continuously growing price and earnings levels); uprating is never
+negative — a deflationary CPI freezes the rate, matching statute. A run
+starting past the last shipped tax-year file steps the shipped rate
+forward to `today` by one whole uprating per intervening tax year (the
+extension deliberately carries the rate untouched, §5.3); the uprating
+policy is read at region build like the future-years extension, so it
+lands in the region data version. Deferral shifts the start past SPA in
+whole months and earns one ninth of 1% per whole week deferred, payable
+only from nine weeks (~5.8%/52 weeks; shipped as data); the uplift
+fraction applies to the rate payable **at claim** — upratings earned
+during deferment included — and the resulting increment uprates by CPI
+only from then on (§6).
 
 Pre-existing pension access is likewise a set of facts:
 `crystallised_balance` (funds already designated to drawdown), `lsa_used`,

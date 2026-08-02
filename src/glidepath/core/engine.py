@@ -253,26 +253,45 @@ class _DbStream:
 class _StatePensionStream:
     """The person's state pension income stream (roadmap 4.3).
 
-    The entitlement's two slices uprate separately (planning §5.1, §6):
+    The entitlement's slices uprate separately (planning §5.1, §6):
     the main amount by the ``policy.state_pension.uprating`` rule, the
-    protected payment and deferral increments by CPI only.
+    protected payment by CPI only. State pension rates step by a full
+    year's uprating at each period boundary (upratings take effect
+    whole each April, which is exactly a UK period boundary), so —
+    unlike the continuous price/earnings levels — the advance is never
+    scaled by a partial period's active fraction (planning §5.1), and
+    the CPI-only step is floored at zero (statutory uprating never
+    cuts a rate).
+
+    The deferral ``increment`` is captured in the first paying period —
+    the uplift fraction applied to the rate then payable, upratings
+    earned through deferment included — and uprates by CPI only from
+    that point on (planning §5.1, §6).
     """
 
     entitlement: StatePensionEntitlement
     uprating: StatePensionUprating
     policy_factor: Decimal = _ONE
     cpi_factor: Decimal = _ONE
+    increment: Money | None = None
 
-    def advance(self, cpi: Decimal, fraction: Decimal) -> None:
-        """Compound one completed period's uprating (§5.2 linear scaling)."""
-        self.policy_factor *= _ONE + self.uprating.annual_rate(cpi) * fraction
-        self.cpi_factor *= _ONE + cpi * fraction
+    def advance(self, cpi: Decimal) -> None:
+        """Step one period boundary's uprating, whole (class docstring)."""
+        self.policy_factor *= _ONE + self.uprating.annual_rate(cpi)
+        cpi_step = _ONE + max(cpi, Decimal(0))
+        self.cpi_factor *= cpi_step
+        if self.increment is not None:
+            self.increment = self.increment * cpi_step
 
     def annual_amount(self) -> Money:
-        """The period's full annual state pension, uprated to date."""
-        policy_slice = self.entitlement.annual_amount * self.policy_factor
-        cpi_slice = self.entitlement.cpi_uprated_annual_amount * self.cpi_factor
-        return policy_slice + cpi_slice
+        """The paying period's full annual state pension, uprated to date."""
+        base = (
+            self.entitlement.annual_amount * self.policy_factor
+            + self.entitlement.cpi_uprated_annual_amount * self.cpi_factor
+        )
+        if self.increment is None:
+            self.increment = base * self.entitlement.deferral_uplift
+        return base + self.increment
 
 
 def run(
@@ -364,7 +383,7 @@ class _Projection:
                 for stream in self._db_streams:
                     stream.advance(previous_cpi, previous_fraction)
                 if self._sp_stream is not None:
-                    self._sp_stream.advance(previous_cpi, previous_fraction)
+                    self._sp_stream.advance(previous_cpi)
             snapshots.append(
                 self._project_period(period, returns, inflation, factors, fraction)
             )

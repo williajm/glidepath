@@ -129,6 +129,19 @@ class TestStatePensionEntitlement:
                 cpi_uprated_annual_amount=negative,
             )
 
+    def test_negative_deferral_uplift_is_rejected(self) -> None:
+        """The uplift is a non-negative fraction."""
+        zero = Money(Decimal(0))
+        start = date(2037, 6, 15)
+        negative_uplift = Decimal("-0.01")
+        with pytest.raises(ValueError, match="deferral_uplift"):
+            StatePensionEntitlement(
+                start_date=start,
+                annual_amount=zero,
+                cpi_uprated_annual_amount=zero,
+                deferral_uplift=negative_uplift,
+            )
+
 
 class TestStatePensionUprating:
     """Parsing and applying the ``policy.state_pension.uprating`` value."""
@@ -158,9 +171,20 @@ class TestStatePensionUprating:
         assert uprating.annual_rate(Decimal("0.01")) == Decimal("0.025")
 
     def test_cpi_rule_tracks_cpi(self) -> None:
-        """The CPI rule uprates by CPI, floor-free."""
+        """The CPI rule uprates by CPI (no triple-lock floor)."""
         uprating = StatePensionUprating.from_assumption_value("cpi")
         assert uprating.annual_rate(Decimal("0.02")) == Decimal("0.02")
+
+    def test_uprating_is_never_negative(self) -> None:
+        """Deflation freezes rates; statutory uprating never cuts them."""
+        cpi_rule = StatePensionUprating.from_assumption_value("cpi")
+        assert cpi_rule.annual_rate(Decimal("-0.05")) == Decimal(0)
+        sub_zero_lock = StatePensionUprating(
+            rule=UpratingRule.TRIPLE_LOCK,
+            floor=Decimal("-0.03"),
+            cpi_margin=Decimal(0),
+        )
+        assert sub_zero_lock.annual_rate(Decimal("-0.05")) == Decimal(0)
 
     def test_unknown_rule_is_rejected(self) -> None:
         """A rule outside the known set fails loudly."""

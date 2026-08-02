@@ -225,14 +225,16 @@ class RecordingContributionRules:
 class StubStatePension:
     """A pass-through scheme: configured amounts, entitled at ``start_age``.
 
-    The engine owns uprating, pro-rating, and the spending offset;
-    this stub only answers the region question — what is the
-    entitlement in today's rates and when does it start.
+    The engine owns uprating, pro-rating, the deferral increment, and
+    the spending offset; this stub only answers the region question —
+    the entitlement in today's rates, its start date, and the uplift
+    fraction deferral earned.
     """
 
     annual: Money = ZERO
     cpi_annual: Money = ZERO
     start_age: int = 67
+    uplift: Decimal = Decimal(0)
 
     def entitlement(
         self, record: StatePensionRecord, date_of_birth: date, today: date
@@ -245,6 +247,7 @@ class StubStatePension:
             start_date=add_months(start, months),
             annual_amount=self.annual,
             cpi_uprated_annual_amount=self.cpi_annual,
+            deferral_uplift=self.uplift,
         )
 
 
@@ -1073,6 +1076,113 @@ class TestPensionIncome:
         assert second.persons[0].state_pension_income == Money(Decimal("11270.00"))
         keys_read = {entry.key for entry in result.provenance.assumptions}
         assert AssumptionKey.POLICY_STATE_PENSION_UPRATING in keys_read
+
+    def test_state_pension_uprating_steps_whole_across_a_partial_year(self) -> None:
+        """A mid-year start never dilutes the next boundary's uprating.
+
+        Rates step by a full year's uprating at each period boundary
+        (upratings take effect whole each April), so a run starting
+        halfway through the first period still sees 10,000 x 1.025 +
+        1,000 x 1.02 = 11,270 in the second period — not the
+        fraction-scaled 11,135 the linear convention would give.
+        """
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(),
+            )
+        )
+        scheme = StubStatePension(
+            annual=Money(Decimal(10000)), cpi_annual=Money(Decimal(1000)), start_age=66
+        )
+        config = RunConfig(today=date(2026, 7, 1), horizon_end=date(2027, 12, 31))
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("0.02"),
+                    "policy.state_pension.uprating": TRIPLE_LOCK,
+                }
+            ),
+            stub_region(state_pension=scheme),
+            config,
+        )
+        first, second = result.snapshots
+        assert first.persons[0].state_pension_income == Money(Decimal("5500.00"))
+        assert second.persons[0].state_pension_income == Money(Decimal("11270.00"))
+
+    def test_deflation_freezes_the_state_pension(self) -> None:
+        """A negative CPI leaves both slices unchanged, never cut.
+
+        Statutory uprating does not apply a negative increase: with
+        CPI -1% under the cpi rule, both the main and CPI-only slices
+        pay the same 11,000 in the second period.
+        """
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(),
+            )
+        )
+        scheme = StubStatePension(
+            annual=Money(Decimal(10000)), cpi_annual=Money(Decimal(1000)), start_age=66
+        )
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("-0.01"),
+                    "policy.state_pension.uprating": "cpi",
+                }
+            ),
+            stub_region(state_pension=scheme),
+            config,
+        )
+        first, second = result.snapshots
+        assert first.persons[0].state_pension_income == Money(Decimal("11000.00"))
+        assert second.persons[0].state_pension_income == Money(Decimal("11000.00"))
+
+    def test_deferral_increment_builds_on_the_rate_at_claim(self) -> None:
+        """The uplift applies to the uprated rate, then follows CPI.
+
+        A 10% uplift claimed one year in: the base has uprated to
+        10,250 (2.5% proxy), so the increment is 1,025 — 11,275 in the
+        claim year. A year later the base is 10,506.25 but the
+        increment follows CPI only: 1,025 x 1.02 = 1,045.50, paying
+        11,551.75.
+        """
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(deferral="1"),
+            )
+        )
+        scheme = StubStatePension(
+            annual=Money(Decimal(10000)), start_age=66, uplift=Decimal("0.10")
+        )
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 12, 31))
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("0.02"),
+                    "policy.state_pension.uprating": TRIPLE_LOCK,
+                }
+            ),
+            stub_region(state_pension=scheme),
+            config,
+        )
+        first, second, third = result.snapshots
+        assert first.persons[0].state_pension_income == ZERO
+        assert second.persons[0].state_pension_income == Money(Decimal("11275.00"))
+        assert third.persons[0].state_pension_income == Money(Decimal("11551.75"))
 
     def test_state_pension_deferral_shifts_the_start(self) -> None:
         """A one-year deferral moves the entitlement into period two."""

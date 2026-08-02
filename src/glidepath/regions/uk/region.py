@@ -26,16 +26,21 @@ from glidepath.core import (
     Provenance,
     Rate,
     Region,
+    StatePensionUprating,
     decimal_assumption_value,
 )
 from glidepath.regions.uk.ages import UkAgeRules
 from glidepath.regions.uk.contributions import UkContributionRuleset
 from glidepath.regions.uk.extension import FutureYearsExtension, FutureYearsPolicy
 from glidepath.regions.uk.loader import (
+    AGE_RULES_FILENAME,
+    ASSUMPTIONS_FILENAME,
     available_tax_years,
+    data_file_digest,
     load_age_rules,
     load_default_assumptions,
     load_tax_year,
+    tax_year_filename,
 )
 from glidepath.regions.uk.schema import SCHEMA_VERSION
 from glidepath.regions.uk.state_pension import UkStatePensionScheme
@@ -86,13 +91,34 @@ def future_years_extension(assumptions: AssumptionSet) -> FutureYearsExtension:
     return FutureYearsExtension(policy=policy, cpi=cpi)
 
 
-def uk_region(future_years: FutureYearsExtension | None = None) -> Region:
+def state_pension_uprating(assumptions: AssumptionSet) -> StatePensionUprating:
+    """The parsed ``policy.state_pension.uprating`` value (planning §7).
+
+    Read at region-build time like :func:`future_years_extension`: the
+    state pension scheme uses it to step the shipped rate forward to a
+    run start past the last shipped file, and its effect is identified
+    through the region data version rather than the run's assumption
+    read list (module docstring).
+    """
+    return StatePensionUprating.from_assumption_value(
+        assumptions.get(AssumptionKey.POLICY_STATE_PENSION_UPRATING).value
+    )
+
+
+def uk_region(
+    future_years: FutureYearsExtension | None = None,
+    uprating: StatePensionUprating | None = None,
+) -> Region:
     """The UK region bundle over every shipped data file (planning §4.2).
 
     Without ``future_years`` the bundle answers only for the shipped
     tax years and fails loudly past them; pass
     :func:`future_years_extension` to project beyond the last shipped
-    file (planning §5.3).
+    file (planning §5.3). ``uprating`` (see
+    :func:`state_pension_uprating`) is likewise only needed to start a
+    run past the last shipped file: it steps the shipped state pension
+    rate forward to ``today``, since the extension deliberately never
+    uprates that rate.
     """
     return Region(
         calendar=AnnualCalendar(
@@ -102,30 +128,51 @@ def uk_region(future_years: FutureYearsExtension | None = None) -> Region:
         tax=UkTaxSystem.from_shipped_data(future_years),
         wrappers=UkWrapperRuleset.from_shipped_data(future_years),
         contributions=UkContributionRuleset.from_shipped_data(future_years),
-        state_pension=UkStatePensionScheme.from_shipped_data(future_years),
-        data_version=_data_version(future_years),
+        state_pension=UkStatePensionScheme.from_shipped_data(future_years, uprating),
+        data_version=_data_version(future_years, uprating),
     )
 
 
-def _data_version(future_years: FutureYearsExtension | None) -> str:
+def _data_version(
+    future_years: FutureYearsExtension | None,
+    uprating: StatePensionUprating | None = None,
+) -> str:
     """A deterministic content-version string over the shipped files.
 
-    Names every file with its ``verified_on`` date, plus the full
-    future-years policy (mode, freeze end, CPI) when an extension is
-    configured — enough to tell two runs apart whenever the data
-    behind them differs (planning §4.6).
+    Names every file with its ``verified_on`` date and a short content
+    digest — the date alone cannot tell two same-day revisions apart
+    (planning §4.6) — plus the full future-years policy (mode, freeze
+    end, CPI) and the state pension uprating policy when configured:
+    both are region-build inputs whose effect must be identifiable
+    from the version string, not the assumption read list.
     """
     parts = [f"uk schema={SCHEMA_VERSION}"]
     for start_year in available_tax_years():
         year = load_tax_year(start_year)
-        parts.append(f"tax_year {year.meta.tax_year} verified {year.meta.verified_on}")
+        digest = data_file_digest(tax_year_filename(start_year))
+        parts.append(
+            f"tax_year {year.meta.tax_year} verified {year.meta.verified_on}"
+            f" sha256={digest}"
+        )
     ages = load_age_rules()
-    parts.append(f"age_rules verified {ages.meta.verified_on}")
+    ages_digest = data_file_digest(AGE_RULES_FILENAME)
+    parts.append(f"age_rules verified {ages.meta.verified_on} sha256={ages_digest}")
     assumptions = load_default_assumptions()
-    parts.append(f"assumptions verified {assumptions.meta.verified_on}")
+    assumptions_digest = data_file_digest(ASSUMPTIONS_FILENAME)
+    parts.append(
+        f"assumptions verified {assumptions.meta.verified_on}"
+        f" sha256={assumptions_digest}"
+    )
     if future_years is not None:
         detail = future_years.policy.mode.value
         if future_years.policy.frozen_until_start_year is not None:
             detail += f" until={future_years.policy.frozen_until_start_year}"
         parts.append(f"future_years {detail} cpi={future_years.cpi.value}")
+    if uprating is not None:
+        detail = uprating.rule.name.lower()
+        if uprating.floor is not None:
+            detail += f" floor={uprating.floor}"
+        if uprating.cpi_margin is not None:
+            detail += f" margin={uprating.cpi_margin}"
+        parts.append(f"state_pension_uprating {detail}")
     return "; ".join(parts)

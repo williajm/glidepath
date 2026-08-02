@@ -12,6 +12,7 @@ Failures raise :class:`~glidepath.regions.uk.schema.DataFileError` with a
 ``file.section.key`` context string.
 """
 
+import hashlib
 import re
 import tomllib
 from datetime import date, datetime
@@ -573,6 +574,18 @@ def _read_data_file(filename: str) -> str:
 def tax_year_filename(start_year: int) -> str:
     """The canonical data filename for the tax year starting ``start_year``."""
     return f"tax_year_{start_year}_{(start_year + 1) % 100:02d}.toml"
+
+
+def data_file_digest(filename: str) -> str:
+    """A short SHA-256 digest of one shipped data file's text.
+
+    Part of the region data version (planning §4.6): ``verified_on``
+    dates alone cannot tell two same-day revisions of a file apart, so
+    the content digest makes the version string change whenever the
+    data does.
+    """
+    text = _read_data_file(filename)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
 def available_tax_years() -> tuple[int, ...]:

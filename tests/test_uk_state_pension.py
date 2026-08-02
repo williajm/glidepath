@@ -17,6 +17,7 @@ from glidepath.regions.uk import (
     UkStatePensionScheme,
     default_assumption_set,
     future_years_extension,
+    state_pension_uprating,
 )
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -31,9 +32,11 @@ WEEKS = Decimal(52)
 
 
 def scheme() -> UkStatePensionScheme:
-    """The scheme over shipped data, with the future-years extension."""
+    """The scheme over shipped data, extension and uprating configured."""
+    assumptions = default_assumption_set()
     return UkStatePensionScheme.from_shipped_data(
-        future_years_extension(default_assumption_set())
+        future_years_extension(assumptions),
+        state_pension_uprating(assumptions),
     )
 
 
@@ -161,50 +164,84 @@ class TestDerivationGates:
 
 
 class TestDeferral:
-    """Deferral shifts the start and earns CPI-uprated increments (§6)."""
+    """Deferral shifts the start and earns per-week increments (§6)."""
 
-    def test_one_year_deferral_shifts_the_start_and_uplifts(self) -> None:
-        """One year is 52 whole weeks: 5 nine-week increments, +5%.
+    def test_one_year_deferral_accrues_per_whole_week(self) -> None:
+        """52 whole weeks earn 52 ninths of 1% — just under 5.8% (§6).
 
-        The increment lands in the CPI-only slice alongside protected
-        payments, because increments uprate by CPI (planning §6).
+        The uplift is returned as a fraction: it applies to the rate
+        payable at claim, which only the engine knows (upratings earned
+        during deferment included).
         """
         record = record_of(forecast="241.30", deferral="1")
         entitlement = scheme().entitlement(record, DOB_SPA_67, TODAY)
         assert entitlement.start_date == date(2038, 6, 15)
         assert entitlement.annual_amount == Money(FULL_WEEKLY * WEEKS)
-        expected_increment = FULL_WEEKLY * Decimal("0.05") * WEEKS
-        assert entitlement.cpi_uprated_annual_amount == Money(expected_increment)
+        assert entitlement.cpi_uprated_annual_amount == Money(Decimal(0))
+        expected = Decimal("0.01") * (Decimal(52) / Decimal(9))
+        assert entitlement.deferral_uplift == expected
 
-    def test_short_deferral_earns_no_increment(self) -> None:
-        """One month (about 4 weeks) is under the 9-week increment step."""
+    def test_three_month_deferral_counts_thirteen_weeks(self) -> None:
+        """92 days are 13 whole weeks: past the 9-week minimum, 13/9%."""
         record = record_of(forecast="241.30", deferral="0.25")
         entitlement = scheme().entitlement(record, DOB_SPA_67, TODAY)
         assert entitlement.start_date == date(2037, 9, 15)
-        expected_weeks = (date(2037, 9, 15) - date(2037, 6, 15)).days // 7
-        assert expected_weeks < 18
-        assert entitlement.cpi_uprated_annual_amount == Money(
-            FULL_WEEKLY * Decimal("0.01") * (expected_weeks // 9) * WEEKS
-        )
+        assert (date(2037, 9, 15) - date(2037, 6, 15)).days // 7 == 13
+        expected = Decimal("0.01") * (Decimal(13) / Decimal(9))
+        assert entitlement.deferral_uplift == expected
 
-    def test_deferral_uplifts_the_protected_slice_too(self) -> None:
-        """Increments accrue on the whole weekly amount, protected included."""
+    def test_no_deferral_earns_no_uplift(self) -> None:
+        """Zero weeks is under the 9-week statutory minimum."""
+        record = record_of(forecast="241.30")
+        entitlement = scheme().entitlement(record, DOB_SPA_67, TODAY)
+        assert entitlement.deferral_uplift == Decimal(0)
+
+    def test_deferral_leaves_the_protected_slice_intact(self) -> None:
+        """Deferral changes the uplift fraction, never the slices.
+
+        The uplift applies to the whole rate at claim — protected
+        slice included — but applying it is the engine's job.
+        """
         record = record_of(forecast="250.00", protected="20.00", deferral="1")
         entitlement = scheme().entitlement(record, DOB_SPA_67, TODAY)
-        increment = Decimal("250.00") * Decimal("0.05")
-        expected = (Decimal("20.00") + increment) * WEEKS
-        assert entitlement.cpi_uprated_annual_amount == Money(expected)
+        assert entitlement.annual_amount == Money(Decimal("230.00") * WEEKS)
+        assert entitlement.cpi_uprated_annual_amount == Money(Decimal("20.00") * WEEKS)
+        expected = Decimal("0.01") * (Decimal(52) / Decimal(9))
+        assert entitlement.deferral_uplift == expected
 
 
 class TestRateResolution:
     """The full rate comes from the tax year containing ``today`` (§5.3)."""
 
-    def test_past_the_shipped_files_the_rate_carries_forward(self) -> None:
-        """The extension never uprates the state pension rate (§5.3)."""
+    def test_past_the_shipped_files_the_rate_steps_forward(self) -> None:
+        """A 2033 run start gets seven whole April upratings.
+
+        The extension carries the rate untouched (§5.3), so the scheme
+        itself steps it forward — one whole uprating per intervening
+        tax year at the triple-lock proxy rate max(2% + 0.5%, 2.5%).
+        """
         record = record_of(ni_start=POST_2016_NI_START, qualifying=35)
         future_today = date(2033, 8, 2)
         entitlement = scheme().entitlement(record, DOB_SPA_67, future_today)
-        assert entitlement.annual_amount == Money(FULL_WEEKLY * WEEKS)
+        stepped = FULL_WEEKLY * (Decimal(35) / Decimal(35)) * Decimal("1.025") ** 7
+        assert entitlement.annual_amount == Money(stepped * WEEKS)
+
+    def test_past_the_shipped_files_without_an_uprating_policy_fails(self) -> None:
+        """Stepping needs the uprating policy; stale rates are refused."""
+        extension_only = UkStatePensionScheme.from_shipped_data(
+            future_years_extension(default_assumption_set())
+        )
+        record = record_of(ni_start=POST_2016_NI_START, qualifying=35)
+        future_today = date(2033, 8, 2)
+        with pytest.raises(UkStatePensionError, match="uprating policy"):
+            extension_only.entitlement(record, DOB_SPA_67, future_today)
+
+    def test_a_forecast_needs_no_rate_data(self) -> None:
+        """The forecast is the fact: no shipped rate or stepping involved."""
+        bare = UkStatePensionScheme.from_shipped_data()
+        record = record_of(forecast="230.25")
+        entitlement = bare.entitlement(record, DOB_SPA_67, date(2033, 8, 2))
+        assert entitlement.annual_amount == Money(Decimal("230.25") * WEEKS)
 
     def test_without_an_extension_a_future_today_fails(self) -> None:
         """Past shipped coverage, no extension means no answer."""

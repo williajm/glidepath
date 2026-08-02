@@ -35,6 +35,7 @@ from glidepath.regions.uk import (
     FutureYearsMode,
     default_assumption_set,
     future_years_extension,
+    state_pension_uprating,
     uk_region,
 )
 
@@ -83,13 +84,20 @@ class TestUkRegionBundle:
     """The bundle and its content-version string."""
 
     def test_data_version_names_every_shipped_file(self) -> None:
-        """The manifest string identifies the data behind a run."""
+        """The manifest string identifies the data behind a run.
+
+        Each file carries a content digest besides its ``verified_on``
+        date: two same-day revisions of a file must still produce
+        distinguishable version strings (planning §4.6).
+        """
         version = uk_region().data_version
         assert version.startswith("uk schema=1")
         assert "tax_year 2026/27 verified" in version
         assert "age_rules verified" in version
         assert "assumptions verified" in version
+        assert version.count("sha256=") == 3
         assert "future_years" not in version
+        assert "state_pension_uprating" not in version
 
     def test_data_version_records_the_full_extension_policy(self) -> None:
         """Mode, freeze end, and CPI all land in the version string.
@@ -101,6 +109,17 @@ class TestUkRegionBundle:
         extension = future_years_extension(default_assumption_set())
         version = uk_region(extension).data_version
         assert "future_years frozen_then_cpi_indexed until=2030 cpi=0.02" in version
+
+    def test_data_version_records_the_state_pension_uprating(self) -> None:
+        """The uprating policy is a region-build input like the extension.
+
+        It steps the shipped state pension rate forward for runs past
+        the last shipped file, so its rule and parameters must be
+        identifiable from the version string.
+        """
+        uprating = state_pension_uprating(default_assumption_set())
+        version = uk_region(uprating=uprating).data_version
+        assert "state_pension_uprating triple_lock floor=0.025 margin=0.005" in version
 
 
 def accumulator_household() -> Household:

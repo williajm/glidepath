@@ -69,8 +69,11 @@ open_age_max = 39
 contribute_until_age = 50
 access_age = 60
 
-# Post-2016 deferral: +1% of the weekly rate per 9 weeks deferred
-# (~5.8%/yr); increments are CPI-uprated.
+# Post-2016 deferral: the weekly rate increases by 1% per 9 weeks
+# deferred, accruing at increment_rate/per_weeks for each whole week
+# once at least per_weeks weeks are deferred (~5.8% per 52 weeks).
+# The uplift applies to the rate payable at claim; increments are
+# CPI-uprated from then on.
 [state_pension_deferral]
 increment_rate = "0.01"
 per_weeks = 9
