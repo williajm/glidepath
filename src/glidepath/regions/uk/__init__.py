@@ -9,6 +9,12 @@ sync by a doc-sync test.
 """
 
 from glidepath.regions.uk.ages import UkAgeError, UkAgeRules
+from glidepath.regions.uk.extension import (
+    FutureYearsExtension,
+    FutureYearsMode,
+    FutureYearsPolicy,
+    extend_tax_year,
+)
 from glidepath.regions.uk.loader import (
     AGE_RULES_FILENAME,
     ASSUMPTIONS_FILENAME,
@@ -62,6 +68,9 @@ __all__ = [
     "AssumptionsFile",
     "DataFileError",
     "FileMeta",
+    "FutureYearsExtension",
+    "FutureYearsMode",
+    "FutureYearsPolicy",
     "IncomeTaxSchedule",
     "IsaRules",
     "LisaAges",
@@ -80,6 +89,7 @@ __all__ = [
     "UkTaxError",
     "UkTaxSystem",
     "available_tax_years",
+    "extend_tax_year",
     "load_age_rules",
     "load_default_assumptions",
     "load_tax_year",

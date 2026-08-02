@@ -39,6 +39,38 @@ def _fail(context: str, problem: str) -> NoReturn:
     raise DataFileError(msg)
 
 
+def tax_year_label(start_year: int) -> str:
+    """The ``YYYY/YY`` label of the tax year starting 6 April ``start_year``."""
+    return f"{start_year}/{(start_year + 1) % 100:02d}"
+
+
+def tax_year_start(start_year: int) -> date:
+    """6 April of ``start_year``: the first day of that tax year."""
+    month, day = _TAX_YEAR_START
+    return date(start_year, month, day)
+
+
+def tax_year_end(start_year: int) -> date:
+    """5 April of the following year: the last day of that tax year."""
+    month, day = _TAX_YEAR_END
+    return date(start_year + 1, month, day)
+
+
+def tax_year_start_year(day: date) -> int:
+    """The start year of the UK tax year containing ``day``."""
+    return day.year if day >= tax_year_start(day.year) else day.year - 1
+
+
+def parse_tax_year_label(label: str, context: str) -> int:
+    """Parse a ``YYYY/YY`` label into its start year, validating the suffix."""
+    if not _TAX_YEAR_FORMAT.fullmatch(label):
+        _fail(context, f"tax_year {label!r} is not 'YYYY/YY'")
+    start_year = int(label[:4])
+    if int(label[5:]) != (start_year + 1) % 100:
+        _fail(context, f"tax_year {label!r} suffix is not start+1")
+    return start_year
+
+
 def _require_sources(sources: tuple[str, ...], owner: str) -> None:
     """Every data file must cite at least one source (planning §5.3)."""
     if not sources:
@@ -82,16 +114,10 @@ class TaxYearMeta:
     def __post_init__(self) -> None:
         """Require a coherent UK tax-year label and date range."""
         _require_sources(self.sources, "TaxYearMeta")
-        if not _TAX_YEAR_FORMAT.fullmatch(self.tax_year):
-            _fail("TaxYearMeta", f"tax_year {self.tax_year!r} is not 'YYYY/YY'")
-        start_year = int(self.tax_year[:4])
-        if int(self.tax_year[5:]) != (start_year + 1) % 100:
-            _fail("TaxYearMeta", f"tax_year {self.tax_year!r} suffix is not start+1")
-        start_month, start_day = _TAX_YEAR_START
-        if self.start_date != date(start_year, start_month, start_day):
+        start_year = parse_tax_year_label(self.tax_year, "TaxYearMeta")
+        if self.start_date != tax_year_start(start_year):
             _fail("TaxYearMeta", "start_date must be 6 April of the start year")
-        end_month, end_day = _TAX_YEAR_END
-        if self.end_date != date(start_year + 1, end_month, end_day):
+        if self.end_date != tax_year_end(start_year):
             _fail("TaxYearMeta", "end_date must be 5 April of the following year")
 
 

@@ -41,6 +41,7 @@ from glidepath.regions.uk.schema import (
     TaxBand,
     TaxYearFile,
     TaxYearMeta,
+    tax_year_label,
 )
 
 if TYPE_CHECKING:
@@ -569,7 +570,7 @@ def load_tax_year(start_year: int) -> TaxYearFile:
     """Load the shipped file for the tax year starting 6 April ``start_year``."""
     filename = tax_year_filename(start_year)
     parsed = parse_tax_year(_read_data_file(filename), context=filename)
-    expected = f"{start_year}/{(start_year + 1) % 100:02d}"
+    expected = tax_year_label(start_year)
     if parsed.meta.tax_year != expected:
         claimed = parsed.meta.tax_year
         _fail(filename, f"file claims tax year {claimed!r}, not {expected!r}")

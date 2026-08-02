@@ -143,7 +143,7 @@ def test_period_spanning_tax_years_is_rejected(system: UkTaxSystem) -> None:
 def test_uncovered_period_is_rejected(
     system: UkTaxSystem, start: date, end: date
 ) -> None:
-    """Periods outside the shipped data fail until roadmap 2.5."""
+    """Without a future-years extension, periods outside shipped data fail."""
     uncovered = Period(start=start, end=end)
     income = ruk_income("60000")
     with pytest.raises(UkTaxError, match="no shipped tax-year data"):
