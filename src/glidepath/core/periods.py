@@ -216,3 +216,24 @@ def prorata_fraction(entitlement_start: date, period: Period) -> Decimal:
         raise ValueError(msg)
     months_in_payment = whole_months_between(entitlement_start, end_exclusive)
     return Decimal(months_in_payment) / Decimal(months_in_period)
+
+
+class AgeRules(Protocol):
+    """Region-supplied age rules (planning §4.1, §4.2).
+
+    Turns a date of birth into the exact dates and period gates behind
+    age-triggered changes: state pension entitlement is an *income
+    entitlement* (begins at its exact date, pro-rated via
+    :func:`prorata_fraction`) while private pension access is an
+    *access gate* (following :func:`is_age_attained_by_period_start`).
+    Wrapper-specific age gates (e.g. UK LISA ages) stay behind the
+    region's wrapper rules rather than crossing the boundary here.
+    """
+
+    def state_pension_date(self, date_of_birth: date) -> date:
+        """The exact date state pension entitlement begins."""
+        ...
+
+    def is_pension_access_open(self, date_of_birth: date, period: Period) -> bool:
+        """Whether new pension benefits may be accessed in ``period``."""
+        ...

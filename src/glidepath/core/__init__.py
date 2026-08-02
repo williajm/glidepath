@@ -16,6 +16,7 @@ from glidepath.core.entities import (
 )
 from glidepath.core.money import Money, Rate
 from glidepath.core.periods import (
+    AgeRules,
     AnnualCalendar,
     FiscalCalendar,
     Period,
@@ -40,6 +41,7 @@ from glidepath.core.provenance import (
 from glidepath.core.tax import TaxInput, TaxLine, TaxResult, TaxSystem
 
 __all__ = [
+    "AgeRules",
     "AnnualCalendar",
     "Assumption",
     "AssumptionKey",
