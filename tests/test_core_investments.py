@@ -33,14 +33,18 @@ def test_allocation_accepts_weights_summing_to_one() -> None:
 
 def test_allocation_rejects_weights_not_summing_to_one() -> None:
     """An incomplete split describes no portfolio."""
+    half = Decimal("0.5")
+    short = Decimal("0.3")
     with pytest.raises(ValueError, match="must sum to exactly 1"):
-        AssetAllocation(equity=Decimal("0.5"), bonds=Decimal("0.3"))
+        AssetAllocation(equity=half, bonds=short)
 
 
 def test_allocation_rejects_negative_weights() -> None:
     """Short positions are not modelled."""
+    leveraged = Decimal("1.2")
+    negative = Decimal("-0.2")
     with pytest.raises(ValueError, match="between 0 and 1"):
-        AssetAllocation(equity=Decimal("1.2"), bonds=Decimal("-0.2"))
+        AssetAllocation(equity=leveraged, bonds=negative)
 
 
 def test_returns_reject_losses_beyond_everything() -> None:
@@ -64,8 +68,9 @@ def test_fee_schedule_combines_platform_and_fund() -> None:
 def test_fee_schedule_rejects_rates_outside_the_unit_interval() -> None:
     """A negative fee is not a fee."""
     fund = Rate(Decimal("0.0015"))
+    negative = Rate(Decimal("-0.001"))
     with pytest.raises(ValueError, match="between 0 and 1"):
-        FeeSchedule(platform=Rate(Decimal("-0.001")), fund=fund)
+        FeeSchedule(platform=negative, fund=fund)
 
 
 def test_period_fee_charges_the_average_balance() -> None:
