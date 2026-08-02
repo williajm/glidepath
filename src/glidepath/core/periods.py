@@ -189,6 +189,19 @@ def whole_months_between(start: date, end_exclusive: date) -> int:
     return max(months, 0)
 
 
+def _whole_months_in(period: Period) -> int:
+    """Whole months in ``period``, which pro-rating divides by.
+
+    Raises:
+        ValueError: If ``period`` is shorter than one whole month.
+    """
+    months = whole_months_between(period.start, period.end + timedelta(days=1))
+    if months == 0:
+        msg = "period is shorter than one whole month; cannot pro-rate"
+        raise ValueError(msg)
+    return months
+
+
 def prorata_fraction(entitlement_start: date, period: Period) -> Decimal:
     """Fraction of ``period`` an entitlement starting mid-period is paid for.
 
@@ -209,11 +222,8 @@ def prorata_fraction(entitlement_start: date, period: Period) -> Decimal:
         return Decimal(1)
     if entitlement_start > period.end:
         return Decimal(0)
+    months_in_period = _whole_months_in(period)
     end_exclusive = period.end + timedelta(days=1)
-    months_in_period = whole_months_between(period.start, end_exclusive)
-    if months_in_period == 0:
-        msg = "period is shorter than one whole month; cannot pro-rate"
-        raise ValueError(msg)
     months_in_payment = whole_months_between(entitlement_start, end_exclusive)
     return Decimal(months_in_payment) / Decimal(months_in_period)
 
@@ -253,13 +263,8 @@ def entitlement_active_fraction(
         return Decimal(0)
     if payable_start == period.start and payable_end == period.end:
         return Decimal(1)
+    months_in_period = _whole_months_in(period)
     end_exclusive = payable_end + timedelta(days=1)
-    months_in_period = whole_months_between(
-        period.start, period.end + timedelta(days=1)
-    )
-    if months_in_period == 0:
-        msg = "period is shorter than one whole month; cannot pro-rate"
-        raise ValueError(msg)
     months_payable = whole_months_between(payable_start, end_exclusive)
     return Decimal(months_payable) / Decimal(months_in_period)
 
@@ -295,12 +300,7 @@ def period_active_fraction(
     active_end_exclusive = min(window_end, period.end) + timedelta(days=1)
     if active_end_exclusive <= active_start:
         return Decimal(0)
-    months_in_period = whole_months_between(
-        period.start, period.end + timedelta(days=1)
-    )
-    if months_in_period == 0:
-        msg = "period is shorter than one whole month; cannot pro-rate"
-        raise ValueError(msg)
+    months_in_period = _whole_months_in(period)
     months_active = whole_months_between(active_start, active_end_exclusive)
     return Decimal(months_active) / Decimal(months_in_period)
 
