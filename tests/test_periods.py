@@ -17,6 +17,7 @@ from glidepath.core.periods import (
     birthday_in_year,
     date_age_attained,
     is_age_attained_by_period_start,
+    period_active_fraction,
     prorata_fraction,
     whole_months_between,
 )
@@ -204,3 +205,58 @@ def test_prorata_rejects_sub_month_period() -> None:
     mid_period = date(2026, 1, 2)
     with pytest.raises(ValueError, match="shorter than one whole month"):
         prorata_fraction(mid_period, period)
+
+
+def test_active_fraction_is_one_for_a_period_wholly_inside_the_window() -> None:
+    """A fully covered period needs no pro-rating."""
+    period = Period(date(2026, 4, 6), date(2027, 4, 5))
+    assert period_active_fraction(period, date(2026, 1, 1), date(2028, 1, 1)) == 1
+    assert period_active_fraction(period, period.start, period.end) == 1
+
+
+def test_active_fraction_agrees_with_prorata_for_a_mid_period_start() -> None:
+    """A window starting mid-period matches the §4.1 entitlement fraction."""
+    period = Period(date(2026, 4, 6), date(2027, 4, 5))
+    start = date(2026, 8, 15)
+    fraction = period_active_fraction(period, start, date(2030, 1, 1))
+    assert fraction == prorata_fraction(start, period)
+    assert fraction == Decimal(7) / Decimal(12)
+
+
+def test_active_fraction_counts_whole_months_up_to_the_window_end() -> None:
+    """A window ending mid-period keeps only the whole months reached."""
+    period = Period(date(2026, 4, 6), date(2027, 4, 5))
+    assert period_active_fraction(period, date(2020, 1, 1), date(2026, 10, 5)) == (
+        Decimal(6) / Decimal(12)
+    )
+
+
+def test_active_fraction_intersects_a_window_inside_the_period() -> None:
+    """Both window ends inside the period leave the months between them."""
+    period = Period(date(2026, 1, 1), date(2026, 12, 31))
+    assert period_active_fraction(period, date(2026, 3, 1), date(2026, 8, 31)) == (
+        Decimal(6) / Decimal(12)
+    )
+
+
+def test_active_fraction_is_zero_without_a_whole_month_of_overlap() -> None:
+    """Under one whole month inside the window models nothing (§4.1)."""
+    period = Period(date(2026, 1, 1), date(2026, 12, 31))
+    assert period_active_fraction(period, date(2026, 12, 20), date(2027, 6, 1)) == 0
+    assert period_active_fraction(period, date(2025, 1, 1), date(2025, 12, 31)) == 0
+
+
+def test_active_fraction_rejects_a_backwards_window() -> None:
+    """A window ending before it starts is a caller error."""
+    period = Period(date(2026, 1, 1), date(2026, 12, 31))
+    window_start, window_end = date(2026, 6, 1), date(2026, 5, 1)
+    with pytest.raises(ValueError, match="precedes window start"):
+        period_active_fraction(period, window_start, window_end)
+
+
+def test_active_fraction_rejects_sub_month_period() -> None:
+    """Pro-rating needs at least one whole month to divide by."""
+    period = Period(date(2026, 1, 1), date(2026, 1, 15))
+    window_start, window_end = date(2026, 1, 5), date(2026, 3, 1)
+    with pytest.raises(ValueError, match="shorter than one whole month"):
+        period_active_fraction(period, window_start, window_end)

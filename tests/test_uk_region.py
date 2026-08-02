@@ -164,10 +164,16 @@ class TestUkEndToEnd:
     """First full-pipeline runs through the real UK region."""
 
     def test_accumulation_run_over_three_tax_years(self) -> None:
-        """Contributions, relief, fees, and growth flow through UK rules."""
+        """Contributions, relief, fees, and growth flow through UK rules.
+
+        Today is 2 August 2026, so the first tax year is partial: eight
+        whole months remain to 5 April 2027 (roadmap 4.6), scaling the
+        50,000 salary to 33,333.33 and the 5,000 contributions to
+        3,333.33 (with 20% relief at source, 666.67).
+        """
         assumptions = default_assumption_set()
         region = uk_region(future_years_extension(assumptions))
-        config = RunConfig(today=TODAY, horizon_end=date(2028, 6, 1))
+        config = RunConfig(today=TODAY, horizon_end=date(2029, 4, 5))
         result = run(accumulator_household(), assumptions, region, config)
 
         assert len(result.snapshots) == 3
@@ -177,10 +183,12 @@ class TestUkEndToEnd:
             assert dc_result.closing_balance > dc_result.opening_balance
             assert person_result.tax.tax_due > Money(Decimal(0))
             assert isa_result.contribution_shortfall == Money(Decimal(0))
-        first = result.snapshots[0].persons[0]
-        assert first.employment_income == Money(Decimal("50000.00"))
-        assert first.wrappers[0].provider_relief == Money(Decimal("1000.00"))
-        assert first.wrappers[1].employee_contribution == Money(Decimal("5000.00"))
+        first_snapshot = result.snapshots[0]
+        assert first_snapshot.year_fraction == Decimal(8) / Decimal(12)
+        first = first_snapshot.persons[0]
+        assert first.employment_income == Money(Decimal("33333.33"))
+        assert first.wrappers[0].provider_relief == Money(Decimal("666.67"))
+        assert first.wrappers[1].employee_contribution == Money(Decimal("3333.33"))
         assert result.provenance.region_data_version.startswith("uk schema=1")
         keys_read = {entry.key for entry in result.provenance.assumptions}
         assert AssumptionKey.INFLATION_CPI in keys_read
@@ -192,11 +200,13 @@ class TestUkEndToEnd:
         Need 40,000 net: the ISA's 5,000 comes out tax-free, and the
         remaining 35,000 net comes from crystallised SIPP funds. With
         the 12,570 personal allowance and the 20% basic rate, the
-        fixed point lands at 40,607.49 gross and 5,607.49 tax.
+        fixed point lands at 40,607.49 gross and 5,607.49 tax. The run
+        covers exactly one whole tax year so the hand-worked figures
+        are not pro-rated (partial periods are pinned elsewhere).
         """
         assumptions = default_assumption_set()
         region = uk_region(future_years_extension(assumptions))
-        config = RunConfig(today=TODAY, horizon_end=date(2026, 9, 1))
+        config = RunConfig(today=date(2026, 4, 6), horizon_end=date(2027, 4, 5))
         result = run(retiree_household("40000"), assumptions, region, config)
 
         [snapshot] = result.snapshots

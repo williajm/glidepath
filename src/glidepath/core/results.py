@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
 _ZERO = Money(Decimal(0))
 _ZERO_FACTOR = Decimal(0)
+_ONE_FACTOR = Decimal(1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,17 +145,26 @@ class PeriodSnapshot:
     period to this one — the CPI path the engine inflated nominal
     figures by, which the reporting layer deflates by (roadmap 4.4:
     one inflation truth per run). The first period's factor is 1.
+
+    ``year_fraction`` is the whole-month fraction of the period inside
+    the run window (roadmap 4.6, planning §5.2): 1 for a whole period;
+    less when ``today`` or the horizon end falls mid-period, in which
+    case the period's flows, fees, and growth were scaled by it.
     """
 
     period: Period
     returns: PeriodReturns
     inflation_factor: Decimal
     persons: tuple[PersonPeriodResult, ...]
+    year_fraction: Decimal = _ONE_FACTOR
 
     def __post_init__(self) -> None:
-        """Require a positive inflation factor."""
+        """Require a positive inflation factor and a fraction in [0, 1]."""
         if self.inflation_factor <= _ZERO_FACTOR:
             msg = "PeriodSnapshot.inflation_factor must be positive"
+            raise ValueError(msg)
+        if not _ZERO_FACTOR <= self.year_fraction <= _ONE_FACTOR:
+            msg = "PeriodSnapshot.year_fraction must lie between 0 and 1"
             raise ValueError(msg)
 
 

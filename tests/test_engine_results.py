@@ -160,6 +160,25 @@ class TestResultInvariants:
                 persons=(),
             )
 
+    def test_snapshot_rejects_a_year_fraction_outside_the_unit_interval(self) -> None:
+        """The active fraction of a period is a share of it: [0, 1]."""
+        returns = PeriodReturns(
+            assets=AssetReturns(
+                equity=Rate(Decimal(0)), bonds=Rate(Decimal(0)), cash=Rate(Decimal(0))
+            ),
+            cpi=Rate(Decimal(0)),
+        )
+        period = Period(date(2026, 1, 1), date(2026, 12, 31))
+        beyond_whole = Decimal("1.01")
+        with pytest.raises(ValueError, match="between 0 and 1"):
+            PeriodSnapshot(
+                period=period,
+                returns=returns,
+                inflation_factor=Decimal(1),
+                persons=(),
+                year_fraction=beyond_whole,
+            )
+
     def test_period_returns_rejects_cpi_at_or_below_total_deflation(self) -> None:
         """A CPI at or below -100% is rejected up front.
 

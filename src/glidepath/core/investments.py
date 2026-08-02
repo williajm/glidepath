@@ -108,22 +108,33 @@ class FeeSchedule:
         return Rate(self.platform.value + self.fund.value)
 
 
-def period_fee(opening: Money, after_flows: Money, fees: FeeSchedule) -> Money:
+def period_fee(
+    opening: Money,
+    after_flows: Money,
+    fees: FeeSchedule,
+    year_fraction: Decimal = _ONE,
+) -> Money:
     """The period's fee: the total rate on the average balance (§5.2 step 6).
 
     The average balance is the mean of the opening balance and the
     balance after the period's flows (contributions and withdrawals,
-    steps 2-4). The fee is capped at ``after_flows`` — a provider cannot
-    charge more than the account holds.
+    steps 2-4). ``year_fraction`` scales the annual rate linearly for a
+    partial first/last period (the roadmap-4.6 convention of planning
+    §5.2); a whole period passes 1. The fee is capped at ``after_flows``
+    — a provider cannot charge more than the account holds.
 
     Raises:
-        ValueError: If either balance is negative.
+        ValueError: If either balance is negative, or ``year_fraction``
+            lies outside [0, 1].
     """
     if opening < _ZERO_MONEY or after_flows < _ZERO_MONEY:
         msg = "balances must be non-negative"
         raise ValueError(msg)
+    if not _ZERO <= year_fraction <= _ONE:
+        msg = "year_fraction must lie between 0 and 1"
+        raise ValueError(msg)
     average = (opening + after_flows) * _HALF
-    return min(fees.total_rate.of(average), after_flows)
+    return min(fees.total_rate.of(average) * year_fraction, after_flows)
 
 
 @dataclass(frozen=True, slots=True)

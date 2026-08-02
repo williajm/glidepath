@@ -311,8 +311,8 @@ def household_of(person: Person, *, spending: str | None = None) -> Household:
 
 
 def one_period_config() -> RunConfig:
-    """A single calendar-year period starting 2026."""
-    return RunConfig(today=date(2026, 1, 1), horizon_end=date(2026, 6, 1))
+    """A single whole calendar-year period covering 2026."""
+    return RunConfig(today=date(2026, 1, 1), horizon_end=date(2026, 12, 31))
 
 
 class TestOperationOrder:
@@ -529,7 +529,7 @@ class TestEscalation:
                 }
             ),
             stub_region(),
-            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 6, 1)),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
         )
         first, second = result.snapshots
         assert first.inflation_factor == Decimal(1)
@@ -560,7 +560,7 @@ class TestEscalation:
                 }
             ),
             stub_region(),
-            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 6, 1)),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
         )
         second = result.snapshots[1]
         assert second.persons[0].wrappers[0].employee_contribution == Money(
@@ -761,7 +761,7 @@ class TestWithdrawals:
                 }
             ),
             stub_region(),
-            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 6, 1)),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
         )
         first, second = result.snapshots
         assert first.persons[0].spending_need == Money(Decimal("10000.00"))
@@ -897,7 +897,7 @@ class TestProvenanceAndDeterminism:
         """Purity (planning §4.6): same manifest, same output."""
         pension = wrapper_of(PENSION, "10000")
         plan = household_of(person_of((pension,), employment="30000"))
-        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 6, 1))
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 12, 31))
         first = run(plan, assumptions_with(), stub_region(), config)
         second = run(plan, assumptions_with(), stub_region(), config)
         assert first == second
@@ -915,6 +915,107 @@ class TestProvenanceAndDeterminism:
         assert len(result.snapshots) == 5
         keys_read = {entry.key for entry in result.provenance.assumptions}
         assert AssumptionKey.HORIZON_PLANNING_AGE in keys_read
+
+
+class TestPartialPeriods:
+    """Roadmap 4.6: whole-month pro-rating of partial first/last periods."""
+
+    def test_mid_period_today_pro_rates_flows_fees_and_growth(self) -> None:
+        """A 1 July start models half the year, never the elapsed half.
+
+        The fraction is 6/12: employment 50,000 → 25,000; the RAS
+        employee 4,000 and employer 2,000 → 2,000 + 1,000 (relief 400).
+        The post-flow balance is 13,000, so the 1% fee on the average
+        of 10,000 and 13,000 scales to 115 x 1/2 = 57.50, and 10%
+        growth scales to 5% of the post-fee 12,942.50 → 647.125.
+        """
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(4000)), recorded_on=RECORDED),
+            employer_amount=money_fact("2000"),
+            relief_mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
+        )
+        pension = Wrapper(
+            id=EntityId("wrapper-half-year"),
+            kind=PENSION,
+            balance=money_fact("10000"),
+            contributions=schedule,
+            allocation=EQUITY_ONLY,
+            fees=FeeSchedule(platform=Rate(Decimal("0.01")), fund=Rate(Decimal(0))),
+        )
+        plan = household_of(person_of((pension,), employment="50000"))
+        result = run(
+            plan,
+            assumptions_with(),
+            stub_region(),
+            RunConfig(today=date(2026, 7, 1), horizon_end=date(2026, 12, 31)),
+        )
+        [snapshot] = result.snapshots
+        assert snapshot.year_fraction == Decimal("0.5")
+        [person_result] = snapshot.persons
+        [wrapper_result] = person_result.wrappers
+        assert person_result.employment_income == Money(Decimal("25000.00"))
+        assert person_result.tax.tax_due == Money(Decimal("6250.00"))
+        assert wrapper_result.employee_contribution == Money(Decimal("2000.00"))
+        assert wrapper_result.employer_contribution == Money(Decimal("1000.00"))
+        assert wrapper_result.provider_relief == Money(Decimal("400.00"))
+        assert wrapper_result.fee == Money(Decimal("57.50"))
+        assert wrapper_result.growth == Money(Decimal("647.12"))
+        assert wrapper_result.closing_uncrystallised == Money(Decimal("13589.62"))
+
+    def test_final_period_stops_at_the_horizon_end(self) -> None:
+        """A 30 June horizon halves the second period's flows."""
+        plan = household_of(person_of((), employment="10000"))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 6, 30)),
+        )
+        first, second = result.snapshots
+        assert first.year_fraction == Decimal(1)
+        assert first.persons[0].employment_income == Money(Decimal("10000.00"))
+        assert second.year_fraction == Decimal("0.5")
+        assert second.persons[0].employment_income == Money(Decimal("5000.00"))
+
+    def test_spending_need_is_pro_rated_in_a_partial_period(self) -> None:
+        """A retiree starting mid-year needs half the annual spending."""
+        free_account = wrapper_of(FREE, "100000")
+        plan = retiree_plan((free_account,), spending="12000")
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(today=date(2026, 7, 1), horizon_end=date(2026, 12, 31)),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.spending_need == Money(Decimal("6000.00"))
+        assert person_result.net_withdrawn == Money(Decimal("6000.00"))
+        [wrapper_result] = person_result.wrappers
+        assert wrapper_result.closing_uncrystallised == Money(Decimal("94000.00"))
+
+    def test_under_one_whole_month_models_a_zero_flow_period(self) -> None:
+        """Less than a whole month inside the window rounds to nothing.
+
+        The §4.1 whole-month convention counts zero months from
+        15 December, so the period is emitted with zero flows and
+        zero growth — the run never invents part-month amounts.
+        """
+        pension = wrapper_of(PENSION, "10000")
+        plan = household_of(person_of((pension,), employment="50000"))
+        result = run(
+            plan,
+            assumptions_with(),
+            stub_region(),
+            RunConfig(today=date(2026, 12, 15), horizon_end=date(2026, 12, 31)),
+        )
+        [snapshot] = result.snapshots
+        assert snapshot.year_fraction == Decimal(0)
+        [person_result] = snapshot.persons
+        assert person_result.employment_income == ZERO
+        [wrapper_result] = person_result.wrappers
+        assert wrapper_result.growth == ZERO
+        assert wrapper_result.fee == ZERO
+        assert wrapper_result.closing_uncrystallised == Money(Decimal("10000.00"))
 
 
 class TestEngineErrors:

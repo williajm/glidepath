@@ -38,11 +38,15 @@ v1 engine conventions, superseded as later phases land:
 - Wrapper balance facts are taken as at the run start; annual-allowance
   measurement joins the loop when the AA charge is modelled
   (roadmap 5.x/9.5).
-- The first and last periods are currently applied whole: a mid-period
-  ``today`` gets a full year of flows despite balances being as-of the
-  run start, and the final period runs past the horizon end. Partial-
-  period pro-rating per §4.1 is roadmap 4.6 (issue #57), sequenced
-  before the 4.5 golden scenario.
+- Partial first and last periods (roadmap 4.6, planning §5.2): the run
+  models only the window from ``config.today`` through the horizon end.
+  A period partly outside that window has its flows (employment income,
+  contributions, spending need) pro-rated by whole months per §4.1, and
+  its annual growth and fee rates scaled linearly by the same fraction —
+  exact ``Decimal`` arithmetic, so §4.6 reproducibility holds. Annual
+  caps, allowances, and tax bands stay whole-year: the months already
+  elapsed live in the balance facts, not the model, so the partial
+  year's pro-rated income meets full-year bands (accepted cost, §5.2).
 """
 
 from dataclasses import dataclass, field
@@ -55,7 +59,7 @@ from glidepath.core.entities import validate_household_v1
 from glidepath.core.glide import glide_path_from_shape, years_to_target_retirement
 from glidepath.core.investments import FeeSchedule, period_fee
 from glidepath.core.money import Money, Rate
-from glidepath.core.periods import age_on, date_age_attained
+from glidepath.core.periods import age_on, date_age_attained, period_active_fraction
 from glidepath.core.provenance import (
     AssumptionKey,
     AssumptionReadRecorder,
@@ -258,11 +262,14 @@ class _Projection:
         snapshots: list[PeriodSnapshot] = []
         horizon_end = self._horizon_end()
         for period in self.region.calendar.periods(self.config.today, horizon_end):
+            fraction = period_active_fraction(period, self.config.today, horizon_end)
             returns = model.returns_for(period, 0)
             if snapshots:
                 inflation *= returns.cpi.growth_factor
                 factors.advance(returns.cpi.value)
-            snapshots.append(self._project_period(period, returns, inflation, factors))
+            snapshots.append(
+                self._project_period(period, returns, inflation, factors, fraction)
+            )
         return tuple(snapshots)
 
     def _horizon_end(self) -> date:
@@ -322,8 +329,16 @@ class _Projection:
         returns: PeriodReturns,
         inflation: Decimal,
         factors: _NominalFactors,
+        fraction: Decimal,
     ) -> PeriodSnapshot:
-        """Run the eight steps of planning §5.2 for one period."""
+        """Run the eight steps of planning §5.2 for one period.
+
+        ``fraction`` is the whole-month share of the period inside the
+        run window (roadmap 4.6): flows and the annual growth/fee rates
+        are scaled by it, so a mid-period ``today`` never re-models
+        months already reflected in the balance facts, and the final
+        period never models time past the horizon end.
+        """
         person = self.person
         # Step 1 — open.
         age = age_on(person.date_of_birth.value, period.start)
@@ -340,24 +355,26 @@ class _Projection:
         # Step 2 — income.
         employment = _ZERO
         if not retired and person.employment_income is not None:
-            employment = person.employment_income.value * factors.factor(
-                AssumptionKey.EARNINGS_GROWTH_REAL
+            employment = (
+                person.employment_income.value
+                * factors.factor(AssumptionKey.EARNINGS_GROWTH_REAL)
+                * fraction
             )
         # Steps 3-4 — contributions, then withdrawals.
         self._taxable_income = employment
         self._relief_at_source = _ZERO
         if not retired:
-            self._contribution_step(ledgers, period, employment, factors)
+            self._contribution_step(ledgers, period, employment, factors, fraction)
         need = _ZERO
         delivered = _ZERO
         if retired and self.plan.spending is not None:
-            need = _spending_need(self.plan.spending, stage, inflation)
+            need = _spending_need(self.plan.spending, stage, inflation) * fraction
             delivered = self._withdrawal_step(ledgers, period, need)
         # Step 5 — final tax assessment on the full income picture.
         tax = self.region.tax.assess(period, self._tax_input())
         # Steps 6-8 — fees, growth, close.
         wrapper_results = tuple(
-            self._close_wrapper(ledger, returns) for ledger in ledgers
+            self._close_wrapper(ledger, returns, fraction) for ledger in ledgers
         )
         shortfall = max(need - delivered, _ZERO)
         person_result = PersonPeriodResult(
@@ -377,6 +394,7 @@ class _Projection:
             returns=returns,
             inflation_factor=inflation,
             persons=(person_result,),
+            year_fraction=fraction,
         )
 
     def _open_ledger(
@@ -405,6 +423,7 @@ class _Projection:
         period: Period,
         employment: Money,
         factors: _NominalFactors,
+        fraction: Decimal,
     ) -> None:
         """Step 3: scheduled contributions through caps and relief rules.
 
@@ -412,7 +431,11 @@ class _Projection:
         control) consume any per-kind cap first; the employee amount
         fills what remains. Amounts a cap or the region's relief limit
         keeps out of the pot are recorded as the wrapper's contribution
-        shortfall — v1 does not reroute them (roadmap 9.2).
+        shortfall — v1 does not reroute them (roadmap 9.2). Scheduled
+        amounts are scaled by the partial-period ``fraction`` (roadmap
+        4.6); per-kind caps stay whole-year — allowances are annual,
+        and contributions already made this year live in the balance
+        facts, not the model.
         """
         used_by_kind: dict[str, Money] = {}
         relieved_so_far = _ZERO
@@ -424,10 +447,10 @@ class _Projection:
             escalation = _ONE
             if schedule.escalation is not None:
                 escalation = factors.factor(schedule.escalation)
-            employee_intended = schedule.employee_amount.value * escalation
+            employee_intended = schedule.employee_amount.value * escalation * fraction
             employer = _ZERO
             if schedule.employer_amount is not None:
-                employer = schedule.employer_amount.value * escalation
+                employer = schedule.employer_amount.value * escalation * fraction
             kind = ledger.wrapper.kind
             cap = self.region.wrappers.annual_contribution_limit(kind, period)
             employee = employee_intended
@@ -606,7 +629,7 @@ class _Projection:
         )
 
     def _close_wrapper(
-        self, ledger: _WrapperLedger, returns: PeriodReturns
+        self, ledger: _WrapperLedger, returns: PeriodReturns, fraction: Decimal
     ) -> WrapperPeriodResult:
         """Steps 6-8 for one wrapper: fees, growth, quantize, snapshot.
 
@@ -615,19 +638,23 @@ class _Projection:
         and the cannot-exceed-the-holdings cap binds at account level —
         then allocated across the sub-balances pro rata to their
         post-flow values. Growth (step 7) applies to each post-fee
-        sub-balance; fees before growth per the §5.2 order.
+        sub-balance; fees before growth per the §5.2 order. In a
+        partial first/last period both annual rates are scaled linearly
+        by ``fraction`` (the §5.2 roadmap-4.6 convention).
         """
         fees = self._fees_for(ledger.wrapper)
         opening_total = ledger.opening_uncrystallised + ledger.opening_crystallised
         after_total = ledger.uncrystallised + ledger.crystallised
-        fee_total = period_fee(opening_total, after_total, fees)
+        fee_total = period_fee(opening_total, after_total, fees, fraction)
         fee_uncrystallised = _ZERO
         if after_total > _ZERO:
             fee_uncrystallised = Money(
                 fee_total.amount * ledger.uncrystallised.amount / after_total.amount
             )
         fee_crystallised = fee_total - fee_uncrystallised
-        growth_rate = returns.assets.portfolio_growth_factor(ledger.allocation) - _ONE
+        growth_rate = (
+            returns.assets.portfolio_growth_factor(ledger.allocation) - _ONE
+        ) * fraction
         post_fee_uncrystallised = ledger.uncrystallised - fee_uncrystallised
         post_fee_crystallised = ledger.crystallised - fee_crystallised
         growth_uncrystallised = Money(post_fee_uncrystallised.amount * growth_rate)
