@@ -170,11 +170,12 @@ class TestResultInvariants:
         )
         period = Period(date(2026, 1, 1), date(2026, 12, 31))
         beyond_whole = Decimal("1.01")
+        whole_inflation = Decimal(1)
         with pytest.raises(ValueError, match="between 0 and 1"):
             PeriodSnapshot(
                 period=period,
                 returns=returns,
-                inflation_factor=Decimal(1),
+                inflation_factor=whole_inflation,
                 persons=(),
                 year_fraction=beyond_whole,
             )
