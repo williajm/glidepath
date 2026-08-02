@@ -25,10 +25,15 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from glidepath.core import Money, TaxInput, TaxLine, TaxResidencyId, TaxResult
+from glidepath.regions.uk.extension import extend_tax_year
 from glidepath.regions.uk.loader import available_tax_years, load_tax_year
+from glidepath.regions.uk.schema import tax_year_start_year
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from glidepath.core import Period
+    from glidepath.regions.uk.extension import FutureYearsExtension
     from glidepath.regions.uk.schema import IncomeTaxSchedule, TaxBand, TaxYearFile
 
 RUK_RESIDENCY = TaxResidencyId("uk.ruk")
@@ -61,11 +66,14 @@ class UkTaxSystem:
     """UK implementation of the core ``TaxSystem`` protocol.
 
     Holds the tax-year files it may assess against. Periods past the
-    last shipped year fail until the future-year extension policy lands
-    (roadmap 2.5).
+    last shipped year are synthesized per the future-years extension
+    when one is configured (roadmap 2.5; planning §5.3); shipped data
+    always beats extrapolation. Without an extension — and always for
+    periods before the first shipped year — assessment fails.
     """
 
     tax_years: tuple[TaxYearFile, ...]
+    future_years: FutureYearsExtension | None = None
 
     def __post_init__(self) -> None:
         """Require at least one year, ascending and non-overlapping."""
@@ -78,10 +86,15 @@ class UkTaxSystem:
                 raise UkTaxError(msg)
 
     @classmethod
-    def from_shipped_data(cls) -> UkTaxSystem:
+    def from_shipped_data(
+        cls, future_years: FutureYearsExtension | None = None
+    ) -> UkTaxSystem:
         """Build a system over every shipped ``tax_year_*.toml``."""
         years = available_tax_years()
-        return cls(tax_years=tuple(load_tax_year(year) for year in years))
+        return cls(
+            tax_years=tuple(load_tax_year(year) for year in years),
+            future_years=future_years,
+        )
 
     def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:
         """Assess one period's non-savings income (planning §4.2)."""
@@ -90,20 +103,35 @@ class UkTaxSystem:
         return _assess_schedule(schedule, tax_input.non_savings_income)
 
     def _tax_year_for(self, period: Period) -> TaxYearFile:
-        """The shipped file whose tax year fully contains ``period``."""
+        """The shipped or synthesized file fully containing ``period``."""
+        year = self._year_containing(period.start)
+        if period.end > year.meta.end_date:
+            msg = (
+                f"period {period.start}..{period.end} extends beyond"
+                f" tax year {year.meta.tax_year}"
+            )
+            raise UkTaxError(msg)
+        return year
+
+    def _year_containing(self, day: date) -> TaxYearFile:
+        """The shipped file covering ``day``, or an extension past the last."""
         for year in self.tax_years:
-            if year.meta.start_date <= period.start <= year.meta.end_date:
-                if period.end > year.meta.end_date:
-                    msg = (
-                        f"period {period.start}..{period.end} extends beyond"
-                        f" tax year {year.meta.tax_year}"
-                    )
-                    raise UkTaxError(msg)
+            if year.meta.start_date <= day <= year.meta.end_date:
                 return year
-        msg = (
-            f"no shipped tax-year data covers {period.start}"
-            " (future-year extension is roadmap 2.5)"
+        last = self.tax_years[-1]
+        if self.future_years is not None and day > last.meta.end_date:
+            return extend_tax_year(
+                last,
+                tax_year_start_year(day),
+                policy=self.future_years.policy,
+                cpi=self.future_years.cpi,
+            )
+        problem = (
+            "the future-years extension only reaches past the last shipped year"
+            if self.future_years is not None
+            else "no future-years extension is configured (planning §5.3)"
         )
+        msg = f"no shipped tax-year data covers {day}; {problem}"
         raise UkTaxError(msg)
 
 
