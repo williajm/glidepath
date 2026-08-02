@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from glidepath.core.contributions import ContributionSchedule
     from glidepath.core.entities import EntityId
+    from glidepath.core.investments import AssetAllocation, FeeSchedule
     from glidepath.core.money import Rate
     from glidepath.core.periods import Period
     from glidepath.core.provenance import Fact
@@ -125,8 +126,11 @@ class Wrapper:
     already-in-drawdown user modellable (no fresh tax-free cash on
     crystallised funds, planning §5.1); non-pension kinds leave it
     ``None``. ``contributions`` is the wrapper's planned contribution
-    schedule, if any (roadmap 3.2); allocation (3.5) and fees (3.4)
-    attach in later roadmap items.
+    schedule, if any (roadmap 3.2). ``allocation`` is the wrapper's own
+    asset split; ``None`` means the person's glide path supplies it each
+    period (roadmap 3.5). ``fees`` is the wrapper's fee schedule;
+    ``None`` means the shipped fee assumptions apply (planning §7,
+    roadmap 3.4).
     """
 
     id: EntityId
@@ -134,6 +138,8 @@ class Wrapper:
     balance: Fact[Money]
     crystallised_balance: Fact[Money] | None = None
     contributions: ContributionSchedule | None = None
+    allocation: AssetAllocation | None = None
+    fees: FeeSchedule | None = None
 
     def __post_init__(self) -> None:
         """Reject negative balances."""

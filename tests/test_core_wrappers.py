@@ -6,10 +6,12 @@ from decimal import Decimal
 import pytest
 
 from glidepath.core import (
+    AssetAllocation,
     ContributionSchedule,
     ContributionTaxTreatment,
     Decision,
     Fact,
+    FeeSchedule,
     GrowthTaxTreatment,
     Money,
     Rate,
@@ -65,6 +67,28 @@ def test_wrapper_carries_contribution_schedule() -> None:
         contributions=schedule,
     )
     assert wrapper.contributions is schedule
+
+
+def test_wrapper_carries_allocation_and_fees() -> None:
+    """A wrapper may state its own asset split and fees (issues 3.4, 3.5)."""
+    allocation = AssetAllocation(equity=Decimal("0.6"), bonds=Decimal("0.4"))
+    fees = FeeSchedule(platform=Rate(Decimal("0.0025")), fund=Rate(Decimal("0.0015")))
+    wrapper = Wrapper(
+        id=new_entity_id(),
+        kind=KIND,
+        balance=money_fact("125000"),
+        allocation=allocation,
+        fees=fees,
+    )
+    assert wrapper.allocation == allocation
+    assert wrapper.fees == fees
+
+
+def test_wrapper_defaults_to_glide_path_and_fee_assumptions() -> None:
+    """None means the glide path and the fee assumptions supply the values."""
+    wrapper = Wrapper(id=new_entity_id(), kind=KIND, balance=money_fact("125000"))
+    assert wrapper.allocation is None
+    assert wrapper.fees is None
 
 
 def test_wrapper_rejects_negative_balance() -> None:

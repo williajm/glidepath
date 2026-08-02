@@ -20,6 +20,21 @@ from glidepath.core.entities import (
     new_entity_id,
     validate_household_v1,
 )
+from glidepath.core.glide import (
+    GlidePathConfig,
+    GlidePathPoint,
+    LifeStage,
+    glide_path_from_shape,
+    years_to_target_retirement,
+)
+from glidepath.core.investments import (
+    AssetAllocation,
+    AssetReturns,
+    FeesAndGrowthOutcome,
+    FeeSchedule,
+    apply_fees_and_growth,
+    period_fee,
+)
 from glidepath.core.money import Money, Rate
 from glidepath.core.periods import (
     AgeRules,
@@ -59,6 +74,8 @@ from glidepath.core.wrappers import (
 __all__ = [
     "AgeRules",
     "AnnualCalendar",
+    "AssetAllocation",
+    "AssetReturns",
     "Assumption",
     "AssumptionKey",
     "AssumptionReadRecorder",
@@ -69,9 +86,14 @@ __all__ = [
     "Decision",
     "EntityId",
     "Fact",
+    "FeeSchedule",
+    "FeesAndGrowthOutcome",
     "FiscalCalendar",
+    "GlidePathConfig",
+    "GlidePathPoint",
     "GrowthTaxTreatment",
     "Household",
+    "LifeStage",
     "MemberContributionOutcome",
     "MemberContributionRequest",
     "Money",
@@ -94,11 +116,15 @@ __all__ = [
     "WrapperTaxTreatment",
     "add_months",
     "age_on",
+    "apply_fees_and_growth",
     "birthday_in_year",
     "date_age_attained",
+    "glide_path_from_shape",
     "is_age_attained_by_period_start",
     "new_entity_id",
+    "period_fee",
     "prorata_fraction",
     "validate_household_v1",
     "whole_months_between",
+    "years_to_target_retirement",
 ]

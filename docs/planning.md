@@ -308,7 +308,7 @@ class Person:
     wrappers: tuple[Wrapper, ...]
     db_pensions: tuple[DBPension, ...]
     state_pension: StatePensionRecord
-    glide_path: GlidePathConfig
+    glide_path: GlidePathConfig | None  # None: default-shape assumption applies
 
 
 # Wrapper kinds are OPAQUE region-defined ids ("uk.workplace_dc",
@@ -325,8 +325,8 @@ class Wrapper:
     kind: WrapperKindId
     balance: Fact[Money]  # pension kinds: uncrystallised value
     crystallised_balance: Fact[Money] | None  # pension kinds: already in drawdown
-    allocation: AssetAllocation  # or supplied by glide path
-    fees: FeeSchedule  # platform + fund, annual %
+    allocation: AssetAllocation | None  # None: the glide path supplies it
+    fees: FeeSchedule | None  # platform + fund, annual %; None: fee assumptions
     contributions: ContributionSchedule | None
 
 
@@ -413,7 +413,14 @@ moves them through `EARLY_ACCUMULATION → MID_ACCUMULATION → PRE_RETIREMENT
 years-to-target-retirement, not stored. The glide path maps
 years-to-retirement → asset allocation by interpolating a factor table;
 the default shape is an assumption (`glidepath.default_shape`),
-overridable per person.
+overridable per person. Stage boundaries (3.5): `DECUMULATION` once the
+target retirement age is attained by the period's first day
+(years-to-retirement ≤ 0, the §4.1 gate convention); `PRE_RETIREMENT`
+inside the table's de-risking window (its highest knot); the
+`EARLY`/`MID` accumulation split falls at twice that window — the split
+is presentational (only the allocation is mechanical), so a simple
+doubling rule suffices. A constant-allocation table never de-risks, so
+`PRE_RETIREMENT` is unreachable there.
 
 ### 5.2 Projection engine
 
@@ -449,7 +456,9 @@ the `ReturnModel` differs** — a design invariant, not an aspiration.
 5. **Tax** — final `TaxSystem.assess` per person on the period's full
    categorised income picture. The gross-up in step 4 calls the same
    function, so the final assessment is consistent by construction.
-6. **Fees** — platform + fund on average balances.
+6. **Fees** — platform + fund on average balances (the mean of the
+   opening and post-flow balances; the fee never exceeds what the
+   account holds).
 7. **Growth** — apply the period's returns to each wrapper's allocation.
 8. **Close period** — quantize ledger, emit `PeriodSnapshot`.
 
