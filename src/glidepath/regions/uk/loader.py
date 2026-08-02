@@ -12,6 +12,7 @@ Failures raise :class:`~glidepath.regions.uk.schema.DataFileError` with a
 ``file.section.key`` context string.
 """
 
+import hashlib
 import re
 import tomllib
 from datetime import date, datetime
@@ -31,6 +32,7 @@ from glidepath.regions.uk.schema import (
     IncomeTaxSchedule,
     IsaRules,
     LisaAges,
+    NewStatePension,
     NmpaStep,
     PensionRules,
     SpaAgeBand,
@@ -445,6 +447,14 @@ def _parse_deferral(raw: object, context: str) -> StatePensionDeferral:
     return deferral
 
 
+def _parse_new_state_pension(raw: object, context: str) -> NewStatePension:
+    """Parse the ``[new_state_pension]`` table."""
+    table = _Table(raw, context)
+    system_start = _plain_date(table.take("system_start"), f"{context}.system_start")
+    table.finish()
+    return NewStatePension(system_start=system_start)
+
+
 def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRulesFile:
     """Parse and strictly validate an age-rules TOML document."""
     root = _load_document(text, context)
@@ -468,6 +478,9 @@ def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRules
     deferral = _parse_deferral(
         root.take("state_pension_deferral"), f"{context}.state_pension_deferral"
     )
+    new_state_pension = _parse_new_state_pension(
+        root.take("new_state_pension"), f"{context}.new_state_pension"
+    )
     root.finish()
     return AgeRulesFile(
         schema_version=schema_version,
@@ -476,6 +489,7 @@ def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRules
         spa_bands=spa_bands,
         lisa=lisa,
         deferral=deferral,
+        new_state_pension=new_state_pension,
     )
 
 
@@ -560,6 +574,18 @@ def _read_data_file(filename: str) -> str:
 def tax_year_filename(start_year: int) -> str:
     """The canonical data filename for the tax year starting ``start_year``."""
     return f"tax_year_{start_year}_{(start_year + 1) % 100:02d}.toml"
+
+
+def data_file_digest(filename: str) -> str:
+    """A short SHA-256 digest of one shipped data file's text.
+
+    Part of the region data version (planning §4.6): ``verified_on``
+    dates alone cannot tell two same-day revisions of a file apart, so
+    the content digest makes the version string change whenever the
+    data does.
+    """
+    text = _read_data_file(filename)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
 def available_tax_years() -> tuple[int, ...]:

@@ -7,8 +7,8 @@ household level avoids a schema + engine migration when couples activate
 :func:`validate_household_v1`.
 
 Wrappers attach to :class:`Person` as of roadmap 3.1, the glide-path
-config as of 3.5, and household spending as of 4.1; DB pensions and
-state pension records follow later in Phase 4.
+config as of 3.5, household spending as of 4.1, and DB pensions and
+state pension records as of 4.2/4.3.
 """
 
 import uuid
@@ -24,7 +24,9 @@ if TYPE_CHECKING:
     from datetime import date
 
     from glidepath.core.glide import GlidePathConfig, LifeStage
+    from glidepath.core.pensions import DBPension
     from glidepath.core.provenance import Decision, Fact
+    from glidepath.core.state_pension import StatePensionRecord
     from glidepath.core.wrappers import Wrapper
 
 EntityId = NewType("EntityId", str)
@@ -84,6 +86,13 @@ class Person:
     (roadmap 3.3). In-plan triggers land with decumulation (Phase 5).
     """
     wrappers: tuple[Wrapper, ...] = ()
+    db_pensions: tuple[DBPension, ...] = ()
+    """Deferred DB entitlements (roadmap 4.2; v1: no active accrual)."""
+    state_pension: StatePensionRecord | None = None
+    """This person's state pension record (roadmap 4.3).
+
+    ``None`` means no state pension is modelled for this person.
+    """
     glide_path: GlidePathConfig | None = None
     """This person's glide path, if they overrode the default.
 
@@ -92,10 +101,11 @@ class Person:
     """
 
     def __post_init__(self) -> None:
-        """Require distinct wrapper ids (they are override targets, §4.3)."""
+        """Require distinct entity ids (they are override targets, §4.3)."""
         ids = [wrapper.id for wrapper in self.wrappers]
+        ids += [pension.id for pension in self.db_pensions]
         if len(set(ids)) != len(ids):
-            msg = "a person's wrappers must have distinct EntityIds"
+            msg = "a person's wrappers and DB pensions must have distinct EntityIds"
             raise ValueError(msg)
 
 
@@ -143,16 +153,20 @@ class Household:
 
         Scenario overrides target entities by id + field path (planning
         §4.3), so ids must be unambiguous across the whole household —
-        two persons' wrappers may not share an id, nor may a wrapper
-        share one with a person.
+        two persons' wrappers or DB pensions may not share an id, nor
+        may either share one with a person.
         """
         if not _MIN_PERSONS <= len(self.persons) <= _MAX_PERSONS:
             msg = f"a household holds 1 or 2 persons, got {len(self.persons)}"
             raise ValueError(msg)
         ids = [person.id for person in self.persons]
         ids += [wrapper.id for person in self.persons for wrapper in person.wrappers]
+        ids += [pension.id for person in self.persons for pension in person.db_pensions]
         if len(set(ids)) != len(ids):
-            msg = "household entities (persons, wrappers) must have distinct EntityIds"
+            msg = (
+                "household entities (persons, wrappers, DB pensions) must"
+                " have distinct EntityIds"
+            )
             raise ValueError(msg)
 
 

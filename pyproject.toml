@@ -58,6 +58,7 @@ max-complexity = 10
     "S101",    # pytest tests use bare assert by design.
     "PLR2004", # Literal expected values in assertions are idiomatic in tests.
     "INP001",  # tests/ is intentionally not a package (pytest src-layout).
+    "PLR0913", # Test-data factories take many optional keyword knobs by design.
 ]
 "scripts/**" = [
     "T201",   # Standalone CLI scripts report via print.

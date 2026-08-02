@@ -126,6 +126,9 @@ access_age = 60
 [state_pension_deferral]
 increment_rate = "0.01"
 per_weeks = 9
+
+[new_state_pension]
+system_start = 2016-04-06
 """
 
 ASSUMPTIONS_HEADER = """schema_version = 1

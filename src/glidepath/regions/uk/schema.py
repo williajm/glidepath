@@ -314,6 +314,19 @@ class StatePensionDeferral:
             _fail(owner, "per_weeks must be positive")
 
 
+@dataclass(frozen=True, slots=True)
+class NewStatePension:
+    """The new state pension system's start date (planning §5.1).
+
+    NI records starting before this date are governed by transitional
+    starting-amount rules the model does not compute, so the
+    qualifying-years derivation refuses them (an official forecast is
+    required instead).
+    """
+
+    system_start: date
+
+
 def _validate_nmpa_steps(steps: tuple[NmpaStep, ...]) -> None:
     """The first step is the baseline; later steps are strictly dated."""
     owner = "AgeRulesFile.nmpa"
@@ -365,6 +378,7 @@ class AgeRulesFile:
     spa_bands: tuple[SpaBand, ...]
     lisa: LisaAges
     deferral: StatePensionDeferral
+    new_state_pension: NewStatePension
 
     def __post_init__(self) -> None:
         """Validate the version, the NMPA schedule, and SPA band tiling."""

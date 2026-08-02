@@ -13,6 +13,7 @@ sources = [
   "https://www.gov.uk/lifetime-isa/who-can-open-a-lifetime-isa",
   "https://www.gov.uk/lifetime-isa/withdrawing-money-from-your-lifetime-isa",
   "https://www.gov.uk/deferring-state-pension/if-you-reach-state-pension-age-on-or-after-6-april-2016",
+  "https://www.gov.uk/new-state-pension",
 ]
 
 # Normal minimum pension age: 55 today, 57 from 6 April 2028. Protected
@@ -68,8 +69,19 @@ open_age_max = 39
 contribute_until_age = 50
 access_age = 60
 
-# Post-2016 deferral: +1% of the weekly rate per 9 weeks deferred
-# (~5.8%/yr); increments are CPI-uprated.
+# Post-2016 deferral: the weekly rate increases by 1% per 9 weeks
+# deferred, accruing at increment_rate/per_weeks for each whole week
+# once at least per_weeks weeks are deferred (~5.8% per 52 weeks).
+# The uplift applies to the rate payable at claim; increments are
+# CPI-uprated from then on.
 [state_pension_deferral]
 increment_rate = "0.01"
 per_weeks = 9
+
+# The new state pension began 6 April 2016. The /35 qualifying-years
+# derivation is valid only for NI records starting on or after this
+# date: earlier records are governed by transitional starting-amount
+# rules (contracting-out, possible protected payment) the model does
+# not compute, so they require an official forecast (planning §5.1).
+[new_state_pension]
+system_start = 2016-04-06

@@ -2,8 +2,9 @@
 
 A :class:`Region` gathers one region's implementations of every core
 boundary protocol — fiscal calendar, age rules, tax system, wrapper
-rules, contribution rules — plus a content-version string identifying
-the data those implementations answer from. The engine receives exactly
+rules, contribution rules, state pension scheme — plus a
+content-version string identifying the data those implementations
+answer from. The engine receives exactly
 this bundle (planning §5.2: ``run(plan, assumptions, region, config)``)
 and never anything region-specific; the version string lands in
 ``ProjectionResult.provenance`` so a result records which data produced
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from glidepath.core.contributions import ContributionRuleset
     from glidepath.core.periods import AgeRules, FiscalCalendar
+    from glidepath.core.state_pension import StatePensionScheme
     from glidepath.core.tax import TaxSystem
     from glidepath.core.wrappers import WrapperRuleset
 
@@ -34,6 +36,7 @@ class Region:
     tax: TaxSystem
     wrappers: WrapperRuleset
     contributions: ContributionRuleset
+    state_pension: StatePensionScheme
     data_version: str
 
     def __post_init__(self) -> None:
