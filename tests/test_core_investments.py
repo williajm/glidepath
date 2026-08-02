@@ -93,6 +93,25 @@ def test_period_fee_rejects_negative_balances() -> None:
         period_fee(negative, positive, TYPICAL_FEES)
 
 
+def test_period_fee_scales_linearly_with_the_year_fraction() -> None:
+    """Half a period charges half the annual rate (§5.2, roadmap 4.6)."""
+    fee = period_fee(
+        Money(Decimal(100000)),
+        Money(Decimal(110000)),
+        TYPICAL_FEES,
+        year_fraction=Decimal("0.5"),
+    )
+    assert fee == Money(Decimal("210.00"))
+
+
+def test_period_fee_rejects_a_fraction_outside_the_unit_interval() -> None:
+    """An active fraction is never negative or above one."""
+    balance = Money(Decimal(1000))
+    beyond_whole = Decimal("1.5")
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        period_fee(balance, balance, TYPICAL_FEES, year_fraction=beyond_whole)
+
+
 def test_fees_apply_before_growth_per_the_operation_order() -> None:
     """The §5.2 golden numbers: fee 420 off 110k, then 3.4% growth.
 

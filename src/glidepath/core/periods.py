@@ -218,6 +218,47 @@ def prorata_fraction(entitlement_start: date, period: Period) -> Decimal:
     return Decimal(months_in_payment) / Decimal(months_in_period)
 
 
+def period_active_fraction(
+    period: Period, window_start: date, window_end: date
+) -> Decimal:
+    """Fraction of ``period`` inside the run window, by whole months.
+
+    Implements the partial first/last period convention (planning §5.2,
+    roadmap 4.6): the engine models only the window from ``window_start``
+    (the run's ``today``) through ``window_end`` (the horizon end), both
+    inclusive. A period partly outside that window is scaled by
+    ``whole months inside the window / whole months in the period`` —
+    the same §4.1 whole-month convention as other partial years. For a
+    window open at the end, this agrees with :func:`prorata_fraction`.
+
+    Returns:
+        ``1`` if the period lies wholly inside the window, ``0`` if less
+        than one whole month of it does, otherwise the exact ``Decimal``
+        month ratio.
+
+    Raises:
+        ValueError: If ``window_end`` precedes ``window_start``, or the
+            period is shorter than one whole month.
+    """
+    if window_end < window_start:
+        msg = f"window end {window_end} precedes window start {window_start}"
+        raise ValueError(msg)
+    if window_start <= period.start and window_end >= period.end:
+        return Decimal(1)
+    active_start = max(window_start, period.start)
+    active_end_exclusive = min(window_end, period.end) + timedelta(days=1)
+    if active_end_exclusive <= active_start:
+        return Decimal(0)
+    months_in_period = whole_months_between(
+        period.start, period.end + timedelta(days=1)
+    )
+    if months_in_period == 0:
+        msg = "period is shorter than one whole month; cannot pro-rate"
+        raise ValueError(msg)
+    months_active = whole_months_between(active_start, active_end_exclusive)
+    return Decimal(months_active) / Decimal(months_in_period)
+
+
 class AgeRules(Protocol):
     """Region-supplied age rules (planning §4.1, §4.2).
 

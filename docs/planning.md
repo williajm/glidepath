@@ -469,26 +469,47 @@ growth approximates intra-year accrual acceptably at annual resolution.
 `PeriodSnapshot` records per person/wrapper: opening/closing balances,
 flows by category, tax with breakdown, ages, stage, allocation.
 
-**Partial first and last periods (open decision — roadmap 4.6).** The run
+**Partial first and last periods (decided — roadmap 4.6).** The run
 anchors on the period containing `config.today` and ends with the period
-containing the horizon end; the 4.1 engine applies every flow to those
-periods whole. That conflicts with the §4.1 partial-year convention when
-`today` falls mid-period: balance facts are as-of the run start, so a
-full year of contributions and income double-counts the months already
-elapsed (and reflected in the balances). Roadmap 4.6 fixes this by
-pro-rating flows (income, contributions, spending need) by whole months
-per §4.1. Growth and fees additionally need a partial-period convention
-that §4.1 does not settle — linear scaling of the annual rate by the
-period fraction (Decimal-exact, slightly understates compounding) versus
-fractional-exponent compounding (exact, but needs non-integer Decimal
-powers) — to be decided in 4.6 and recorded here. Sequencing: land 4.6
-before the 4.5 golden scenario, so the hand-reviewed expected output is
-written once against the corrected behaviour.
+containing the horizon end, but models only the window
+`[today, horizon_end]`. A period partly outside that window is scaled by
+its *active fraction* — whole months inside the window over whole months
+in the period, the §4.1 whole-month convention (`period_active_fraction`;
+under one whole month the fraction is 0). Flows (employment income,
+scheduled contributions, spending need) are multiplied by the fraction,
+so a mid-period `today` never re-models months already reflected in the
+balance facts and the final period never models time past the horizon
+end. **Growth and fees scale the annual rate linearly by the same
+fraction** rather than compounding by a fractional exponent: linear
+scaling is exact `Decimal` arithmetic (multiplication and division only,
+fully reproducible per §4.6), matches §4.1's linear whole-month
+convention, and its error against fractional-exponent compounding is
+second-order small and confined to at most two periods per run.
+Fractional-exponent compounding was rejected because `Decimal` powers
+with non-integer exponents are only "almost always correctly rounded"
+(Python `decimal` docs), which is not the byte-identical reproducibility
+§4.6 demands. The cumulative CPI and nominal escalation factors advance
+between periods the same way — by the completed period's annual rate
+scaled linearly by that period's active fraction — so a mid-year start
+advances later price and earnings levels only by the months actually
+modelled, never a whole year. **Accepted costs:** annual caps, allowances, and tax bands
+apply whole to the partial year — the pro-rated income of the first
+modelled year meets full-year bands, understating its tax slightly
+(the elapsed months' income belongs to the pre-model past); and a run
+starting with under one whole month of a period models that period as
+zero-flow. Landed before the 4.5 golden scenario, so the hand-reviewed
+expected output is written once against the corrected behaviour.
 
 **Real vs nominal.** The engine computes nominal (tax bands are nominal
 objects); the reporting layer deflates by the run's CPI path. **Real
 (today's money) is the default presentation**; nominal available. One
-inflation truth per run.
+inflation truth per run. Deflators match what each amount is: flows
+deflate by the snapshot's period-start factor (the level the engine
+inflated them with); closing balances — which embed the period's own
+nominal growth — deflate by the level at the period's modelled end,
+`inflation_factor × (1 + cpi × year_fraction)`. Presented totals are
+sums of the presented per-wrapper amounts, so report tables stay
+internally consistent after penny rounding.
 
 **Withdrawal strategies** are a protocol
 (`withdraw(state, need) -> WithdrawalPlan`): v1 fixed-real and fixed-%;
