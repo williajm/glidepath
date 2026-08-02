@@ -416,10 +416,12 @@ the default shape is an assumption (`glidepath.default_shape`),
 overridable per person. Stage boundaries (3.5): `DECUMULATION` once the
 target retirement age is attained by the period's first day
 (years-to-retirement ≤ 0, the §4.1 gate convention); `PRE_RETIREMENT`
-inside the table's de-risking window (its highest knot); the
-`EARLY`/`MID` accumulation split falls at twice that window — the split
-is presentational (only the allocation is mechanical), so a simple
-doubling rule suffices. A constant-allocation table never de-risks, so
+inside the table's de-risking window — the years at which the
+allocation starts changing (the lowest knot of the top
+constant-allocation plateau); the `EARLY`/`MID` accumulation split
+falls at twice that window — the split is presentational (only the
+allocation is mechanical), so a simple doubling rule suffices. A
+constant-allocation table has a zero window and never de-risks, so
 `PRE_RETIREMENT` is unreachable there.
 
 ### 5.2 Projection engine

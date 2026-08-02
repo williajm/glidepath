@@ -9,8 +9,9 @@ interpolating a factor table (:class:`GlidePathConfig`).
 Stage boundaries (planning §5.1): ``DECUMULATION`` once the target
 retirement age is attained by the period's first day (years-to-retirement
 ≤ 0, matching the §4.1 gate convention); ``PRE_RETIREMENT`` inside the
-table's de-risking window (its highest knot); the ``EARLY`` / ``MID``
-split falls at twice that window.
+table's de-risking window — the years at which the allocation starts
+changing (zero for a constant table, which never de-risks); the
+``EARLY`` / ``MID`` split falls at twice that window.
 
 The default shape ships as the ``glidepath.default_shape`` assumption
 (planning §7), overridable per person; :func:`glide_path_from_shape`
@@ -18,7 +19,7 @@ turns that structured value into a config.
 """
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import Decimal
 from enum import Enum, auto
 from itertools import pairwise
 from typing import TYPE_CHECKING
@@ -34,16 +35,6 @@ if TYPE_CHECKING:
 
 _ZERO = Decimal(0)
 _ONE = Decimal(1)
-
-_FRACTION_EXPONENT = Decimal("1e-9")
-"""Quantization for the interpolation fraction between two knots.
-
-A short fraction keeps every interpolated weight product exact in
-``Decimal`` arithmetic, so interpolated allocations still sum to exactly
-1; a billionth of the span between knots is far below any planning
-significance. Config resolution is not ledger arithmetic, so this does
-not breach the never-quantize-rates policy (planning §4.6).
-"""
 
 _SHAPE_LINEAR = "linear"
 _SHAPE_HOLD = "hold"
@@ -102,8 +93,20 @@ class GlidePathConfig:
 
     @property
     def derisk_window_years(self) -> int:
-        """Years before retirement at which de-risking begins (highest knot)."""
-        return self.points[-1].years_to_retirement
+        """Years before retirement at which the allocation starts changing.
+
+        The lowest knot of the top plateau — the run of highest knots
+        sharing the final allocation — since above it the table is
+        constant. Zero when every knot holds the same allocation: a
+        constant table never de-risks.
+        """
+        top = self.points[-1].allocation
+        window = self.points[-1].years_to_retirement
+        for point in reversed(self.points[:-1]):
+            if point.allocation != top:
+                return window
+            window = point.years_to_retirement
+        return 0
 
     def allocation_at(self, years_to_retirement: int) -> AssetAllocation:
         """The allocation held at ``years_to_retirement`` (may be negative).
@@ -126,9 +129,10 @@ class GlidePathConfig:
     def stage_at(self, years_to_retirement: int) -> LifeStage:
         """Derive the life stage at ``years_to_retirement`` (planning §5.1).
 
-        A constant-allocation table (single knot, or a knot only at 0)
-        never de-risks, so ``PRE_RETIREMENT`` is unreachable and
-        accumulation runs straight into ``DECUMULATION``.
+        A constant-allocation table (a single knot, or knots all holding
+        the same allocation) has a zero de-risking window, so
+        ``PRE_RETIREMENT`` is unreachable and accumulation runs straight
+        into ``DECUMULATION``.
         """
         if years_to_retirement <= 0:
             return LifeStage.DECUMULATION
@@ -143,22 +147,26 @@ class GlidePathConfig:
 def _interpolate(
     lower: GlidePathPoint, upper: GlidePathPoint, years_to_retirement: int
 ) -> AssetAllocation:
-    """Linearly interpolate between two knots at an interior year."""
+    """Linearly interpolate between two knots at an interior year.
+
+    The fraction and weights carry full context precision — factors are
+    never explicitly quantized (planning §4.6, the same convention as
+    ``prorata_fraction``). Cash is derived as the residual so the
+    weights sum to exactly 1 despite any rounding at context precision;
+    interior interpolants sit far enough inside [0, 1] that the residual
+    cannot go negative for a valid table.
+    """
     span = upper.years_to_retirement - lower.years_to_retirement
     offset = years_to_retirement - lower.years_to_retirement
-    fraction = (Decimal(offset) / Decimal(span)).quantize(
-        _FRACTION_EXPONENT, rounding=ROUND_HALF_EVEN
-    )
+    fraction = Decimal(offset) / Decimal(span)
 
     def weight(start: Decimal, end: Decimal) -> Decimal:
         """One class's weight at ``fraction`` of the way from lower to upper."""
         return start + (end - start) * fraction
 
-    return AssetAllocation(
-        equity=weight(lower.allocation.equity, upper.allocation.equity),
-        bonds=weight(lower.allocation.bonds, upper.allocation.bonds),
-        cash=weight(lower.allocation.cash, upper.allocation.cash),
-    )
+    equity = weight(lower.allocation.equity, upper.allocation.equity)
+    bonds = weight(lower.allocation.bonds, upper.allocation.bonds)
+    return AssetAllocation(equity=equity, bonds=bonds, cash=_ONE - equity - bonds)
 
 
 def years_to_target_retirement(

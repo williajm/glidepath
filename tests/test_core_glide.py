@@ -62,7 +62,7 @@ def test_allocation_interpolates_linearly_between_knots() -> None:
 def test_interpolated_weights_sum_to_exactly_one() -> None:
     """A non-terminating fraction (7/15) still yields a complete allocation."""
     allocation = DEFAULT_CONFIG.allocation_at(7)
-    assert allocation.equity == Decimal("0.5866666668")
+    assert allocation.equity.quantize(Decimal("1e-9")) == Decimal("0.586666667")
     assert allocation.equity + allocation.bonds + allocation.cash == 1
 
 
@@ -86,7 +86,7 @@ def test_three_class_tables_interpolate_all_classes() -> None:
     )
     allocation = config.allocation_at(5)
     assert allocation.equity + allocation.bonds + allocation.cash == 1
-    assert allocation.cash == Decimal("0.2166666666")
+    assert allocation.cash.quantize(Decimal("1e-9")) == Decimal("0.216666667")
 
 
 @pytest.mark.parametrize(
@@ -114,6 +114,42 @@ def test_a_constant_allocation_never_derisks() -> None:
     assert config.allocation_at(30) == AT_START
     assert config.stage_at(1) == LifeStage.EARLY_ACCUMULATION
     assert config.stage_at(0) == LifeStage.DECUMULATION
+
+
+def test_a_single_high_knot_is_still_constant() -> None:
+    """A lone knot at year 15 clamps everywhere, so it never de-risks either."""
+    config = GlidePathConfig(
+        points=(GlidePathPoint(years_to_retirement=15, allocation=AT_START),)
+    )
+    assert config.derisk_window_years == 0
+    assert config.stage_at(10) == LifeStage.EARLY_ACCUMULATION
+
+
+def test_identical_knots_are_a_constant_table() -> None:
+    """Knots that never change allocation leave the window at zero."""
+    config = GlidePathConfig(
+        points=(
+            GlidePathPoint(years_to_retirement=0, allocation=AT_START),
+            GlidePathPoint(years_to_retirement=15, allocation=AT_START),
+        )
+    )
+    assert config.derisk_window_years == 0
+    assert config.stage_at(10) == LifeStage.EARLY_ACCUMULATION
+
+
+def test_the_window_starts_where_the_allocation_starts_changing() -> None:
+    """A plateau above the transition does not stretch the window."""
+    config = GlidePathConfig(
+        points=(
+            GlidePathPoint(years_to_retirement=0, allocation=AT_RETIREMENT),
+            GlidePathPoint(years_to_retirement=5, allocation=AT_START),
+            GlidePathPoint(years_to_retirement=15, allocation=AT_START),
+        )
+    )
+    assert config.derisk_window_years == 5
+    assert config.stage_at(5) == LifeStage.PRE_RETIREMENT
+    assert config.stage_at(6) == LifeStage.MID_ACCUMULATION
+    assert config.stage_at(11) == LifeStage.EARLY_ACCUMULATION
 
 
 def test_config_requires_at_least_one_point() -> None:
