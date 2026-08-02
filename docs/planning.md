@@ -469,6 +469,22 @@ growth approximates intra-year accrual acceptably at annual resolution.
 `PeriodSnapshot` records per person/wrapper: opening/closing balances,
 flows by category, tax with breakdown, ages, stage, allocation.
 
+**Partial first and last periods (open decision — roadmap 4.6).** The run
+anchors on the period containing `config.today` and ends with the period
+containing the horizon end; the 4.1 engine applies every flow to those
+periods whole. That conflicts with the §4.1 partial-year convention when
+`today` falls mid-period: balance facts are as-of the run start, so a
+full year of contributions and income double-counts the months already
+elapsed (and reflected in the balances). Roadmap 4.6 fixes this by
+pro-rating flows (income, contributions, spending need) by whole months
+per §4.1. Growth and fees additionally need a partial-period convention
+that §4.1 does not settle — linear scaling of the annual rate by the
+period fraction (Decimal-exact, slightly understates compounding) versus
+fractional-exponent compounding (exact, but needs non-integer Decimal
+powers) — to be decided in 4.6 and recorded here. Sequencing: land 4.6
+before the 4.5 golden scenario, so the hand-reviewed expected output is
+written once against the corrected behaviour.
+
 **Real vs nominal.** The engine computes nominal (tax bands are nominal
 objects); the reporting layer deflates by the run's CPI path. **Real
 (today's money) is the default presentation**; nominal available. One
@@ -786,7 +802,13 @@ phases are dependency-ordered. Labels: `core`, `region:uk`, `data-files`,
 - [ ] 4.4 Real/nominal reporting layer — *real default; nominal available;
   one CPI path per run.*
 - [ ] 4.5 End-to-end golden scenario — *"35-year-old, DC + ISA, retires at
-  60" produces a reviewed, checked-in expected output.*
+  60" produces a reviewed, checked-in expected output.* Land after 4.6 so
+  the golden output is written once against corrected partial-period
+  behaviour.
+- [ ] 4.6 Partial first/last period pro-rating — *a mid-period `today`
+  pro-rates flows (income, contributions, spending need) by whole months
+  per §4.1; the growth/fee partial-period convention is decided and
+  recorded in §5.2; the run never models time before `today`.*
 
 ### Phase 5 — Decumulation
 

@@ -14,7 +14,9 @@ The engine may not read a tunable number any way other than through an
 ``ProjectionResult.provenance`` can list every assumption actually used.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Any
 
@@ -192,6 +194,60 @@ class AssumptionReadRecorder:
     def keys_read(self) -> tuple[AssumptionKey, ...]:
         """Keys read so far, deduplicated, in first-read order."""
         return tuple(self._keys_in_order)
+
+
+def decimal_assumption_value(assumption: Assumption[Any]) -> Decimal:
+    """The assumption's value as an exact ``Decimal`` rate or factor.
+
+    The engine reads tunable numbers only through assumptions (planning
+    §5.1); a value of the wrong shape is a configuration error and must
+    fail loudly, never coerce — ``Decimal`` end-to-end is the §4.6 rule
+    (a bool is rejected explicitly: it is an ``int`` subtype but never
+    a number here).
+
+    Raises:
+        TypeError: If the value is not a ``Decimal``.
+    """
+    value = assumption.value
+    if not isinstance(value, Decimal):
+        msg = (
+            f"assumption {assumption.key!r} must hold a Decimal value,"
+            f" got {type(value).__name__}"
+        )
+        raise TypeError(msg)
+    return value
+
+
+def int_assumption_value(assumption: Assumption[Any]) -> int:
+    """The assumption's value as a whole number (e.g. a planning age).
+
+    Raises:
+        TypeError: If the value is not an ``int`` (``bool`` rejected).
+    """
+    value = assumption.value
+    if isinstance(value, bool) or not isinstance(value, int):
+        msg = (
+            f"assumption {assumption.key!r} must hold an integer value,"
+            f" got {type(value).__name__}"
+        )
+        raise TypeError(msg)
+    return value
+
+
+def mapping_assumption_value(assumption: Assumption[Any]) -> Mapping[str, Any]:
+    """The assumption's value as a structured table (e.g. a glide shape).
+
+    Raises:
+        TypeError: If the value is not a mapping.
+    """
+    value = assumption.value
+    if not isinstance(value, Mapping):
+        msg = (
+            f"assumption {assumption.key!r} must hold a table value,"
+            f" got {type(value).__name__}"
+        )
+        raise TypeError(msg)
+    return value
 
 
 @dataclass(frozen=True, slots=True)

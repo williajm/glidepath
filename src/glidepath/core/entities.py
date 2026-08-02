@@ -6,20 +6,24 @@ household level avoids a schema + engine migration when couples activate
 (roadmap 9.4). v1 validates exactly one person via
 :func:`validate_household_v1`.
 
-Wrappers attach to :class:`Person` as of roadmap 3.1 and the glide-path
-config as of 3.5; DB pensions and state pension records follow in Phase 4.
+Wrappers attach to :class:`Person` as of roadmap 3.1, the glide-path
+config as of 3.5, and household spending as of 4.1; DB pensions and
+state pension records follow later in Phase 4.
 """
 
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum, auto
 from typing import TYPE_CHECKING, NewType
 
+from glidepath.core.money import Money
+
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from datetime import date
 
-    from glidepath.core.glide import GlidePathConfig
-    from glidepath.core.money import Money
+    from glidepath.core.glide import GlidePathConfig, LifeStage
     from glidepath.core.provenance import Decision, Fact
     from glidepath.core.wrappers import Wrapper
 
@@ -38,6 +42,8 @@ The core never interprets it; the region's tax system does (planning §4.2).
 
 _MIN_PERSONS = 1
 _MAX_PERSONS = 2
+_ZERO = Money(Decimal(0))
+_ZERO_MULTIPLIER = Decimal(0)
 
 
 def new_entity_id() -> EntityId:
@@ -94,14 +100,43 @@ class Person:
 
 
 @dataclass(frozen=True, slots=True)
+class SpendingPlan:
+    """The household's retirement spending need (planning §5.1, §5.2).
+
+    ``annual_spending_real`` is a *net* (after-tax) need in today's
+    money — the engine inflates it by the run's CPI path and grosses
+    withdrawals up against the tax system (planning §5.2 step 4).
+    ``stage_multipliers`` optionally scales the need per life stage
+    (e.g. go-go years); an absent stage means a multiplier of 1.
+    """
+
+    annual_spending_real: Fact[Money]
+    stage_multipliers: Mapping[LifeStage, Decimal] | None = None
+
+    def __post_init__(self) -> None:
+        """Reject negative spending and non-positive multipliers."""
+        if self.annual_spending_real.value < _ZERO:
+            msg = "SpendingPlan.annual_spending_real must be non-negative"
+            raise ValueError(msg)
+        multipliers = self.stage_multipliers or {}
+        if any(value <= _ZERO_MULTIPLIER for value in multipliers.values()):
+            msg = "SpendingPlan.stage_multipliers must be positive"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
 class Household:
-    """One or two persons plus (in later phases) shared economics.
+    """One or two persons plus shared economics (planning §4.4, §5.1).
 
     The 1..2 bound is the schema-level invariant (planning §4.4); the
     stricter v1 single-person rule is :func:`validate_household_v1`.
+    ``spending`` is the household-level retirement spending need;
+    ``None`` means decumulation withdrawals are not modelled (planned
+    outflows follow in roadmap 5.4).
     """
 
     persons: tuple[Person, ...]
+    spending: SpendingPlan | None = None
 
     def __post_init__(self) -> None:
         """Enforce the 1..2 bound and aggregate-wide distinct entity ids.
