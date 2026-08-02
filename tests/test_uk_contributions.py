@@ -415,9 +415,10 @@ def test_max_taper_leaves_no_alternative_allowance(pension: PensionRules) -> Non
 def test_assessment_requires_alternative_exactly_when_mpaa_active() -> None:
     """The result type cannot mis-state the MPAA position."""
     zero = money("0")
+    allowance = money("60000")
     with pytest.raises(UkContributionError, match="alternative_annual_allowance"):
         AnnualAllowanceAssessment(
-            annual_allowance=money("60000"),
+            annual_allowance=allowance,
             mpaa_active=True,
             money_purchase_excess=zero,
             alternative_annual_allowance=None,
