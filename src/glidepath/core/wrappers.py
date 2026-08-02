@@ -182,9 +182,14 @@ class WrapperRuleset(Protocol):
     def is_access_open(
         self, kind: WrapperKindId, date_of_birth: date, period: Period
     ) -> bool:
-        """Whether withdrawals from ``kind`` are permitted in ``period``.
+        """Whether *new* access to ``kind`` may open in ``period``.
 
         Follows the §4.1 access-gate convention: open only if any access
-        age is attained on or before the period's first day.
+        age is attained on or before the period's first day. This gates
+        new access only — e.g. crystallising pension funds; funds the
+        person has already accessed (a wrapper's crystallised balance)
+        are never re-gated by a later rise in the access age (planning
+        §5.1) — withdrawals from those are the decumulation logic's
+        concern (§5.2).
         """
         ...

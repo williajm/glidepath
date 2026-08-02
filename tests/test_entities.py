@@ -102,3 +102,25 @@ def test_person_rejects_duplicate_wrapper_ids() -> None:
     duplicates = (make_wrapper(shared), make_wrapper(shared))
     with pytest.raises(ValueError, match="distinct EntityIds"):
         make_person(wrappers=duplicates)
+
+
+def test_household_rejects_wrapper_ids_shared_across_persons() -> None:
+    """Ids must be unambiguous across the whole aggregate (planning §4.3)."""
+    shared = new_entity_id()
+    persons = (
+        make_person(wrappers=(make_wrapper(shared),)),
+        make_person(wrappers=(make_wrapper(shared),)),
+    )
+    with pytest.raises(ValueError, match="distinct EntityIds"):
+        Household(persons=persons)
+
+
+def test_household_rejects_wrapper_id_colliding_with_person_id() -> None:
+    """A wrapper may not reuse a person's id either."""
+    person_id = new_entity_id()
+    persons = (
+        make_person(person_id),
+        make_person(wrappers=(make_wrapper(person_id),)),
+    )
+    with pytest.raises(ValueError, match="distinct EntityIds"):
+        Household(persons=persons)

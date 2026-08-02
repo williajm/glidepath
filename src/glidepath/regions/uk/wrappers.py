@@ -168,12 +168,14 @@ class UkWrapperRuleset:
     def is_access_open(
         self, kind: WrapperKindId, date_of_birth: date, period: Period
     ) -> bool:
-        """Whether withdrawals from ``kind`` are permitted in ``period``.
+        """Whether *new* access to ``kind`` may open in ``period``.
 
         Pension kinds follow the NMPA access gate (§4.1), including the
         2028 step-up; ISAs are always accessible. Only *new* pension
-        access is gated — benefits already in payment are never re-gated
-        (planning §5.1).
+        access (crystallisation, UFPLS) is gated — funds already
+        crystallised and benefits already in payment are never re-gated
+        (planning §5.1), so someone who crystallised at 55 before the
+        2028 step keeps drawing at 56 even while this gate is shut.
         """
         if kind in _PENSION_KINDS:
             return self.ages.is_pension_access_open(date_of_birth, period)
