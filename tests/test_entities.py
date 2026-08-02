@@ -17,6 +17,12 @@ from glidepath.core.entities import (
 from glidepath.core.glide import GlidePathConfig, GlidePathPoint
 from glidepath.core.investments import AssetAllocation
 from glidepath.core.money import Money
+from glidepath.core.pensions import (
+    DBPension,
+    FactorTable,
+    RevaluationBasis,
+    RevaluationReference,
+)
 from glidepath.core.provenance import Decision, Fact
 from glidepath.core.wrappers import Wrapper, WrapperKindId
 
@@ -49,6 +55,21 @@ def make_wrapper(wrapper_id: EntityId | None = None) -> Wrapper:
         balance=Fact(
             value=Money(Decimal(10000)), as_of=date(2026, 8, 1), recorded_on=RECORDED
         ),
+    )
+
+
+def make_db_pension(pension_id: EntityId | None = None) -> DBPension:
+    """Build a minimal deferred DB pension for tests."""
+    return DBPension(
+        id=pension_id if pension_id is not None else new_entity_id(),
+        accrued_annual_pension=Fact(
+            value=Money(Decimal(8000)), as_of=date(2026, 8, 1), recorded_on=RECORDED
+        ),
+        statement_date=date(2024, 8, 1),
+        normal_pension_age=Fact(value=65, as_of=date(2026, 8, 1), recorded_on=RECORDED),
+        revaluation_basis=RevaluationBasis(reference=RevaluationReference.NONE),
+        early_late_factors=FactorTable(factors={}),
+        commuted_fraction=Decision(value=Decimal(0), recorded_on=RECORDED),
     )
 
 
@@ -175,3 +196,48 @@ def test_household_rejects_wrapper_id_colliding_with_person_id() -> None:
     )
     with pytest.raises(ValueError, match="distinct EntityIds"):
         Household(persons=persons)
+
+
+def test_person_rejects_db_pension_id_colliding_with_wrapper_id() -> None:
+    """DB pensions are override targets too (planning §4.3, roadmap 4.2)."""
+    shared = new_entity_id()
+    person_id = new_entity_id()
+    wrappers = (make_wrapper(shared),)
+    pensions = (make_db_pension(shared),)
+    date_of_birth = Fact(
+        value=date(1991, 4, 5), as_of=date(2026, 8, 1), recorded_on=RECORDED
+    )
+    retirement = Decision(value=60, recorded_on=RECORDED)
+    residency = TaxResidencyId("uk.ruk")
+    with pytest.raises(ValueError, match="distinct EntityIds"):
+        Person(
+            id=person_id,
+            date_of_birth=date_of_birth,
+            target_retirement_age=retirement,
+            tax_residency=residency,
+            wrappers=wrappers,
+            db_pensions=pensions,
+        )
+
+
+def test_household_rejects_db_pension_ids_shared_across_persons() -> None:
+    """DB pension ids must be unambiguous across the aggregate."""
+    shared = new_entity_id()
+    first = make_person()
+    second_id = new_entity_id()
+    second = Person(
+        id=second_id,
+        date_of_birth=first.date_of_birth,
+        target_retirement_age=first.target_retirement_age,
+        tax_residency=TaxResidencyId("uk.ruk"),
+        db_pensions=(make_db_pension(shared),),
+    )
+    third = Person(
+        id=new_entity_id(),
+        date_of_birth=first.date_of_birth,
+        target_retirement_age=first.target_retirement_age,
+        tax_residency=TaxResidencyId("uk.ruk"),
+        db_pensions=(make_db_pension(shared),),
+    )
+    with pytest.raises(ValueError, match="distinct EntityIds"):
+        Household(persons=(second, third))

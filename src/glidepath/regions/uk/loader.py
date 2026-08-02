@@ -31,6 +31,7 @@ from glidepath.regions.uk.schema import (
     IncomeTaxSchedule,
     IsaRules,
     LisaAges,
+    NewStatePension,
     NmpaStep,
     PensionRules,
     SpaAgeBand,
@@ -445,6 +446,14 @@ def _parse_deferral(raw: object, context: str) -> StatePensionDeferral:
     return deferral
 
 
+def _parse_new_state_pension(raw: object, context: str) -> NewStatePension:
+    """Parse the ``[new_state_pension]`` table."""
+    table = _Table(raw, context)
+    system_start = _plain_date(table.take("system_start"), f"{context}.system_start")
+    table.finish()
+    return NewStatePension(system_start=system_start)
+
+
 def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRulesFile:
     """Parse and strictly validate an age-rules TOML document."""
     root = _load_document(text, context)
@@ -468,6 +477,9 @@ def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRules
     deferral = _parse_deferral(
         root.take("state_pension_deferral"), f"{context}.state_pension_deferral"
     )
+    new_state_pension = _parse_new_state_pension(
+        root.take("new_state_pension"), f"{context}.new_state_pension"
+    )
     root.finish()
     return AgeRulesFile(
         schema_version=schema_version,
@@ -476,6 +488,7 @@ def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRules
         spa_bands=spa_bands,
         lisa=lisa,
         deferral=deferral,
+        new_state_pension=new_state_pension,
     )
 
 

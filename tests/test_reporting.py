@@ -294,3 +294,39 @@ class TestRowShape:
         assert first.closing_balance == money("90.95")
         assert second.closing_balance == money("90.95")
         assert row.closing_balance == money("181.90")
+
+
+class TestPensionIncomeColumns:
+    """DB and state pension income present as flows (roadmap 4.2/4.3)."""
+
+    def test_pension_income_deflates_like_other_flows(self) -> None:
+        """Real presentation divides the income columns by the CPI path."""
+        person = PersonPeriodResult(
+            person_id=PERSON,
+            age_at_period_start=68,
+            years_to_retirement=-8,
+            stage=LifeStage.DECUMULATION,
+            employment_income=ZERO,
+            tax=tax_of("0"),
+            spending_need=ZERO,
+            net_withdrawn=ZERO,
+            shortfall=ZERO,
+            wrappers=(),
+            db_income=money("2200.00"),
+            db_lump_sum=money("1100.00"),
+            state_pension_income=money("3300.00"),
+        )
+        snapshot = PeriodSnapshot(
+            period=Period(date(2026, 1, 1), date(2026, 12, 31)),
+            returns=FLAT_RETURNS,
+            inflation_factor=Decimal("1.1"),
+            persons=(person,),
+        )
+        [row] = build_report(result_of(snapshot)).rows
+        assert row.db_income == money("2000.00")
+        assert row.db_lump_sum == money("1000.00")
+        assert row.state_pension_income == money("3000.00")
+        [nominal_row] = build_report(result_of(snapshot), ReportBasis.NOMINAL).rows
+        assert nominal_row.db_income == money("2200.00")
+        assert nominal_row.db_lump_sum == money("1100.00")
+        assert nominal_row.state_pension_income == money("3300.00")

@@ -53,6 +53,7 @@ from glidepath.regions.uk.schema import (
     IncomeTaxSchedule,
     IsaRules,
     LisaAges,
+    NewStatePension,
     NmpaStep,
     PensionRules,
     SpaAgeBand,
@@ -63,6 +64,10 @@ from glidepath.regions.uk.schema import (
     TaxBand,
     TaxYearFile,
     TaxYearMeta,
+)
+from glidepath.regions.uk.state_pension import (
+    UkStatePensionError,
+    UkStatePensionScheme,
 )
 from glidepath.regions.uk.tax import (
     RUK_RESIDENCY,
@@ -101,6 +106,7 @@ __all__ = [
     "IncomeTaxSchedule",
     "IsaRules",
     "LisaAges",
+    "NewStatePension",
     "NmpaStep",
     "PensionRules",
     "SpaAgeBand",
@@ -116,6 +122,8 @@ __all__ = [
     "UkAgeRules",
     "UkContributionError",
     "UkContributionRuleset",
+    "UkStatePensionError",
+    "UkStatePensionScheme",
     "UkTaxError",
     "UkTaxSystem",
     "UkTaxYearError",

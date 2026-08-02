@@ -307,7 +307,7 @@ class Person:
     lsa_used: Fact[Money] | None  # lump sum allowance already used
     wrappers: tuple[Wrapper, ...]
     db_pensions: tuple[DBPension, ...]
-    state_pension: StatePensionRecord
+    state_pension: StatePensionRecord | None  # None: not modelled
     glide_path: GlidePathConfig | None  # None: default-shape assumption applies
 
 
@@ -388,7 +388,22 @@ class AnnuityPurchase:  # wholly a decision record (5.1)
 
 DB scheme parameters (revaluation basis, NPA, early/late factors,
 commutation factor) are user-entered **facts** — schemes vary too much to
-ship as data.
+ship as data. v1 modelling conventions (roadmap 4.2): the scheme's one
+`RevaluationBasis` (CPI optionally capped, fixed, or none; CPI-linked
+revaluation floored at zero) governs both revaluation in deferment and
+increases in payment — splitting the two bases is a 9.6 extension.
+Within the run, revaluation advances with each period's CPI under the
+§5.2 linear whole-month convention; the span from the statement date to
+`today` — which the run never models period-by-period — compounds the
+assumed CPI over whole months (integer-exponent whole years plus a
+linear remainder, exact `Decimal` per §4.6). Commutation trades pension
+for `pension given up x commutation factor` of tax-free cash in the
+period benefits start; a start date before `today` means the pension is
+already in payment and the lump sum already lives in the stated
+balances. In decumulation, net-of-tax DB/state-pension income and any
+commutation lump sum meet the net spending need before wrappers are
+drawn; income beyond the need is not banked — there is no cash/GIA
+wrapper until roadmap 9.2.
 
 State pension: an official forecast, when present, is the fact and wins.
 The qualifying-years derivation (÷35) is valid **only for NI records
@@ -397,7 +412,16 @@ transitional *starting amount* (old/new-system comparison,
 contracting-out, possible protected payment) that the model does not
 compute — for those users an official forecast is **required**, and any
 protected payment is recorded separately because it uprates by CPI only,
-not the full uprating policy.
+not the full uprating policy. Conventions (roadmap 4.3): the forecast
+weekly amount is the DWP total, of which `protected_payment` is the
+CPI-only slice; the derivation caps stated-plus-planned years at the
+full-rate count and pays nothing below the minimum; amounts are taken in
+the rates of the tax year containing `today` (annualised at 52 weeks)
+and uprated by the engine from the run start. Deferral shifts the start
+past SPA in whole months; increments (+1% per 9 whole weeks, shipped as
+data) are computed on the current-rate weekly amount and land in the
+CPI-only slice alongside protected payments, because deferral increments
+uprate by CPI (§6).
 
 Pre-existing pension access is likewise a set of facts:
 `crystallised_balance` (funds already designated to drawdown), `lsa_used`,
@@ -608,7 +632,9 @@ qualifying_years_min  = 10
 `age_rules.toml` holds the durable, effective-dated policy parameters that
 are not re-set each tax year: NMPA (55; 57 from 2028-04-06), the SPA
 DOB-band table (§6), LISA ages (open 18–39, contribute to 50, access 60),
-and the state pension deferral increment (1% per 9 weeks).
+the state pension deferral increment (1% per 9 weeks), and the new state
+pension system start (2016-04-06 — the gate on the qualifying-years
+derivation, §5.1).
 
 **Future years:** past the last shipped file, the region extends the final
 year per the `policy.tax.future_years` assumption (scenario-flippable):

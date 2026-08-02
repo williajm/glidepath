@@ -16,6 +16,7 @@ from glidepath.core.periods import (
     age_on,
     birthday_in_year,
     date_age_attained,
+    entitlement_active_fraction,
     is_age_attained_by_period_start,
     period_active_fraction,
     prorata_fraction,
@@ -205,6 +206,71 @@ def test_prorata_rejects_sub_month_period() -> None:
     mid_period = date(2026, 1, 2)
     with pytest.raises(ValueError, match="shorter than one whole month"):
         prorata_fraction(mid_period, period)
+
+
+def test_entitlement_fraction_matches_prorata_inside_a_full_window() -> None:
+    """With the window covering the period, only the start date binds."""
+    period = Period(date(2026, 4, 6), date(2027, 4, 5))
+    window = (date(2020, 1, 1), date(2040, 1, 1))
+    start = date(2026, 10, 6)
+    expected = prorata_fraction(start, period)
+    assert entitlement_active_fraction(start, period, *window) == expected
+
+
+def test_entitlement_fraction_matches_active_fraction_for_old_entitlements() -> None:
+    """An entitlement predating the window is bounded by the window alone."""
+    period = Period(date(2026, 4, 6), date(2027, 4, 5))
+    window = (date(2026, 8, 2), date(2040, 1, 1))
+    expected = period_active_fraction(period, *window)
+    assert entitlement_active_fraction(date(2020, 1, 1), period, *window) == expected
+
+
+def test_entitlement_fraction_overlaps_start_date_and_window() -> None:
+    """Both bounds binding count only the overlap months.
+
+    The entitlement starts in month three and the window ends after
+    month six of a twelve-month period: four whole months are payable —
+    not the six the window alone, or the ten the start alone, allows.
+    """
+    period = Period(date(2026, 1, 1), date(2026, 12, 31))
+    start = date(2026, 3, 1)
+    fraction = entitlement_active_fraction(
+        start, period, date(2020, 1, 1), date(2026, 6, 30)
+    )
+    assert fraction == Decimal(4) / Decimal(12)
+
+
+def test_entitlement_fraction_is_zero_outside_the_window() -> None:
+    """A start past the window (or the period) pays nothing."""
+    period = Period(date(2026, 1, 1), date(2026, 12, 31))
+    window = (date(2026, 1, 1), date(2026, 6, 30))
+    assert entitlement_active_fraction(date(2026, 8, 1), period, *window) == 0
+    assert entitlement_active_fraction(date(2027, 2, 1), period, *window) == 0
+
+
+def test_entitlement_fraction_is_one_when_payment_covers_the_period() -> None:
+    """An old entitlement inside a wide window needs no pro-rating."""
+    period = Period(date(2026, 1, 1), date(2026, 12, 31))
+    window = (date(2020, 1, 1), date(2040, 1, 1))
+    assert entitlement_active_fraction(date(2020, 6, 1), period, *window) == 1
+
+
+def test_entitlement_fraction_rejects_a_backwards_window() -> None:
+    """A window ending before it starts is invalid."""
+    period = Period(date(2026, 1, 1), date(2026, 12, 31))
+    start = date(2026, 1, 1)
+    window_start, window_end = date(2026, 6, 1), date(2026, 1, 1)
+    with pytest.raises(ValueError, match="precedes window start"):
+        entitlement_active_fraction(start, period, window_start, window_end)
+
+
+def test_entitlement_fraction_rejects_a_sub_month_period() -> None:
+    """Pro-rating needs at least one whole month to divide by."""
+    period = Period(date(2026, 1, 1), date(2026, 1, 15))
+    start = date(2026, 1, 2)
+    window_start, window_end = date(2026, 1, 1), date(2026, 1, 10)
+    with pytest.raises(ValueError, match="shorter than one whole month"):
+        entitlement_active_fraction(start, period, window_start, window_end)
 
 
 def test_active_fraction_is_one_for_a_period_wholly_inside_the_window() -> None:

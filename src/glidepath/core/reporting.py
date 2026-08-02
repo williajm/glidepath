@@ -92,6 +92,9 @@ class PeriodReportRow:
     deflator: Decimal
     balance_deflator: Decimal
     employment_income: Money
+    db_income: Money
+    db_lump_sum: Money
+    state_pension_income: Money
     tax_due: Money
     spending_need: Money
     net_withdrawn: Money
@@ -180,6 +183,9 @@ def _person_row(
         deflator=deflator,
         balance_deflator=balance_deflator,
         employment_income=flow(person.employment_income),
+        db_income=flow(person.db_income),
+        db_lump_sum=flow(person.db_lump_sum),
+        state_pension_income=flow(person.state_pension_income),
         tax_due=flow(person.tax.tax_due),
         spending_need=flow(person.spending_need),
         net_withdrawn=flow(person.net_withdrawn),

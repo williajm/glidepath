@@ -23,10 +23,12 @@ from glidepath.core import (
     AssumptionSet,
     ContributionSchedule,
     ContributionTaxTreatment,
+    DBPension,
     Decision,
     EngineError,
     EntityId,
     Fact,
+    FactorTable,
     FeeSchedule,
     GlidePathConfig,
     GlidePathPoint,
@@ -42,8 +44,12 @@ from glidepath.core import (
     Rate,
     Region,
     ReliefMechanic,
+    RevaluationBasis,
+    RevaluationReference,
     RunConfig,
     SpendingPlan,
+    StatePensionEntitlement,
+    StatePensionRecord,
     TaxInput,
     TaxLine,
     TaxResidencyId,
@@ -52,6 +58,7 @@ from glidepath.core import (
     Wrapper,
     WrapperKindId,
     WrapperTaxTreatment,
+    add_months,
     date_age_attained,
     is_age_attained_by_period_start,
     run,
@@ -214,9 +221,37 @@ class RecordingContributionRules:
         )
 
 
+@dataclass(frozen=True)
+class StubStatePension:
+    """A pass-through scheme: configured amounts, entitled at ``start_age``.
+
+    The engine owns uprating, pro-rating, and the spending offset;
+    this stub only answers the region question — what is the
+    entitlement in today's rates and when does it start.
+    """
+
+    annual: Money = ZERO
+    cpi_annual: Money = ZERO
+    start_age: int = 67
+
+    def entitlement(
+        self, record: StatePensionRecord, date_of_birth: date, today: date
+    ) -> StatePensionEntitlement:
+        """The configured entitlement, deferral shifting the start."""
+        del today
+        start = date_age_attained(date_of_birth, self.start_age)
+        months = int(record.deferral_years.value * Decimal(12))
+        return StatePensionEntitlement(
+            start_date=add_months(start, months),
+            annual_amount=self.annual,
+            cpi_uprated_annual_amount=self.cpi_annual,
+        )
+
+
 def stub_region(
     contributions: RecordingContributionRules | None = None,
     free_kind_cap: Money | None = None,
+    state_pension: StubStatePension | None = None,
 ) -> Region:
     """A calendar-year region over the stub implementations."""
     return Region(
@@ -225,6 +260,7 @@ def stub_region(
         tax=FlatTaxSystem(),
         wrappers=StubWrapperRules(free_kind_cap=free_kind_cap),
         contributions=contributions or RecordingContributionRules(),
+        state_pension=state_pension or StubStatePension(),
         data_version="stub region v1",
     )
 
@@ -290,6 +326,8 @@ def person_of(
     date_of_birth: date = date(1990, 1, 1),
     retire_at: int = 65,
     employment: str | None = None,
+    db_pensions: tuple[DBPension, ...] = (),
+    state_pension: StatePensionRecord | None = None,
 ) -> Person:
     """A single test person."""
     return Person(
@@ -299,7 +337,58 @@ def person_of(
         tax_residency=RESIDENCY,
         employment_income=None if employment is None else money_fact(employment),
         wrappers=wrappers,
+        db_pensions=db_pensions,
+        state_pension=state_pension,
     )
+
+
+def db_pension_of(
+    *,
+    accrued: str = "8000",
+    statement: date = date(2026, 1, 1),
+    npa: int = 65,
+    basis: RevaluationBasis | None = None,
+    factors: dict[int, Decimal] | None = None,
+    commuted: str = "0",
+    commutation_factor: str | None = None,
+    taken_at: int | None = None,
+) -> DBPension:
+    """A deferred DB pension; the default basis never revalues."""
+    return DBPension(
+        id=EntityId("db-1"),
+        accrued_annual_pension=money_fact(accrued),
+        statement_date=statement,
+        normal_pension_age=Fact(value=npa, as_of=AS_OF, recorded_on=RECORDED),
+        revaluation_basis=basis
+        or RevaluationBasis(reference=RevaluationReference.NONE),
+        early_late_factors=FactorTable(factors=factors or {}),
+        commuted_fraction=Decision(value=Decimal(commuted), recorded_on=RECORDED),
+        commutation_factor=None
+        if commutation_factor is None
+        else Fact(value=Decimal(commutation_factor), as_of=AS_OF, recorded_on=RECORDED),
+        taken_at_age=None
+        if taken_at is None
+        else Decision(value=taken_at, recorded_on=RECORDED),
+    )
+
+
+def sp_record(deferral: str = "0") -> StatePensionRecord:
+    """A forecast-backed record; the stub scheme reads only the deferral."""
+    return StatePensionRecord(
+        forecast_weekly_amount=money_fact("200"),
+        protected_payment=None,
+        ni_record_start=None,
+        qualifying_years=None,
+        planned_extra_years=Decision(value=0, recorded_on=RECORDED),
+        deferral_years=Decision(value=Decimal(deferral), recorded_on=RECORDED),
+    )
+
+
+TRIPLE_LOCK = {
+    "rule": "triple_lock",
+    "floor": Decimal("0.025"),
+    "deterministic_cpi_margin": Decimal("0.005"),
+}
 
 
 def household_of(person: Person, *, spending: str | None = None) -> Household:
@@ -766,6 +855,343 @@ class TestWithdrawals:
         first, second = result.snapshots
         assert first.persons[0].spending_need == Money(Decimal("10000.00"))
         assert second.persons[0].spending_need == Money(Decimal("11000.00"))
+
+
+class TestPensionIncome:
+    """Step 2 income streams: DB pensions and the state pension (4.2/4.3)."""
+
+    def test_db_income_offsets_the_net_spending_need(self) -> None:
+        """Net-of-tax DB income meets the need before wrappers are drawn.
+
+        A 66-year-old with an 8,000 DB pension in payment (NPA 65, no
+        revaluation) and a 12,000 net need: the flat 25% tax leaves
+        6,000 net income, so only 6,000 comes from the free account.
+        """
+        free_account = wrapper_of(FREE, "100000")
+        pension = db_pension_of(accrued="8000", statement=date(2024, 1, 1), npa=65)
+        plan = household_of(
+            person_of(
+                (free_account,),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+            ),
+            spending="12000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.db_income == Money(Decimal("8000.00"))
+        assert person_result.tax.tax_due == Money(Decimal("2000.00"))
+        assert person_result.spending_need == Money(Decimal("12000.00"))
+        assert person_result.net_withdrawn == Money(Decimal("6000.00"))
+        assert person_result.shortfall == ZERO
+        [free_result] = person_result.wrappers
+        assert free_result.closing_uncrystallised == Money(Decimal("94000.00"))
+
+    def test_db_income_starting_mid_period_is_pro_rated(self) -> None:
+        """An entitlement beginning mid-period pays whole months only.
+
+        NPA 66 with a 1 July birthday starts payment halfway through
+        the calendar-year period: 6 of 12 months, so 4,000 of 8,000.
+        """
+        pension = db_pension_of(accrued="8000", npa=66)
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 7, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+            )
+        )
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        [person_result] = result.snapshots[0].persons
+        assert person_result.db_income == Money(Decimal("4000.00"))
+
+    def test_db_revaluation_compounds_before_and_within_the_run(self) -> None:
+        """A fixed 10% basis revalues the deferment span and each period.
+
+        Statement two years before today: the pre-run factor is
+        exactly 1.21; the second period compounds one more year.
+        """
+        basis = RevaluationBasis(
+            reference=RevaluationReference.FIXED, fixed_rate=Rate(Decimal("0.10"))
+        )
+        pension = db_pension_of(
+            accrued="8000", statement=date(2024, 1, 1), npa=65, basis=basis
+        )
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+            )
+        )
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        result = run(plan, assumptions_with(), stub_region(), config)
+        first, second = result.snapshots
+        assert first.persons[0].db_income == Money(Decimal("9680.00"))
+        assert second.persons[0].db_income == Money(Decimal("10648.00"))
+
+    def test_cpi_revaluation_is_capped_by_the_scheme_basis(self) -> None:
+        """CPI 8% against a 5% cap revalues at 5% (planning §5.1)."""
+        basis = RevaluationBasis(
+            reference=RevaluationReference.CPI, cap=Rate(Decimal("0.05"))
+        )
+        pension = db_pension_of(accrued="8000", npa=65, basis=basis)
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+            )
+        )
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        result = run(
+            plan,
+            assumptions_with({"inflation.cpi": Decimal("0.08")}),
+            stub_region(),
+            config,
+        )
+        first, second = result.snapshots
+        assert first.persons[0].db_income == Money(Decimal("8000.00"))
+        assert second.persons[0].db_income == Money(Decimal("8400.00"))
+
+    def test_commutation_trades_pension_for_a_lump_sum_at_start(self) -> None:
+        """Commuting 25% at factor 12 pays 24,000 once, pension drops.
+
+        8,000 x 25% = 2,000 given up buys 2,000 x 12 = 24,000 tax-free
+        in the starting period only; the residual pension is 6,000. The
+        lump sum plus net pension income covers the whole 12,000 need,
+        so nothing is drawn from wrappers.
+        """
+        free_account = wrapper_of(FREE, "100000")
+        pension = db_pension_of(
+            accrued="8000", npa=66, commuted="0.25", commutation_factor="12"
+        )
+        plan = household_of(
+            person_of(
+                (free_account,),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+            ),
+            spending="12000",
+        )
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            config,
+        )
+        first, second = result.snapshots
+        assert first.persons[0].db_income == Money(Decimal("6000.00"))
+        assert first.persons[0].db_lump_sum == Money(Decimal("24000.00"))
+        assert first.persons[0].net_withdrawn == ZERO
+        assert first.persons[0].shortfall == ZERO
+        assert second.persons[0].db_lump_sum == ZERO
+
+    def test_a_lump_sum_already_taken_stays_out_of_the_run(self) -> None:
+        """Benefits started before today never re-pay the lump sum.
+
+        The start date (NPA 65, 2025) precedes today, so the run sees
+        the reduced pension in payment and no commutation cash — that
+        money already lives in the user's stated balances.
+        """
+        pension = db_pension_of(
+            accrued="8000", npa=65, commuted="0.25", commutation_factor="12"
+        )
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+            )
+        )
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        [person_result] = result.snapshots[0].persons
+        assert person_result.db_income == Money(Decimal("6000.00"))
+        assert person_result.db_lump_sum == ZERO
+
+    def test_early_retirement_factor_scales_the_pension(self) -> None:
+        """Taking at 63 with a stated 0.85 factor pays 6,800 of 8,000."""
+        pension = db_pension_of(
+            accrued="8000", npa=65, taken_at=63, factors={63: Decimal("0.85")}
+        )
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1963, 1, 1),
+                retire_at=63,
+                db_pensions=(pension,),
+            )
+        )
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        [person_result] = result.snapshots[0].persons
+        assert person_result.db_income == Money(Decimal("6800.00"))
+
+    def test_state_pension_slices_uprate_by_rule_and_cpi(self) -> None:
+        """The main slice follows the triple-lock proxy, the rest CPI.
+
+        With CPI 2%, floor 2.5%, margin 0.5%: the 10,000 main slice
+        grows 2.5% while the 1,000 CPI slice grows 2% — 11,270 in the
+        second period.
+        """
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(),
+            )
+        )
+        scheme = StubStatePension(
+            annual=Money(Decimal(10000)), cpi_annual=Money(Decimal(1000)), start_age=66
+        )
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("0.02"),
+                    "policy.state_pension.uprating": TRIPLE_LOCK,
+                }
+            ),
+            stub_region(state_pension=scheme),
+            config,
+        )
+        first, second = result.snapshots
+        assert first.persons[0].state_pension_income == Money(Decimal("11000.00"))
+        assert second.persons[0].state_pension_income == Money(Decimal("11270.00"))
+        keys_read = {entry.key for entry in result.provenance.assumptions}
+        assert AssumptionKey.POLICY_STATE_PENSION_UPRATING in keys_read
+
+    def test_state_pension_deferral_shifts_the_start(self) -> None:
+        """A one-year deferral moves the entitlement into period two."""
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(deferral="1"),
+            )
+        )
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        result = run(
+            plan,
+            assumptions_with({"policy.state_pension.uprating": "cpi"}),
+            stub_region(state_pension=scheme),
+            config,
+        )
+        first, second = result.snapshots
+        assert first.persons[0].state_pension_income == ZERO
+        assert second.persons[0].state_pension_income == Money(Decimal("10000.00"))
+
+    def test_a_zero_entitlement_reads_no_uprating_assumption(self) -> None:
+        """A record earning nothing creates no stream and no reads.
+
+        The baseline assumption set has no uprating key, so a read
+        would fail loudly — and the provenance stays free of keys the
+        result does not rest on.
+        """
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(),
+            )
+        )
+        result = run(
+            plan,
+            assumptions_with(),
+            stub_region(state_pension=StubStatePension()),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.state_pension_income == ZERO
+        keys_read = {entry.key for entry in result.provenance.assumptions}
+        assert AssumptionKey.POLICY_STATE_PENSION_UPRATING not in keys_read
+
+    def test_pension_income_is_taxed_alongside_employment(self) -> None:
+        """DB income before retirement joins the assessed income picture."""
+        pension = db_pension_of(accrued="8000", npa=65)
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=70,
+                employment="20000",
+                db_pensions=(pension,),
+            )
+        )
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        [person_result] = result.snapshots[0].persons
+        assert person_result.employment_income == Money(Decimal("20000.00"))
+        assert person_result.db_income == Money(Decimal("8000.00"))
+        assert person_result.tax.tax_due == Money(Decimal("7000.00"))
+
+    def test_db_statement_after_today_is_rejected(self) -> None:
+        """A statement date in the future cannot anchor revaluation."""
+        pension = db_pension_of(accrued="8000", statement=date(2027, 6, 1), npa=65)
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+            )
+        )
+        assumptions = assumptions_with()
+        region = stub_region()
+        config = one_period_config()
+        with pytest.raises(EngineError, match="statement date"):
+            run(plan, assumptions, region, config)
+
+    def test_pension_provenance_lists_facts_and_decisions(self) -> None:
+        """DB and state pension entries land under stable labels."""
+        pension = db_pension_of(
+            accrued="8000",
+            npa=65,
+            taken_at=63,
+            factors={63: Decimal("0.85")},
+            commuted="0.25",
+            commutation_factor="12",
+        )
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+                state_pension=sp_record(),
+            )
+        )
+        result = run(
+            plan,
+            assumptions_with({"policy.state_pension.uprating": "cpi"}),
+            stub_region(state_pension=StubStatePension(annual=Money(Decimal(10000)))),
+            one_period_config(),
+        )
+        fact_labels = {entry.label for entry in result.provenance.facts}
+        decision_labels = {entry.label for entry in result.provenance.decisions}
+        assert "db_pension[db-1].accrued_annual_pension" in fact_labels
+        assert "db_pension[db-1].normal_pension_age" in fact_labels
+        assert "db_pension[db-1].commutation_factor" in fact_labels
+        assert "person[person-1].state_pension.forecast_weekly_amount" in fact_labels
+        assert "db_pension[db-1].taken_at_age" in decision_labels
+        assert "db_pension[db-1].commuted_fraction" in decision_labels
+        assert "person[person-1].state_pension.planned_extra_years" in decision_labels
+        assert "person[person-1].state_pension.deferral_years" in decision_labels
 
 
 class TestStagesAndAllocation:

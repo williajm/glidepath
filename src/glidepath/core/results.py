@@ -111,6 +111,12 @@ class PersonPeriodResult:
     net cash the withdrawal step delivered toward it; ``shortfall`` is
     the unmet remainder once every accessible wrapper was exhausted
     (the ruin signal the success metrics of roadmap 7.3 read).
+
+    ``db_income`` and ``state_pension_income`` are the period's DB and
+    state pension income actually in payment (revalued/uprated,
+    pro-rated from their exact start dates, §4.1); ``db_lump_sum`` is
+    tax-free commutation cash received when a DB pension starts this
+    period (roadmap 4.2/4.3).
     """
 
     person_id: EntityId
@@ -123,6 +129,9 @@ class PersonPeriodResult:
     net_withdrawn: Money
     shortfall: Money
     wrappers: tuple[WrapperPeriodResult, ...]
+    db_income: Money = _ZERO
+    db_lump_sum: Money = _ZERO
+    state_pension_income: Money = _ZERO
 
     def __post_init__(self) -> None:
         """Reject negative flows."""
@@ -131,6 +140,9 @@ class PersonPeriodResult:
             self.spending_need,
             self.net_withdrawn,
             self.shortfall,
+            self.db_income,
+            self.db_lump_sum,
+            self.state_pension_income,
         )
         if any(amount < _ZERO for amount in amounts):
             msg = "PersonPeriodResult amounts must be non-negative"
@@ -240,6 +252,24 @@ def collect_plan_facts(household: Household) -> tuple[LabelledFact, ...]:
         note(f"{prefix}.sex_for_longevity", person.sex_for_longevity)
         note(f"{prefix}.employment_income", person.employment_income)
         note(f"{prefix}.mpaa_triggered_on", person.mpaa_triggered_on)
+        for pension in person.db_pensions:
+            pension_prefix = f"db_pension[{pension.id}]"
+            note(
+                f"{pension_prefix}.accrued_annual_pension",
+                pension.accrued_annual_pension,
+            )
+            note(f"{pension_prefix}.normal_pension_age", pension.normal_pension_age)
+            note(f"{pension_prefix}.commutation_factor", pension.commutation_factor)
+        if person.state_pension is not None:
+            record = person.state_pension
+            record_prefix = f"{prefix}.state_pension"
+            note(
+                f"{record_prefix}.forecast_weekly_amount",
+                record.forecast_weekly_amount,
+            )
+            note(f"{record_prefix}.protected_payment", record.protected_payment)
+            note(f"{record_prefix}.ni_record_start", record.ni_record_start)
+            note(f"{record_prefix}.qualifying_years", record.qualifying_years)
         for wrapper in person.wrappers:
             wrapper_prefix = f"wrapper[{wrapper.id}]"
             note(f"{wrapper_prefix}.balance", wrapper.balance)
@@ -267,6 +297,35 @@ def collect_plan_decisions(household: Household) -> tuple[LabelledDecision, ...]
                 decision=person.target_retirement_age,
             )
         )
+        for pension in person.db_pensions:
+            pension_prefix = f"db_pension[{pension.id}]"
+            if pension.taken_at_age is not None:
+                decisions.append(
+                    LabelledDecision(
+                        label=f"{pension_prefix}.taken_at_age",
+                        decision=pension.taken_at_age,
+                    )
+                )
+            decisions.append(
+                LabelledDecision(
+                    label=f"{pension_prefix}.commuted_fraction",
+                    decision=pension.commuted_fraction,
+                )
+            )
+        if person.state_pension is not None:
+            record_prefix = f"person[{person.id}].state_pension"
+            decisions.append(
+                LabelledDecision(
+                    label=f"{record_prefix}.planned_extra_years",
+                    decision=person.state_pension.planned_extra_years,
+                )
+            )
+            decisions.append(
+                LabelledDecision(
+                    label=f"{record_prefix}.deferral_years",
+                    decision=person.state_pension.deferral_years,
+                )
+            )
         decisions.extend(
             LabelledDecision(
                 label=f"wrapper[{wrapper.id}].contributions.employee_amount",

@@ -9,8 +9,14 @@ spec (planning §5.2, tested):
    convention: retirement is attained only if reached by the period's
    first day).
 2. **Income** — employment income while accumulating, escalated by the
-   earnings-growth assumption (DB and state pension income land in
-   roadmap 4.2/4.3).
+   earnings-growth assumption; DB pension income (revalued in
+   deferment and increased in payment per the scheme basis, early/late
+   factors and commutation applied at start — roadmap 4.2) and state
+   pension income (region entitlement, uprated per the
+   ``policy.state_pension.uprating`` assumption with protected
+   payments and deferral increments uprating by CPI only — roadmap
+   4.3). Entitlements begin at their exact start dates and are
+   pro-rated by whole months within their starting period (§4.1).
 3. **Contributions** — employee + employer per schedule, escalation,
    per-kind caps, then the region's relief mechanics.
 4. **Withdrawals** — in decumulation, the household's net (after-tax)
@@ -34,7 +40,18 @@ v1 engine conventions, superseded as later phases land:
 - Withdrawal order is tax-aware and fixed (planning §5.2's default,
   pending the strategy protocol of roadmap 5.1): tax-free wrappers
   first, then funds already in drawdown (no fresh tax-free cash), then
-  new pension access where the region's gate is open.
+  new pension access where the region's gate is open. In decumulation
+  the net-of-tax DB/state-pension income (and any commutation lump
+  sum) received in the period offsets the net spending need before
+  wrappers are drawn; income beyond the need is not banked — there is
+  no cash/GIA wrapper until roadmap 9.2.
+- DB revaluation for the span before ``today`` — which the run never
+  models period-by-period — compounds the scheme basis over the whole
+  months from the statement date at the assumed CPI (planning §5.1);
+  within the run it advances with each period's CPI. A DB start date
+  before ``today`` means benefits are already in payment: income flows
+  from the run start and the commutation lump sum is treated as
+  already spent or banked in the user's stated balances.
 - Wrapper balance facts are taken as at the run start; annual-allowance
   measurement joins the loop when the AA charge is modelled
   (roadmap 5.x/9.5).
@@ -62,7 +79,18 @@ from glidepath.core.entities import validate_household_v1
 from glidepath.core.glide import glide_path_from_shape, years_to_target_retirement
 from glidepath.core.investments import FeeSchedule, period_fee
 from glidepath.core.money import Money, Rate
-from glidepath.core.periods import age_on, date_age_attained, period_active_fraction
+from glidepath.core.pensions import (
+    db_early_late_factor,
+    db_start_date,
+    revaluation_factor_for_months,
+)
+from glidepath.core.periods import (
+    age_on,
+    date_age_attained,
+    entitlement_active_fraction,
+    period_active_fraction,
+    whole_months_between,
+)
 from glidepath.core.provenance import (
     AssumptionKey,
     AssumptionReadRecorder,
@@ -81,6 +109,7 @@ from glidepath.core.results import (
     collect_plan_facts,
 )
 from glidepath.core.returns import DeterministicReturnModel
+from glidepath.core.state_pension import StatePensionUprating
 from glidepath.core.tax import TaxInput
 from glidepath.core.wrappers import WithdrawalTaxTreatment
 
@@ -91,10 +120,12 @@ if TYPE_CHECKING:
     from glidepath.core.entities import Household, Person, SpendingPlan
     from glidepath.core.glide import GlidePathConfig, LifeStage
     from glidepath.core.investments import AssetAllocation
+    from glidepath.core.pensions import RevaluationBasis
     from glidepath.core.periods import Period
     from glidepath.core.provenance import AssumptionSet
     from glidepath.core.region import Region
     from glidepath.core.returns import PeriodReturns
+    from glidepath.core.state_pension import StatePensionEntitlement
     from glidepath.core.wrappers import Wrapper, WrapperTaxTreatment
 
 _ZERO = Money(Decimal(0))
@@ -196,6 +227,54 @@ class _NominalFactors:
         return self._factors[key]
 
 
+@dataclass(slots=True)
+class _DbStream:
+    """One DB pension's income stream through the run (roadmap 4.2).
+
+    ``base_annual`` and ``lump_sum_base`` are revalued to the run start
+    (statement date to ``today`` at the assumed CPI), with the early or
+    late factor and commutation already applied; ``factor`` carries the
+    within-run revaluation forward per period, both in deferment and in
+    payment (the single-basis v1 convention, planning §5.1).
+    """
+
+    basis: RevaluationBasis
+    start: date
+    base_annual: Money
+    lump_sum_base: Money
+    factor: Decimal = _ONE
+
+    def advance(self, cpi: Decimal, fraction: Decimal) -> None:
+        """Compound one completed period's revaluation (§5.2 linear scaling)."""
+        self.factor *= _ONE + self.basis.annual_rate(cpi) * fraction
+
+
+@dataclass(slots=True)
+class _StatePensionStream:
+    """The person's state pension income stream (roadmap 4.3).
+
+    The entitlement's two slices uprate separately (planning §5.1, §6):
+    the main amount by the ``policy.state_pension.uprating`` rule, the
+    protected payment and deferral increments by CPI only.
+    """
+
+    entitlement: StatePensionEntitlement
+    uprating: StatePensionUprating
+    policy_factor: Decimal = _ONE
+    cpi_factor: Decimal = _ONE
+
+    def advance(self, cpi: Decimal, fraction: Decimal) -> None:
+        """Compound one completed period's uprating (§5.2 linear scaling)."""
+        self.policy_factor *= _ONE + self.uprating.annual_rate(cpi) * fraction
+        self.cpi_factor *= _ONE + cpi * fraction
+
+    def annual_amount(self) -> Money:
+        """The period's full annual state pension, uprated to date."""
+        policy_slice = self.entitlement.annual_amount * self.policy_factor
+        cpi_slice = self.entitlement.cpi_uprated_annual_amount * self.cpi_factor
+        return policy_slice + cpi_slice
+
+
 def run(
     plan: Household,
     assumptions: AssumptionSet,
@@ -250,6 +329,8 @@ class _Projection:
     _balances: dict[str, tuple[Money, Money]] = field(default_factory=dict)
     _taxable_income: Money = _ZERO
     _relief_at_source: Money = _ZERO
+    _db_streams: list[_DbStream] = field(default_factory=list)
+    _sp_stream: _StatePensionStream | None = None
 
     def execute(self) -> tuple[PeriodSnapshot, ...]:
         """Run the period loop and return the snapshots in order."""
@@ -264,6 +345,7 @@ class _Projection:
         }
         model = DeterministicReturnModel(assumptions=self.tracked)
         factors = _NominalFactors(self.tracked, self._escalation_keys())
+        self._build_income_streams()
         inflation = _ONE
         snapshots: list[PeriodSnapshot] = []
         horizon_end = self._horizon_end()
@@ -279,12 +361,74 @@ class _Projection:
                 # fast-forward a whole year of escalation.
                 inflation *= _ONE + previous_cpi * previous_fraction
                 factors.advance(previous_cpi, previous_fraction)
+                for stream in self._db_streams:
+                    stream.advance(previous_cpi, previous_fraction)
+                if self._sp_stream is not None:
+                    self._sp_stream.advance(previous_cpi, previous_fraction)
             snapshots.append(
                 self._project_period(period, returns, inflation, factors, fraction)
             )
             previous_cpi = returns.cpi.value
             previous_fraction = fraction
         return tuple(snapshots)
+
+    def _build_income_streams(self) -> None:
+        """Resolve the person's DB and state pension income streams.
+
+        DB amounts are revalued from the statement date to ``today``
+        over whole months at the assumed CPI (the run never models
+        time before ``today``; module docstring), with the early/late
+        factor and the commutation split applied. The state pension
+        entitlement comes from the region's scheme; its uprating rule
+        is read (and recorded) only when a record is present.
+
+        Raises:
+            EngineError: If a DB statement date lies in the future.
+        """
+        person = self.person
+        today = self.config.today
+        cpi = decimal_assumption_value(self.tracked.get(AssumptionKey.INFLATION_CPI))
+        for pension in person.db_pensions:
+            if pension.statement_date > today:
+                msg = (
+                    f"DB pension {pension.id}: statement date"
+                    f" {pension.statement_date} is after today {today}"
+                )
+                raise EngineError(msg)
+            months = whole_months_between(pension.statement_date, today)
+            annual_rate = pension.revaluation_basis.annual_rate(cpi)
+            revalued = pension.accrued_annual_pension.value * (
+                revaluation_factor_for_months(annual_rate, months)
+                * db_early_late_factor(pension)
+            )
+            commuted = pension.commuted_fraction.value
+            lump_sum = _ZERO
+            if commuted > Decimal(0) and pension.commutation_factor is not None:
+                lump_sum = revalued * (commuted * pension.commutation_factor.value)
+            self._db_streams.append(
+                _DbStream(
+                    basis=pension.revaluation_basis,
+                    start=db_start_date(pension, person.date_of_birth.value),
+                    base_annual=revalued * (_ONE - commuted),
+                    lump_sum_base=lump_sum,
+                )
+            )
+        if person.state_pension is None:
+            return
+        entitlement = self.region.state_pension.entitlement(
+            person.state_pension, person.date_of_birth.value, today
+        )
+        if (
+            entitlement.annual_amount <= _ZERO
+            and entitlement.cpi_uprated_annual_amount <= _ZERO
+        ):
+            return
+        uprating = StatePensionUprating.from_assumption_value(
+            self.tracked.get(AssumptionKey.POLICY_STATE_PENSION_UPRATING).value
+        )
+        self._sp_stream = _StatePensionStream(
+            entitlement=entitlement, uprating=uprating
+        )
 
     def _horizon_end(self) -> date:
         """The configured horizon end, or the planning-age default (§5.2)."""
@@ -351,7 +495,9 @@ class _Projection:
         run window (roadmap 4.6): flows and the annual growth/fee rates
         are scaled by it, so a mid-period ``today`` never re-models
         months already reflected in the balance facts, and the final
-        period never models time past the horizon end.
+        period never models time past the horizon end. Income
+        entitlements pro-rate by their own start dates within the same
+        window (§4.1).
         """
         person = self.person
         # Step 1 — open.
@@ -374,23 +520,33 @@ class _Projection:
                 * factors.factor(AssumptionKey.EARNINGS_GROWTH_REAL)
                 * fraction
             )
+        db_income, db_lump_sum = self._db_amounts(period)
+        state_pension = self._state_pension_amount(period)
         # Steps 3-4 — contributions, then withdrawals.
-        self._taxable_income = employment
+        self._taxable_income = employment + db_income + state_pension
         self._relief_at_source = _ZERO
         if not retired:
             self._contribution_step(ledgers, period, employment, factors, fraction)
         need = _ZERO
+        wrapper_need = _ZERO
         delivered = _ZERO
         if retired and self.plan.spending is not None:
             need = _spending_need(self.plan.spending, stage, inflation) * fraction
-            delivered = self._withdrawal_step(ledgers, period, need)
+            # Net-of-tax pension income and any commutation lump sum
+            # meet the net need first; only the remainder is drawn from
+            # wrappers (income beyond the need is not banked — module
+            # docstring).
+            income_tax = self.region.tax.assess(period, self._tax_input()).tax_due
+            income_net = db_income + state_pension + db_lump_sum - income_tax
+            wrapper_need = max(need - income_net, _ZERO)
+            delivered = self._withdrawal_step(ledgers, period, wrapper_need)
         # Step 5 — final tax assessment on the full income picture.
         tax = self.region.tax.assess(period, self._tax_input())
         # Steps 6-8 — fees, growth, close.
         wrapper_results = tuple(
             self._close_wrapper(ledger, returns, fraction) for ledger in ledgers
         )
-        shortfall = max(need - delivered, _ZERO)
+        shortfall = max(wrapper_need - delivered, _ZERO)
         person_result = PersonPeriodResult(
             person_id=person.id,
             age_at_period_start=age,
@@ -402,6 +558,9 @@ class _Projection:
             net_withdrawn=delivered.quantized(),
             shortfall=shortfall.quantized(),
             wrappers=wrapper_results,
+            db_income=db_income.quantized(),
+            db_lump_sum=db_lump_sum.quantized(),
+            state_pension_income=state_pension.quantized(),
         )
         return PeriodSnapshot(
             period=period,
@@ -410,6 +569,49 @@ class _Projection:
             persons=(person_result,),
             year_fraction=fraction,
         )
+
+    def _db_amounts(self, period: Period) -> tuple[Money, Money]:
+        """Step 2: DB income in payment plus any commutation lump sum.
+
+        Income pro-rates from each pension's exact start date within
+        the run window (§4.1). The lump sum lands once, in the period
+        containing the start date — and only when that date is inside
+        the window: an already-taken lump sum lives in the user's
+        stated balances, not the model (module docstring).
+        """
+        income = _ZERO
+        lump_sum = _ZERO
+        today = self.config.today
+        horizon_end = self._horizon_end()
+        for stream in self._db_streams:
+            share = entitlement_active_fraction(
+                stream.start, period, today, horizon_end
+            )
+            if share > Decimal(0):
+                income = income + stream.base_annual * (stream.factor * share)
+            if period.contains(stream.start) and today <= stream.start <= horizon_end:
+                lump_sum = lump_sum + stream.lump_sum_base * stream.factor
+        return income, lump_sum
+
+    def _state_pension_amount(self, period: Period) -> Money:
+        """Step 2: state pension income in payment for ``period``.
+
+        The uprated annual amount (both slices) pro-rated from the
+        entitlement's exact start date — state pension age plus any
+        deferral — within the run window (§4.1).
+        """
+        stream = self._sp_stream
+        if stream is None:
+            return _ZERO
+        share = entitlement_active_fraction(
+            stream.entitlement.start_date,
+            period,
+            self.config.today,
+            self._horizon_end(),
+        )
+        if share <= Decimal(0):
+            return _ZERO
+        return stream.annual_amount() * share
 
     def _open_ledger(
         self, wrapper: Wrapper, period: Period, glide: GlidePathConfig, ytr: int

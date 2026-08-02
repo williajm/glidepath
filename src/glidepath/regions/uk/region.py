@@ -38,6 +38,7 @@ from glidepath.regions.uk.loader import (
     load_tax_year,
 )
 from glidepath.regions.uk.schema import SCHEMA_VERSION
+from glidepath.regions.uk.state_pension import UkStatePensionScheme
 from glidepath.regions.uk.tax import UkTaxSystem
 from glidepath.regions.uk.wrappers import UkWrapperRuleset
 
@@ -101,6 +102,7 @@ def uk_region(future_years: FutureYearsExtension | None = None) -> Region:
         tax=UkTaxSystem.from_shipped_data(future_years),
         wrappers=UkWrapperRuleset.from_shipped_data(future_years),
         contributions=UkContributionRuleset.from_shipped_data(future_years),
+        state_pension=UkStatePensionScheme.from_shipped_data(future_years),
         data_version=_data_version(future_years),
     )
 

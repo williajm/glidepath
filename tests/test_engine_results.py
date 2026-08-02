@@ -220,6 +220,7 @@ class TestSpendingPlanAndRegion:
                 tax=None,  # type: ignore[arg-type]
                 wrappers=None,  # type: ignore[arg-type]
                 contributions=None,  # type: ignore[arg-type]
+                state_pension=None,  # type: ignore[arg-type]
                 data_version="",
             )
 

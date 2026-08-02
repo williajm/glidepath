@@ -183,6 +183,12 @@ def test_lisa_ages_and_deferral() -> None:
     assert rules.deferral.per_weeks == 9
 
 
+def test_new_state_pension_system_start() -> None:
+    """The new state pension began 6 April 2016 (the derivation gate)."""
+    rules = load_age_rules()
+    assert rules.new_state_pension.system_start == date(2016, 4, 6)
+
+
 def test_default_assumptions_cover_every_key() -> None:
     """The defaults file defines every AssumptionKey exactly once."""
     file = load_default_assumptions()
