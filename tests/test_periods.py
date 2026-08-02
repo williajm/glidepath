@@ -40,8 +40,9 @@ def test_period_contains_both_endpoints() -> None:
 
 def test_period_rejects_end_before_start() -> None:
     """A backwards period is invalid."""
+    start, end = date(2026, 1, 2), date(2026, 1, 1)
     with pytest.raises(ValueError, match="precedes start"):
-        Period(date(2026, 1, 2), date(2026, 1, 1))
+        Period(start, end)
 
 
 def test_annual_calendar_is_a_fiscal_calendar() -> None:
@@ -79,8 +80,9 @@ def test_periods_iterate_an_arbitrary_horizon() -> None:
 
 def test_periods_reject_backwards_horizon() -> None:
     """A horizon ending before it starts is invalid."""
+    backwards = APRIL_6.periods(date(2026, 1, 2), date(2026, 1, 1))
     with pytest.raises(ValueError, match="precedes start"):
-        list(APRIL_6.periods(date(2026, 1, 2), date(2026, 1, 1)))
+        list(backwards)
 
 
 def test_calendar_rejects_leap_day_anchor() -> None:
@@ -120,14 +122,16 @@ def test_age_on_boundaries() -> None:
 
 def test_age_on_rejects_days_before_birth() -> None:
     """Asking for an age before birth is a caller error."""
+    dob, day = date(1971, 4, 5), date(1971, 4, 4)
     with pytest.raises(ValueError, match="precedes date of birth"):
-        age_on(date(1971, 4, 5), date(1971, 4, 4))
+        age_on(dob, day)
 
 
 def test_date_age_attained_rejects_negative_age() -> None:
     """Negative ages are invalid."""
+    dob = date(1971, 4, 5)
     with pytest.raises(ValueError, match="non-negative"):
-        date_age_attained(date(1971, 4, 5), -1)
+        date_age_attained(dob, -1)
 
 
 def test_access_gate_convention_last_day_birthday_unlocks_next_period() -> None:
@@ -168,8 +172,9 @@ def test_whole_months_between_counts_complete_months() -> None:
 
 def test_whole_months_between_rejects_backwards_range() -> None:
     """A range ending before it starts is invalid."""
+    start, end = date(2026, 2, 1), date(2026, 1, 1)
     with pytest.raises(ValueError, match="precedes start"):
-        whole_months_between(date(2026, 2, 1), date(2026, 1, 1))
+        whole_months_between(start, end)
 
 
 def test_prorata_full_period_when_entitlement_predates_period() -> None:
@@ -196,5 +201,6 @@ def test_prorata_whole_months_mid_period() -> None:
 def test_prorata_rejects_sub_month_period() -> None:
     """Pro-rating needs at least one whole month to divide by."""
     period = Period(date(2026, 1, 1), date(2026, 1, 15))
+    mid_period = date(2026, 1, 2)
     with pytest.raises(ValueError, match="shorter than one whole month"):
-        prorata_fraction(date(2026, 1, 2), period)
+        prorata_fraction(mid_period, period)

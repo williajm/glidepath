@@ -74,10 +74,8 @@ class AnnualCalendar:
         try:
             date(_NON_LEAP_YEAR, self.anchor_month, self.anchor_day)
         except ValueError as exc:
-            msg = (
-                f"anchor {self.anchor_month:02d}-{self.anchor_day:02d} must be"
-                " a valid day in every year (29 February is not permitted)"
-            )
+            anchor = f"{self.anchor_month:02d}-{self.anchor_day:02d}"
+            msg = f"anchor {anchor} must be a valid day in every year (no 29 February)"
             raise ValueError(msg) from exc
 
     def _anchor_in_year(self, year: int) -> date:

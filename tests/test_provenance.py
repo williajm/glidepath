@@ -56,8 +56,9 @@ def test_fact_holds_value_and_dates() -> None:
 
 def test_fact_rejects_naive_recorded_on() -> None:
     """Datetimes are always tz-aware (repo rule)."""
+    as_of = date(2026, 8, 1)
     with pytest.raises(ValueError, match="timezone-aware"):
-        Fact(value=1, as_of=date(2026, 8, 1), recorded_on=NAIVE)
+        Fact(value=1, as_of=as_of, recorded_on=NAIVE)
 
 
 def test_decision_rejects_naive_recorded_on() -> None:
@@ -68,11 +69,12 @@ def test_decision_rejects_naive_recorded_on() -> None:
 
 def test_assumption_rejects_user_fact_provenance() -> None:
     """An assumption is by definition not a user-stated fact."""
+    two_percent = Decimal("0.02")
     with pytest.raises(ValueError, match="USER_FACT"):
         Assumption(
             key=AssumptionKey.INFLATION_CPI,
-            value=Decimal("0.02"),
-            default_value=Decimal("0.02"),
+            value=two_percent,
+            default_value=two_percent,
             provenance=Provenance.USER_FACT,
             source="https://example.test",
             recorded_on=RECORDED,
@@ -82,11 +84,12 @@ def test_assumption_rejects_user_fact_provenance() -> None:
 
 def test_assumption_rejects_naive_recorded_on() -> None:
     """Assumptions carry tz-aware timestamps too."""
+    two_percent = Decimal("0.02")
     with pytest.raises(ValueError, match="timezone-aware"):
         Assumption(
             key=AssumptionKey.INFLATION_CPI,
-            value=Decimal("0.02"),
-            default_value=Decimal("0.02"),
+            value=two_percent,
+            default_value=two_percent,
             provenance=Provenance.DEFAULT_ASSUMPTION,
             source="https://example.test",
             recorded_on=NAIVE,

@@ -59,12 +59,14 @@ def test_household_rejects_zero_and_three_persons() -> None:
     """The schema bound is 1..2 persons."""
     with pytest.raises(ValueError, match="1 or 2 persons"):
         Household(persons=())
+    three = (make_person(), make_person(), make_person())
     with pytest.raises(ValueError, match="1 or 2 persons"):
-        Household(persons=(make_person(), make_person(), make_person()))
+        Household(persons=three)
 
 
 def test_household_rejects_duplicate_entity_ids() -> None:
     """Stable ids are override targets; duplicates would be ambiguous."""
     shared = new_entity_id()
+    duplicates = (make_person(shared), make_person(shared))
     with pytest.raises(ValueError, match="distinct EntityIds"):
-        Household(persons=(make_person(shared), make_person(shared)))
+        Household(persons=duplicates)

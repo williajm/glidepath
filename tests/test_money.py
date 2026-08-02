@@ -98,8 +98,9 @@ def test_money_rejects_float() -> None:
 @pytest.mark.parametrize("raw", ["NaN", "Infinity", "-Infinity"])
 def test_money_rejects_non_finite(raw: str) -> None:
     """NaN and infinities are invalid amounts."""
+    amount = Decimal(raw)
     with pytest.raises(ValueError, match="must be finite"):
-        Money(Decimal(raw))
+        Money(amount)
 
 
 def test_rate_growth_factor_and_of() -> None:
@@ -113,5 +114,6 @@ def test_rate_rejects_float_and_non_finite() -> None:
     """Rates are Decimal and finite, like money."""
     with pytest.raises(TypeError, match="must be Decimal"):
         Rate(0.05)  # type: ignore[arg-type]
+    nan = Decimal("NaN")
     with pytest.raises(ValueError, match="must be finite"):
-        Rate(Decimal("NaN"))
+        Rate(nan)
