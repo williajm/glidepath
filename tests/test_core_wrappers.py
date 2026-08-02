@@ -6,11 +6,14 @@ from decimal import Decimal
 import pytest
 
 from glidepath.core import (
+    ContributionSchedule,
     ContributionTaxTreatment,
+    Decision,
     Fact,
     GrowthTaxTreatment,
     Money,
     Rate,
+    ReliefMechanic,
     WithdrawalTaxTreatment,
     Wrapper,
     WrapperKindId,
@@ -46,6 +49,22 @@ def test_wrapper_carries_crystallised_balance() -> None:
     )
     assert wrapper.crystallised_balance is not None
     assert wrapper.crystallised_balance.value == Money(Decimal(80000))
+
+
+def test_wrapper_carries_contribution_schedule() -> None:
+    """A wrapper's planned contributions attach as a schedule (issue 3.2)."""
+    schedule = ContributionSchedule(
+        employee_amount=Decision(value=Money(Decimal(6000)), recorded_on=RECORDED),
+        employer_amount=money_fact("4000"),
+        relief_mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
+    )
+    wrapper = Wrapper(
+        id=new_entity_id(),
+        kind=KIND,
+        balance=money_fact("125000"),
+        contributions=schedule,
+    )
+    assert wrapper.contributions is schedule
 
 
 def test_wrapper_rejects_negative_balance() -> None:

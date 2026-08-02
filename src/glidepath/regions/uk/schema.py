@@ -167,10 +167,19 @@ class PensionRules:
     aa_taper_rate: Rate
     aa_taper_floor: Money
     mpaa: Money
+    member_relief_basic_amount: Money
+    """Relief floor for low/no earners, available via relief at source only."""
+    member_relief_max_age: int
+    """No relief on contributions from this age on (FA 2004 s188(3)(a))."""
     relief_at_source_rate: Rate
     tax_free_lump_sum_fraction: Rate
     lump_sum_allowance: Money
     lump_sum_death_benefit_allowance: Money
+
+    def __post_init__(self) -> None:
+        """Require a positive relief age limit."""
+        if self.member_relief_max_age <= 0:
+            _fail("PensionRules", "member_relief_max_age must be positive")
 
 
 @dataclass(frozen=True, slots=True)

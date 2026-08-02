@@ -279,6 +279,15 @@ def _parse_pension(raw: object, context: str) -> PensionRules:
             table.take("aa_taper_floor"), f"{context}.aa_taper_floor"
         ),
         mpaa=_money(table.take("mpaa"), f"{context}.mpaa"),
+        member_relief_basic_amount=_money(
+            table.take("member_relief_basic_amount"),
+            f"{context}.member_relief_basic_amount",
+        ),
+        member_relief_max_age=_integer(
+            table.take("member_relief_max_age"),
+            f"{context}.member_relief_max_age",
+            minimum=1,
+        ),
         relief_at_source_rate=_fraction(
             table.take("relief_at_source_rate"), f"{context}.relief_at_source_rate"
         ),

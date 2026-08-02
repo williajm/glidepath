@@ -50,6 +50,28 @@ def make_wrapper(wrapper_id: EntityId | None = None) -> Wrapper:
     )
 
 
+def test_person_defaults_to_no_mpaa_trigger() -> None:
+    """Most users have never flexibly accessed a pension."""
+    assert make_person().mpaa_triggered_on is None
+
+
+def test_person_carries_mpaa_trigger_fact() -> None:
+    """Pre-plan flexible access is a stated fact (planning §5.1, issue 3.3)."""
+    triggered = Fact(
+        value=date(2024, 6, 1), as_of=date(2026, 8, 1), recorded_on=RECORDED
+    )
+    person = Person(
+        id=new_entity_id(),
+        date_of_birth=Fact(
+            value=date(1966, 4, 5), as_of=date(2026, 8, 1), recorded_on=RECORDED
+        ),
+        target_retirement_age=Decision(value=60, recorded_on=RECORDED),
+        tax_residency=TaxResidencyId("uk.ruk"),
+        mpaa_triggered_on=triggered,
+    )
+    assert person.mpaa_triggered_on is triggered
+
+
 def test_new_entity_ids_are_unique_strings() -> None:
     """Fresh ids are distinct and stringly persisted."""
     first, second = new_entity_id(), new_entity_id()

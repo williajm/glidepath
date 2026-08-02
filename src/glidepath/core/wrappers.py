@@ -24,6 +24,7 @@ from glidepath.core.money import Money
 if TYPE_CHECKING:
     from datetime import date
 
+    from glidepath.core.contributions import ContributionSchedule
     from glidepath.core.entities import EntityId
     from glidepath.core.money import Rate
     from glidepath.core.periods import Period
@@ -123,7 +124,8 @@ class Wrapper:
     holds funds already designated to drawdown — making an
     already-in-drawdown user modellable (no fresh tax-free cash on
     crystallised funds, planning §5.1); non-pension kinds leave it
-    ``None``. Allocation (3.5), fees (3.4) and contributions (3.2)
+    ``None``. ``contributions`` is the wrapper's planned contribution
+    schedule, if any (roadmap 3.2); allocation (3.5) and fees (3.4)
     attach in later roadmap items.
     """
 
@@ -131,6 +133,7 @@ class Wrapper:
     kind: WrapperKindId
     balance: Fact[Money]
     crystallised_balance: Fact[Money] | None = None
+    contributions: ContributionSchedule | None = None
 
     def __post_init__(self) -> None:
         """Reject negative balances."""

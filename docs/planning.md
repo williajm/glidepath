@@ -538,6 +538,8 @@ aa_taper_adjusted_income   = "260000"
 aa_taper_rate              = "0.5"
 aa_taper_floor             = "10000"
 mpaa                       = "10000"
+member_relief_basic_amount = "3600"  # low/no-earner relief floor, RAS only
+member_relief_max_age      = 75  # no relief on contributions from age 75
 relief_at_source_rate      = "0.20"
 tax_free_lump_sum_fraction = "0.25"
 lump_sum_allowance         = "268275"
@@ -626,9 +628,9 @@ become the Phase 2 data files.
 | Figure | Value | Source |
 | --- | --- | --- |
 | Annual allowance | £60,000 — measures total *pension input amounts* incl. employer contributions and DB accrual; excess charged via the AA charge. Distinct from the member relief limit below | [pension scheme rates](https://www.gov.uk/government/publications/rates-and-allowances-pension-schemes/pension-schemes-rates); [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance) |
-| Member relief limit | tax relief on *member* contributions limited to 100% of relevant UK earnings (low/no earners keep a small basic-amount limit — figure to verify, §9) | [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance) |
-| AA taper | threshold income £200,000; adjusted income £260,000; −£1 per £2; floor £10,000 | rates page; [tapered AA guidance](https://www.gov.uk/guidance/pension-schemes-work-out-your-tapered-annual-allowance) |
-| MPAA | £10,000; triggered by first FAD income payment, first UFPLS, etc. (not by PCLS-only or standard lifetime annuity); when triggered, DB accrual keeps an *alternative* annual allowance (figure to verify, §9) | rates page; [PTM056520](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm056520) |
+| Member relief limit | tax relief on *member* contributions limited to 100% of relevant UK earnings; low/no earners keep the **£3,600 gross (£2,880 net)** basic amount, available via relief at source only. The limit is a per-person aggregate across all schemes and mechanics; contributions from **age 75** are never relievable (FA 2004 s188(3)(a)) (verified 2026-08-02) | [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance); [pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief); [FA 2004 s190](https://www.legislation.gov.uk/ukpga/2004/12/section/190); [PTM044100](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm044100) |
+| AA taper | threshold income £200,000; adjusted income £260,000; −£1 per £2 (reduction rounded down to the whole £, PTM057100); floor £10,000. Adjusted income includes all employer-funded pension input (for DB: input amount net of member contributions). Known v1 limitation: the post-8-July-2015 salary-sacrifice add-back to threshold income is not modelled (no salary-sacrifice concept in v1) | rates page; [tapered AA guidance](https://www.gov.uk/guidance/pension-schemes-work-out-your-tapered-annual-allowance); [PTM057100](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm057100) |
+| MPAA | £10,000; triggered by first FAD income payment, first UFPLS, etc. (not by PCLS-only or standard lifetime annuity); when triggered, DB accrual keeps an *alternative* annual allowance = AA − MPAA (£50,000; computed, not an independent figure — nil at maximum taper; carry-forward may top up the alternative AA but never the MPAA; verified 2026-08-02) | rates page; [PTM056520](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm056520); [HS345 (2026)](https://www.gov.uk/government/publications/pensions-tax-charges-on-any-excess-over-the-lifetime-allowance-annual-allowance-special-annual-allowance-and-on-unauthorised-payments-hs345-self/hs345-pension-savings-tax-charges-2026) |
 | AA carry-forward | unused AA from previous 3 tax years (detail re-verify at implementation) | [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance) |
 | Relief at source | provider adds 20% basic-rate relief (25% top-up on net); higher/additional via assessment; Scottish variants | [pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief) |
 | Net pay | pre-tax deduction; full marginal relief automatic | same |
@@ -863,8 +865,16 @@ Carried from the 2026-08-01 research pass:
 6. **OBR 50-year determinants** — medium-term EFO figures verified; the
    long-term determinants are in Fiscal risks & sustainability July 2026
    (PDF) — worth extracting for >30-year horizons.
-7. **Member relief basic amount** — the low/no-earner relief floor
-   (commonly quoted as £3,600 gross) was not verified on a fetched primary
-   page; verify before Phase 3 (items 3.2/3.3).
-8. **Alternative annual allowance** — the DB-side allowance that remains
-   after an MPAA trigger was not verified; verify at Phase 3 (item 3.3).
+7. **Member relief basic amount** — *resolved 2026-08-02*: £3,600 gross
+   (£2,880 net), available via relief at source only, verified on
+   [gov.uk pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief)
+   and [FA 2004 s190](https://www.legislation.gov.uk/ukpga/2004/12/section/190)
+   ("the basic amount is £3,600"). Shipped as
+   `pension.member_relief_basic_amount` in the tax-year data file (§6).
+8. **Alternative annual allowance** — *resolved 2026-08-02*: the DB-side
+   allowance after an MPAA trigger is the (possibly tapered) annual
+   allowance minus the MPAA — £50,000 standard, nil at maximum taper —
+   computed, never stored as an independent figure; carry-forward may top
+   up the alternative AA but never the MPAA. Verified on
+   [HS345 (2026)](https://www.gov.uk/government/publications/pensions-tax-charges-on-any-excess-over-the-lifetime-allowance-annual-allowance-special-annual-allowance-and-on-unauthorised-payments-hs345-self/hs345-pension-savings-tax-charges-2026)
+   (§6).
