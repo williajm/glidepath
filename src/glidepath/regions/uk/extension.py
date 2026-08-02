@@ -6,12 +6,16 @@ tax-year files by extending the final shipped year per the
 
 - ``frozen`` — every figure carried forward unchanged indefinitely
   (nominal freeze: fiscal drag forever);
-- ``cpi_indexed`` — money figures compound with assumed CPI from the
-  last shipped year (the schedule holds constant in real terms);
 - ``frozen_then_cpi_indexed`` — frozen up to and including
   ``frozen_until_tax_year``, CPI-indexed thereafter. The shipped
   default: the legislated freeze to 2030/31 (planning §6), then
   indexation.
+
+There is deliberately no index-immediately mode: a legislated freeze
+end is a fact (planning §6), and a mode without one could synthesize
+years that contradict known legislation. A freeze end at or before the
+last shipped year already degrades to pure CPI indexation from that
+year, so nothing is lost once the freeze lapses.
 
 Legislated data always beats extrapolation: extension applies only past
 the last shipped file and re-bases automatically when a newer file
@@ -64,7 +68,6 @@ class FutureYearsMode(StrEnum):
     """How the last shipped tax year extrapolates (planning §5.3, §7)."""
 
     FROZEN = "frozen"
-    CPI_INDEXED = "cpi_indexed"
     FROZEN_THEN_CPI_INDEXED = "frozen_then_cpi_indexed"
 
 
@@ -90,7 +93,15 @@ class FutureYearsPolicy:
     """Start year of the last frozen tax year (``frozen_then_cpi_indexed``)."""
 
     def __post_init__(self) -> None:
-        """Require the freeze end exactly when the mode uses one."""
+        """Require a real mode and the freeze end exactly when it uses one.
+
+        The mode must be an actual :class:`FutureYearsMode` member: a
+        bare string would pass the ``is`` identity checks below as
+        neither mode and silently index a "frozen" policy.
+        """
+        if not isinstance(self.mode, FutureYearsMode):
+            type_name = type(self.mode).__name__
+            _fail(_CONTEXT, f"mode must be a FutureYearsMode member, got {type_name}")
         needs_until = self.mode is FutureYearsMode.FROZEN_THEN_CPI_INDEXED
         if needs_until and self.frozen_until_start_year is None:
             _fail(_CONTEXT, f"mode {self.mode} requires frozen_until_tax_year")
@@ -123,12 +134,20 @@ class FutureYearsPolicy:
         last shipped, legislated file) and the policy's freeze end —
         legislated data always beats extrapolation.
         """
-        if self.mode is FutureYearsMode.FROZEN:
+        frozen_until = self.frozen_until_start_year
+        if frozen_until is None:  # __post_init__ invariant: the mode is FROZEN
             return 0
-        floor = base_start_year
-        if self.frozen_until_start_year is not None:
-            floor = max(floor, self.frozen_until_start_year)
-        return max(0, target_start_year - floor)
+        return max(0, target_start_year - max(base_start_year, frozen_until))
+
+
+def _require_indexable_cpi(cpi: Rate, context: str) -> None:
+    """Reject a CPI at or below -100%: growth factors must stay positive.
+
+    A non-positive growth factor collapses or sign-flips every money
+    figure; with an even step count the output would even look valid.
+    """
+    if cpi.growth_factor <= 0:
+        _fail(context, "CPI must be greater than -100%")
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,9 +159,8 @@ class FutureYearsExtension:
     """Assumed annual CPI (the ``inflation.cpi`` assumption)."""
 
     def __post_init__(self) -> None:
-        """Reject a CPI at or below -100%: growth factors must stay positive."""
-        if self.cpi.growth_factor <= 0:
-            _fail("FutureYearsExtension.cpi", "CPI must be greater than -100%")
+        """Validate the CPI at construction time."""
+        _require_indexable_cpi(self.cpi, "FutureYearsExtension.cpi")
 
 
 def _indexed_money(money: Money, factor: Decimal) -> Money:
@@ -216,7 +234,9 @@ def extend_tax_year(
 
     Raises:
         ValueError: If ``target_start_year`` is not after the base year.
+        DataFileError: If ``cpi`` is at or below -100%.
     """
+    _require_indexable_cpi(cpi, "extend_tax_year.cpi")
     base_start_year = base.meta.start_date.year
     if target_start_year <= base_start_year:
         msg = (

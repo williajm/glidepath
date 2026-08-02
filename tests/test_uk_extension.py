@@ -64,6 +64,9 @@ def test_frozen_needs_no_freeze_end() -> None:
         ({}, "missing required key 'mode'"),
         ({"mode": Decimal(1)}, "expected a string"),
         ({"mode": "sideways"}, "unknown mode"),
+        # Index-immediately is deliberately not a mode: it could contradict
+        # a legislated freeze (planning §6). Use a lapsed freeze end instead.
+        ({"mode": "cpi_indexed"}, "unknown mode"),
         ({"mode": "frozen", "extra": "x"}, "unknown keys: extra"),
         (
             {"mode": "frozen_then_cpi_indexed", "frozen_until_tax_year": 2030},
@@ -82,10 +85,6 @@ def test_frozen_needs_no_freeze_end() -> None:
             {"mode": "frozen", "frozen_until_tax_year": "2030/31"},
             "does not take frozen_until_tax_year",
         ),
-        (
-            {"mode": "cpi_indexed", "frozen_until_tax_year": "2030/31"},
-            "does not take frozen_until_tax_year",
-        ),
     ],
 )
 def test_invalid_policy_values_are_rejected(value: object, problem: str) -> None:
@@ -100,6 +99,12 @@ def test_direct_construction_enforces_the_same_invariants() -> None:
         FutureYearsPolicy(mode=FutureYearsMode.FROZEN_THEN_CPI_INDEXED)
 
 
+def test_mode_must_be_an_enum_member() -> None:
+    """A bare string would dodge the identity checks and silently index."""
+    with pytest.raises(DataFileError, match="must be a FutureYearsMode member"):
+        FutureYearsPolicy(mode="frozen")  # type: ignore[arg-type]
+
+
 def test_cpi_at_or_below_minus_one_is_rejected(
     default_policy: FutureYearsPolicy,
 ) -> None:
@@ -107,6 +112,17 @@ def test_cpi_at_or_below_minus_one_is_rejected(
     collapse = Rate(Decimal(-1))
     with pytest.raises(DataFileError, match="greater than -100%"):
         FutureYearsExtension(policy=default_policy, cpi=collapse)
+
+
+def test_extend_tax_year_validates_the_cpi_itself(
+    base: TaxYearFile, default_policy: FutureYearsPolicy
+) -> None:
+    """The exported function rejects an unindexable CPI directly too."""
+    # -300%: an even step count would give a positive factor and
+    # plausible-looking (but nonsense) figures if this were allowed.
+    inverted = Rate(Decimal(-3))
+    with pytest.raises(DataFileError, match="greater than -100%"):
+        extend_tax_year(base, 2031, policy=default_policy, cpi=inverted)
 
 
 # --- extension mechanics ----------------------------------------------------
@@ -222,15 +238,12 @@ def test_indexation_compounds_once_from_the_base_year(
     assert extended.income_tax_ruk.personal_allowance == Money(Decimal(13878))
 
 
-def test_cpi_indexed_mode_indexes_from_the_base_year(base: TaxYearFile) -> None:
-    """Pure CPI indexation starts the year after the last shipped file."""
-    policy = FutureYearsPolicy(mode=FutureYearsMode.CPI_INDEXED)
-    extended = extend_tax_year(base, 2027, policy=policy, cpi=CPI)
-    assert extended.income_tax_ruk.personal_allowance == Money(Decimal(12821))
+def test_lapsed_freeze_end_indexes_from_the_base_year(base: TaxYearFile) -> None:
+    """A freeze that ended at or before the base year is pure indexation.
 
-
-def test_shipped_data_beats_a_stale_freeze_end(base: TaxYearFile) -> None:
-    """A freeze that ended before the base year indexes from the base year."""
+    This is how post-freeze indexation is expressed once the legislated
+    freeze lapses — there is deliberately no index-immediately mode.
+    """
     policy = FutureYearsPolicy.from_assumption_value(
         {"mode": "frozen_then_cpi_indexed", "frozen_until_tax_year": "2020/21"}
     )

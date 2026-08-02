@@ -561,11 +561,15 @@ DOB-band table (§6), LISA ages (open 18–39, contribute to 50, access 60),
 and the state pension deferral increment (1% per 9 weeks).
 
 **Future years:** past the last shipped file, the region extends the final
-year per the `policy.tax.future_years` assumption (`frozen` vs
-`cpi_indexed`, scenario-flippable; the shipped default composes them as
-`frozen_then_cpi_indexed` with the legislated freeze end). Legislated
-future changes (freeze end, pre-announced rates) ship as data in the
-relevant year's file, so legislated data always beats extrapolation.
+year per the `policy.tax.future_years` assumption (scenario-flippable):
+`frozen` (indefinitely) vs `frozen_then_cpi_indexed` (the shipped default:
+the legislated freeze end, then CPI-indexed). There is deliberately no
+index-immediately mode — a legislated freeze end is a fact (§6), and a
+mode without one could synthesize years contradicting known legislation;
+a freeze end at or before the last shipped year already degrades to pure
+CPI indexation. Legislated future changes (freeze end, pre-announced
+rates) ship as data in the relevant year's file, so legislated data
+always beats extrapolation.
 Extension conventions: indexation compounds assumed CPI once from the last
 shipped file (a target year never depends on intermediate synthesized
 years) and scales the money figures of the income-tax schedules and the
