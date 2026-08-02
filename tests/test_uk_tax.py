@@ -117,6 +117,41 @@ def test_band_tax_rounds_down_to_the_penny(system: UkTaxSystem) -> None:
     assert [line.tax for line in result.lines] == [Money(Decimal(0))]
 
 
+def ruk_income_with_ras(amount: str, ras_gross: str) -> TaxInput:
+    """Gross income plus gross relief-at-source pension contributions."""
+    return TaxInput(
+        residency=RUK_RESIDENCY,
+        non_savings_income=Money(Decimal(amount)),
+        relief_at_source_contributions=Money(Decimal(ras_gross)),
+    )
+
+
+def test_ras_extends_the_basic_rate_band(system: UkTaxSystem) -> None:
+    """HMRC mechanism: £10,000 gross RAS moves the 40% threshold up.
+
+    At £60,000 income the whole £47,430 taxable now fits inside the
+    extended basic band (£47,700), so the assessment grants a further
+    20% on the £9,730 that had sat in the higher band.
+    """
+    result = system.assess(TAX_YEAR_2026_27, ruk_income_with_ras("60000", "10000"))
+    assert result.tax_due == Money(Decimal("9486.00"))
+    assert [line.band for line in result.lines] == ["basic"]
+    without = system.assess(TAX_YEAR_2026_27, ruk_income("60000"))
+    assert without.tax_due - result.tax_due == Money(Decimal("1946.00"))
+
+
+def test_ras_restores_the_tapered_allowance(system: UkTaxSystem) -> None:
+    """Adjusted net income deducts gross RAS: £110,000 keeps the full PA."""
+    result = system.assess(TAX_YEAR_2026_27, ruk_income_with_ras("110000", "10000"))
+    assert result.tax_free_allowance == Money(Decimal(12570))
+    assert result.taxable_income == Money(Decimal(97430))
+    assert [line.taxed for line in result.lines] == [
+        Money(Decimal(47700)),  # basic band extended by the gross contribution
+        Money(Decimal(49730)),
+    ]
+    assert result.tax_due == Money(Decimal("29432.00"))
+
+
 def test_sub_period_within_tax_year(system: UkTaxSystem) -> None:
     """A period inside one tax year assesses under that year's rules."""
     part_year = Period(start=date(2026, 4, 6), end=date(2026, 12, 31))

@@ -5,6 +5,11 @@ It never imports region code (planning §4.2) — enforced by a guard test —
 and never contains policy figures, which live in region data files.
 """
 
+from glidepath.core.contributions import (
+    ContributionRuleset,
+    ContributionSchedule,
+    MemberContributionOutcome,
+)
 from glidepath.core.entities import (
     EntityId,
     Household,
@@ -57,6 +62,8 @@ __all__ = [
     "AssumptionKey",
     "AssumptionReadRecorder",
     "AssumptionSet",
+    "ContributionRuleset",
+    "ContributionSchedule",
     "ContributionTaxTreatment",
     "Decision",
     "EntityId",
@@ -64,6 +71,7 @@ __all__ = [
     "FiscalCalendar",
     "GrowthTaxTreatment",
     "Household",
+    "MemberContributionOutcome",
     "Money",
     "Period",
     "Person",

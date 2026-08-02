@@ -9,6 +9,16 @@ sync by a doc-sync test.
 """
 
 from glidepath.regions.uk.ages import UkAgeError, UkAgeRules
+from glidepath.regions.uk.contributions import (
+    AnnualAllowanceAssessment,
+    UkContributionError,
+    UkContributionRuleset,
+    adjusted_income,
+    assess_annual_allowance,
+    is_mpaa_active,
+    tapered_annual_allowance,
+    threshold_income,
+)
 from glidepath.regions.uk.extension import (
     FutureYearsExtension,
     FutureYearsMode,
@@ -74,6 +84,7 @@ __all__ = [
     "SIPP_KIND",
     "WORKPLACE_DC_KIND",
     "AgeRulesFile",
+    "AnnualAllowanceAssessment",
     "AssumptionDefault",
     "AssumptionValue",
     "AssumptionsFile",
@@ -98,18 +109,25 @@ __all__ = [
     "TaxYearSeries",
     "UkAgeError",
     "UkAgeRules",
+    "UkContributionError",
+    "UkContributionRuleset",
     "UkTaxError",
     "UkTaxSystem",
     "UkTaxYearError",
     "UkWrapperError",
     "UkWrapperRuleset",
+    "adjusted_income",
+    "assess_annual_allowance",
     "available_tax_years",
     "extend_tax_year",
+    "is_mpaa_active",
     "load_age_rules",
     "load_default_assumptions",
     "load_tax_year",
     "parse_age_rules",
     "parse_default_assumptions",
     "parse_tax_year",
+    "tapered_annual_allowance",
     "tax_year_filename",
+    "threshold_income",
 ]

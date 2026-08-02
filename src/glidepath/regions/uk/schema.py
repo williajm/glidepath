@@ -167,6 +167,8 @@ class PensionRules:
     aa_taper_rate: Rate
     aa_taper_floor: Money
     mpaa: Money
+    member_relief_basic_amount: Money
+    """Relief floor for low/no earners, available via relief at source only."""
     relief_at_source_rate: Rate
     tax_free_lump_sum_fraction: Rate
     lump_sum_allowance: Money

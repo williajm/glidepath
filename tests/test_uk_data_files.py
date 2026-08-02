@@ -26,7 +26,7 @@ def test_tax_year_2026_27_meta() -> None:
     assert meta.tax_year == "2026/27"
     assert meta.start_date == date(2026, 4, 6)
     assert meta.end_date == date(2027, 4, 5)
-    assert meta.verified_on == date(2026, 8, 1)
+    assert meta.verified_on == date(2026, 8, 2)
     assert meta.sources
     assert all(source.startswith("https://") for source in meta.sources)
 
@@ -88,6 +88,7 @@ def test_pension_allowances() -> None:
     assert pension.aa_taper_rate == Rate(Decimal("0.5"))
     assert pension.aa_taper_floor == Money(Decimal(10000))
     assert pension.mpaa == Money(Decimal(10000))
+    assert pension.member_relief_basic_amount == Money(Decimal(3600))
     assert pension.relief_at_source_rate == Rate(Decimal("0.20"))
     assert pension.tax_free_lump_sum_fraction == Rate(Decimal("0.25"))
     assert pension.lump_sum_allowance == Money(Decimal(268275))

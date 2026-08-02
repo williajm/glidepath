@@ -1,5 +1,5 @@
 # UK tax year 2026/27 policy figures (docs/planning.md §5.3, §6).
-# All figures verified 2026-08-01 from the primary sources below; never
+# All figures verified 2026-08-01/02 from the primary sources below; never
 # edit a figure without re-verifying and updating [meta].
 
 schema_version = 1
@@ -8,12 +8,14 @@ schema_version = 1
 tax_year    = "2026/27"
 start_date  = 2026-04-06
 end_date    = 2027-04-05
-verified_on = 2026-08-01
+verified_on = 2026-08-02
 sources = [
   "https://www.gov.uk/income-tax-rates",
   "https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027",
   "https://www.gov.uk/scottish-income-tax",
   "https://www.gov.uk/government/publications/rates-and-allowances-pension-schemes/pension-schemes-rates",
+  "https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief",
+  "https://www.legislation.gov.uk/ukpga/2004/12/section/190",
   "https://www.gov.uk/individual-savings-accounts",
   "https://www.gov.uk/lifetime-isa",
   "https://www.gov.uk/new-state-pension/what-youll-get",
@@ -51,6 +53,7 @@ aa_taper_adjusted_income   = "260000"
 aa_taper_rate              = "0.5"
 aa_taper_floor             = "10000"
 mpaa                       = "10000"
+member_relief_basic_amount = "3600"  # low/no-earner relief floor, RAS only
 relief_at_source_rate      = "0.20"
 tax_free_lump_sum_fraction = "0.25"
 lump_sum_allowance         = "268275"

@@ -34,6 +34,24 @@ def test_tax_input_rejects_negative_income() -> None:
         TaxInput(residency=RESIDENCY, non_savings_income=negative)
 
 
+def test_tax_input_relief_at_source_defaults_to_zero() -> None:
+    """With no contributions stated, nothing extends the assessment."""
+    tax_input = TaxInput(residency=RESIDENCY, non_savings_income=money("100"))
+    assert tax_input.relief_at_source_contributions == money("0")
+
+
+def test_tax_input_rejects_negative_relief_at_source() -> None:
+    """Negative relief-at-source contributions are a construction error."""
+    income = money("100")
+    negative = money("-1")
+    with pytest.raises(ValueError, match="relief_at_source"):
+        TaxInput(
+            residency=RESIDENCY,
+            non_savings_income=income,
+            relief_at_source_contributions=negative,
+        )
+
+
 def test_tax_line_rejects_empty_band_name() -> None:
     """Band labels are region-supplied and must not be empty."""
     rate = Rate(Decimal("0.20"))

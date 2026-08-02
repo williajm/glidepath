@@ -29,15 +29,28 @@ class TaxInput:
     income share one ladder in the UK); further categories (savings,
     dividends) are added as fields when the wrappers that produce them
     land (roadmap 9.2).
+
+    ``relief_at_source_contributions`` is the period's gross member
+    pension contributions paid under a relief-at-source mechanic
+    (roadmap 3.2): basic-rate relief already arrived at source, and the
+    region's assessment grants the higher rates — e.g. by extending its
+    band thresholds — and deducts the gross amount from any
+    allowance-taper income measure. Net-pay contributions never appear
+    here: they leave pay before tax, so the caller excludes them from
+    ``non_savings_income``.
     """
 
     residency: TaxResidencyId
     non_savings_income: Money
+    relief_at_source_contributions: Money = _ZERO
 
     def __post_init__(self) -> None:
-        """Reject negative income."""
+        """Reject negative amounts."""
         if self.non_savings_income < _ZERO:
             msg = "TaxInput.non_savings_income must be non-negative"
+            raise ValueError(msg)
+        if self.relief_at_source_contributions < _ZERO:
+            msg = "TaxInput.relief_at_source_contributions must be non-negative"
             raise ValueError(msg)
 
 

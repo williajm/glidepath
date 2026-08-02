@@ -70,6 +70,13 @@ class Person:
     tax_residency: TaxResidencyId
     sex_for_longevity: Fact[Sex] | None = None
     employment_income: Fact[Money] | None = None
+    mpaa_triggered_on: Fact[date] | None = None
+    """Date pension benefits were first flexibly accessed, if ever.
+
+    A pre-plan fact (planning §5.1): once set, the region's
+    money-purchase contribution limit applies from that date on
+    (roadmap 3.3). In-plan triggers land with decumulation (Phase 5).
+    """
     wrappers: tuple[Wrapper, ...] = ()
 
     def __post_init__(self) -> None:

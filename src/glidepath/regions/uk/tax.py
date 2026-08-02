@@ -14,9 +14,14 @@ the personal-allowance reduction is rounded *down* to the whole pound
 and the resulting allowance *up* to the whole pound, and each band's
 tax is rounded *down* to the penny. These statutory roundings are the
 region's own — the core ledger policy (half-even at ledger writes,
-planning §4.6) is unchanged elsewhere. With no reliefs modelled yet
-(contributions arrive in Phase 3), adjusted net income equals the
-period's non-savings income.
+planning §4.6) is unchanged elsewhere.
+
+Relief-at-source pension contributions (roadmap 3.2) receive their
+higher and additional rates of relief here, by HMRC's own mechanism:
+every bounded band threshold is extended by the gross contribution, and
+adjusted net income — the personal-allowance taper measure — deducts
+it. Net-pay contributions need no assessment adjustment: they leave pay
+before tax, so the caller excludes them from the assessed income.
 """
 
 from dataclasses import dataclass
@@ -25,12 +30,13 @@ from typing import TYPE_CHECKING
 
 from glidepath.core import Money, TaxInput, TaxLine, TaxResidencyId, TaxResult
 from glidepath.regions.uk.loader import available_tax_years, load_tax_year
+from glidepath.regions.uk.schema import TaxBand
 from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
 
 if TYPE_CHECKING:
     from glidepath.core import Period
     from glidepath.regions.uk.extension import FutureYearsExtension
-    from glidepath.regions.uk.schema import IncomeTaxSchedule, TaxBand, TaxYearFile
+    from glidepath.regions.uk.schema import IncomeTaxSchedule, TaxYearFile
 
 RUK_RESIDENCY = TaxResidencyId("uk.ruk")
 """Residency id for England, Wales and Northern Ireland (rUK)."""
@@ -93,7 +99,11 @@ class UkTaxSystem:
         """Assess one period's non-savings income (planning §4.2)."""
         year = self._tax_year_for(period)
         schedule = _schedule_for(year, tax_input.residency)
-        return _assess_schedule(schedule, tax_input.non_savings_income)
+        return _assess_schedule(
+            schedule,
+            tax_input.non_savings_income,
+            tax_input.relief_at_source_contributions,
+        )
 
     def _series(self) -> TaxYearSeries:
         """The shared year-resolution series over this system's files."""
@@ -165,11 +175,41 @@ def _band_lines(bands: tuple[TaxBand, ...], taxable: Money) -> tuple[TaxLine, ..
     return tuple(lines)
 
 
-def _assess_schedule(schedule: IncomeTaxSchedule, income: Money) -> TaxResult:
-    """Assess non-savings ``income`` under one regime's schedule."""
-    allowance = _tapered_allowance(schedule, income)
+def _extended_bands(
+    bands: tuple[TaxBand, ...], extension: Money
+) -> tuple[TaxBand, ...]:
+    """Extend every bounded band threshold by a relief-at-source gross.
+
+    HMRC's relief-at-source mechanism: the basic (and each later
+    bounded) rate limit grows by the gross contribution, so more income
+    is taxed at the lower rates. The unbounded top band needs no move.
+    """
+    if extension <= _ZERO:
+        return bands
+    return tuple(
+        TaxBand(
+            name=band.name,
+            rate=band.rate,
+            upper=None if band.upper is None else band.upper + extension,
+        )
+        for band in bands
+    )
+
+
+def _assess_schedule(
+    schedule: IncomeTaxSchedule, income: Money, ras_gross: Money
+) -> TaxResult:
+    """Assess non-savings ``income`` under one regime's schedule.
+
+    ``ras_gross`` — the period's gross relief-at-source pension
+    contributions — extends the bounded band thresholds and comes off
+    adjusted net income for the personal-allowance taper (module
+    docstring).
+    """
+    adjusted_net_income = max(income - ras_gross, _ZERO)
+    allowance = _tapered_allowance(schedule, adjusted_net_income)
     taxable = max(income - allowance, _ZERO)
-    lines = _band_lines(schedule.bands, taxable)
+    lines = _band_lines(_extended_bands(schedule.bands, ras_gross), taxable)
     tax_due = sum((line.tax for line in lines), start=_ZERO)
     return TaxResult(
         tax_due=tax_due,
