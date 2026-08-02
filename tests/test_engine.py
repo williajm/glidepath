@@ -962,6 +962,43 @@ class TestPartialPeriods:
         assert wrapper_result.growth == Money(Decimal("647.12"))
         assert wrapper_result.closing_uncrystallised == Money(Decimal("13589.62"))
 
+    def test_escalation_advances_by_the_completed_fraction_only(self) -> None:
+        """A July start advances levels by half a year, never a whole one.
+
+        The completed first period covers 6/12, so the second period's
+        price level is 1 + 0.10 x 1/2 = 1.05 and the earnings level is
+        1 + 0.21 x 1/2 = 1.105 (annual nominal 21% from 10% real and
+        10% CPI, scaled linearly per §5.2) — not the whole-year 1.10
+        and 1.21.
+        """
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(1000)), recorded_on=RECORDED),
+            relief_mechanic=ReliefMechanic.NET_PAY,
+            escalation=AssumptionKey.EARNINGS_GROWTH_REAL,
+        )
+        pension = wrapper_of(PENSION, "0", schedule=schedule)
+        plan = household_of(person_of((pension,), employment="10000"))
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("0.10"),
+                    "earnings.growth.real": Decimal("0.10"),
+                    "returns.equity.real": Decimal(0),
+                }
+            ),
+            stub_region(),
+            RunConfig(today=date(2026, 7, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first, second = result.snapshots
+        assert first.year_fraction == Decimal("0.5")
+        assert first.persons[0].employment_income == Money(Decimal("5000.00"))
+        assert second.inflation_factor == Decimal("1.05")
+        assert second.persons[0].employment_income == Money(Decimal("11050.00"))
+        assert second.persons[0].wrappers[0].employee_contribution == Money(
+            Decimal("1105.00")
+        )
+
     def test_final_period_stops_at_the_horizon_end(self) -> None:
         """A 30 June horizon halves the second period's flows."""
         plan = household_of(person_of((), employment="10000"))

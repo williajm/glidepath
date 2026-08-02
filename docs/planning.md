@@ -488,7 +488,11 @@ second-order small and confined to at most two periods per run.
 Fractional-exponent compounding was rejected because `Decimal` powers
 with non-integer exponents are only "almost always correctly rounded"
 (Python `decimal` docs), which is not the byte-identical reproducibility
-§4.6 demands. **Accepted costs:** annual caps, allowances, and tax bands
+§4.6 demands. The cumulative CPI and nominal escalation factors advance
+between periods the same way — by the completed period's annual rate
+scaled linearly by that period's active fraction — so a mid-year start
+advances later price and earnings levels only by the months actually
+modelled, never a whole year. **Accepted costs:** annual caps, allowances, and tax bands
 apply whole to the partial year — the pro-rated income of the first
 modelled year meets full-year bands, understating its tax slightly
 (the elapsed months' income belongs to the pre-model past); and a run
@@ -499,7 +503,13 @@ expected output is written once against the corrected behaviour.
 **Real vs nominal.** The engine computes nominal (tax bands are nominal
 objects); the reporting layer deflates by the run's CPI path. **Real
 (today's money) is the default presentation**; nominal available. One
-inflation truth per run.
+inflation truth per run. Deflators match what each amount is: flows
+deflate by the snapshot's period-start factor (the level the engine
+inflated them with); closing balances — which embed the period's own
+nominal growth — deflate by the level at the period's modelled end,
+`inflation_factor × (1 + cpi × year_fraction)`. Presented totals are
+sums of the presented per-wrapper amounts, so report tables stay
+internally consistent after penny rounding.
 
 **Withdrawal strategies** are a protocol
 (`withdraw(state, need) -> WithdrawalPlan`): v1 fixed-real and fixed-%;

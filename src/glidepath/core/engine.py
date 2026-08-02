@@ -43,7 +43,10 @@ v1 engine conventions, superseded as later phases land:
   A period partly outside that window has its flows (employment income,
   contributions, spending need) pro-rated by whole months per §4.1, and
   its annual growth and fee rates scaled linearly by the same fraction —
-  exact ``Decimal`` arithmetic, so §4.6 reproducibility holds. Annual
+  exact ``Decimal`` arithmetic, so §4.6 reproducibility holds. The
+  cumulative CPI and escalation factors likewise advance between
+  periods by the completed period's fraction, so later price and
+  earnings levels reflect the time actually modelled. Annual
   caps, allowances, and tax bands stay whole-year: the months already
   elapsed live in the balance facts, not the model, so the partial
   year's pro-rated income meets full-year bands (accepted cost, §5.2).
@@ -159,10 +162,12 @@ class _WithdrawalSource:
 class _NominalFactors:
     """Cumulative nominal escalation factors, one per assumption key.
 
-    Each registered key holds a *real* growth-rate assumption; its
-    factor compounds ``(1 + real) * (1 + CPI)`` each period after the
-    first, so escalated amounts stay nominal like everything else the
-    engine computes (planning §5.2).
+    Each registered key holds a *real* growth-rate assumption; after
+    each completed period its factor advances by the annual nominal
+    rate ``(1 + real)(1 + CPI) - 1`` scaled linearly by that period's
+    active fraction (planning §5.2, roadmap 4.6), so escalated amounts
+    stay nominal and a partial first period advances the level only by
+    the months actually modelled — never a whole year.
     """
 
     __slots__ = ("_factors", "_real_rates")
@@ -180,10 +185,11 @@ class _NominalFactors:
         }
         self._factors = dict.fromkeys(self._real_rates, _ONE)
 
-    def advance(self, cpi: Decimal) -> None:
-        """Compound every factor by one period's nominal growth."""
+    def advance(self, cpi: Decimal, fraction: Decimal) -> None:
+        """Compound every factor by one completed period's nominal growth."""
         for key, real in self._real_rates.items():
-            self._factors[key] *= (_ONE + real) * (_ONE + cpi)
+            annual = (_ONE + real) * (_ONE + cpi) - _ONE
+            self._factors[key] *= _ONE + annual * fraction
 
     def factor(self, key: AssumptionKey) -> Decimal:
         """The cumulative nominal factor for ``key`` (1 in period one)."""
@@ -261,15 +267,23 @@ class _Projection:
         inflation = _ONE
         snapshots: list[PeriodSnapshot] = []
         horizon_end = self._horizon_end()
+        previous_cpi: Decimal | None = None
+        previous_fraction = _ONE
         for period in self.region.calendar.periods(self.config.today, horizon_end):
             fraction = period_active_fraction(period, self.config.today, horizon_end)
             returns = model.returns_for(period, 0)
-            if snapshots:
-                inflation *= returns.cpi.growth_factor
-                factors.advance(returns.cpi.value)
+            if previous_cpi is not None:
+                # Advance the price/earnings levels by the growth of the
+                # period just completed, scaled by its active fraction
+                # (§5.2, roadmap 4.6): a partial first period must not
+                # fast-forward a whole year of escalation.
+                inflation *= _ONE + previous_cpi * previous_fraction
+                factors.advance(previous_cpi, previous_fraction)
             snapshots.append(
                 self._project_period(period, returns, inflation, factors, fraction)
             )
+            previous_cpi = returns.cpi.value
+            previous_fraction = fraction
         return tuple(snapshots)
 
     def _horizon_end(self) -> date:
