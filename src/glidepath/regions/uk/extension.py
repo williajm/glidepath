@@ -202,6 +202,7 @@ def _indexed_pension(pension: PensionRules, factor: Decimal) -> PensionRules:
         member_relief_basic_amount=_indexed_money(
             pension.member_relief_basic_amount, factor
         ),
+        member_relief_max_age=pension.member_relief_max_age,
         relief_at_source_rate=pension.relief_at_source_rate,
         tax_free_lump_sum_fraction=pension.tax_free_lump_sum_fraction,
         lump_sum_allowance=_indexed_money(pension.lump_sum_allowance, factor),

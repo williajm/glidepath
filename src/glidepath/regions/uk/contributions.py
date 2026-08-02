@@ -21,6 +21,11 @@ nothing is hardcoded here (guard-tested).
   relief is immediate and no assessment adjustment applies. Relief
   cannot exceed pay, and the basic-amount floor does not apply.
 
+The relief limit is a per-person, per-tax-year aggregate over every
+scheme and mechanic (PTM044220), threaded through
+``already_relieved_gross`` on the request; and contributions paid from
+the member's ``member_relief_max_age`` birthday on are never
+relievable, whatever the earnings (FA 2004 s188(3)(a), PTM044100).
 Contributions beyond the relief limit are clipped and reported, not
 contributed unrelieved (planning §5.1 keeps v1 wrappers relief-clean;
 routing excess to a taxable wrapper is roadmap 9.2 territory).
@@ -41,14 +46,19 @@ from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 from typing import TYPE_CHECKING
 
-from glidepath.core import MemberContributionOutcome, Money, ReliefMechanic
+from glidepath.core import (
+    MemberContributionOutcome,
+    Money,
+    ReliefMechanic,
+    date_age_attained,
+)
 from glidepath.regions.uk.loader import available_tax_years, load_tax_year
 from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
 
 if TYPE_CHECKING:
     from datetime import date
 
-    from glidepath.core import Period
+    from glidepath.core import MemberContributionRequest, Period
     from glidepath.regions.uk.extension import FutureYearsExtension
     from glidepath.regions.uk.schema import PensionRules, TaxYearFile
 
@@ -65,6 +75,29 @@ def _require_non_negative(amount: Money, name: str) -> None:
     if amount < _ZERO:
         msg = f"{name} must be non-negative"
         raise UkContributionError(msg)
+
+
+def _unrelieved(gross: Money) -> MemberContributionOutcome:
+    """The whole contribution is clipped: no relief is available."""
+    return MemberContributionOutcome(
+        gross_to_pot=_ZERO,
+        member_cash_cost=_ZERO,
+        provider_relief=_ZERO,
+        taxable_pay_deduction=_ZERO,
+        assessment_relief_gross=_ZERO,
+        unrelieved_excess=gross,
+    )
+
+
+def _headroom(request: MemberContributionRequest, *, cap: Money) -> Money:
+    """The relievable part of the request under a per-person cap.
+
+    The member relief limit is shared across every wrapper and
+    mechanic, so relief already granted this period comes off the cap
+    before this contribution is measured against it.
+    """
+    remaining = max(cap - request.already_relieved_gross, _ZERO)
+    return min(request.gross, remaining)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,42 +132,49 @@ class UkContributionRuleset:
         )
 
     def member_contribution(
-        self,
-        *,
-        gross: Money,
-        relevant_earnings: Money,
-        mechanic: ReliefMechanic | None,
-        period: Period,
+        self, request: MemberContributionRequest, period: Period
     ) -> MemberContributionOutcome:
-        """Resolve a gross member contribution for ``period`` (module doc).
+        """Resolve one gross member contribution for ``period`` (module doc).
 
         With no mechanic the contribution is plain post-tax cash (e.g.
-        an ISA): no relief, no limit, nothing for the assessment.
+        an ISA): no relief, no limit, nothing for the assessment. The
+        period's tax year is always resolved — even on that path — so a
+        query outside data coverage fails loudly (class docstring).
+
+        Relief shuts off from the period in which the member's
+        ``member_relief_max_age`` birthday falls: contributions paid
+        after that birthday are never relievable (FA 2004 s188(3)(a)),
+        and at annual resolution the whole period is treated that way —
+        conservative in the §4.1 sense, so the model never grants
+        relief the person could not get in reality.
         """
-        _require_non_negative(gross, "gross")
-        _require_non_negative(relevant_earnings, "relevant_earnings")
-        if mechanic is None:
+        pension = self._year_for(period).pension
+        if request.mechanic is None:
             return MemberContributionOutcome(
-                gross_to_pot=gross,
-                member_cash_cost=gross,
+                gross_to_pot=request.gross,
+                member_cash_cost=request.gross,
                 provider_relief=_ZERO,
                 taxable_pay_deduction=_ZERO,
                 assessment_relief_gross=_ZERO,
                 unrelieved_excess=_ZERO,
             )
-        pension = self._year_for(period).pension
-        if mechanic is ReliefMechanic.NET_PAY:
-            relievable = min(gross, relevant_earnings)
+        max_age_birthday = date_age_attained(
+            request.date_of_birth, pension.member_relief_max_age
+        )
+        if max_age_birthday <= period.end:
+            return _unrelieved(request.gross)
+        if request.mechanic is ReliefMechanic.NET_PAY:
+            relievable = _headroom(request, cap=request.relevant_earnings)
             return MemberContributionOutcome(
                 gross_to_pot=relievable,
                 member_cash_cost=relievable,
                 provider_relief=_ZERO,
                 taxable_pay_deduction=relievable,
                 assessment_relief_gross=_ZERO,
-                unrelieved_excess=gross - relievable,
+                unrelieved_excess=request.gross - relievable,
             )
-        limit = max(relevant_earnings, pension.member_relief_basic_amount)
-        relievable = min(gross, limit)
+        limit = max(request.relevant_earnings, pension.member_relief_basic_amount)
+        relievable = _headroom(request, cap=limit)
         relief = pension.relief_at_source_rate.of(relievable)
         return MemberContributionOutcome(
             gross_to_pot=relievable,
@@ -142,7 +182,7 @@ class UkContributionRuleset:
             provider_relief=relief,
             taxable_pay_deduction=_ZERO,
             assessment_relief_gross=relievable,
-            unrelieved_excess=gross - relievable,
+            unrelieved_excess=request.gross - relievable,
         )
 
     def _series(self) -> TaxYearSeries:
@@ -168,8 +208,13 @@ def threshold_income(
     ``total_income`` is taxable income before any member pension
     deduction; both member contribution routes come off it (net-pay
     amounts never reached taxable pay; relief-at-source gross amounts
-    are deducted by definition). Salary-sacrifice add-backs are out of
-    scope for v1 (planning §6 models the 2029 NICs change as data).
+    are deducted by definition).
+
+    Known limitation: HMRC adds back employment income given up under
+    salary-sacrifice arrangements made on or after 9 July 2015
+    (PTM057100). v1 has no salary-sacrifice concept, so there is
+    nothing to add back — a user who models a sacrifice arrangement as
+    employer contributions will understate threshold income here.
     """
     _require_non_negative(total_income, "total_income")
     _require_non_negative(net_pay_contributions, "net_pay_contributions")
@@ -178,16 +223,20 @@ def threshold_income(
     return max(remaining, _ZERO)
 
 
-def adjusted_income(*, total_income: Money, employer_contributions: Money) -> Money:
+def adjusted_income(*, total_income: Money, employer_pension_inputs: Money) -> Money:
     """Adjusted income for the AA taper (planning §6).
 
     ``total_income`` is taxable income before any member pension
     deduction, so member net-pay amounts are already included (HMRC
-    adds them back to net income); employer contributions are added.
+    adds them back to net income). ``employer_pension_inputs`` is every
+    employer-funded pension input: DC employer contributions plus, for
+    DB arrangements, the pension input amount net of the member's own
+    contributions (PTM057100) — from Phase 4 the DB accrual must be
+    included here, not only in the AA measure itself.
     """
     _require_non_negative(total_income, "total_income")
-    _require_non_negative(employer_contributions, "employer_contributions")
-    return total_income + employer_contributions
+    _require_non_negative(employer_pension_inputs, "employer_pension_inputs")
+    return total_income + employer_pension_inputs
 
 
 def tapered_annual_allowance(
@@ -220,10 +269,13 @@ def tapered_annual_allowance(
 def is_mpaa_active(triggered_on: date | None, period: Period) -> bool:
     """Whether the MPAA constrains money-purchase inputs in ``period``.
 
-    Active from the period containing the trigger date onward. Applying
-    it to the whole trigger period is deliberately conservative at
-    annual resolution (the §4.1 convention): the model never allows
-    relief the person could not get in reality.
+    Active from the period containing the trigger date onward. Within
+    the trigger period itself, statute tests only money-purchase inputs
+    made *after* the trigger against the MPAA, counting earlier ones on
+    the other side of the comparison (HS345) — that split is the
+    caller's job via :func:`assess_annual_allowance`'s inputs. For the
+    v1 pre-plan trigger fact (planning §5.1) every projected period is
+    wholly post-trigger, so no split arises.
     """
     return triggered_on is not None and triggered_on <= period.end
 
@@ -272,8 +324,11 @@ def assess_annual_allowance(
 
     ``annual_allowance`` is the year's allowance after any taper
     (:func:`tapered_annual_allowance`); ``money_purchase_inputs`` is
-    member gross plus employer DC contributions; ``other_inputs`` is
-    non-money-purchase input, i.e. DB accrual (zero until Phase 4/9.6).
+    member gross plus employer DC contributions *made while the MPAA
+    applies*; ``other_inputs`` is everything else measured by the AA —
+    DB accrual (zero until Phase 4/9.6) and, in the MPAA trigger
+    period, any money-purchase inputs made before the trigger (HS345;
+    see :func:`is_mpaa_active`).
     """
     _require_non_negative(annual_allowance, "annual_allowance")
     _require_non_negative(money_purchase_inputs, "money_purchase_inputs")

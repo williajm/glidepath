@@ -9,6 +9,7 @@ from glidepath.core.contributions import (
     ContributionRuleset,
     ContributionSchedule,
     MemberContributionOutcome,
+    MemberContributionRequest,
 )
 from glidepath.core.entities import (
     EntityId,
@@ -72,6 +73,7 @@ __all__ = [
     "GrowthTaxTreatment",
     "Household",
     "MemberContributionOutcome",
+    "MemberContributionRequest",
     "Money",
     "Period",
     "Person",

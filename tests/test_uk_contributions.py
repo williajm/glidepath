@@ -16,6 +16,7 @@ import pytest
 
 from glidepath.core import (
     ContributionRuleset,
+    MemberContributionRequest,
     Money,
     Period,
     ReliefMechanic,
@@ -34,11 +35,29 @@ from glidepath.regions.uk import (
 )
 
 TAX_YEAR_2026_27 = Period(start=date(2026, 4, 6), end=date(2027, 4, 5))
+DOB_1980 = date(1980, 1, 1)  # well under the relief age limit throughout
 
 
 def money(amount: str) -> Money:
     """Build ``Money`` from a decimal string."""
     return Money(Decimal(amount))
+
+
+def request(
+    gross: str,
+    earnings: str,
+    mechanic: ReliefMechanic | None,
+    already_relieved: str = "0",
+    date_of_birth: date = DOB_1980,
+) -> MemberContributionRequest:
+    """Build a contribution request for the standard test member."""
+    return MemberContributionRequest(
+        gross=money(gross),
+        relevant_earnings=money(earnings),
+        date_of_birth=date_of_birth,
+        mechanic=mechanic,
+        already_relieved_gross=money(already_relieved),
+    )
 
 
 @pytest.fixture(scope="module", name="rules")
@@ -59,10 +78,7 @@ def pension_fixture() -> PensionRules:
 def test_relief_at_source_grosses_up(rules: UkContributionRuleset) -> None:
     """gov.uk worked example: £8,000 cash becomes £10,000 in the pot."""
     outcome = rules.member_contribution(
-        gross=money("10000"),
-        relevant_earnings=money("60000"),
-        mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
-        period=TAX_YEAR_2026_27,
+        request("10000", "60000", ReliefMechanic.RELIEF_AT_SOURCE), TAX_YEAR_2026_27
     )
     assert outcome.gross_to_pot == money("10000")
     assert outcome.member_cash_cost == money("8000")
@@ -75,10 +91,7 @@ def test_relief_at_source_grosses_up(rules: UkContributionRuleset) -> None:
 def test_net_pay_deducts_before_tax(rules: UkContributionRuleset) -> None:
     """Net pay: the gross amount leaves pay pre-tax; nothing at source."""
     outcome = rules.member_contribution(
-        gross=money("10000"),
-        relevant_earnings=money("60000"),
-        mechanic=ReliefMechanic.NET_PAY,
-        period=TAX_YEAR_2026_27,
+        request("10000", "60000", ReliefMechanic.NET_PAY), TAX_YEAR_2026_27
     )
     assert outcome.gross_to_pot == money("10000")
     assert outcome.member_cash_cost == money("10000")
@@ -89,12 +102,7 @@ def test_net_pay_deducts_before_tax(rules: UkContributionRuleset) -> None:
 
 def test_no_mechanic_is_plain_taxed_cash(rules: UkContributionRuleset) -> None:
     """An ISA-style contribution: no relief, no limit, no assessment."""
-    outcome = rules.member_contribution(
-        gross=money("5000"),
-        relevant_earnings=money("0"),
-        mechanic=None,
-        period=TAX_YEAR_2026_27,
-    )
+    outcome = rules.member_contribution(request("5000", "0", None), TAX_YEAR_2026_27)
     assert outcome.gross_to_pot == money("5000")
     assert outcome.member_cash_cost == money("5000")
     assert outcome.provider_relief == money("0")
@@ -106,10 +114,7 @@ def test_no_earner_keeps_the_basic_amount_via_ras(
 ) -> None:
     """gov.uk: with no earnings, £2,880 net grosses up to £3,600."""
     outcome = rules.member_contribution(
-        gross=money("3600"),
-        relevant_earnings=money("0"),
-        mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
-        period=TAX_YEAR_2026_27,
+        request("3600", "0", ReliefMechanic.RELIEF_AT_SOURCE), TAX_YEAR_2026_27
     )
     assert outcome.gross_to_pot == money("3600")
     assert outcome.member_cash_cost == money("2880")
@@ -122,10 +127,7 @@ def test_ras_clips_above_the_basic_amount_for_no_earners(
 ) -> None:
     """A no-earner asking for more than £3,600 gross is clipped to it."""
     outcome = rules.member_contribution(
-        gross=money("5000"),
-        relevant_earnings=money("0"),
-        mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
-        period=TAX_YEAR_2026_27,
+        request("5000", "0", ReliefMechanic.RELIEF_AT_SOURCE), TAX_YEAR_2026_27
     )
     assert outcome.gross_to_pot == money("3600")
     assert outcome.unrelieved_excess == money("1400")
@@ -136,10 +138,7 @@ def test_ras_relief_limited_to_earnings_above_basic_amount(
 ) -> None:
     """Relief caps at 100% of relevant earnings once above the floor."""
     outcome = rules.member_contribution(
-        gross=money("25000"),
-        relevant_earnings=money("20000"),
-        mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
-        period=TAX_YEAR_2026_27,
+        request("25000", "20000", ReliefMechanic.RELIEF_AT_SOURCE), TAX_YEAR_2026_27
     )
     assert outcome.gross_to_pot == money("20000")
     assert outcome.member_cash_cost == money("16000")
@@ -150,10 +149,7 @@ def test_ras_relief_limited_to_earnings_above_basic_amount(
 def test_net_pay_gets_no_basic_amount(rules: UkContributionRuleset) -> None:
     """The £3,600 floor is relief-at-source only: net pay needs earnings."""
     outcome = rules.member_contribution(
-        gross=money("3600"),
-        relevant_earnings=money("0"),
-        mechanic=ReliefMechanic.NET_PAY,
-        period=TAX_YEAR_2026_27,
+        request("3600", "0", ReliefMechanic.NET_PAY), TAX_YEAR_2026_27
     )
     assert outcome.gross_to_pot == money("0")
     assert outcome.unrelieved_excess == money("3600")
@@ -162,42 +158,124 @@ def test_net_pay_gets_no_basic_amount(rules: UkContributionRuleset) -> None:
 def test_net_pay_cannot_exceed_pay(rules: UkContributionRuleset) -> None:
     """A net-pay deduction is limited to the pay it comes out of."""
     outcome = rules.member_contribution(
-        gross=money("30000"),
-        relevant_earnings=money("25000"),
-        mechanic=ReliefMechanic.NET_PAY,
-        period=TAX_YEAR_2026_27,
+        request("30000", "25000", ReliefMechanic.NET_PAY), TAX_YEAR_2026_27
     )
     assert outcome.gross_to_pot == money("25000")
     assert outcome.unrelieved_excess == money("5000")
 
 
-def test_member_contribution_rejects_negative_gross(
+def test_relief_limit_is_shared_across_wrappers(
     rules: UkContributionRuleset,
 ) -> None:
+    """PTM044220: the earnings limit aggregates over every scheme.
+
+    With £60,000 earnings, a £40,000 SIPP contribution after £40,000
+    already relieved elsewhere leaves only £20,000 of headroom.
+    """
+    outcome = rules.member_contribution(
+        request(
+            "40000",
+            "60000",
+            ReliefMechanic.RELIEF_AT_SOURCE,
+            already_relieved="40000",
+        ),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.gross_to_pot == money("20000")
+    assert outcome.provider_relief == money("4000")
+    assert outcome.unrelieved_excess == money("20000")
+
+
+def test_basic_amount_is_not_repeated_per_wrapper(
+    rules: UkContributionRuleset,
+) -> None:
+    """A no-earner who used the £3,600 floor gets nothing in a second pot."""
+    outcome = rules.member_contribution(
+        request(
+            "3600",
+            "0",
+            ReliefMechanic.RELIEF_AT_SOURCE,
+            already_relieved="3600",
+        ),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.gross_to_pot == money("0")
+    assert outcome.unrelieved_excess == money("3600")
+
+
+def test_net_pay_headroom_is_reduced_by_prior_relief(
+    rules: UkContributionRuleset,
+) -> None:
+    """The aggregate limit spans mechanics: prior relief shrinks net pay too."""
+    outcome = rules.member_contribution(
+        request("10000", "12000", ReliefMechanic.NET_PAY, already_relieved="8000"),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.gross_to_pot == money("4000")
+    assert outcome.unrelieved_excess == money("6000")
+
+
+def test_no_relief_from_age_75(rules: UkContributionRuleset) -> None:
+    """FA 2004 s188(3)(a): contributions from 75 are never relievable."""
+    born_1950 = date(1950, 1, 1)  # 76 throughout 2026/27
+    outcome = rules.member_contribution(
+        request("3600", "0", ReliefMechanic.RELIEF_AT_SOURCE, date_of_birth=born_1950),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.gross_to_pot == money("0")
+    assert outcome.provider_relief == money("0")
+    assert outcome.unrelieved_excess == money("3600")
+
+
+def test_relief_stops_in_the_period_of_the_75th_birthday(
+    rules: UkContributionRuleset,
+) -> None:
+    """A mid-period 75th birthday shuts relief for the whole period.
+
+    Conservative at annual resolution (§4.1): contributions after the
+    birthday could not be relieved, so the model grants none. The
+    period before is unaffected.
+    """
+    born_1952 = date(1952, 1, 1)  # turns 75 on 1 January 2027, mid tax year
+    denied = rules.member_contribution(
+        request(
+            "10000",
+            "60000",
+            ReliefMechanic.NET_PAY,
+            date_of_birth=born_1952,
+        ),
+        TAX_YEAR_2026_27,
+    )
+    assert denied.gross_to_pot == money("0")
+    assert denied.unrelieved_excess == money("10000")
+
+
+def test_request_rejects_negative_gross() -> None:
     """A negative contribution is a construction-time input error."""
     negative = money("-1")
     earnings = money("10000")
-    with pytest.raises(UkContributionError, match="gross"):
-        rules.member_contribution(
+    zero = money("0")
+    with pytest.raises(ValueError, match="non-negative"):
+        MemberContributionRequest(
             gross=negative,
             relevant_earnings=earnings,
+            date_of_birth=DOB_1980,
             mechanic=None,
-            period=TAX_YEAR_2026_27,
+            already_relieved_gross=zero,
         )
 
 
-def test_uncovered_period_is_rejected(rules: UkContributionRuleset) -> None:
-    """Without an extension, periods outside shipped data fail loudly."""
+@pytest.mark.parametrize(
+    "mechanic", [ReliefMechanic.RELIEF_AT_SOURCE, None], ids=["ras", "no-relief"]
+)
+def test_uncovered_period_is_rejected(
+    rules: UkContributionRuleset, mechanic: ReliefMechanic | None
+) -> None:
+    """Periods outside shipped data fail loudly on every mechanic path."""
     uncovered = Period(start=date(2027, 4, 6), end=date(2028, 4, 5))
-    gross = money("100")
-    earnings = money("100")
+    contribution = request("100", "100", mechanic)
     with pytest.raises(UkContributionError, match="no shipped tax-year data"):
-        rules.member_contribution(
-            gross=gross,
-            relevant_earnings=earnings,
-            mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
-            period=uncovered,
-        )
+        rules.member_contribution(contribution, uncovered)
 
 
 def test_empty_ruleset_is_rejected() -> None:
@@ -210,10 +288,7 @@ def test_ruleset_satisfies_core_protocol(rules: UkContributionRuleset) -> None:
     """``UkContributionRuleset`` is usable via the core protocol."""
     protocol_typed: ContributionRuleset = rules
     outcome = protocol_typed.member_contribution(
-        gross=money("100"),
-        relevant_earnings=money("0"),
-        mechanic=None,
-        period=TAX_YEAR_2026_27,
+        request("100", "0", None), TAX_YEAR_2026_27
     )
     assert outcome.gross_to_pot == money("100")
 
@@ -241,19 +316,24 @@ def test_threshold_income_floors_at_zero() -> None:
     assert result == money("0")
 
 
-def test_adjusted_income_adds_employer_contributions() -> None:
-    """Adjusted income keeps member amounts and adds employer input."""
+def test_adjusted_income_adds_employer_pension_inputs() -> None:
+    """Adjusted income keeps member amounts and adds employer-funded input.
+
+    The input covers DC employer contributions and DB pension input
+    net of member contributions alike (PTM057100): £220,000 income
+    with £60,000 of DB input gives £280,000 adjusted income.
+    """
     result = adjusted_income(
-        total_income=money("210000"), employer_contributions=money("30000")
+        total_income=money("220000"), employer_pension_inputs=money("60000")
     )
-    assert result == money("240000")
+    assert result == money("280000")
 
 
 def test_taper_income_helpers_reject_negatives() -> None:
     """Negative income components are input errors."""
     negative = money("-1")
     with pytest.raises(UkContributionError, match="total_income"):
-        adjusted_income(total_income=negative, employer_contributions=negative)
+        adjusted_income(total_income=negative, employer_pension_inputs=negative)
 
 
 # --- tapered annual allowance (issue 3.3) -----------------------------------

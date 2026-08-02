@@ -89,6 +89,7 @@ def test_pension_allowances() -> None:
     assert pension.aa_taper_floor == Money(Decimal(10000))
     assert pension.mpaa == Money(Decimal(10000))
     assert pension.member_relief_basic_amount == Money(Decimal(3600))
+    assert pension.member_relief_max_age == 75
     assert pension.relief_at_source_rate == Rate(Decimal("0.20"))
     assert pension.tax_free_lump_sum_fraction == Rate(Decimal("0.25"))
     assert pension.lump_sum_allowance == Money(Decimal(268275))

@@ -16,6 +16,7 @@ sources = [
   "https://www.gov.uk/government/publications/rates-and-allowances-pension-schemes/pension-schemes-rates",
   "https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief",
   "https://www.legislation.gov.uk/ukpga/2004/12/section/190",
+  "https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm044100",
   "https://www.gov.uk/individual-savings-accounts",
   "https://www.gov.uk/lifetime-isa",
   "https://www.gov.uk/new-state-pension/what-youll-get",
@@ -54,6 +55,7 @@ aa_taper_rate              = "0.5"
 aa_taper_floor             = "10000"
 mpaa                       = "10000"
 member_relief_basic_amount = "3600"  # low/no-earner relief floor, RAS only
+member_relief_max_age      = 75  # no relief on contributions from age 75 (FA 2004 s188)
 relief_at_source_rate      = "0.20"
 tax_free_lump_sum_fraction = "0.25"
 lump_sum_allowance         = "268275"

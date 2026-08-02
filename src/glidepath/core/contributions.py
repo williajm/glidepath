@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Protocol
 from glidepath.core.money import Money
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from glidepath.core.periods import Period
     from glidepath.core.provenance import AssumptionKey, Decision, Fact
     from glidepath.core.wrappers import ReliefMechanic
@@ -58,6 +60,36 @@ class ContributionSchedule:
             raise ValueError(msg)
         if self.employer_amount is not None and self.employer_amount.value < _ZERO:
             msg = "ContributionSchedule.employer_amount must be non-negative"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class MemberContributionRequest:
+    """One member contribution to resolve through a region's relief rules.
+
+    ``gross`` is the intended gross contribution to one wrapper;
+    ``relevant_earnings`` is the period's earned income the region's
+    relief limit measures against; ``date_of_birth`` lets the region
+    apply any relief age limits. Relief limits are per *person* per
+    period, shared across every wrapper and mechanic — so
+    ``already_relieved_gross`` must carry the gross member
+    contributions relief has already been granted on this period
+    (across all the person's wrappers); the region grants relief only
+    on the remaining headroom. ``mechanic`` is ``None`` when the
+    wrapper kind attracts no relief.
+    """
+
+    gross: Money
+    relevant_earnings: Money
+    date_of_birth: date
+    mechanic: ReliefMechanic | None = None
+    already_relieved_gross: Money = _ZERO
+
+    def __post_init__(self) -> None:
+        """Reject negative monetary inputs."""
+        amounts = (self.gross, self.relevant_earnings, self.already_relieved_gross)
+        if any(amount < _ZERO for amount in amounts):
+            msg = "MemberContributionRequest amounts must be non-negative"
             raise ValueError(msg)
 
 
@@ -122,17 +154,7 @@ class ContributionRuleset(Protocol):
     """
 
     def member_contribution(
-        self,
-        *,
-        gross: Money,
-        relevant_earnings: Money,
-        mechanic: ReliefMechanic | None,
-        period: Period,
+        self, request: MemberContributionRequest, period: Period
     ) -> MemberContributionOutcome:
-        """Resolve a gross member contribution for ``period``.
-
-        ``relevant_earnings`` is the period's earned income the region's
-        relief limit measures against; ``mechanic`` is ``None`` when the
-        wrapper kind attracts no relief.
-        """
+        """Resolve one gross member contribution for ``period``."""
         ...
