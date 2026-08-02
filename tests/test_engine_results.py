@@ -98,8 +98,9 @@ class TestResultInvariants:
 
     def test_wrapper_result_rejects_negative_flows(self) -> None:
         """Every flow except growth must be non-negative."""
+        negative_fee = Money(Decimal(-1))
         with pytest.raises(ValueError, match="non-negative"):
-            wrapper_result(fee=Money(Decimal(-1)))
+            wrapper_result(fee=negative_fee)
 
     def test_wrapper_result_allows_negative_growth(self) -> None:
         """A down period is a legitimate ledger entry."""
@@ -125,13 +126,15 @@ class TestResultInvariants:
         tax = TaxResult(
             tax_due=ZERO, taxable_income=ZERO, tax_free_allowance=ZERO, lines=()
         )
+        person_id = EntityId("person-1")
+        negative_income = Money(Decimal(-1))
         with pytest.raises(ValueError, match="non-negative"):
             PersonPeriodResult(
-                person_id=EntityId("person-1"),
+                person_id=person_id,
                 age_at_period_start=40,
                 years_to_retirement=25,
                 stage=LifeStage.EARLY_ACCUMULATION,
-                employment_income=Money(Decimal(-1)),
+                employment_income=negative_income,
                 tax=tax,
                 spending_need=ZERO,
                 net_withdrawn=ZERO,
@@ -148,11 +151,12 @@ class TestResultInvariants:
             cpi=Rate(Decimal(0)),
         )
         period = Period(date(2026, 1, 1), date(2026, 12, 31))
+        zero_factor = Decimal(0)
         with pytest.raises(ValueError, match="positive"):
             PeriodSnapshot(
                 period=period,
                 returns=returns,
-                inflation_factor=Decimal(0),
+                inflation_factor=zero_factor,
                 persons=(),
             )
 
@@ -161,8 +165,9 @@ class TestResultInvariants:
         assets = AssetReturns(
             equity=Rate(Decimal(0)), bonds=Rate(Decimal(0)), cash=Rate(Decimal(0))
         )
+        impossible_cpi = Rate(Decimal("-1.5"))
         with pytest.raises(ValueError, match="at least -1"):
-            PeriodReturns(assets=assets, cpi=Rate(Decimal("-1.5")))
+            PeriodReturns(assets=assets, cpi=impossible_cpi)
 
 
 class TestSpendingPlanAndRegion:

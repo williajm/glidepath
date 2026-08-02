@@ -874,8 +874,10 @@ class TestEngineErrors:
 
     def test_horizon_before_today_is_rejected(self) -> None:
         """A horizon that ends before it starts is a config error."""
+        today = date(2026, 1, 1)
+        horizon_end = date(2025, 12, 31)
         with pytest.raises(EngineError, match="precedes today"):
-            RunConfig(today=date(2026, 1, 1), horizon_end=date(2025, 12, 31))
+            RunConfig(today=today, horizon_end=horizon_end)
 
     def test_planning_age_already_attained_is_rejected(self) -> None:
         """The default horizon cannot end before the run starts."""
