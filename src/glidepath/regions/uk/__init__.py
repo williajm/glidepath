@@ -42,11 +42,19 @@ from glidepath.regions.uk.schema import (
     TaxYearFile,
     TaxYearMeta,
 )
+from glidepath.regions.uk.tax import (
+    RUK_RESIDENCY,
+    SCOTLAND_RESIDENCY,
+    UkTaxError,
+    UkTaxSystem,
+)
 
 __all__ = [
     "AGE_RULES_FILENAME",
     "ASSUMPTIONS_FILENAME",
+    "RUK_RESIDENCY",
     "SCHEMA_VERSION",
+    "SCOTLAND_RESIDENCY",
     "AgeRulesFile",
     "AssumptionDefault",
     "AssumptionValue",
@@ -66,6 +74,8 @@ __all__ = [
     "TaxBand",
     "TaxYearFile",
     "TaxYearMeta",
+    "UkTaxError",
+    "UkTaxSystem",
     "available_tax_years",
     "load_age_rules",
     "load_default_assumptions",

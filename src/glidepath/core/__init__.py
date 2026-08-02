@@ -37,6 +37,7 @@ from glidepath.core.provenance import (
     Provenance,
     TrackedAssumptions,
 )
+from glidepath.core.tax import TaxInput, TaxLine, TaxResult, TaxSystem
 
 __all__ = [
     "AnnualCalendar",
@@ -55,7 +56,11 @@ __all__ = [
     "Provenance",
     "Rate",
     "Sex",
+    "TaxInput",
+    "TaxLine",
     "TaxResidencyId",
+    "TaxResult",
+    "TaxSystem",
     "TrackedAssumptions",
     "add_months",
     "age_on",
