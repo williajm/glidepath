@@ -21,6 +21,7 @@ from glidepath.app.display import (
     format_money,
     format_recorded,
     format_value,
+    format_wrapper_kind,
 )
 from glidepath.app.tables import table_edit_text
 from glidepath.core import (
@@ -54,12 +55,6 @@ _STATUS_LABELS: Mapping[Provenance, str] = {
     Provenance.DEFAULT_ASSUMPTION: "Shipped default",
     Provenance.USER_OVERRIDE: "Your override",
     Provenance.SCENARIO_OVERRIDE: "Scenario override",
-}
-
-_WRAPPER_KIND_NAMES: Mapping[str, str] = {
-    "uk.workplace_dc": "Workplace DC",
-    "uk.sipp": "SIPP",
-    "uk.isa": "ISA",
 }
 
 _RESIDENCY_NAMES: Mapping[str, str] = {
@@ -194,7 +189,7 @@ def _entity_names(household: Household | None) -> dict[str, str]:
     for person in household.persons:
         names[str(person.id)] = "You"
         for number, wrapper in enumerate(person.wrappers, start=1):
-            kind = _WRAPPER_KIND_NAMES.get(str(wrapper.kind), str(wrapper.kind))
+            kind = format_wrapper_kind(wrapper.kind)
             names[str(wrapper.id)] = f"Wrapper {number} ({kind})"
         for number, pension in enumerate(person.db_pensions, start=1):
             names[str(pension.id)] = f"DB pension {number}"
@@ -306,8 +301,7 @@ def _person_structure(person: Person, name: str) -> list[StructureRow]:
 
 def _wrapper_structure(wrapper: Wrapper, name: str) -> list[StructureRow]:
     """One wrapper's structural inputs as display rows (issue #70)."""
-    kind = str(wrapper.kind)
-    rows = [StructureRow(name, "Wrapper kind", _WRAPPER_KIND_NAMES.get(kind, kind))]
+    rows = [StructureRow(name, "Wrapper kind", format_wrapper_kind(wrapper.kind))]
     schedule = wrapper.contributions
     if schedule is not None:
         relief = (
