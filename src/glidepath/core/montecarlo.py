@@ -175,10 +175,10 @@ def run_paths(
     if config.mode is not RunMode.MONTE_CARLO:
         msg = "run_paths requires RunMode.MONTE_CARLO (planning §5.2)"
         raise EngineError(msg)
-    first = run(plan, assumptions, region, replace(config, path=0))
+    first = run(plan, assumptions, region, _path_config(config, 0))
     outcomes = [_path_outcome(0, first)]
     for index in range(1, paths):
-        path_config = replace(config, path=index)
+        path_config = _path_config(config, index)
         outcomes.append(
             _path_outcome(index, run(plan, assumptions, region, path_config))
         )
@@ -270,6 +270,12 @@ def sustainable_income(
         else:
             high = midpoint
     return low
+
+
+def _path_config(config: RunConfig, index: int) -> RunConfig:
+    """The run configuration for one path: ``config`` at ``path=index``."""
+    changes: dict[str, Any] = {"path": index}
+    return replace(config, **changes) if changes else config
 
 
 def _path_outcome(index: int, result: ProjectionResult) -> PathOutcome:
