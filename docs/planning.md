@@ -43,23 +43,23 @@ decumulation — under explicit, inspectable inputs.
 | --- | --- |
 | **v1** | Single person, UK (rUK tax). Wrappers: workplace DC, SIPP, S&S ISA. DB pensions (deferred/accrued entitlements only). State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
 | **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; LISA/GIA/cash wrappers; Scottish bands (designed-for now); dividend/savings taxation (needs GIA); AA carry-forward; DB active accrual (accrual rate, pensionable salary, service); couples activation; announced future rules (2027 cash-ISA reform, 2029 salary-sacrifice NICs). |
-| **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); protected pension ages (noted in UI copy). |
+| **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy). |
 
 ## 3. Architecture
 
 ```
-┌───────────────┐   ┌───────────────────┐   ┌──────────────────────────┐
-│ GUI (PySide6) │──▶│ Scenario layer    │──▶│ Core engine (pure,       │
-│ facts entry,  │   │ base ⊕ overrides  │   │ Decimal, seeded RNG)     │
-│ "stated vs    │   │ (§4.3)            │   │ run(plan, assumptions,   │
-│ assumed" view │   └───────────────────┘   │     region, config)      │
-└───────────────┘                           └───────────┬──────────────┘
-        ▲                                               │ typed protocols
-        │ provenance record                             ▼ (§4.2)
-┌────────────────┐                          ┌──────────────────────────┐
-│ .glidepath.json│◀──────────────────────── │ regions/uk ◀── TOML data │
-│ (local only)   │        (§4.5)            │ (tax years, age rules)   │
-└────────────────┘                          └──────────────────────────┘
+┌───────────────┐   ┌───────────────┐   ┌───────────────────┐   ┌──────────────────────────┐
+│ GUI shell     │──▶│ App layer     │──▶│ Scenario layer    │──▶│ Core engine (pure,       │
+│ (PySide6 v1;  │   │ view models,  │   │ base ⊕ overrides  │   │ Decimal, seeded RNG)     │
+│ web possible  │   │ copy, format- │   │ (§4.3)            │   │ run(plan, assumptions,   │
+│ later, §4.7)  │   │ ting (no Qt)  │   └───────────────────┘   │     region, config)      │
+└───────────────┘   └───────────────┘                           └───────────┬──────────────┘
+        ▲ "stated vs assumed" view                                          │ typed protocols
+        │ provenance record                                                 ▼ (§4.2)
+┌────────────────┐                                              ┌──────────────────────────┐
+│ .glidepath.json│◀───────────────────────────────────────────  │ regions/uk ◀── TOML data │
+│ (local only)   │        (§4.5)                                │ (tax years, age rules)   │
+└────────────────┘                                              └──────────────────────────┘
 ```
 
 ## 4. Decision records (Proposed — awaiting approval)
@@ -223,6 +223,37 @@ end-to-end 2026-08-03 with the 7.3 path runner (`run_paths`, same
 persona): ≈ 38 ms per path — ≈ 3.8 s per 100 paths, ≈ 38 s per 1,000
 paths, matching the 7.2 projection. Within the accepted envelope; any
 optimisation revisit starts from these recorded numbers.
+
+### 4.7 UI architecture: thin desktop shell over a UI-agnostic app layer
+
+**Decision.** v1 ships a PySide6 desktop GUI, but a web UI is a plausible
+future, so presentation logic is split in two:
+
+- `glidepath.app` — the **application layer**: view models, app state,
+  user-facing copy (including the §1 disclaimer text), and formatting
+  (Decimal→display, real/nominal presentation). Pure typed Python over the
+  scenario layer and engine; **no Qt imports allowed** (guard test, same
+  pattern as the core/region boundary test). Everything a UI needs to
+  render — labels, table rows, chart series, validation messages — is
+  produced here as plain dataclasses/strings.
+- `glidepath.gui` — the **PySide6 shell**: widgets, layouts, signals.
+  Thin by policy: it binds view models to widgets and forwards user
+  actions back; it contains no domain logic, no formatting, no copy.
+
+A future web UI would be a second shell over the same `glidepath.app`
+layer; nothing in `app` may assume a desktop (no file dialogs, no
+blocking prompts — shells own interaction mechanics).
+
+**Why.** The same boundary that keeps the core region-agnostic keeps the
+product UI-agnostic; view models are plain objects, so the ≥90% coverage
+bar is met headless (no Qt event loop in tests), and the Qt layer stays
+small enough to justify its thinner test coverage. **Rejected:** logic in
+widgets (locks the product to Qt, untestable without a display); building
+web-first now (v1 is a local, private-by-construction desktop tool, §1;
+a server stack contradicts "nothing is transmitted" until designed
+properly). **Accepted cost:** some ceremony — every screen needs a view
+model even when trivial; Qt-specific glue still needs a few smoke tests
+under an offscreen platform (`QT_QPA_PLATFORM=offscreen`).
 
 ## 5. Design
 
@@ -1177,10 +1208,15 @@ phases are dependency-ordered. Labels: `core`, `region:uk`, `data-files`,
 - [ ] 7.4 Sequence-of-returns fixtures — *same returns, different order →
   demonstrably different outcome.*
 
-### Phase 8 — GUI (PySide6)
+### Phase 8 — GUI (PySide6 shell over the app layer)
+
+All Phase 8 work follows §4.7: view models, copy, and formatting live in
+the UI-agnostic `glidepath.app` layer (guard-tested Qt-free); PySide6
+widgets in `glidepath.gui` stay thin so a web shell can be added later.
 
 - [ ] 8.1 `make deps` PySide6; app shell + **disclaimer screen** —
-  *disclaimer on first run (§1).*
+  *disclaimer on first run (§1); §4.7 layering in place with the
+  Qt-import guard test.*
 - [ ] 8.2 Facts entry forms — *every fact in §5.1 enterable with `as_of`
   dates.*
 - [ ] 8.3 Assumptions inspector — *the "stated vs assumed" surface rendered
