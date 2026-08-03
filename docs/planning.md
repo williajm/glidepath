@@ -265,6 +265,48 @@ properly). **Accepted cost:** some ceremony — every screen needs a view
 model even when trivial; Qt-specific glue still needs a few smoke tests
 under an offscreen platform (`QT_QPA_PLATFORM=offscreen`).
 
+### 4.8 Wrapper balance roll-forward from the statement date
+
+**Decision.** A wrapper balance is a fact dated `as_of` (its statement
+date), but the run starts at `config.today`. The engine seeds each
+opening ledger by rolling the stated value forward over the **whole
+months** from `as_of` to `today` at the wrapper's **expected nominal
+return** — the deterministic composition of the real-return assumptions
+with CPI (`(1 + real)(1 + cpi) - 1`), weighted by the allocation the
+wrapper opens the first period with (its own stated allocation, else
+the glide path at the run-start years-to-retirement) — compounded by
+the same integer-exponent-plus-linear-remainder arithmetic the DB
+statement-date convention uses (`revaluation_factor_for_months`, §5.1,
+§4.6). Each sub-balance fact (`balance`, `crystallised_balance`) rolls
+by its own `as_of`. A balance dated in the future is an engine error,
+mirroring the DB statement-date check. The expected (deterministic)
+rate applies in every run mode: the pre-`today` span is not
+path-modelled, exactly as CPI stays deterministic across Monte Carlo
+paths. The stated fact is never altered — the rolled-forward figure is
+an engine-derived *estimate layered on the fact*, and every non-zero
+adjustment is reported in `RunProvenance.balance_roll_forwards`
+(stated value, `as_of`, months, factor, opening value) and rendered by
+the inspector, so the deviation from the stated-fact principle (§1) is
+visible, attributable, and assumption-driven rather than silent.
+
+**Why.** Silently treating a statement value as today's value was
+wrong for any stale statement (issue #72); DB entitlements already
+roll forward from their statement date, so this extends one documented
+convention rather than inventing a second. **Rejected:** modelling the
+span period-by-period (the run never models time before `today` —
+§5.2 partial-period convention: elapsed months live in the facts, not
+the model); treating the balance as current (the bug being fixed);
+erroring on any stale balance (statements are routinely weeks old — a
+usability failure). **Accepted costs:** contributions and fees in the
+gap are *flows*, and only *level revaluations* compound over the
+unmodelled span (the DB precedent) — a long-stale statement therefore
+understates by the missed contributions and overstates by the unlevied
+fees, and restating a fresh balance is always better than relying on
+the roll-forward; the opening allocation stands in for the whole span;
+a span under one whole month rolls by nothing (the §4.1 whole-month
+convention), which keeps the common freshly-stated case an exact
+no-op.
+
 ## 5. Design
 
 ### 5.1 Domain model
@@ -544,6 +586,11 @@ need: in decumulation the configured strategy funds it after the income
 offset above; before decumulation it is funded net-defined in the
 default tax-aware order, since the withdrawal strategy is a
 decumulation decision (§5.2).
+
+Wrapper balances are facts dated by their statement (`as_of`); the
+engine rolls each one forward to `today` at the wrapper's expected
+nominal return over whole months, reporting every non-zero adjustment
+in the run's provenance (decision record §4.8).
 
 Pre-existing pension access is likewise a set of facts:
 `crystallised_balance` (funds already designated to drawdown), `lsa_used`,

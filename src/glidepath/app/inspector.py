@@ -16,7 +16,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from glidepath.app.display import format_date, format_recorded, format_value
+from glidepath.app.display import (
+    format_date,
+    format_money,
+    format_recorded,
+    format_value,
+)
 from glidepath.app.tables import table_edit_text
 from glidepath.core import (
     Assumption,
@@ -90,6 +95,22 @@ class FactRow:
 
 
 @dataclass(frozen=True)
+class RollForwardRow:
+    """One wrapper balance rolled forward to the run start (§4.8).
+
+    The stated fact is unchanged; this row shows the estimate the
+    engine layered on it — the statement value, its date, the whole
+    months rolled, and the opening value the projection actually used.
+    """
+
+    label: str
+    stated: str
+    as_of: str
+    months: str
+    opening: str
+
+
+@dataclass(frozen=True)
 class DecisionRow:
     """One decision in effect, formatted for display."""
 
@@ -137,6 +158,9 @@ class InspectorViewModel:
     facts_heading: str
     facts_columns: tuple[str, ...]
     facts: tuple[FactRow, ...]
+    roll_forwards_heading: str
+    roll_forwards_columns: tuple[str, ...]
+    roll_forwards: tuple[RollForwardRow, ...]
     assumptions_heading: str
     assumptions_columns: tuple[str, ...]
     assumptions: tuple[AssumptionRow, ...]
@@ -425,11 +449,26 @@ def build_inspector_view_model(state: PlanState) -> InspectorViewModel:
         )
         for labelled in (provenance.decisions if provenance is not None else ())
     )
+    roll_forwards = tuple(
+        RollForwardRow(
+            label=_display_label(entry.label, names),
+            stated=format_money(entry.stated),
+            as_of=format_date(entry.as_of),
+            months=str(entry.months),
+            opening=format_money(entry.opening),
+        )
+        for entry in (
+            provenance.balance_roll_forwards if provenance is not None else ()
+        )
+    )
     return InspectorViewModel(
         title="Stated vs assumed",
         facts_heading="Facts you stated",
         facts_columns=("Fact", "Value", "As of", "Recorded"),
         facts=facts,
+        roll_forwards_heading="Balances rolled forward to today",
+        roll_forwards_columns=("Balance", "Stated", "As of", "Months", "Value today"),
+        roll_forwards=roll_forwards,
         assumptions_heading="Assumptions used",
         assumptions_columns=(
             "Assumption",

@@ -19,6 +19,7 @@ from glidepath.core import (
     AssumptionKey,
     AssumptionReadRecorder,
     AssumptionSet,
+    BalanceRollForward,
     ContributionSchedule,
     Decision,
     DeterministicReturnModel,
@@ -141,6 +142,38 @@ class TestResultInvariants:
                 net_withdrawn=ZERO,
                 shortfall=ZERO,
                 wrappers=(),
+            )
+
+    def test_roll_forward_rejects_non_positive_months(self) -> None:
+        """A zero-month roll-forward could not describe a §4.8 record."""
+        stated = Money(Decimal(10000))
+        as_of = date(2026, 1, 1)
+        factor = Decimal("1.05")
+        opening = Money(Decimal(10500))
+        with pytest.raises(ValueError, match="months must be positive"):
+            BalanceRollForward(
+                label="wrapper[w-1].balance",
+                stated=stated,
+                as_of=as_of,
+                months=0,
+                factor=factor,
+                opening=opening,
+            )
+
+    def test_roll_forward_rejects_non_positive_factor(self) -> None:
+        """A non-positive multiplier could not describe a §4.8 record."""
+        stated = Money(Decimal(10000))
+        as_of = date(2026, 1, 1)
+        factor = Decimal(0)
+        opening = Money(Decimal(0))
+        with pytest.raises(ValueError, match="factor must be positive"):
+            BalanceRollForward(
+                label="wrapper[w-1].balance",
+                stated=stated,
+                as_of=as_of,
+                months=6,
+                factor=factor,
+                opening=opening,
             )
 
     def test_snapshot_rejects_non_positive_inflation_factor(self) -> None:

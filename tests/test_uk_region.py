@@ -44,9 +44,9 @@ RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 AS_OF = date(2026, 8, 1)
 
 
-def money_fact(amount: str) -> Fact[Money]:
+def money_fact(amount: str, as_of: date = AS_OF) -> Fact[Money]:
     """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
+    return Fact(value=Money(Decimal(amount)), as_of=as_of, recorded_on=RECORDED)
 
 
 class TestDefaultAssumptionSet:
@@ -155,18 +155,23 @@ def accumulator_household() -> Household:
     return Household(persons=(person,))
 
 
-def retiree_household(spending: str) -> Household:
-    """A 68-year-old drawing on a crystallised SIPP and an ISA."""
+def retiree_household(spending: str, balances_as_of: date = AS_OF) -> Household:
+    """A 68-year-old drawing on a crystallised SIPP and an ISA.
+
+    ``balances_as_of`` dates the balance facts: a run whose ``today``
+    is earlier than the module ``AS_OF`` must date its balances on or
+    before that ``today`` (§4.8 rejects future-dated balances).
+    """
     sipp = Wrapper(
         id=EntityId("uk-sipp"),
         kind=SIPP_KIND,
-        balance=money_fact("0"),
-        crystallised_balance=money_fact("150000"),
+        balance=money_fact("0", as_of=balances_as_of),
+        crystallised_balance=money_fact("150000", as_of=balances_as_of),
     )
     isa = Wrapper(
         id=EntityId("uk-isa"),
         kind=ISA_KIND,
-        balance=money_fact("5000"),
+        balance=money_fact("5000", as_of=balances_as_of),
     )
     person = Person(
         id=EntityId("uk-retiree"),
@@ -226,7 +231,8 @@ class TestUkEndToEnd:
         assumptions = default_assumption_set()
         region = uk_region(future_years_extension(assumptions))
         config = RunConfig(today=date(2026, 4, 6), horizon_end=date(2027, 4, 5))
-        result = run(retiree_household("40000"), assumptions, region, config)
+        household = retiree_household("40000", balances_as_of=date(2026, 4, 6))
+        result = run(household, assumptions, region, config)
 
         [snapshot] = result.snapshots
         [person_result] = snapshot.persons

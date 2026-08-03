@@ -233,6 +233,38 @@ class LabelledFact:
 
 
 @dataclass(frozen=True, slots=True)
+class BalanceRollForward:
+    """One stale wrapper balance rolled forward to the run start (§4.8).
+
+    A wrapper balance fact is dated ``as_of`` (its statement date); the
+    engine seeds the opening ledger with ``stated`` compounded over the
+    ``months`` whole months from ``as_of`` to the run's ``today`` at
+    the wrapper's expected nominal return — ``factor`` is the exact
+    multiplier applied and ``opening`` the quantized result. The stated
+    fact itself is never altered: this record is how the estimate
+    layered on it stays visible rather than silent (planning §4.8).
+    ``label`` addresses the fact at its stable plan path, exactly like
+    :class:`LabelledFact`.
+    """
+
+    label: str
+    stated: Money
+    as_of: date
+    months: int
+    factor: Decimal
+    opening: Money
+
+    def __post_init__(self) -> None:
+        """Reject records that could not describe a §4.8 roll-forward."""
+        if self.months <= 0:
+            msg = "BalanceRollForward.months must be positive"
+            raise ValueError(msg)
+        if self.factor <= _ZERO_FACTOR:
+            msg = "BalanceRollForward.factor must be positive"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
 class LabelledDecision:
     """One user choice in effect during the run, at a stable plan path."""
 
@@ -248,6 +280,11 @@ class RunProvenance:
     order, each carrying its own default-vs-overridden provenance —
     the engine-side read tracking makes this exhaustive with no UI
     bookkeeping (planning §5.1).
+
+    ``balance_roll_forwards`` lists every wrapper balance fact the run
+    rolled forward from its statement date to ``today`` (planning
+    §4.8) — empty when every balance was stated within a whole month
+    of the run start.
     """
 
     facts: tuple[LabelledFact, ...]
@@ -255,6 +292,7 @@ class RunProvenance:
     assumptions: tuple[Assumption[Any], ...]
     region_data_version: str
     seed: int | None
+    balance_roll_forwards: tuple[BalanceRollForward, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

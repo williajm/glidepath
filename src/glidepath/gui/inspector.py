@@ -74,6 +74,11 @@ class InspectorPane(QWidget):
         facts_layout = QVBoxLayout(self._facts_box)
         facts_layout.addWidget(self.facts_table)
 
+        self._roll_forwards_box = QGroupBox(self)
+        self.roll_forwards_table = _read_only_table(self._roll_forwards_box)
+        roll_forwards_layout = QVBoxLayout(self._roll_forwards_box)
+        roll_forwards_layout.addWidget(self.roll_forwards_table)
+
         self._assumptions_box = QGroupBox(self)
         self.assumptions_table = _read_only_table(self._assumptions_box)
         self.assumptions_table.cellDoubleClicked.connect(self._edit_assumption)
@@ -95,8 +100,12 @@ class InspectorPane(QWidget):
         self.status_label = QLabel("", self)
         self.status_label.setWordWrap(True)
 
+        stated_column = QVBoxLayout()
+        stated_column.addWidget(self._facts_box, 2)
+        stated_column.addWidget(self._roll_forwards_box, 1)
+
         columns = QHBoxLayout()
-        columns.addWidget(self._facts_box, 1)
+        columns.addLayout(stated_column, 1)
         columns.addWidget(self._assumptions_box, 2)
         columns.addWidget(self._decisions_box, 1)
 
@@ -141,6 +150,16 @@ class InspectorPane(QWidget):
             self.decisions_table,
             view_model.decisions_columns,
             [(row.label, row.value, row.recorded) for row in view_model.decisions],
+        )
+        self._roll_forwards_box.setTitle(view_model.roll_forwards_heading)
+        self._roll_forwards_box.setVisible(bool(view_model.roll_forwards))
+        _fill_table(
+            self.roll_forwards_table,
+            view_model.roll_forwards_columns,
+            [
+                (row.label, row.stated, row.as_of, row.months, row.opening)
+                for row in view_model.roll_forwards
+            ],
         )
         self._structure_box.setTitle(view_model.structure_heading)
         _fill_table(

@@ -792,8 +792,10 @@ def _wrapper_section() -> SectionSpec:
         description=(
             "One pension or ISA. Balances are facts from a statement; "
             "contributions are your choices plus your employer's terms. "
-            "The projection treats balances as opening values today — "
-            "growth since the statement date is not rolled forward."
+            "A balance dated a whole month or more before today is "
+            "rolled forward to today at the assumed return — "
+            "contributions in the gap are not added, so restate the "
+            "balance if your statement is old."
         ),
         repeatable=True,
         add_label="Add wrapper",
