@@ -842,6 +842,54 @@ untouched because its uprating is governed by
 task** after each Budget: copy previous year's file, re-verify every
 figure, update `verified_on`/`sources`, update §6.
 
+### 5.4 Plan document format (`.glidepath.json` schema v1)
+
+Implements the §4.5 decision (`glidepath/persistence/`, roadmap 6.2/6.4;
+region-agnostic like the core — the region's shipped defaults and data
+version are function inputs, never imports). Top level:
+
+```json
+{
+  "schema_version": 1,
+  "region": "uk",
+  "assumptions_resolved_against": "<region data_version at last save>",
+  "household": { "persons": [...], "spending": ..., "planned_outflows": [...] },
+  "assumption_overrides": [ { "key", "value", "source", "recorded_on" } ],
+  "scenarios": [ { "name", "note", "overrides": [...] } ]
+}
+```
+
+Conventions: canonical output is `json.dumps(sort_keys=True, indent=2)`
+plus one trailing LF, written with newline translation disabled — a
+given document always serializes to the same bytes and a load→save
+round trip is byte-stable (a golden file pins the format). Value
+representations are preserved exactly, never normalized: a `Decimal`
+keeps the exponent the user stated (`1.0` and `1.00` compare equal but
+keep their spellings) and a datetime keeps its offset. The writer never
+produces a file the reader rejects — non-finite decimals, booleans in
+whole-number fields, and empty entity ids are refused at save, and
+serialization completes before the target file is opened so a failed
+save cannot truncate the last valid file. `Decimal`
+and `Money` are strings, never JSON floats (the reader rejects any JSON
+float); datetimes are ISO-8601 with offset; dates ISO-8601. Every entity
+field is present in full shape (`null` for absent optionals) and decoded
+strictly by field context — missing or unknown keys fail loudly with a
+document path. Enums persist as stable lowercase tokens that must never
+change meaning (same rule as assumption keys). Polymorphic values
+(assumption/scenario override values) use a closed tagged vocabulary —
+`{"kind": "int" | "text" | "decimal" | "money" | "table" |
+"annuity_type" | "annuity_basis", "value": ...}` — so exact runtime
+types survive the round trip. Only assumption *overrides* are stored;
+`resolve_assumptions` rebuilds the effective set on load from the
+current shipped defaults (overrides re-stamped `USER_OVERRIDE`, keeping
+the shipped default value and description; a stored value whose shape no
+longer matches the shipped default fails loudly, the §4.3 rule).
+Migration (roadmap 6.4): upgraders keyed by the schema version they
+read, each stepping exactly one version, applied in sequence on load
+before strict decoding; a current-version file passes through untouched
+(the wired v1→v1 no-op), and a newer-than-current file errors with an
+"upgrade glidepath" message.
+
 ## 6. Verified UK policy figures (2026/27)
 
 All verified **2026-08-01** from live-fetched primary pages (gov.uk / HMRC

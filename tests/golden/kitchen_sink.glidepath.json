@@ -1,0 +1,533 @@
+{
+  "assumption_overrides": [
+    {
+      "key": "inflation.cpi",
+      "recorded_on": "2026-08-01T12:00:00+00:00",
+      "source": "my own view",
+      "value": {
+        "kind": "decimal",
+        "value": "0.03"
+      }
+    },
+    {
+      "key": "horizon.planning_age",
+      "recorded_on": "2026-08-01T12:00:00+00:00",
+      "source": "family history",
+      "value": {
+        "kind": "int",
+        "value": 99
+      }
+    },
+    {
+      "key": "policy.state_pension.uprating",
+      "recorded_on": "2026-08-01T12:00:00+00:00",
+      "source": "pessimism",
+      "value": {
+        "kind": "text",
+        "value": "cpi"
+      }
+    },
+    {
+      "key": "glidepath.default_shape",
+      "recorded_on": "2026-08-01T12:00:00+00:00",
+      "source": "my IFA's shape",
+      "value": {
+        "kind": "table",
+        "value": {
+          "derisk_years_before_retirement": {
+            "kind": "int",
+            "value": 12
+          },
+          "equity_at_retirement": {
+            "kind": "decimal",
+            "value": "0.35"
+          },
+          "equity_start": {
+            "kind": "decimal",
+            "value": "0.85"
+          },
+          "in_drawdown": {
+            "kind": "text",
+            "value": "hold"
+          },
+          "transition": {
+            "kind": "text",
+            "value": "linear"
+          }
+        }
+      }
+    }
+  ],
+  "assumptions_resolved_against": "test-region data v1",
+  "household": {
+    "persons": [
+      {
+        "annuity_purchases": [
+          {
+            "annuity_type": "level",
+            "at_age": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": 70
+            },
+            "basis": "single",
+            "fraction_of_pot": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "0.5"
+            },
+            "id": "annuity-1"
+          },
+          {
+            "annuity_type": "inflation_linked",
+            "at_age": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": 75
+            },
+            "basis": "joint",
+            "fraction_of_pot": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "0.25"
+            },
+            "id": "annuity-2"
+          },
+          {
+            "annuity_type": "escalating",
+            "at_age": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": 80
+            },
+            "basis": "single",
+            "fraction_of_pot": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "1"
+            },
+            "id": "annuity-3"
+          }
+        ],
+        "date_of_birth": {
+          "as_of": "2026-08-01",
+          "note": "from my statement",
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": "1970-06-01"
+        },
+        "db_pensions": [
+          {
+            "accrued_annual_pension": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "8000"
+            },
+            "commutation_factor": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "12"
+            },
+            "commuted_fraction": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "0.25"
+            },
+            "early_late_factors": {
+              "62": "0.85",
+              "64": "0.95"
+            },
+            "id": "db-1",
+            "normal_pension_age": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": 65
+            },
+            "revaluation_basis": {
+              "cap": "0.05",
+              "fixed_rate": null,
+              "reference": "cpi"
+            },
+            "statement_date": "2026-01-01",
+            "taken_at_age": {
+              "note": "what if I go early",
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": 62
+            }
+          },
+          {
+            "accrued_annual_pension": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "2500"
+            },
+            "commutation_factor": null,
+            "commuted_fraction": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "0"
+            },
+            "early_late_factors": {},
+            "id": "db-2",
+            "normal_pension_age": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": 60
+            },
+            "revaluation_basis": {
+              "cap": null,
+              "fixed_rate": "0.03",
+              "reference": "fixed"
+            },
+            "statement_date": "2020-04-06",
+            "taken_at_age": null
+          },
+          {
+            "accrued_annual_pension": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "1200"
+            },
+            "commutation_factor": null,
+            "commuted_fraction": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "0"
+            },
+            "early_late_factors": {},
+            "id": "db-3",
+            "normal_pension_age": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": 65
+            },
+            "revaluation_basis": {
+              "cap": null,
+              "fixed_rate": null,
+              "reference": "none"
+            },
+            "statement_date": "2015-01-01",
+            "taken_at_age": null
+          }
+        ],
+        "employment_income": {
+          "as_of": "2026-08-01",
+          "note": null,
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": "52000"
+        },
+        "glide_path": {
+          "points": [
+            {
+              "allocation": {
+                "bonds": "0.70",
+                "cash": "0",
+                "equity": "0.30"
+              },
+              "years_to_retirement": 0
+            },
+            {
+              "allocation": {
+                "bonds": "0.20",
+                "cash": "0",
+                "equity": "0.80"
+              },
+              "years_to_retirement": 10
+            }
+          ]
+        },
+        "id": "person-1",
+        "lsa_used": {
+          "as_of": "2026-08-01",
+          "note": null,
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": "10000"
+        },
+        "mpaa_triggered_on": {
+          "as_of": "2026-08-01",
+          "note": null,
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": "2024-01-15"
+        },
+        "sex_for_longevity": {
+          "as_of": "2026-08-01",
+          "note": null,
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": "female"
+        },
+        "state_pension": {
+          "deferral_years": {
+            "note": null,
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "value": "0.5"
+          },
+          "forecast_weekly_amount": {
+            "as_of": "2026-08-01",
+            "note": null,
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "value": "230.25"
+          },
+          "ni_record_start": {
+            "as_of": "2026-08-01",
+            "note": null,
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "value": "2016-04-06"
+          },
+          "planned_extra_years": {
+            "note": null,
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "value": 2
+          },
+          "protected_payment": {
+            "as_of": "2026-08-01",
+            "note": null,
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "value": "20.10"
+          },
+          "qualifying_years": {
+            "as_of": "2026-08-01",
+            "note": null,
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "value": 20
+          }
+        },
+        "target_retirement_age": {
+          "note": "maybe 60",
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": 65
+        },
+        "tax_residency": "uk.ruk",
+        "wrappers": [
+          {
+            "allocation": {
+              "bonds": "0.30",
+              "cash": "0.10",
+              "equity": "0.60"
+            },
+            "balance": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "100000.00"
+            },
+            "contributions": {
+              "employee_amount": {
+                "note": "salary sacrifice soon",
+                "recorded_on": "2026-08-01T12:00:00+00:00",
+                "value": "5000"
+              },
+              "employer_amount": {
+                "as_of": "2026-08-01",
+                "note": null,
+                "recorded_on": "2026-08-01T12:00:00+00:00",
+                "value": "3000"
+              },
+              "escalation": "earnings.growth.real",
+              "relief_mechanic": "relief_at_source"
+            },
+            "crystallised_balance": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "25000.50"
+            },
+            "fees": {
+              "fund": "0.0010",
+              "platform": "0.0035"
+            },
+            "id": "wrapper-1",
+            "kind": "uk.sipp"
+          },
+          {
+            "allocation": null,
+            "balance": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "50000"
+            },
+            "contributions": null,
+            "crystallised_balance": null,
+            "fees": null,
+            "id": "wrapper-2",
+            "kind": "uk.isa"
+          }
+        ]
+      },
+      {
+        "annuity_purchases": [],
+        "date_of_birth": {
+          "as_of": "2026-08-01",
+          "note": null,
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": "1972-03-15"
+        },
+        "db_pensions": [],
+        "employment_income": null,
+        "glide_path": null,
+        "id": "person-2",
+        "lsa_used": null,
+        "mpaa_triggered_on": null,
+        "sex_for_longevity": {
+          "as_of": "2026-08-01",
+          "note": null,
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": "male"
+        },
+        "state_pension": null,
+        "target_retirement_age": {
+          "note": null,
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": 67
+        },
+        "tax_residency": "uk.ruk",
+        "wrappers": []
+      }
+    ],
+    "planned_outflows": [
+      {
+        "amount_real": {
+          "note": "quoted 2026",
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": "20000"
+        },
+        "at_age_of": {
+          "age": 66,
+          "person_id": "person-1"
+        },
+        "id": "outflow-1",
+        "label": "new roof"
+      }
+    ],
+    "spending": {
+      "annual_spending_real": {
+        "as_of": "2026-08-01",
+        "note": null,
+        "recorded_on": "2026-08-01T12:00:00+00:00",
+        "value": "24000"
+      },
+      "stage_multipliers": {
+        "decumulation": "1.10",
+        "early_accumulation": "1.00",
+        "mid_accumulation": "1.05",
+        "pre_retirement": "0.95"
+      }
+    }
+  },
+  "region": "uk",
+  "scenarios": [
+    {
+      "name": "retire at 60",
+      "note": "the big question",
+      "overrides": [
+        {
+          "note": "five years early",
+          "target": {
+            "entity_id": "person-1",
+            "field_path": "target_retirement_age",
+            "kind": "decision"
+          },
+          "value": {
+            "kind": "int",
+            "value": 60
+          }
+        },
+        {
+          "note": null,
+          "target": {
+            "entity_id": "wrapper-1",
+            "field_path": "contributions.employee_amount",
+            "kind": "decision"
+          },
+          "value": {
+            "kind": "money",
+            "value": "8000"
+          }
+        },
+        {
+          "note": null,
+          "target": {
+            "entity_id": "db-1",
+            "field_path": "commuted_fraction",
+            "kind": "decision"
+          },
+          "value": {
+            "kind": "decimal",
+            "value": "0.1"
+          }
+        },
+        {
+          "note": null,
+          "target": {
+            "entity_id": "annuity-1",
+            "field_path": "annuity_type",
+            "kind": "decision"
+          },
+          "value": {
+            "kind": "annuity_type",
+            "value": "inflation_linked"
+          }
+        },
+        {
+          "note": null,
+          "target": {
+            "entity_id": "annuity-1",
+            "field_path": "basis",
+            "kind": "decision"
+          },
+          "value": {
+            "kind": "annuity_basis",
+            "value": "joint"
+          }
+        },
+        {
+          "note": null,
+          "target": {
+            "key": "inflation.cpi",
+            "kind": "assumption"
+          },
+          "value": {
+            "kind": "decimal",
+            "value": "0.04"
+          }
+        },
+        {
+          "note": null,
+          "target": {
+            "key": "glidepath.default_shape",
+            "kind": "assumption"
+          },
+          "value": {
+            "kind": "table",
+            "value": {
+              "derisk_years_before_retirement": {
+                "kind": "int",
+                "value": 15
+              },
+              "equity_start": {
+                "kind": "decimal",
+                "value": "0.9"
+              },
+              "transition": {
+                "kind": "text",
+                "value": "linear"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "do nothing",
+      "note": null,
+      "overrides": []
+    }
+  ],
+  "schema_version": 1
+}
