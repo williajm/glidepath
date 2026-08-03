@@ -13,6 +13,7 @@ from glidepath.app import (
     DecisionRow,
     FactRow,
     InspectorViewModel,
+    StructureRow,
 )
 from glidepath.gui import inspector as inspector_module
 from glidepath.gui.inspector import InspectorPane
@@ -20,7 +21,7 @@ from glidepath.gui.inspector import InspectorPane
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-EDITABLE_ROW = AssumptionRow(
+SCALAR_ROW = AssumptionRow(
     key="inflation.cpi",
     description="Shipped UK default for 'inflation.cpi'",
     value="0.02",
@@ -29,19 +30,21 @@ EDITABLE_ROW = AssumptionRow(
     usage="Used in this projection",
     source="OBR EFO",
     recorded="2026-08-01",
-    editable=True,
+    structured=False,
+    edit_text="0.02",
 )
 
 STRUCTURED_ROW = AssumptionRow(
     key="glidepath.default_shape",
     description="Shipped UK default for 'glidepath.default_shape'",
-    value="structured table (4 entries)",
-    default_value="structured table (4 entries)",
+    value="equity_start=0.80; derisk_years_before_retirement=15",
+    default_value="equity_start=0.80; derisk_years_before_retirement=15",
     status="Shipped default",
     usage="Not used by this projection",
     source="Typical UK shape",
     recorded="2026-08-01",
-    editable=False,
+    structured=True,
+    edit_text="equity_start = 0.80\nderisk_years_before_retirement = 15",
 )
 
 
@@ -70,7 +73,7 @@ def view_model() -> InspectorViewModel:
             "Source",
             "Recorded",
         ),
-        assumptions=(EDITABLE_ROW, STRUCTURED_ROW),
+        assumptions=(SCALAR_ROW, STRUCTURED_ROW),
         decisions_heading="Your choices in effect",
         decisions_columns=("Choice", "Value", "Recorded"),
         decisions=(
@@ -81,18 +84,28 @@ def view_model() -> InspectorViewModel:
                 note="",
             ),
         ),
+        structure_heading="Plan structure",
+        structure_columns=("Entity", "Setting", "Value"),
+        structure=(
+            StructureRow(
+                entity="You",
+                setting="Tax residency",
+                value="UK (England, Wales, or Northern Ireland)",
+            ),
+        ),
         summary="summary line",
         override_title="Override assumption",
         override_prompt="New value:",
-        not_editable_message="structured tables are display-only",
+        table_override_prompt="One 'key = value' line per figure:",
     )
 
 
 class FakeInputDialog:
-    """Test double for the override prompt."""
+    """Test double for the override prompts, single- and multi-line."""
 
     result: ClassVar[tuple[str, bool]] = ("", False)
     calls: ClassVar[list[tuple[str, str, str]]] = []
+    multiline_calls: ClassVar[list[tuple[str, str, str]]] = []
 
     @classmethod
     def getText(  # noqa: N802 - Qt API name
@@ -107,6 +120,18 @@ class FakeInputDialog:
         cls.calls.append((title, label, text))
         return cls.result
 
+    @classmethod
+    def getMultiLineText(  # noqa: N802 - Qt API name
+        cls,
+        _parent: InspectorPane,
+        title: str,
+        label: str,
+        text: str = "",
+    ) -> tuple[str, bool]:
+        """Record the multi-line prompt and return the scripted outcome."""
+        cls.multiline_calls.append((title, label, text))
+        return cls.result
+
 
 @pytest.fixture(name="fake_dialog")
 def fake_dialog_fixture(monkeypatch: pytest.MonkeyPatch) -> type[FakeInputDialog]:
@@ -114,6 +139,7 @@ def fake_dialog_fixture(monkeypatch: pytest.MonkeyPatch) -> type[FakeInputDialog
     monkeypatch.setattr(inspector_module, "QInputDialog", FakeInputDialog)
     FakeInputDialog.result = ("", False)
     FakeInputDialog.calls = []
+    FakeInputDialog.multiline_calls = []
     return FakeInputDialog
 
 
@@ -143,6 +169,18 @@ class TestRendering:
         assert status_item.text() == "Shipped default"
         assert pane.decisions_table.rowCount() == 1
         assert pane.summary_label.text() == "summary line"
+
+    def test_structure_table_renders_entity_rows(self) -> None:
+        """The plan-structure section renders its entity-level rows (#70)."""
+        pane = refreshed_pane()
+        assert pane.structure_table.rowCount() == 1
+        assert pane.structure_table.columnCount() == 3
+        entity_item = pane.structure_table.item(0, 0)
+        assert entity_item is not None
+        assert entity_item.text() == "You"
+        value_item = pane.structure_table.item(0, 2)
+        assert value_item is not None
+        assert value_item.text() == "UK (England, Wales, or Northern Ireland)"
 
     def test_assumption_rows_are_addressable(self) -> None:
         """The pane maps table rows back to their view-model rows."""
@@ -204,11 +242,22 @@ class TestOverridePrompt:
         pane.assumptions_table.cellDoubleClicked.emit(0, 0)
         assert received == []
 
-    def test_structured_rows_refuse_the_prompt(
+    def test_structured_rows_open_the_multiline_prompt(
         self, fake_dialog: type[FakeInputDialog]
     ) -> None:
-        """A display-only row shows the explanation instead of a prompt."""
-        pane = refreshed_pane()
+        """A table row edits as multi-line text prefilled with its form."""
+        received: list[tuple[str, str]] = []
+
+        def on_override(key: str, raw: str) -> str | None:
+            received.append((key, raw))
+            return None
+
+        pane = refreshed_pane(on_override)
+        fake_dialog.result = ("equity_start = 0.70", True)
         pane.assumptions_table.cellDoubleClicked.emit(1, 0)
-        assert pane.status_label.text() == "structured tables are display-only"
+        assert received == [("glidepath.default_shape", "equity_start = 0.70")]
+        [(title, label, prefill)] = fake_dialog.multiline_calls
+        assert title == "Override assumption"
+        assert "glidepath.default_shape" in label
+        assert prefill == STRUCTURED_ROW.edit_text
         assert fake_dialog.calls == []

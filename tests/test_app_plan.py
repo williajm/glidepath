@@ -19,6 +19,7 @@ from glidepath.app import (
     state_with_household,
     state_with_override,
 )
+from glidepath.app.tables import table_edit_text
 from glidepath.core import (
     AssumptionKey,
     Decision,
@@ -148,19 +149,124 @@ class TestStateWithOverride:
             == 92
         )
 
-    def test_policy_tables_are_structured_and_display_only(self) -> None:
-        """The uprating policy is a table, so in-place edits are refused."""
+    def test_table_override_parses_and_re_stamps(self) -> None:
+        """A structured default takes ``key = value`` text (issue #71)."""
+        recorded = datetime(2026, 8, 3, 9, 0, tzinfo=UTC)
+        outcome = state_with_override(
+            initial_plan_state(),
+            AssumptionKey.POLICY_STATE_PENSION_UPRATING.value,
+            "rule = cpi",
+            recorded_on=recorded,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        overridden = outcome.state.assumptions.get(
+            AssumptionKey.POLICY_STATE_PENSION_UPRATING
+        )
+        assert overridden.value == {"rule": "cpi"}
+        assert overridden.provenance is Provenance.USER_OVERRIDE
+        assert overridden.source == OVERRIDE_SOURCE
+        assert overridden.recorded_on == recorded
+
+    def test_table_override_edits_one_figure_in_place(self) -> None:
+        """Editing one figure of the glide shape keeps the others."""
+        base = initial_plan_state()
+        default = base.assumptions.get(AssumptionKey.GLIDEPATH_DEFAULT_SHAPE).value
+        text = table_edit_text(default).replace("0.80", "0.70")
+        outcome = state_with_override(
+            base,
+            AssumptionKey.GLIDEPATH_DEFAULT_SHAPE.value,
+            text,
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        value = outcome.state.assumptions.get(
+            AssumptionKey.GLIDEPATH_DEFAULT_SHAPE
+        ).value
+        assert value["equity_start"] == Decimal("0.70")
+        assert value["derisk_years_before_retirement"] == 15
+
+    def test_table_override_with_bad_content_is_rejected(self) -> None:
+        """The policy parser vets a table before it reaches the state."""
         state = initial_plan_state()
         outcome = state_with_override(
             state,
             AssumptionKey.POLICY_STATE_PENSION_UPRATING.value,
-            "cpi",
+            "rule = quadruple_lock",
             recorded_on=RECORDED,
             today=TODAY,
         )
         assert outcome.error is not None
-        assert "structured" in outcome.error
         assert outcome.state is state
+
+    def test_table_override_missing_figure_is_named(self) -> None:
+        """A missing required figure is named in the rejection."""
+        state = initial_plan_state()
+        outcome = state_with_override(
+            state,
+            AssumptionKey.GLIDEPATH_DEFAULT_SHAPE.value,
+            "equity_start = 0.80",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is not None
+        assert "missing required key" in outcome.error
+        assert outcome.state is state
+
+    def test_table_override_whole_number_fraction_is_rejected(self) -> None:
+        """A fraction typed without a decimal point fails by type."""
+        state = initial_plan_state()
+        outcome = state_with_override(
+            state,
+            AssumptionKey.GLIDEPATH_DEFAULT_SHAPE.value,
+            "equity_start = 1",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is not None
+        assert "Decimal fraction" in outcome.error
+        assert outcome.state is state
+
+    def test_annuity_table_override_round_trips_nested_keys(self) -> None:
+        """The nested annuity table edits through dotted keys."""
+        base = initial_plan_state()
+        default = base.assumptions.get(AssumptionKey.ANNUITY_AGE_ADJUSTMENT).value
+        text = table_edit_text(default).replace("0.846", "0.850")
+        outcome = state_with_override(
+            base,
+            AssumptionKey.ANNUITY_AGE_ADJUSTMENT.value,
+            text,
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        value = outcome.state.assumptions.get(
+            AssumptionKey.ANNUITY_AGE_ADJUSTMENT
+        ).value
+        assert value["level"]["55"] == Decimal("0.850")
+
+    def test_blank_restores_a_structured_default(self) -> None:
+        """A blank value undoes a table override entirely."""
+        overridden = state_with_override(
+            initial_plan_state(),
+            AssumptionKey.POLICY_STATE_PENSION_UPRATING.value,
+            "rule = cpi",
+            recorded_on=RECORDED,
+            today=TODAY,
+        ).state
+        outcome = state_with_override(
+            overridden,
+            AssumptionKey.POLICY_STATE_PENSION_UPRATING.value,
+            "",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        restored = outcome.state.assumptions.get(
+            AssumptionKey.POLICY_STATE_PENSION_UPRATING
+        )
+        assert restored.provenance is Provenance.DEFAULT_ASSUMPTION
+        assert restored.value == restored.default_value
 
     def test_non_finite_decimal_override_is_rejected(self) -> None:
         """Infinity never reaches the assumption set."""
@@ -222,8 +328,8 @@ class TestStateWithOverride:
         assert outcome.error is not None
         assert outcome.state is state
 
-    def test_structured_assumption_is_not_editable(self) -> None:
-        """Table-valued assumptions refuse in-place edits."""
+    def test_table_override_needs_key_value_lines(self) -> None:
+        """A bare scalar cannot stand in for a structured table."""
         state = initial_plan_state()
         outcome = state_with_override(
             state,
@@ -233,8 +339,23 @@ class TestStateWithOverride:
             today=TODAY,
         )
         assert outcome.error is not None
-        assert "structured" in outcome.error
+        assert "key = value" in outcome.error
         assert outcome.state is state
+
+    def test_table_override_re_projects_a_captured_household(
+        self, projected: PlanState
+    ) -> None:
+        """A table override re-runs the projection like any other."""
+        outcome = state_with_override(
+            projected,
+            AssumptionKey.POLICY_STATE_PENSION_UPRATING.value,
+            "rule = cpi",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        assert outcome.state.result is not None
+        assert outcome.state.result is not projected.result
 
     def test_unknown_key_is_rejected(self) -> None:
         """A key outside the catalogue is rejected, not KeyError'd."""

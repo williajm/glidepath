@@ -5,21 +5,43 @@ what the run rested on — as three columns: facts the user stated,
 assumptions used (default vs overridden, with source and date), and
 decisions in effect. The full shipped assumption catalogue follows the
 read list so every default is overridable in place even before it is
-read by a run.
+read by a run. A fourth, entity-level section surfaces the plan's
+*structural* inputs — fields that drive results but are neither
+``Fact`` nor ``Decision`` wrapped, so they never appear as provenance
+rows (planning §5.1, issue #70).
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from glidepath.app.display import format_date, format_recorded, format_value
-from glidepath.core import Assumption, AssumptionKey, Household, Provenance
+from glidepath.app.tables import table_edit_text
+from glidepath.core import (
+    Assumption,
+    AssumptionKey,
+    Household,
+    Provenance,
+    RevaluationReference,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from decimal import Decimal
 
     from glidepath.app.plan import PlanState
+    from glidepath.core import (
+        AnnuityPurchase,
+        AssetAllocation,
+        DBPension,
+        FactorTable,
+        FeeSchedule,
+        GlidePathConfig,
+        LifeStage,
+        Person,
+        RevaluationBasis,
+        Wrapper,
+    )
 
 _LABEL_PATTERN = re.compile(r"^(?P<kind>[a-z_]+)\[(?P<id>[^\]]+)\]\.(?P<path>.+)$")
 
@@ -33,6 +55,11 @@ _WRAPPER_KIND_NAMES: Mapping[str, str] = {
     "uk.workplace_dc": "Workplace DC",
     "uk.sipp": "SIPP",
     "uk.isa": "ISA",
+}
+
+_RESIDENCY_NAMES: Mapping[str, str] = {
+    "uk.ruk": "UK (England, Wales, or Northern Ireland)",
+    "uk.scotland": "UK (Scotland)",
 }
 
 _USED_LABEL = "Used in this projection"
@@ -74,7 +101,12 @@ class DecisionRow:
 
 @dataclass(frozen=True)
 class AssumptionRow:
-    """One assumption with its full §1 provenance payload."""
+    """One assumption with its full §1 provenance payload.
+
+    ``structured`` marks a table-valued row; its ``edit_text`` is the
+    round-trippable multi-line text form, while a scalar's is simply
+    its value (issue #71).
+    """
 
     key: str
     description: str
@@ -84,7 +116,17 @@ class AssumptionRow:
     usage: str
     source: str
     recorded: str
-    editable: bool
+    structured: bool
+    edit_text: str
+
+
+@dataclass(frozen=True)
+class StructureRow:
+    """One structural plan input, surfaced entity-level (§5.1, issue #70)."""
+
+    entity: str
+    setting: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -101,10 +143,13 @@ class InspectorViewModel:
     decisions_heading: str
     decisions_columns: tuple[str, ...]
     decisions: tuple[DecisionRow, ...]
+    structure_heading: str
+    structure_columns: tuple[str, ...]
+    structure: tuple[StructureRow, ...]
     summary: str
     override_title: str
     override_prompt: str
-    not_editable_message: str
+    table_override_prompt: str
 
 
 def _capitalised(text: str) -> str:
@@ -147,6 +192,7 @@ def _display_label(label: str, names: Mapping[str, str]) -> str:
 
 def _assumption_row(assumption: Assumption[Any], usage: str) -> AssumptionRow:
     """One assumption as its display row."""
+    structured = isinstance(assumption.value, Mapping)
     return AssumptionRow(
         key=str(assumption.key.value),
         description=assumption.description,
@@ -156,8 +202,162 @@ def _assumption_row(assumption: Assumption[Any], usage: str) -> AssumptionRow:
         usage=usage,
         source=assumption.source,
         recorded=format_recorded(assumption.recorded_on),
-        editable=isinstance(assumption.value, Decimal | int),
+        structured=structured,
+        edit_text=(
+            table_edit_text(assumption.value)
+            if structured
+            else format_value(assumption.value)
+        ),
     )
+
+
+def _glide_path_text(config: GlidePathConfig | None) -> str:
+    """A person's glide-path source as display text, knots included."""
+    if config is None:
+        return "Default shape assumption (glidepath.default_shape)"
+    knots = "; ".join(
+        f"{point.years_to_retirement}y out: {_allocation_text(point.allocation)}"
+        for point in config.points
+    )
+    return f"Custom — {knots}"
+
+
+def _allocation_text(allocation: AssetAllocation | None) -> str:
+    """A wrapper's asset-allocation source as display text."""
+    if allocation is None:
+        return "From the glide path"
+    return (
+        f"Equity {allocation.equity} / bonds {allocation.bonds}"
+        f" / cash {allocation.cash}"
+    )
+
+
+def _fees_text(fees: FeeSchedule | None) -> str:
+    """A wrapper's fee source as display text."""
+    if fees is None:
+        return "Shipped fee assumptions (fees.platform, fees.fund)"
+    return f"Platform {fees.platform.value} / fund {fees.fund.value}"
+
+
+def _revaluation_text(basis: RevaluationBasis) -> str:
+    """A DB scheme's revaluation basis as display text."""
+    if basis.fixed_rate is not None:  # FIXED, by the RevaluationBasis invariant
+        return f"Fixed {basis.fixed_rate.value} per year"
+    if basis.reference is RevaluationReference.CPI:
+        if basis.cap is None:
+            return "CPI"
+        return f"CPI, capped at {basis.cap.value}"
+    return "None (frozen in nominal terms)"
+
+
+def _factors_text(table: FactorTable) -> str:
+    """A DB scheme's early/late factor table as display text."""
+    if not table.factors:
+        return "None (taken at the normal pension age)"
+    return "; ".join(
+        f"{age}: {factor}" for age, factor in sorted(table.factors.items())
+    )
+
+
+def _stage_multipliers_text(multipliers: Mapping[LifeStage, Decimal] | None) -> str:
+    """A spending plan's life-stage multipliers as display text."""
+    if not multipliers:
+        return "None (flat spending)"
+    return "; ".join(
+        f"{format_value(stage)}: {multiplier}"
+        for stage, multiplier in sorted(
+            multipliers.items(), key=lambda item: item[0].value
+        )
+    )
+
+
+def _person_structure(person: Person, name: str) -> list[StructureRow]:
+    """One person's structural inputs as display rows (issue #70)."""
+    residency = str(person.tax_residency)
+    return [
+        StructureRow(name, "Tax residency", _RESIDENCY_NAMES.get(residency, residency)),
+        StructureRow(name, "Glide path", _glide_path_text(person.glide_path)),
+    ]
+
+
+def _wrapper_structure(wrapper: Wrapper, name: str) -> list[StructureRow]:
+    """One wrapper's structural inputs as display rows (issue #70)."""
+    kind = str(wrapper.kind)
+    rows = [StructureRow(name, "Wrapper kind", _WRAPPER_KIND_NAMES.get(kind, kind))]
+    schedule = wrapper.contributions
+    if schedule is not None:
+        relief = (
+            format_value(schedule.relief_mechanic)
+            if schedule.relief_mechanic is not None
+            else "No tax relief"
+        )
+        rows.append(StructureRow(name, "Contribution relief", relief))
+        escalation = (
+            str(schedule.escalation.value)
+            if schedule.escalation is not None
+            else "None (fixed amounts)"
+        )
+        rows.append(StructureRow(name, "Contribution escalation", escalation))
+    rows.append(
+        StructureRow(name, "Asset allocation", _allocation_text(wrapper.allocation))
+    )
+    rows.append(StructureRow(name, "Fees", _fees_text(wrapper.fees)))
+    return rows
+
+
+def _db_structure(pension: DBPension, name: str) -> list[StructureRow]:
+    """One DB pension's scheme structure as display rows (issue #70)."""
+    return [
+        StructureRow(name, "Statement date", format_date(pension.statement_date)),
+        StructureRow(name, "Revaluation", _revaluation_text(pension.revaluation_basis)),
+        StructureRow(
+            name, "Early/late factors", _factors_text(pension.early_late_factors)
+        ),
+    ]
+
+
+def _annuity_structure(purchase: AnnuityPurchase, name: str) -> list[StructureRow]:
+    """One annuity purchase's structural choices as display rows (issue #70)."""
+    return [
+        StructureRow(name, "Annuity type", format_value(purchase.annuity_type)),
+        StructureRow(name, "Annuity basis", format_value(purchase.basis)),
+    ]
+
+
+def _structure_rows(household: Household | None) -> tuple[StructureRow, ...]:
+    """Structural plan inputs, entity-level (planning §5.1, issue #70).
+
+    These fields drive results but are neither ``Fact`` nor
+    ``Decision`` wrapped, so they never appear as provenance rows —
+    the persisted plan itself is their record, and this section is
+    where the UI shows it.
+    """
+    if household is None:
+        return ()
+    names = _entity_names(household)
+    rows: list[StructureRow] = []
+    for person in household.persons:
+        rows.extend(_person_structure(person, names[str(person.id)]))
+        for wrapper in person.wrappers:
+            rows.extend(_wrapper_structure(wrapper, names[str(wrapper.id)]))
+        for pension in person.db_pensions:
+            rows.extend(_db_structure(pension, names[str(pension.id)]))
+        for purchase in person.annuity_purchases:
+            rows.extend(_annuity_structure(purchase, names[str(purchase.id)]))
+    if household.spending is not None:
+        rows.append(
+            StructureRow(
+                "Household",
+                "Spending stages",
+                _stage_multipliers_text(household.spending.stage_multipliers),
+            )
+        )
+    for outflow in household.planned_outflows:
+        person_id, age = outflow.at_age_of
+        rows.append(
+            StructureRow(outflow.label, "Due", f"{names[str(person_id)]} at age {age}")
+        )
+    return tuple(rows)
 
 
 def _assumption_rows(state: PlanState) -> tuple[AssumptionRow, ...]:
@@ -244,10 +444,14 @@ def build_inspector_view_model(state: PlanState) -> InspectorViewModel:
         decisions_heading="Your choices in effect",
         decisions_columns=("Choice", "Value", "Recorded"),
         decisions=decisions,
+        structure_heading="Plan structure",
+        structure_columns=("Entity", "Setting", "Value"),
+        structure=_structure_rows(state.household),
         summary=_summary(state),
         override_title="Override assumption",
         override_prompt="New value (blank restores the shipped default):",
-        not_editable_message=(
-            "This assumption is a structured table; it cannot be edited in place yet."
+        table_override_prompt=(
+            "New value — one 'key = value' line per figure, dotted keys for"
+            " nested tables (blank restores the shipped default):"
         ),
     )

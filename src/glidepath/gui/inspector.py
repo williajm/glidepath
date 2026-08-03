@@ -1,9 +1,11 @@
 """The stated-vs-assumed widgets (§4.7, roadmap 8.3).
 
-Three read-only tables — facts, assumptions, decisions — bound to the
-app layer's :class:`~glidepath.app.InspectorViewModel`. Double-clicking
-an assumption row opens the in-place override prompt; the new raw text
-goes straight back to the app layer.
+Four read-only tables — facts, assumptions, decisions, and the
+entity-level plan structure (issue #70) — bound to the app layer's
+:class:`~glidepath.app.InspectorViewModel`. Double-clicking an
+assumption row opens the in-place override prompt (multi-line for
+table-valued rows, issue #71); the new raw text goes straight back to
+the app layer.
 """
 
 from typing import TYPE_CHECKING
@@ -83,6 +85,11 @@ class InspectorPane(QWidget):
         decisions_layout = QVBoxLayout(self._decisions_box)
         decisions_layout.addWidget(self.decisions_table)
 
+        self._structure_box = QGroupBox(self)
+        self.structure_table = _read_only_table(self._structure_box)
+        structure_layout = QVBoxLayout(self._structure_box)
+        structure_layout.addWidget(self.structure_table)
+
         self.summary_label = QLabel("", self)
         self.summary_label.setWordWrap(True)
         self.status_label = QLabel("", self)
@@ -94,7 +101,8 @@ class InspectorPane(QWidget):
         columns.addWidget(self._decisions_box, 1)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(columns)
+        layout.addLayout(columns, 2)
+        layout.addWidget(self._structure_box, 1)
         layout.addWidget(self.summary_label)
         layout.addWidget(self.status_label)
 
@@ -134,6 +142,12 @@ class InspectorPane(QWidget):
             view_model.decisions_columns,
             [(row.label, row.value, row.recorded) for row in view_model.decisions],
         )
+        self._structure_box.setTitle(view_model.structure_heading)
+        _fill_table(
+            self.structure_table,
+            view_model.structure_columns,
+            [(row.entity, row.setting, row.value) for row in view_model.structure],
+        )
         self.summary_label.setText(view_model.summary)
 
     def assumption_row(self, row_index: int) -> AssumptionRow:
@@ -148,17 +162,22 @@ class InspectorPane(QWidget):
         if self._view_model is None:  # pragma: no cover - tables imply a model
             return
         row = self.assumption_row(row_index)
-        if not row.editable:
-            self.status_label.setText(self._view_model.not_editable_message)
-            return
         # Joining the row's key to the prompt is layout, not copy — both
         # strings come from the app layer (§4.7).
-        text, accepted = QInputDialog.getText(
-            self,
-            self._view_model.override_title,
-            f"{row.key} — {self._view_model.override_prompt}",
-            text=row.value,
-        )
+        if row.structured:
+            text, accepted = QInputDialog.getMultiLineText(
+                self,
+                self._view_model.override_title,
+                f"{row.key} — {self._view_model.table_override_prompt}",
+                row.edit_text,
+            )
+        else:
+            text, accepted = QInputDialog.getText(
+                self,
+                self._view_model.override_title,
+                f"{row.key} — {self._view_model.override_prompt}",
+                text=row.edit_text,
+            )
         if not accepted:
             return
         error = self._on_override(row.key, text)
