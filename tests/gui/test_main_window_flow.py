@@ -1,0 +1,86 @@
+"""Whole-shell flow, offscreen (issues 8.2 + 8.3, §4.7).
+
+Facts entered in the first tab run a real projection through the UK
+region; the stated-vs-assumed tab re-renders from the result's
+provenance; an in-place override flows back through the app layer.
+"""
+
+from typing import TYPE_CHECKING
+
+from glidepath.app import build_shell_view_model
+from glidepath.gui import inspector as inspector_module
+from glidepath.gui.widgets import MainWindow
+from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
+
+if TYPE_CHECKING:
+    import pytest
+
+
+def filled_window() -> MainWindow:
+    """A window with a minimal projectable plan typed into the facts tab."""
+    window = MainWindow(build_shell_view_model())
+    facts = window.facts_pane
+    facts.person_form.set_value("date_of_birth", "1991-02-01")
+    facts.person_form.set_value("tax_residency", str(RUK_RESIDENCY))
+    facts.person_form.set_value("target_retirement_age", "60")
+    facts.spending_form.set_value("annual_spending_real", "18000")
+    wrapper_form = facts.wrappers.add_entry()
+    wrapper_form.set_value("kind", str(ISA_KIND))
+    wrapper_form.set_value("balance", "25000")
+    return window
+
+
+class TestFactsToInspectorFlow:
+    """The two tabs share one session state through the app layer."""
+
+    def test_valid_submission_projects_and_fills_the_inspector(self) -> None:
+        """Saving facts runs the projection and re-renders the inspector."""
+        window = filled_window()
+        window.facts_pane.submit_button.click()
+        assert "projection run" in window.facts_pane.status_label.text()
+        assert window.inspector_pane.facts_table.rowCount() > 0
+        assert window.inspector_pane.decisions_table.rowCount() > 0
+        assert "Run manifest" in window.inspector_pane.summary_label.text()
+
+    def test_invalid_submission_reports_field_errors(self) -> None:
+        """An empty submission lists the missing required fields."""
+        window = MainWindow(build_shell_view_model())
+        window.facts_pane.submit_button.click()
+        status = window.facts_pane.status_label.text()
+        assert "required" in status
+        assert "Date of birth" in status
+        assert window.inspector_pane.facts_table.rowCount() == 0
+
+    def test_override_through_the_inspector_re_stamps_the_row(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A double-click override lands in the session state (§1)."""
+        window = MainWindow(build_shell_view_model())
+        pane = window.inspector_pane
+        target = next(
+            index
+            for index in range(pane.assumptions_table.rowCount())
+            if pane.assumption_row(index).key == "inflation.cpi"
+        )
+
+        class AcceptingDialog:
+            """Dialog double that accepts a scripted value."""
+
+            @staticmethod
+            def getText(  # noqa: N802 - Qt API name
+                _parent: object, _title: str, _label: str, *, text: str = ""
+            ) -> tuple[str, bool]:
+                """Accept with the scripted override value."""
+                del text
+                return ("0.03", True)
+
+        monkeypatch.setattr(inspector_module, "QInputDialog", AcceptingDialog)
+        pane.assumptions_table.cellDoubleClicked.emit(target, 0)
+        updated = next(
+            pane.assumption_row(index)
+            for index in range(pane.assumptions_table.rowCount())
+            if pane.assumption_row(index).key == "inflation.cpi"
+        )
+        assert updated.status == "Your override"
+        assert updated.value == "0.03"
+        assert pane.status_label.text() == ""

@@ -17,6 +17,7 @@ from glidepath.app.copy import (
     DISCLAIMER_TITLE,
     HELP_MENU_LABEL,
 )
+from glidepath.app.forms import FactsFormViewModel, build_facts_form_view_model
 
 if TYPE_CHECKING:
     from glidepath.app.firstrun import FirstRunState
@@ -45,10 +46,12 @@ class ShellViewModel:
     """Top-level application shell."""
 
     window_title: str
-    placeholder: str
     help_menu_label: str
+    facts_tab_label: str
+    inspector_tab_label: str
     disclaimer: DisclaimerViewModel
     about: AboutViewModel
+    facts_form: FactsFormViewModel
 
 
 def _installed_version() -> str:
@@ -63,11 +66,9 @@ def build_shell_view_model() -> ShellViewModel:
     """Assemble the shell view model from canonical copy and metadata."""
     return ShellViewModel(
         window_title=APP_NAME,
-        placeholder=(
-            "No plan open yet. Facts entry, the assumptions inspector, and "
-            "projection views arrive in later milestones."
-        ),
         help_menu_label=HELP_MENU_LABEL,
+        facts_tab_label="Facts",
+        inspector_tab_label="Stated vs assumed",
         disclaimer=DisclaimerViewModel(
             title=DISCLAIMER_TITLE,
             body=DISCLAIMER_BODY,
@@ -78,6 +79,7 @@ def build_shell_view_model() -> ShellViewModel:
             title=ABOUT_TITLE,
             body=f"{APP_NAME} {_installed_version()}\n\n{DISCLAIMER_BODY}",
         ),
+        facts_form=build_facts_form_view_model(),
     )
 
 
