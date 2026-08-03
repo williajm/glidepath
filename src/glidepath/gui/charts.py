@@ -64,12 +64,17 @@ class ChartsPane(QWidget):
         layout.addWidget(self.chart_tabs, 1)
 
     def refresh(self, view_model: ChartsViewModel) -> None:
-        """Re-render the toggle, message, and charts from the view model."""
+        """Re-render the toggle, message, and charts from the view model.
+
+        The selected sub-tab survives the rebuild, so toggling the
+        basis re-presents the chart the user is looking at.
+        """
         self._basis_box.setTitle(view_model.basis_heading)
         self._sync_basis_buttons(view_model)
         self.message_label.setText(view_model.message)
         self.message_label.setVisible(bool(view_model.message))
         self.chart_tabs.setVisible(bool(view_model.charts))
+        selected_index = self.chart_tabs.currentIndex()
         while self.chart_tabs.count():
             widget = self.chart_tabs.widget(0)
             self.chart_tabs.removeTab(0)
@@ -79,6 +84,8 @@ class ChartsPane(QWidget):
             self.chart_tabs.addTab(
                 self._chart_view(chart, view_model.categories), chart.title
             )
+        if 0 <= selected_index < self.chart_tabs.count():
+            self.chart_tabs.setCurrentIndex(selected_index)
 
     def _sync_basis_buttons(self, view_model: ChartsViewModel) -> None:
         """Create the basis radio buttons once; keep the selection bound."""

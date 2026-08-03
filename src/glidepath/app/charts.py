@@ -70,16 +70,18 @@ _BASIS_SUFFIXES: Final[Mapping[str, str]] = {
 
 _UNKNOWN_BASIS_MESSAGE: Final = "unknown chart basis key"
 
+# The stacked sources must not overlap: the report's pension_lump_sum
+# and annuity_lump_sum are column views of tax-free cash the wrappers
+# already carry in withdrawal_tax_free, so they are already inside
+# withdrawals_gross. Only the DB commutation lump sum is cash from
+# outside the wrappers.
 _INCOME_SOURCES: Final[tuple[tuple[str, Callable[[PeriodReportRow], Money]], ...]] = (
     ("Employment", lambda row: row.employment_income),
     ("DB pension", lambda row: row.db_income),
+    ("DB lump sum", lambda row: row.db_lump_sum),
     ("State pension", lambda row: row.state_pension_income),
     ("Annuity income", lambda row: row.annuity_income),
     ("Withdrawals (gross)", lambda row: row.withdrawals_gross),
-    (
-        "Lump sums",
-        lambda row: row.db_lump_sum + row.pension_lump_sum + row.annuity_lump_sum,
-    ),
 )
 
 
@@ -232,8 +234,9 @@ def _wrapper_labels(
 ) -> dict[EntityId, str]:
     """A display label per wrapper, in first-seen order.
 
-    The wrapper's kind name alone when unique; suffixed with the
-    wrapper's entity id when the household holds several of one kind.
+    The wrapper's kind name alone when unique; numbered in first-seen
+    order when the household holds several of one kind (entity ids are
+    generated UUIDs, so they are never shown as copy).
     """
     kinds: dict[EntityId, str] = {}
     for rows in grouped.values():
@@ -241,10 +244,15 @@ def _wrapper_labels(
             for entry in row.wrapper_balances:
                 kinds.setdefault(entry.wrapper_id, format_wrapper_kind(entry.kind))
     counts = Counter(kinds.values())
-    return {
-        wrapper_id: kind if counts[kind] == 1 else f"{kind} ({wrapper_id})"
-        for wrapper_id, kind in kinds.items()
-    }
+    numbered: Counter[str] = Counter()
+    labels: dict[EntityId, str] = {}
+    for wrapper_id, kind in kinds.items():
+        if counts[kind] == 1:
+            labels[wrapper_id] = kind
+        else:
+            numbered[kind] += 1
+            labels[wrapper_id] = f"{kind} {numbered[kind]}"
+    return labels
 
 
 def _balances_chart(

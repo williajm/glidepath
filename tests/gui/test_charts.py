@@ -96,6 +96,15 @@ class TestChartsPane:
         pane.refresh(view_model)
         assert pane.chart_tabs.count() == len(view_model.charts)
 
+    def test_refresh_keeps_the_selected_chart(self) -> None:
+        """Rebuilding the sub-tabs must not move the user off a chart."""
+        pane = ChartsPane(lambda _key: None)
+        view_model = projected_view_model()
+        pane.refresh(view_model)
+        pane.chart_tabs.setCurrentIndex(2)
+        pane.refresh(view_model)
+        assert pane.chart_tabs.currentIndex() == 2
+
     def test_basis_toggle_forwards_the_option_key(self) -> None:
         """Clicking a basis radio reports its key to the shell handler."""
         selected: list[str] = []
@@ -138,7 +147,9 @@ class TestMainWindowChartsFlow:
             button.text(): button
             for button in window.charts_pane.findChildren(QRadioButton)
         }
+        window.charts_pane.chart_tabs.setCurrentIndex(2)
         buttons["Nominal"].click()
         assert window.charts_pane.chart_tabs.count() == 3
         assert buttons["Nominal"].isChecked()
         assert not buttons["Real (today's money)"].isChecked()
+        assert window.charts_pane.chart_tabs.currentIndex() == 2

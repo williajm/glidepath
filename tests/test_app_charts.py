@@ -210,6 +210,24 @@ class TestProjectedCharts:
         assert "Annuity income" not in labels
         assert "DB pension" not in labels
 
+    def test_income_sources_never_overlap(self, view_model: ChartsViewModel) -> None:
+        """The stack draws only from non-overlapping income sources.
+
+        Pension and annuity tax-free cash already sits inside the
+        wrappers' gross withdrawals, so the person-level lump-sum
+        columns must never chart alongside them (they are views of
+        the same cash); only the DB commutation lump sum is extra.
+        """
+        labels = {series.label for series in view_model.charts[1].series}
+        assert labels <= {
+            "Employment",
+            "DB pension",
+            "DB lump sum",
+            "State pension",
+            "Annuity income",
+            "Withdrawals (gross)",
+        }
+
     def test_tax_chart_is_a_single_series(self, view_model: ChartsViewModel) -> None:
         """Household tax due, one stacked series."""
         tax_chart = view_model.charts[2]
@@ -249,12 +267,16 @@ def two_isas_fixture() -> ChartsViewModel:
 class TestWrapperLabelDisambiguation:
     """Two wrappers of one kind chart under distinguishable labels."""
 
-    def test_duplicate_kinds_carry_their_entity_ids(
+    def test_duplicate_kinds_are_numbered_in_first_seen_order(
         self, two_isas: ChartsViewModel
     ) -> None:
-        """The kind name alone would be ambiguous, so ids are appended."""
+        """Repeated kinds are numbered, never labelled by entity id.
+
+        The kind name alone would be ambiguous, and entity ids are
+        generated UUIDs — not copy a legend should ever show.
+        """
         labels = [series.label for series in two_isas.charts[0].series]
-        assert labels == ["ISA (isa-a)", "ISA (isa-b)"]
+        assert labels == ["ISA 1", "ISA 2"]
 
     def test_all_zero_tax_still_renders_an_axis(
         self, two_isas: ChartsViewModel
