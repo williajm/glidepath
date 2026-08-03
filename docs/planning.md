@@ -549,8 +549,10 @@ hand-reviewed expected output checked in at
 plus each period's real closing balance, the provenance labels, and the
 assumption keys read). Any engine change that shifts the output fails
 the test by design; regenerate with
-`uv run pytest tests/test_golden_scenario.py --update-golden` and
-explain the diff in the pull request. Companion tests pin
+`uv run --locked pytest --no-cov tests/test_golden_scenario.py
+--update-golden` (`--no-cov` because the repository-wide coverage gate
+would fail a single-module run) and explain the diff in the pull
+request. Companion tests pin
 independently hand-computed anchors (first partial period, the
 retirement transition, per-period ledger identities), so the file is
 anchored to reviewed arithmetic, not to whatever the engine emitted

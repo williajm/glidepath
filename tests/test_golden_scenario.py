@@ -10,9 +10,11 @@ serializes the run the same way and compares character-for-character.
 Any engine change that shifts the output fails this test — that is the
 point. To accept a shift, regenerate with
 
-    uv run pytest tests/test_golden_scenario.py --update-golden
+    uv run --locked pytest --no-cov tests/test_golden_scenario.py --update-golden
 
-then review the diff and explain it in the pull request.
+(``--no-cov``: the repository-wide coverage gate would otherwise fail a
+single-module run) then review the diff and explain it in the pull
+request.
 
 The companion tests pin independently hand-computed figures (first
 partial period, the retirement transition, ledger identities), so the
@@ -229,9 +231,9 @@ class TestGoldenOutput:
             GOLDEN_PATH.write_text(rendered, encoding="utf-8", newline="\n")
         stored = GOLDEN_PATH.read_text(encoding="utf-8")
         assert stored == rendered, (
-            "golden output shifted — regenerate with `uv run pytest"
-            " tests/test_golden_scenario.py --update-golden`, review the"
-            " diff, and explain it in the pull request"
+            "golden output shifted — regenerate with `uv run --locked pytest"
+            " --no-cov tests/test_golden_scenario.py --update-golden`, review"
+            " the diff, and explain it in the pull request"
         )
 
 
@@ -286,16 +288,27 @@ class TestHandCheckedAnchors:
         assert after.employment_income == ZERO
         assert after.spending_need > ZERO
         assert dc.employee_contribution == ZERO
+        assert dc.employer_contribution == ZERO
         assert isa.employee_contribution == ZERO
         assert isa.withdrawal_tax_free > ZERO
+        assert dc.withdrawal_tax_free == ZERO
+        assert dc.withdrawal_taxable == ZERO
 
     def test_horizon_runs_to_planning_age(self, result: ProjectionResult) -> None:
-        """The default horizon covers 2026/27 through 2085/86 (age 95)."""
+        """The default horizon covers 2026/27 through 2085/86 (age 95).
+
+        The final year is partial: nine whole months from 6 Apr 2085 to
+        the horizon end on 1 Feb 2086 (age 95), so its flows pro-rate
+        by 9/12 (roadmap 4.6) — pinned here independently because the
+        real-spending invariant derives its expectation from the
+        report's own year fraction.
+        """
         assert len(result.snapshots) == 60
         last = result.snapshots[-1]
         [person] = last.persons
         assert last.period.start == date(2085, 4, 6)
         assert person.age_at_period_start == 94
+        assert last.year_fraction == Decimal(9) / Decimal(12)
 
 
 class TestStructuralInvariants:
