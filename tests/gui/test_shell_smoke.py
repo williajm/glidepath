@@ -4,18 +4,17 @@ The shell is thin by policy, so these tests only check the bindings:
 view-model copy reaches the widgets, the disclaimer gates the shell,
 and declining exits without recording an acknowledgement.
 
-The offscreen QPA platform is selected (autouse fixture) before the
+The offscreen QPA platform is selected (conftest fixture) before the
 singleton QApplication is created, so the suite runs headless on both
 CI and workstations.
 """
 
-import os
 from datetime import date
 from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QTabWidget
 
 from glidepath.app import (
     build_shell_view_model,
@@ -29,17 +28,6 @@ from glidepath.gui.widgets import DisclaimerDialog, MainWindow, prompt_disclaime
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@pytest.fixture(autouse=True, scope="session")
-def qt_app() -> QApplication:
-    """The process-wide QApplication, created on the offscreen platform."""
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    existing = QApplication.instance()
-    if existing is None:
-        return QApplication([])
-    assert isinstance(existing, QApplication)
-    return existing
 
 
 class TestDisclaimerDialog:
@@ -86,13 +74,17 @@ class TestMainWindow:
     """The window binds the shell view model and exposes About."""
 
     def test_binds_view_model_copy(self) -> None:
-        """Window title and placeholder text come from the view model."""
+        """Window title and tab labels come from the view model."""
         view_model = build_shell_view_model()
         window = MainWindow(view_model)
         assert window.windowTitle() == view_model.window_title
         central = window.centralWidget()
-        assert central is not None
-        assert central.property("text") == view_model.placeholder
+        assert isinstance(central, QTabWidget)
+        tab_labels = [central.tabText(index) for index in range(central.count())]
+        assert tab_labels == [
+            view_model.facts_tab_label,
+            view_model.inspector_tab_label,
+        ]
         menu_titles = [action.text() for action in window.menuBar().actions()]
         assert menu_titles == [f"&{view_model.help_menu_label}"]
 
