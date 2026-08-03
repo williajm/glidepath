@@ -209,6 +209,12 @@ makes MC debuggable ("re-run path 4711"). **Rejected:** numpy (runtime
 dep, float-based, breaks the Decimal rule); module-level `random`; floats
 internally. **Accepted cost:** Decimal MC is slow — annual steps and small
 state keep it tractable; a measurement task gates any revisit (§8, 7.2).
+Measured 2026-08-03 (roadmap 7.2; Windows 11, Python 3.14.6, via
+`scripts/measure_mc_performance.py`): one stochastic `returns_for` draw
+≈ 75 µs; one 60-period engine pass ≈ 28 ms; projected per-path cost
+≈ 32 ms → ≈ 3 s per 100 paths, ≈ 32 s per 1,000 paths. Within the
+accepted envelope — no optimisation before the 7.3 path runner exists
+and is measured end-to-end.
 
 ## 5. Design
 
