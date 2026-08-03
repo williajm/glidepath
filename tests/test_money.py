@@ -61,6 +61,24 @@ def test_ties_round_half_even(raw: str, expected: str) -> None:
     assert Money(Decimal(raw)).quantized() == Money(Decimal(expected))
 
 
+@given(amount=amounts)
+def test_quantized_zero_is_never_signed(amount: Decimal) -> None:
+    """A zero ledger write has the one unsigned representation.
+
+    A sub-penny negative residual would otherwise quantize to
+    ``Decimal("-0.00")`` — numerically zero, but serialized with a
+    minus sign into reports and golden outputs.
+    """
+    quantized = Money(amount).quantized()
+    if quantized.amount == 0:
+        assert not quantized.amount.is_signed()
+
+
+def test_negative_residual_quantizes_to_unsigned_zero() -> None:
+    """A tiny negative residual rounds to plain ``0.00``, not ``-0.00``."""
+    assert str(Money(Decimal("-0.0001")).quantized().amount) == "0.00"
+
+
 @given(left=amounts, right=amounts)
 def test_addition_and_subtraction_are_exact(left: Decimal, right: Decimal) -> None:
     """Intermediate arithmetic never rounds (planning §4.6)."""
