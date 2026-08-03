@@ -516,18 +516,24 @@ def _return_model(
 ) -> ReturnModel:
     """The run's return model — injected, or resolved from the mode.
 
+    The seed requirement binds before any injection: a ``MONTE_CARLO``
+    config labels its result a Monte Carlo run, and an unseeded one
+    could never be reproduced from its manifest, so it is rejected
+    rather than defaulted — whether or not a factory stands in for the
+    stochastic model (planning §4.6).
+
     Raises:
-        EngineError: If a ``MONTE_CARLO`` config carries no seed — an
-            unseeded stochastic run could never be reproduced, so it
-            is rejected rather than defaulted (planning §4.6).
+        EngineError: If a ``MONTE_CARLO`` config carries no seed.
     """
-    if factory is not None:
-        return factory(tracked)
     if config.mode is RunMode.MONTE_CARLO:
         if config.seed is None:
             msg = "RunMode.MONTE_CARLO requires RunConfig.seed (planning §4.6)"
             raise EngineError(msg)
+        if factory is not None:
+            return factory(tracked)
         return StochasticReturnModel(assumptions=tracked, seed=config.seed)
+    if factory is not None:
+        return factory(tracked)
     return DeterministicReturnModel(assumptions=tracked)
 
 

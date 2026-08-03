@@ -22,12 +22,21 @@ Success metrics over the outcomes (planning §5.2):
   inflation factor for today's money.
 - **sustainable income** (:func:`sustainable_income`) — the highest
   starting net withdrawal meeting a target success rate
-  (:class:`SustainableIncomeSearch`), by bisection on the spending
-  plan's real annual amount. Every probe reuses the same seed (common
-  random numbers), so candidates differ only by the spending level and
-  the search is reproducible. Probe plans exist only inside the
-  search: the synthetic spending "fact" they carry is never part of
-  any returned result.
+  (:class:`SustainableIncomeSearch`): a descending scan over the
+  bracket finds the highest succeeding scan point, then bisection
+  refines upward within the scan cell above it. For a strategy whose
+  success is monotone in the spending level — the default fixed-real
+  strategy, and the gross-defined strategies whose draws ignore the
+  need — the result is exact to the search tolerance. A strategy with
+  adjustment triggers (guardrails, roadmap 5.3) can make success
+  non-monotone: there the result is still never below the highest
+  succeeding scan point, but a success island narrower than one scan
+  step can be missed — raise ``scan_steps`` to tighten the
+  resolution. Every probe reuses the same seed (common random
+  numbers), so candidates differ only by the spending level and the
+  search is reproducible. Probe plans exist only inside the search:
+  the synthetic spending "fact" they carry is never part of any
+  returned result.
 """
 
 from dataclasses import dataclass, replace
@@ -42,10 +51,12 @@ from glidepath.core.money import Money
 from glidepath.core.provenance import Fact
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from glidepath.core.config import RunConfig
     from glidepath.core.entities import Household
     from glidepath.core.periods import Period
-    from glidepath.core.provenance import AssumptionSet
+    from glidepath.core.provenance import Assumption, AssumptionKey, AssumptionSet
     from glidepath.core.region import Region
     from glidepath.core.results import ProjectionResult, RunProvenance
 
@@ -92,9 +103,10 @@ class MonteCarloResult:
     """N paths' outcomes with the success metrics over them (§5.2).
 
     ``config`` and ``provenance`` are the §4.6 manifest side: the
-    seed, mode, and every assumption the paths read (identical keys on
-    every path — the stochastic model draws per period, not per key),
-    so the whole run is reproducible from this result plus the plan.
+    seed, mode, and every assumption any path read — the union across
+    paths, since a balance-dependent read (natural-yield pricing,
+    roadmap 5.3) can fire on some paths only — so the whole run is
+    reproducible from this result plus the plan.
     """
 
     outcomes: tuple[PathOutcome, ...]
@@ -162,7 +174,7 @@ def run_paths(
     path=i))`` — always paths 0 through ``paths - 1``, whatever
     ``config.path`` says: paths are order-independent and individually
     re-runnable from the seed alone (planning §4.6). The provenance is
-    path 0's — every path reads the same assumption keys.
+    the union across paths in first-read order (class docstring).
 
     Raises:
         EngineError: If ``paths`` is not positive, ``config.mode`` is
@@ -175,15 +187,16 @@ def run_paths(
     if config.mode is not RunMode.MONTE_CARLO:
         msg = "run_paths requires RunMode.MONTE_CARLO (planning §5.2)"
         raise EngineError(msg)
-    first = run(plan, assumptions, region, _path_config(config, 0))
-    outcomes = [_path_outcome(0, first)]
-    for index in range(1, paths):
-        path_config = _path_config(config, index)
-        outcomes.append(
-            _path_outcome(index, run(plan, assumptions, region, path_config))
-        )
+    outcomes: list[PathOutcome] = []
+    provenances: list[RunProvenance] = []
+    for index in range(paths):
+        result = run(plan, assumptions, region, _path_config(config, index))
+        outcomes.append(_path_outcome(index, result))
+        provenances.append(result.provenance)
     return MonteCarloResult(
-        outcomes=tuple(outcomes), config=config, provenance=first.provenance
+        outcomes=tuple(outcomes),
+        config=config,
+        provenance=_merged_provenance(provenances),
     )
 
 
@@ -193,15 +206,24 @@ class SustainableIncomeSearch:
 
     ``paths`` seeded paths are projected per candidate spending level;
     a candidate meets the target when at least ``target_success_rate``
-    of them avoid ruin. The bisection covers ``[0, maximum]`` of real
-    annual spending and stops once the bracket narrows to
-    ``tolerance``.
+    of them avoid ruin. The search covers ``[0, maximum]`` of real
+    annual spending: a descending scan over ``scan_steps`` equal steps
+    finds the highest succeeding scan point, then bisection refines
+    upward within the step above it, stopping once the bracket narrows
+    to ``tolerance``. The scan is what makes the search robust to a
+    non-monotone success predicate (module docstring): success islands
+    narrower than ``maximum / scan_steps`` can still be missed, so
+    raise ``scan_steps`` when the withdrawal strategy has adjustment
+    triggers; ``scan_steps=1`` is a pure bisection. Probe count is at
+    most ``1 + scan_steps`` plus the bisection's
+    ``log2(step / tolerance)``.
     """
 
     paths: int
     target_success_rate: Decimal
     maximum: Money
     tolerance: Money = _DEFAULT_TOLERANCE
+    scan_steps: int = 10
 
     def __post_init__(self) -> None:
         """Reject an empty path count, an off-range target, or bad bounds."""
@@ -220,6 +242,9 @@ class SustainableIncomeSearch:
         if self.tolerance <= _ZERO:
             msg = "tolerance must be positive"
             raise ValueError(msg)
+        if self.scan_steps < 1:
+            msg = f"scan_steps must be positive, got {self.scan_steps}"
+            raise ValueError(msg)
 
 
 def sustainable_income(
@@ -229,16 +254,23 @@ def sustainable_income(
     config: RunConfig,
     search: SustainableIncomeSearch,
 ) -> Money | None:
-    """The highest starting withdrawal meeting the target, by bisection.
+    """The highest starting withdrawal meeting the target (scan + bisect).
 
     Searches the spending plan's real annual amount (today's money —
     the "starting withdrawal": the engine escalates it by the run's
-    CPI path) over the search's ``[0, maximum]``. Returns the highest
-    probed level that met the target, within the search's tolerance of
-    the true boundary — ``maximum`` itself when even that meets — or
-    ``None`` when not even zero spending does (the plan's outflows
-    already exhaust it). Every returned value was actually probed,
-    never interpolated.
+    CPI path) over the search's ``[0, maximum]``: a descending scan
+    over the search's ``scan_steps`` finds the highest succeeding scan
+    point, then bisection refines upward within the step above it.
+    Returns the highest probed level that met the target — ``maximum``
+    itself when even that meets — or ``None`` when no scan point and
+    not even zero spending does (the plan's outflows already exhaust
+    it). Every returned value was actually probed, never interpolated.
+
+    For a monotone success predicate (the default fixed-real strategy)
+    the result is within the search's tolerance of the true boundary;
+    for adjustment-trigger strategies it is never below the highest
+    succeeding scan point, with the resolution caveat on
+    :class:`SustainableIncomeSearch`.
 
     The plan's stated spending amount is irrelevant to the search —
     only its stage multipliers and the rest of the plan carry over; a
@@ -260,9 +292,18 @@ def sustainable_income(
     high = search.maximum
     if meets(high):
         return high
-    low = _ZERO
-    if not meets(low):
-        return None
+    low: Money | None = None
+    step = search.maximum.amount / Decimal(search.scan_steps)
+    for index in range(search.scan_steps - 1, 0, -1):
+        candidate = Money(step * Decimal(index))
+        if meets(candidate):
+            low = candidate
+            break
+        high = candidate
+    if low is None:
+        low = _ZERO
+        if not meets(low):
+            return None
     while high - low > search.tolerance:
         midpoint = Money((low.amount + high.amount) / _TWO)
         if meets(midpoint):
@@ -270,6 +311,25 @@ def sustainable_income(
         else:
             high = midpoint
     return low
+
+
+def _merged_provenance(provenances: Sequence[RunProvenance]) -> RunProvenance:
+    """Path 0's provenance with the assumption union of every path.
+
+    Almost every assumption read is plan- or date-driven and identical
+    across paths, but a balance-dependent read — natural-yield pricing
+    fires only while a source still holds money (roadmap 5.3) — can
+    appear on some paths only. The union keeps the §4.6 manifest
+    exhaustive: path 0's first-read order, then any later-path-only
+    keys in path order. Facts, decisions, the region data version, and
+    the seed are path-independent, so path 0's stand for all.
+    """
+    merged: dict[AssumptionKey, Assumption[Any]] = {}
+    for provenance in provenances:
+        for assumption in provenance.assumptions:
+            merged.setdefault(assumption.key, assumption)
+    changes: dict[str, Any] = {"assumptions": tuple(merged.values())}
+    return replace(provenances[0], **changes) if changes else provenances[0]
 
 
 def _path_config(config: RunConfig, index: int) -> RunConfig:

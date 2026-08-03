@@ -753,15 +753,25 @@ seed and resolves the stochastic model inside `run()`, with
 `RunConfig.path` naming the substream — the path runner (roadmap 7.3,
 `run_paths`) projects path *i* under `replace(config, path=i)` and
 reduces each path to its success signals (ruin period, ending balance),
-dropping the period ledgers; a test double enters through `run()`'s
-`return_model_factory` instead (built from the run's tracked assumption
-view, so provenance stays exhaustive). Success metrics over paths
-(`MonteCarloResult`): **probability of ruin** — the fraction of paths
-with any period's need unmet, read from the engine's `shortfall` signal
-(which survives gross-defined strategies and covers planned outflows);
-**sustainable income** (highest starting withdrawal meeting a target
-success rate, by bisection on the spending plan's real annual amount —
-every probe reuses the run's seed, i.e. common random numbers, and the
+dropping the period ledgers; the result's provenance is the union of
+the paths' reads in first-read order, since a balance-dependent read
+(natural-yield pricing) can fire on some paths only. A test double
+enters through `run()`'s `return_model_factory` instead (built from the
+run's tracked assumption view, so provenance stays exhaustive); the
+seed requirement binds before the injection — a `MONTE_CARLO` result
+must be reproducible from its manifest whatever produced its returns.
+Success metrics over paths (`MonteCarloResult`): **probability of
+ruin** — the fraction of paths with any period's need unmet, read from
+the engine's `shortfall` signal (which survives gross-defined
+strategies and covers planned outflows); **sustainable income**
+(highest starting withdrawal meeting a target success rate: a
+descending scan over the search bracket finds the highest succeeding
+scan point, then bisection refines upward within the scan cell above it
+— exact to tolerance for strategies whose success is monotone in the
+spending level (the default fixed-real), and never below the best scan
+point for adjustment-trigger strategies (guardrails), whose success
+islands narrower than one scan step need a finer `scan_steps`; every
+probe reuses the run's seed, i.e. common random numbers, and the
 returned level is always one actually probed); **ending-pot
 percentiles** (linear interpolation between order statistics of the
 nominal ending balances; CPI is deterministic across paths, so nominal

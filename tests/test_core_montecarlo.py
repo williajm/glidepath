@@ -22,11 +22,13 @@ from glidepath.core import (
     AssumptionSet,
     ContributionTaxTreatment,
     Decision,
+    DeterministicReturnModel,
     EngineError,
     EntityId,
     Fact,
     FeeSchedule,
     GrowthTaxTreatment,
+    GuardrailsWithdrawalStrategy,
     Household,
     MemberContributionOutcome,
     MemberContributionRequest,
@@ -40,6 +42,7 @@ from glidepath.core import (
     Rate,
     Region,
     ReliefMechanic,
+    ReturnModel,
     RunConfig,
     RunMode,
     RunProvenance,
@@ -50,6 +53,7 @@ from glidepath.core import (
     TaxInput,
     TaxResidencyId,
     TaxResult,
+    TrackedAssumptions,
     WithdrawalTaxTreatment,
     Wrapper,
     WrapperKindId,
@@ -60,6 +64,7 @@ from glidepath.core import (
     run_paths,
     sustainable_income,
 )
+from glidepath.core.montecarlo import _merged_provenance
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 AS_OF = date(2026, 8, 1)
@@ -244,6 +249,24 @@ def money_fact(amount: str) -> Fact[Money]:
     return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
+def assumption_of(key: AssumptionKey, value: object) -> Assumption[object]:
+    """A shipped-default assumption for hand-built provenance."""
+    return Assumption(
+        key=key,
+        value=value,
+        default_value=value,
+        provenance=Provenance.DEFAULT_ASSUMPTION,
+        source="test basis",
+        recorded_on=RECORDED,
+        description="test assumption",
+    )
+
+
+def deterministic_model(tracked: TrackedAssumptions) -> ReturnModel:
+    """A stand-in injected return-model factory."""
+    return DeterministicReturnModel(assumptions=tracked)
+
+
 def household_of(
     balance: str = "100000",
     spending: str | None = "10000",
@@ -335,6 +358,26 @@ class TestEngineModes:
         config = mc_config(seed=None)
         with pytest.raises(EngineError, match=r"requires RunConfig\.seed"):
             run(household, assumptions, region, config)
+
+    def test_an_injected_model_does_not_bypass_the_seed_requirement(self) -> None:
+        """A Monte Carlo result must carry a seed, factory or not.
+
+        The result's config labels it a Monte Carlo run; unseeded it
+        could never be reproduced from its manifest (planning §4.6),
+        however its returns were actually produced.
+        """
+        household = household_of()
+        assumptions = assumptions_with()
+        region = stub_region()
+        config = mc_config(seed=None)
+        with pytest.raises(EngineError, match=r"requires RunConfig\.seed"):
+            run(
+                household,
+                assumptions,
+                region,
+                config,
+                return_model_factory=deterministic_model,
+            )
 
     def test_deterministic_run_ignores_the_path_index(self) -> None:
         """The deterministic model returns the same values on every path."""
@@ -434,7 +477,7 @@ class TestRunPaths:
             for outcome in result.outcomes
         )
 
-    def test_records_the_config_and_path_zero_provenance(self) -> None:
+    def test_records_the_config_and_merged_provenance(self) -> None:
         """The result carries the §4.6 manifest side."""
         config = mc_config()
         result = run_paths(
@@ -442,6 +485,34 @@ class TestRunPaths:
         )
         assert result.config is config
         assert result.provenance.seed == SEED
+
+    def test_provenance_unions_assumptions_across_paths(self) -> None:
+        """A key read on one path only still lands in the manifest.
+
+        Almost every read is identical across paths, but natural-yield
+        pricing fires only while a source holds money, so a stronger
+        path can read keys an exhausted path never does — the union
+        keeps the manifest exhaustive, in first-read order.
+        """
+        cpi = assumption_of(AssumptionKey.INFLATION_CPI, Decimal(0))
+        equity_yield = assumption_of(AssumptionKey.YIELD_EQUITY, Decimal("0.02"))
+        exhausted = RunProvenance(
+            facts=(),
+            decisions=(),
+            assumptions=(cpi,),
+            region_data_version="stub region v1",
+            seed=SEED,
+        )
+        solvent = RunProvenance(
+            facts=(),
+            decisions=(),
+            assumptions=(cpi, equity_yield),
+            region_data_version="stub region v1",
+            seed=SEED,
+        )
+        merged = _merged_provenance((exhausted, solvent))
+        keys = [entry.key for entry in merged.assumptions]
+        assert keys == [AssumptionKey.INFLATION_CPI, AssumptionKey.YIELD_EQUITY]
 
     def test_rejects_a_non_positive_path_count(self) -> None:
         """Zero paths measure nothing."""
@@ -575,6 +646,15 @@ class TestSustainableIncomeSearch:
                 paths=2, target_success_rate=target, maximum=maximum, tolerance=zero
             )
 
+    def test_rejects_a_non_positive_scan_step_count(self) -> None:
+        """At least one scan cell is needed to bracket the search."""
+        target = Decimal(1)
+        maximum = Money(Decimal(50000))
+        with pytest.raises(ValueError, match="scan_steps must be positive"):
+            SustainableIncomeSearch(
+                paths=2, target_success_rate=target, maximum=maximum, scan_steps=0
+            )
+
 
 class TestSustainableIncome:
     """The bisection over the stub region, pinned by exact arithmetic.
@@ -676,3 +756,39 @@ class TestSustainableIncome:
         )
         assert frugal == lavish
         assert frugal == Money(Decimal(25000))
+
+    def test_the_scan_rescues_a_non_monotone_success_island(self) -> None:
+        """Guardrails make success non-monotone; the scan still finds it.
+
+        A 100,000 pot, zero returns, nine years, and a prosperity rise
+        of 100%: spending just below 4,000 trips the 4% lower
+        guardrail (an immediate doubled draw) and drains the pot into
+        a capital-preservation cut — reported as shortfall, i.e. ruin
+        — while exactly 4,000 sits on the guardrail (the trigger is
+        strict) and survives every year. Pure bisection walks past
+        that island: its midpoints below 4,000 fail, so it settles on
+        3,828.125. The descending scan probes the 4,000 grid point
+        directly and the upward refinement holds it (4,062.50 and
+        above fail the 6% upper guardrail in the final year).
+        """
+        strategy = GuardrailsWithdrawalStrategy(rise_fraction=Decimal(1))
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2034, 12, 31),
+            mode=RunMode.MONTE_CARLO,
+            seed=SEED,
+            withdrawal_strategy=strategy,
+        )
+        assumptions = assumptions_with(
+            ZERO_VOLATILITY | {AssumptionKey.RETURNS_EQUITY_REAL: Decimal(0)}
+        )
+        search = SustainableIncomeSearch(
+            paths=2,
+            target_success_rate=Decimal(1),
+            maximum=Money(Decimal(10000)),
+            tolerance=Money(Decimal(100)),
+        )
+        income = sustainable_income(
+            household_of(spending=None), assumptions, stub_region(), config, search
+        )
+        assert income == Money(Decimal(4000))
