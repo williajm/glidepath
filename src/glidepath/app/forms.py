@@ -161,6 +161,11 @@ _CONTRIBUTIONS_NEED_EMPLOYEE = (
 
 _AS_OF_HINT = "YYYY-MM-DD; blank means today"
 
+_SELECT_OPTION = ChoiceOption(value="", label="Select…")
+"""The blank first option of every required choice: a real value must
+be picked, never pre-selected (planning §1 — facts are stated, not
+guessed)."""
+
 _SEXES: Mapping[str, Sex] = {"female": Sex.FEMALE, "male": Sex.MALE}
 _RESIDENCIES: Mapping[str, TaxResidencyId] = {
     str(RUK_RESIDENCY): RUK_RESIDENCY,
@@ -671,7 +676,7 @@ def _person_section() -> SectionSpec:
                 kind=FieldKind.CHOICE,
                 required=True,
                 choices=(
-                    ChoiceOption(value="", label="Select…"),
+                    _SELECT_OPTION,
                     ChoiceOption(
                         value=str(RUK_RESIDENCY),
                         label="England, Wales or Northern Ireland",
@@ -800,7 +805,7 @@ def _wrapper_section() -> SectionSpec:
                 kind=FieldKind.CHOICE,
                 required=True,
                 choices=(
-                    ChoiceOption(value="", label="Select…"),
+                    _SELECT_OPTION,
                     ChoiceOption(
                         value=str(WORKPLACE_DC_KIND), label="Workplace DC pension"
                     ),
@@ -892,7 +897,7 @@ def _db_pension_section() -> SectionSpec:
                 kind=FieldKind.CHOICE,
                 required=True,
                 choices=(
-                    ChoiceOption(value="", label="Select…"),
+                    _SELECT_OPTION,
                     ChoiceOption(value="cpi", label="CPI (optionally capped)"),
                     ChoiceOption(value="fixed", label="Fixed annual rate"),
                     ChoiceOption(value="none", label="No revaluation"),
