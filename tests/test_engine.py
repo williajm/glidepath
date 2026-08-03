@@ -135,10 +135,16 @@ class StubAges:
 
 @dataclass(frozen=True)
 class StubWrapperRules:
-    """Two wrapper kinds: an EET pension and a TEE tax-free account."""
+    """Two wrapper kinds: an EET pension and a TEE tax-free account.
+
+    ``free_access_age`` age-gates the tax-free kind when set (a
+    LISA-like account, roadmap 9.2): tax treatment says nothing about
+    accessibility, so the engine must consult the gate for every kind.
+    """
 
     access_age: int = 55
     free_kind_cap: Money | None = None
+    free_access_age: int | None = None
 
     def tax_treatment(self, kind: WrapperKindId, period: Period) -> WrapperTaxTreatment:
         """The pension pays out 25% tax-free; the free kind wholly so."""
@@ -179,10 +185,14 @@ class StubWrapperRules:
     def is_access_open(
         self, kind: WrapperKindId, date_of_birth: date, period: Period
     ) -> bool:
-        """Pension access is age-gated; the free kind is always open."""
+        """Pension access is age-gated; the free kind only if configured."""
         if kind == PENSION:
             return is_age_attained_by_period_start(
                 date_of_birth, self.access_age, period
+            )
+        if self.free_access_age is not None:
+            return is_age_attained_by_period_start(
+                date_of_birth, self.free_access_age, period
             )
         return True
 
@@ -262,13 +272,16 @@ def stub_region(
     contributions: RecordingContributionRules | None = None,
     free_kind_cap: Money | None = None,
     state_pension: StubStatePension | None = None,
+    free_access_age: int | None = None,
 ) -> Region:
     """A calendar-year region over the stub implementations."""
     return Region(
         calendar=AnnualCalendar(),
         ages=StubAges(),
         tax=FlatTaxSystem(),
-        wrappers=StubWrapperRules(free_kind_cap=free_kind_cap),
+        wrappers=StubWrapperRules(
+            free_kind_cap=free_kind_cap, free_access_age=free_access_age
+        ),
         contributions=contributions or RecordingContributionRules(),
         state_pension=state_pension or StubStatePension(),
         data_version="stub region v1",
@@ -765,6 +778,29 @@ class TestWithdrawals:
         )
         [person_result] = result.snapshots[0].persons
         assert person_result.stage is LifeStage.DECUMULATION
+        assert person_result.wrappers[0].withdrawal_gross == ZERO
+        assert person_result.net_withdrawn == ZERO
+        assert person_result.shortfall == Money(Decimal("12000.00"))
+
+    def test_access_gate_applies_to_tax_free_wrappers_too(self) -> None:
+        """An age-gated tax-free account is not drawable before its gate.
+
+        Tax treatment says nothing about accessibility (a LISA-like
+        account, roadmap 9.2): a 50-year-old retiree with the free kind
+        gated at 60 cannot draw it, whatever its tax treatment.
+        """
+        free_account = wrapper_of(FREE, "50000")
+        plan = household_of(
+            person_of((free_account,), date_of_birth=date(1975, 6, 1), retire_at=45),
+            spending="12000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(free_access_age=60),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
         assert person_result.wrappers[0].withdrawal_gross == ZERO
         assert person_result.net_withdrawn == ZERO
         assert person_result.shortfall == Money(Decimal("12000.00"))
@@ -1713,6 +1749,42 @@ class TestWithdrawalStrategies:
         free_result, pension_result = person_result.wrappers
         assert free_result.withdrawal_tax_free == Money(Decimal("500.00"))
         assert pension_result.withdrawal_gross == ZERO
+
+    def test_fixed_percent_pot_excludes_gated_tax_free_funds(self) -> None:
+        """The gate holds for tax-free kinds in the pot base too.
+
+        With the free kind gated at 60, the 50-year-old retiree's pot
+        is only the 10,000 of crystallised pension funds: 10% draws
+        1,000 gross there (fully taxable, 750 net) and the 50,000
+        tax-free account is untouched.
+        """
+        free_account = wrapper_of(FREE, "50000")
+        pension = wrapper_of(PENSION, "0", crystallised="10000")
+        plan = household_of(
+            person_of(
+                (free_account, pension),
+                date_of_birth=date(1975, 6, 1),
+                retire_at=45,
+            )
+        )
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                rate=Rate(Decimal("0.10"))
+            ),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(free_access_age=60),
+            config,
+        )
+        [person_result] = result.snapshots[0].persons
+        free_result, pension_result = person_result.wrappers
+        assert free_result.withdrawal_gross == ZERO
+        assert pension_result.withdrawal_taxable == Money(Decimal("1000.00"))
+        assert person_result.net_withdrawn == Money(Decimal("750.00"))
 
     def test_fixed_percent_gap_to_the_need_is_shortfall(self) -> None:
         """A gross-defined draw below the need reports the miss.

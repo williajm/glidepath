@@ -89,6 +89,17 @@ class TestTaxAwareOrder:
         ordered = tax_aware_order((gated, crystallised))
         assert ordered == (crystallised,)
 
+    def test_gate_closed_tax_free_source_is_excluded(self) -> None:
+        """The gate binds every group — tax-free kinds included.
+
+        Tax treatment says nothing about accessibility: an age-gated
+        wholly tax-free account (a LISA-like kind, roadmap 9.2) stays
+        out of the order until its gate opens.
+        """
+        gated_free = source_of("lisa", tax_free_fraction="1", access_open=False)
+        open_free = source_of("isa", tax_free_fraction="1")
+        assert tax_aware_order((gated_free, open_free)) == (open_free,)
+
     def test_wrapper_order_is_preserved_within_groups(self) -> None:
         """Two sources of the same group keep their plan order."""
         first = source_of("isa-a", tax_free_fraction="1")

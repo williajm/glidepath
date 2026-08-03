@@ -43,7 +43,8 @@ v1 engine conventions, superseded as later phases land:
   region's access gates. The default fixed-real strategy meets the
   net need in the tax-aware order of planning §5.2 — tax-free
   wrappers first, then funds already in drawdown (no fresh tax-free
-  cash), then new pension access where the region's gate is open. In
+  cash), then new pension access — with every uncrystallised pot,
+  tax-free kinds included, subject to the region's access gate. In
   decumulation the net-of-tax DB/state-pension income (and any
   commutation lump sum) received in the period offsets the net
   spending need before wrappers are drawn; income beyond the need is
@@ -868,45 +869,43 @@ class _Projection:
     ) -> dict[WithdrawalSourceId, _WithdrawalSource]:
         """Every sub-balance keyed for plan execution, in wrapper order.
 
-        A wholly tax-free wrapper is open on both sub-balances; on any
-        other kind the crystallised funds are always drawable (already
-        accessed, planning §5.1) while the uncrystallised pot answers
-        to the region's access gate (§4.1).
+        On every kind — wholly tax-free ones included, since tax
+        treatment says nothing about accessibility — the uncrystallised
+        pot answers to the region's access gate (§4.1); crystallised
+        funds are always drawable (already accessed, never re-gated —
+        planning §5.1).
         """
         sources: dict[WithdrawalSourceId, _WithdrawalSource] = {}
         for ledger in ledgers:
             treatment = ledger.treatment
             if treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE:
-                entries = (
-                    _WithdrawalSource(
-                        ledger=ledger, crystallised=False, tax_free_fraction=_ONE
-                    ),
-                    _WithdrawalSource(
-                        ledger=ledger, crystallised=True, tax_free_fraction=_ONE
-                    ),
-                )
+                free_fraction = _ONE
+                crystallised_fraction = _ONE
             else:
                 free_fraction = Decimal(0)
+                crystallised_fraction = Decimal(0)
                 if (
                     treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
                     and treatment.tax_free_fraction is not None
                 ):
                     free_fraction = treatment.tax_free_fraction.value
-                entries = (
-                    _WithdrawalSource(
-                        ledger=ledger,
-                        crystallised=False,
-                        tax_free_fraction=free_fraction,
-                        access_open=self.region.wrappers.is_access_open(
-                            ledger.wrapper.kind,
-                            self.person.date_of_birth.value,
-                            period,
-                        ),
+            entries = (
+                _WithdrawalSource(
+                    ledger=ledger,
+                    crystallised=False,
+                    tax_free_fraction=free_fraction,
+                    access_open=self.region.wrappers.is_access_open(
+                        ledger.wrapper.kind,
+                        self.person.date_of_birth.value,
+                        period,
                     ),
-                    _WithdrawalSource(
-                        ledger=ledger, crystallised=True, tax_free_fraction=Decimal(0)
-                    ),
-                )
+                ),
+                _WithdrawalSource(
+                    ledger=ledger,
+                    crystallised=True,
+                    tax_free_fraction=crystallised_fraction,
+                ),
+            )
             for source in entries:
                 sources[source.source_id] = source
         return sources

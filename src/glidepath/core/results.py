@@ -109,8 +109,12 @@ class PersonPeriodResult:
     ``spending_need`` is the period's net (after-tax) spending target in
     nominal money — zero before decumulation; ``net_withdrawn`` is the
     net cash the withdrawal step delivered toward it; ``shortfall`` is
-    the unmet remainder once every accessible wrapper was exhausted
-    (the ruin signal the success metrics of roadmap 7.3 read).
+    the need left unmet after the configured withdrawal strategy's plan
+    executed (the ruin signal the success metrics of roadmap 7.3 read).
+    Under the default net-defined strategy a shortfall means every
+    accessible wrapper was exhausted; a gross-defined strategy (e.g.
+    fixed-%) may report one with balances still standing, because its
+    draw follows the pot, not the need (planning §5.2).
 
     ``db_income`` and ``state_pension_income`` are the period's DB and
     state pension income actually in payment (revalued/uprated,

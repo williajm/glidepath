@@ -180,12 +180,15 @@ def tax_aware_order(
     Wholly tax-free sub-balances first (drawing them never wastes a
     penny of allowance), then funds already in drawdown — their
     tax-free cash is spent, so they cost only income tax — and last
-    uncrystallised pension funds whose access gate is open, whose draws
-    surrender future tax-free growth. Within each group, plan (wrapper)
-    order is preserved. Before roadmap 9.2's GIA/cash wrappers this
-    reduces to ISA → pension.
+    open uncrystallised pension funds, whose draws surrender future
+    tax-free growth. A source whose access gate has not opened is
+    excluded whatever its group: tax treatment says nothing about
+    accessibility — an age-gated tax-free account (e.g. a LISA,
+    roadmap 9.2) is just as ungated-by-§4.1 as a pension. Within each
+    group, plan (wrapper) order is preserved. Before roadmap 9.2's
+    GIA/cash wrappers this reduces to ISA → pension.
     """
-    entries = tuple(sources)
+    entries = tuple(entry for entry in sources if entry.access_open)
     free = [entry for entry in entries if entry.tax_free_fraction == _ONE]
     crystallised = [
         entry
@@ -195,9 +198,7 @@ def tax_aware_order(
     uncrystallised = [
         entry
         for entry in entries
-        if entry.tax_free_fraction != _ONE
-        and not entry.id.crystallised
-        and entry.access_open
+        if entry.tax_free_fraction != _ONE and not entry.id.crystallised
     ]
     return (*free, *crystallised, *uncrystallised)
 
