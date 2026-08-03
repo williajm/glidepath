@@ -350,28 +350,29 @@ def _apply_to_household(
     household: Household, picks: dict[tuple[EntityId, str], Override]
 ) -> Household:
     """The household with the picked decision overrides applied."""
-    if not picks:
-        return household
-    outflows = tuple(
-        _apply_to_outflow(outflow, picks) for outflow in household.planned_outflows
-    )
-    persons = tuple(_apply_to_person(person, picks) for person in household.persons)
-    resolved: Household = replace(household, persons=persons, planned_outflows=outflows)
-    return resolved
+    changes: dict[str, Any] = {}
+    if picks:
+        changes["planned_outflows"] = tuple(
+            _apply_to_outflow(outflow, picks) for outflow in household.planned_outflows
+        )
+        changes["persons"] = tuple(
+            _apply_to_person(person, picks) for person in household.persons
+        )
+    return replace(household, **changes) if changes else household
 
 
 def _apply_to_outflow(
     outflow: PlannedOutflow, picks: dict[tuple[EntityId, str], Override]
 ) -> PlannedOutflow:
     """One planned outflow with its ``amount_real`` override applied."""
+    changes: dict[str, Any] = {}
     override = picks.get((outflow.id, "amount_real"))
-    if override is None:
-        return outflow
-    label = f"planned_outflow[{outflow.id}].amount_real"
-    resolved: PlannedOutflow = replace(
-        outflow, amount_real=_resolved_decision(outflow.amount_real, override, label)
-    )
-    return resolved
+    if override is not None:
+        label = f"planned_outflow[{outflow.id}].amount_real"
+        changes["amount_real"] = _resolved_decision(
+            outflow.amount_real, override, label
+        )
+    return replace(outflow, **changes) if changes else outflow
 
 
 def _apply_to_person(
@@ -416,18 +417,17 @@ def _apply_to_wrapper(
     wrapper: Wrapper, picks: dict[tuple[EntityId, str], Override]
 ) -> Wrapper:
     """One wrapper with its employee-contribution override applied."""
+    changes: dict[str, Any] = {}
     override = picks.get((wrapper.id, "contributions.employee_amount"))
-    if override is None or wrapper.contributions is None:
-        return wrapper
-    label = f"wrapper[{wrapper.id}].contributions.employee_amount"
-    contributions = replace(
-        wrapper.contributions,
-        employee_amount=_resolved_decision(
-            wrapper.contributions.employee_amount, override, label
-        ),
-    )
-    resolved: Wrapper = replace(wrapper, contributions=contributions)
-    return resolved
+    if override is not None and wrapper.contributions is not None:
+        label = f"wrapper[{wrapper.id}].contributions.employee_amount"
+        changes["contributions"] = replace(
+            wrapper.contributions,
+            employee_amount=_resolved_decision(
+                wrapper.contributions.employee_amount, override, label
+            ),
+        )
+    return replace(wrapper, **changes) if changes else wrapper
 
 
 def _apply_to_db_pension(
