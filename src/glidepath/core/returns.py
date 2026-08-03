@@ -79,6 +79,18 @@ class ReturnModel(Protocol):
         ...
 
 
+type ReturnModelFactory = Callable[[TrackedAssumptions], ReturnModel]
+"""Builds a run's return model from the run's tracked assumption view.
+
+The engine constructs its tracked view internally (every key read must
+land in the run's provenance), so an injected model — a scripted
+sequence fixture (roadmap 7.4), an alternative distribution — enters
+through this factory rather than as a finished instance. A factory must
+preserve the engine's purity (planning §4.6): the model it returns may
+depend on nothing but the view it is given and its own frozen state.
+"""
+
+
 def nominal_rate(real: Decimal, cpi: Decimal) -> Rate:
     """Compose a real rate with CPI into a nominal rate (planning §5.2).
 

@@ -12,8 +12,11 @@ considered. This script times the two components a Monte Carlo run
   per-path step cost the same step function incurs under Monte Carlo.
 
 The projected Monte Carlo wall-clock is then
-``paths x (engine pass + periods x draw)``. Record the printed numbers
-in docs/planning.md §4.6 whenever they are re-measured.
+``paths x (engine pass + periods x draw)`` — and now that the path
+runner exists (roadmap 7.3), the same persona is also measured end to
+end through ``run_paths``, which is the number that gates any
+optimisation. Record the printed numbers in docs/planning.md §4.6
+whenever they are re-measured.
 
 Run: ``uv run --locked python scripts/measure_mc_performance.py``
 """
@@ -34,11 +37,13 @@ from glidepath.core import (
     Person,
     ReliefMechanic,
     RunConfig,
+    RunMode,
     SpendingPlan,
     StochasticReturnModel,
     TrackedAssumptions,
     Wrapper,
     run,
+    run_paths,
 )
 from glidepath.core.periods import AnnualCalendar
 from glidepath.regions.uk import (
@@ -58,6 +63,7 @@ DRAW_CALLS = 5_000
 ENGINE_RUNS = 10
 PROJECTED_PATHS = (100, 1_000, 10_000)
 PERIODS_PER_PATH = 60
+MEASURED_PATHS = 20
 
 
 def _money_fact(amount: str) -> Fact[Money]:
@@ -127,6 +133,18 @@ def _measure_engine_seconds() -> float:
     return (time.perf_counter() - started) / ENGINE_RUNS
 
 
+def _measure_path_runner_seconds() -> float:
+    """Mean seconds per path of an end-to-end ``run_paths`` Monte Carlo."""
+    assumptions = default_assumption_set()
+    region = uk_region(future_years_extension(assumptions))
+    household = _household()
+    config = RunConfig(today=TODAY, mode=RunMode.MONTE_CARLO, seed=20260803)
+    run_paths(household, assumptions, region, config, paths=1)  # warm caches
+    started = time.perf_counter()
+    run_paths(household, assumptions, region, config, paths=MEASURED_PATHS)
+    return (time.perf_counter() - started) / MEASURED_PATHS
+
+
 def main() -> None:
     """Time the components and print the projected Monte Carlo cost."""
     print(f"platform: {platform.platform()} / Python {platform.python_version()}")
@@ -141,6 +159,13 @@ def main() -> None:
     print(f"projected per-path cost: {per_path * 1e3:,.1f} ms")
     for paths in PROJECTED_PATHS:
         print(f"projected {paths:,}-path Monte Carlo: {per_path * paths:,.1f} s")
+    measured = _measure_path_runner_seconds()
+    print(
+        f"measured per-path cost ({MEASURED_PATHS} paths end-to-end via"
+        f" run_paths): {measured * 1e3:,.1f} ms"
+    )
+    for paths in PROJECTED_PATHS:
+        print(f"measured-basis {paths:,}-path Monte Carlo: {measured * paths:,.1f} s")
 
 
 if __name__ == "__main__":

@@ -218,9 +218,11 @@ state keep it tractable; a measurement task gates any revisit (§8, 7.2).
 Measured 2026-08-03 (roadmap 7.2; Windows 11, Python 3.14.6, via
 `scripts/measure_mc_performance.py`): one stochastic `returns_for` draw
 ≈ 146 µs; one 60-period engine pass ≈ 28 ms; projected per-path cost
-≈ 36 ms → ≈ 4 s per 100 paths, ≈ 36 s per 1,000 paths. Within the
-accepted envelope — no optimisation before the 7.3 path runner exists
-and is measured end-to-end.
+≈ 36 ms → ≈ 4 s per 100 paths, ≈ 36 s per 1,000 paths. Re-measured
+end-to-end 2026-08-03 with the 7.3 path runner (`run_paths`, same
+persona): ≈ 38 ms per path — ≈ 3.8 s per 100 paths, ≈ 38 s per 1,000
+paths, matching the 7.2 projection. Within the accepted envelope; any
+optimisation revisit starts from these recorded numbers.
 
 ## 5. Design
 
@@ -746,11 +748,38 @@ deterministic impl = expected real returns + CPI → nominal, same every
 path; stochastic impl (MC phase) = lognormal draws with assumed
 volatilities and correlation matrix (Cholesky in `Decimal`; performance
 measured before optimising), randomness only from the injected seeded
-source. Success metrics over paths: **probability of ruin**, **sustainable
-income** (highest starting withdrawal meeting a target success rate, by
-bisection), **ending-pot percentiles**. Sequence-of-returns risk is
-demonstrated by fixtures: same returns, different order → different
-outcome.
+source. The mode lives in `RunConfig`: `RunMode.MONTE_CARLO` requires a
+seed and resolves the stochastic model inside `run()`, with
+`RunConfig.path` naming the substream — the path runner (roadmap 7.3,
+`run_paths`) projects path *i* under `replace(config, path=i)` and
+reduces each path to its success signals (ruin period, ending balance),
+dropping the period ledgers; the result's provenance is the union of
+the paths' reads in first-read order, since a balance-dependent read
+(natural-yield pricing) can fire on some paths only. A test double
+enters through `run()`'s `return_model_factory` instead (built from the
+run's tracked assumption view, so provenance stays exhaustive); the
+seed requirement binds before the injection — a `MONTE_CARLO` result
+must be reproducible from its manifest whatever produced its returns.
+Success metrics over paths (`MonteCarloResult`): **probability of
+ruin** — the fraction of paths with any period's need unmet, read from
+the engine's `shortfall` signal (which survives gross-defined
+strategies and covers planned outflows); **sustainable income**
+(highest starting withdrawal meeting a target success rate: a
+descending scan over the search bracket finds the highest succeeding
+scan point, then bisection refines upward within the scan cell above it
+— exact to tolerance for strategies whose success is monotone in the
+spending level (the default fixed-real), and never below the best scan
+point for adjustment-trigger strategies (guardrails), whose success
+islands narrower than one scan step need a finer `scan_steps`; every
+probe reuses the run's seed, i.e. common random numbers, and the
+returned level is always one actually probed); **ending-pot
+percentiles** (linear interpolation between order statistics of the
+nominal ending balances; CPI is deterministic across paths, so nominal
+and real rank identically). Sequence-of-returns risk is demonstrated by
+fixtures (roadmap 7.4): same returns, different order → different
+outcome — order-independent without withdrawals, materially different
+endings with them, and ruin in the bad-returns-first order at a
+spending level the good-first order survives.
 
 ### 5.3 UK region data files
 
