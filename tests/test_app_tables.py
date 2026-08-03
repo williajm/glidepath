@@ -47,6 +47,18 @@ class TestRoundTrip:
         parsed = parse_table_text("rate = Infinity")
         assert parsed["rate"] == "Infinity"
 
+    def test_integral_decimal_re_parses_as_decimal(self) -> None:
+        """A whole-number Decimal keeps its type through the text form.
+
+        A hand-edited plan can hold ``Decimal(1)``; serialising it as
+        bare ``1`` would re-parse as ``int`` and be rejected.
+        """
+        text = table_edit_text({"joint_factor": Decimal(1)})
+        assert text == "joint_factor = 1.0"
+        factor = parse_table_text(text)["joint_factor"]
+        assert isinstance(factor, Decimal)
+        assert factor == Decimal(1)
+
     def test_dotted_keys_nest(self) -> None:
         """Dotted keys rebuild the nested sub-tables."""
         parsed = parse_table_text("level.55 = 0.846\nlevel.65 = 1.0")

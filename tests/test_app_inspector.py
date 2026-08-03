@@ -31,9 +31,13 @@ from glidepath.core import (
     Fact,
     FactorTable,
     FeeSchedule,
+    GlidePathConfig,
+    GlidePathPoint,
     Household,
+    LifeStage,
     Money,
     Person,
+    PlannedOutflow,
     Rate,
     ReliefMechanic,
     RevaluationBasis,
@@ -301,7 +305,20 @@ def structural_household() -> Household:
         db_pensions=(capped_cpi, frozen, fixed, uncapped),
         annuity_purchases=(purchase,),
     )
-    return Household(persons=(person,))
+    outflow = PlannedOutflow(
+        id=EntityId("structure-outflow"),
+        label="Mortgage payoff",
+        amount_real=Decision(value=Money(Decimal(40000)), recorded_on=RECORDED),
+        at_age_of=(EntityId("structure-person"), 62),
+    )
+    return Household(
+        persons=(person,),
+        spending=SpendingPlan(
+            annual_spending_real=money_fact("18000"),
+            stage_multipliers={LifeStage.DECUMULATION: Decimal("0.9")},
+        ),
+        planned_outflows=(outflow,),
+    )
 
 
 class TestPlanStructure:
@@ -367,3 +384,47 @@ class TestPlanStructure:
         rows = self.structure_values(structural_household())
         assert rows["Annuity purchase 1", "Annuity type"] == "Level"
         assert rows["Annuity purchase 1", "Annuity basis"] == "Single"
+
+    def test_household_rows_show_spending_stages_and_outflow_timing(self) -> None:
+        """Stage multipliers and outflow timing surface at household level."""
+        rows = self.structure_values(structural_household())
+        assert rows["Household", "Spending stages"] == "Decumulation: 0.9"
+        assert rows["Mortgage payoff", "Due"] == "You at age 62"
+
+    def test_flat_spending_says_so(self) -> None:
+        """A spending plan without stage multipliers reads as flat."""
+        rows = self.structure_values(household())
+        assert rows["Household", "Spending stages"] == "None (flat spending)"
+
+    def test_custom_glide_path_renders_its_knots(self) -> None:
+        """A custom glide path shows its allocations, not just a count."""
+        config = GlidePathConfig(
+            points=(
+                GlidePathPoint(
+                    years_to_retirement=0,
+                    allocation=AssetAllocation(
+                        equity=Decimal("0.4"), bonds=Decimal("0.6")
+                    ),
+                ),
+                GlidePathPoint(
+                    years_to_retirement=15,
+                    allocation=AssetAllocation(
+                        equity=Decimal("0.8"), bonds=Decimal("0.2")
+                    ),
+                ),
+            )
+        )
+        person = Person(
+            id=EntityId("structure-glide-person"),
+            date_of_birth=Fact(
+                value=date(1991, 2, 1), as_of=AS_OF, recorded_on=RECORDED
+            ),
+            target_retirement_age=Decision(value=60, recorded_on=RECORDED),
+            tax_residency=RUK_RESIDENCY,
+            glide_path=config,
+        )
+        rows = self.structure_values(Household(persons=(person,)))
+        assert rows["You", "Glide path"] == (
+            "Custom — 0y out: Equity 0.4 / bonds 0.6 / cash 0;"
+            " 15y out: Equity 0.8 / bonds 0.2 / cash 0"
+        )

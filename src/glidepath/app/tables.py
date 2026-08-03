@@ -39,7 +39,21 @@ def _serialise(lines: list[str], table: Mapping[str, object], prefix: str) -> No
         if isinstance(entry, Mapping):
             _serialise(lines, entry, f"{path}.")
         else:
-            lines.append(f"{path} = {entry}")
+            lines.append(f"{path} = {_leaf_text(entry)}")
+
+
+def _leaf_text(entry: object) -> str:
+    """One leaf value as text that re-parses to an equal figure.
+
+    An integral ``Decimal`` (e.g. a hand-edited plan's ``1``) would
+    otherwise serialise to bare-integer text and re-parse as ``int``,
+    which the policy parsers reject — so it gains a fractional digit,
+    keeping numeric equality.
+    """
+    text = str(entry)
+    if isinstance(entry, Decimal) and _INT_PATTERN.fullmatch(text):
+        return f"{text}.0"
+    return text
 
 
 def parse_table_text(text: str) -> dict[str, AssumptionValue]:

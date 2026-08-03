@@ -27,6 +27,8 @@ from glidepath.core import (
 )
 
 if TYPE_CHECKING:
+    from decimal import Decimal
+
     from glidepath.app.plan import PlanState
     from glidepath.core import (
         AnnuityPurchase,
@@ -35,6 +37,7 @@ if TYPE_CHECKING:
         FactorTable,
         FeeSchedule,
         GlidePathConfig,
+        LifeStage,
         Person,
         RevaluationBasis,
         Wrapper,
@@ -209,10 +212,14 @@ def _assumption_row(assumption: Assumption[Any], usage: str) -> AssumptionRow:
 
 
 def _glide_path_text(config: GlidePathConfig | None) -> str:
-    """A person's glide-path source as display text."""
+    """A person's glide-path source as display text, knots included."""
     if config is None:
         return "Default shape assumption (glidepath.default_shape)"
-    return f"Custom glide path ({len(config.points)} points)"
+    knots = "; ".join(
+        f"{point.years_to_retirement}y out: {_allocation_text(point.allocation)}"
+        for point in config.points
+    )
+    return f"Custom — {knots}"
 
 
 def _allocation_text(allocation: AssetAllocation | None) -> str:
@@ -249,6 +256,18 @@ def _factors_text(table: FactorTable) -> str:
         return "None (taken at the normal pension age)"
     return "; ".join(
         f"{age}: {factor}" for age, factor in sorted(table.factors.items())
+    )
+
+
+def _stage_multipliers_text(multipliers: Mapping[LifeStage, Decimal] | None) -> str:
+    """A spending plan's life-stage multipliers as display text."""
+    if not multipliers:
+        return "None (flat spending)"
+    return "; ".join(
+        f"{format_value(stage)}: {multiplier}"
+        for stage, multiplier in sorted(
+            multipliers.items(), key=lambda item: item[0].value
+        )
     )
 
 
@@ -325,6 +344,19 @@ def _structure_rows(household: Household | None) -> tuple[StructureRow, ...]:
             rows.extend(_db_structure(pension, names[str(pension.id)]))
         for purchase in person.annuity_purchases:
             rows.extend(_annuity_structure(purchase, names[str(purchase.id)]))
+    if household.spending is not None:
+        rows.append(
+            StructureRow(
+                "Household",
+                "Spending stages",
+                _stage_multipliers_text(household.spending.stage_multipliers),
+            )
+        )
+    for outflow in household.planned_outflows:
+        person_id, age = outflow.at_age_of
+        rows.append(
+            StructureRow(outflow.label, "Due", f"{names[str(person_id)]} at age {age}")
+        )
     return tuple(rows)
 
 
