@@ -103,11 +103,16 @@ class WithdrawalSource:
     """One drawable sub-balance as a strategy sees it (planning §5.2).
 
     ``available`` is the balance at the start of the withdrawal step;
-    ``tax_free_fraction`` is the share of a draw that arrives tax-free
-    (1 for a wholly tax-free wrapper, the region's fraction for a
-    partially tax-free pot, 0 for taxable income); ``access_open``
-    follows the §4.1 gate convention — crystallised funds are always
-    open (already accessed, never re-gated; planning §5.1).
+    ``tax_free_fraction`` is the *nominal* share of a draw that
+    arrives tax-free (1 for a wholly tax-free wrapper, the region's
+    fraction for a partially tax-free pot, 0 for taxable income) —
+    for pension sources the tax-free element is additionally capped by
+    the remaining lifetime headroom
+    (:attr:`WithdrawalState.tax_free_cash_headroom`), so a draw past
+    the cap delivers less than the fraction alone promises (roadmap
+    5.2); ``access_open`` follows the §4.1 gate convention —
+    crystallised funds are always open (already accessed, never
+    re-gated; planning §5.1).
     """
 
     id: WithdrawalSourceId
@@ -134,15 +139,28 @@ class WithdrawalState:
     gate-closed sources included, flagged, so a strategy can see the
     whole pot; ``year_fraction`` is the period's active fraction
     (roadmap 4.6), by which gross-defined annual amounts scale.
+    ``tax_free_cash_headroom`` is the tax-free cash still allowed
+    under the region's lifetime cap as the withdrawal step opens —
+    cumulative usage (the ``lsa_used`` fact plus everything this run
+    has paid, income lump sums included) already deducted — or
+    ``None`` where the region has no cap (roadmap 5.2), so a
+    tax-aware strategy can size pension draws against the cap the
+    engine will actually enforce.
     """
 
     sources: tuple[WithdrawalSource, ...]
     year_fraction: Decimal
+    tax_free_cash_headroom: Money | None = None
 
     def __post_init__(self) -> None:
-        """Require a fraction in [0, 1]."""
+        """Require a fraction in [0, 1] and non-negative headroom."""
         if not _ZERO_FRACTION <= self.year_fraction <= _ONE:
             msg = "WithdrawalState.year_fraction must lie between 0 and 1"
+            raise ValueError(msg)
+        if self.tax_free_cash_headroom is not None and (
+            self.tax_free_cash_headroom < _ZERO
+        ):
+            msg = "WithdrawalState.tax_free_cash_headroom must be non-negative"
             raise ValueError(msg)
 
 

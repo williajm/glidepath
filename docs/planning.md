@@ -404,7 +404,9 @@ Within the run, revaluation advances with each period's CPI under the
 assumed CPI over whole months (integer-exponent whole years plus a
 linear remainder, exact `Decimal` per §4.6). Commutation trades pension
 for `pension given up x commutation factor` of tax-free cash in the
-period benefits start; a start date before `today` means the pension is
+period benefits start — tax-free up to the remaining lump-sum
+allowance headroom, the excess taxed as income (§5.2 tax-free cash
+conventions); a start date before `today` means the pension is
 already in payment and the lump sum already lives in the stated
 balances. In decumulation, net-of-tax DB/state-pension income and any
 commutation lump sum meet the net spending need before wrappers are
@@ -639,14 +641,26 @@ across the run, seeded from the `lsa_used` fact; the region supplies
 the lifetime cap per period (`WrapperRuleset.lump_sum_allowance`;
 `None` means no cap), and a payment's tax-free element is capped at
 the remaining headroom with the excess arriving as taxable income —
-crystallised funds never yield fresh tax-free cash (§5.1). The first
-draw with a taxable element from a partially-tax-free (pension)
-wrapper — either sub-balance — is flexible access and records the MPAA
-trigger date as the later of the period's first day and `today`;
-tax-free-only draws (PCLS-only crystallisations, the up-front lump
-sum) never trigger, and a pre-existing `mpaa_triggered_on` fact wins.
-Gross-defined plans resolve every mode as `SPLIT_EACH_PAYMENT`: an
-exact gross amount is a payment instruction, not a designation.
+crystallised funds never yield fresh tax-free cash (§5.1). An in-run
+DB commencement (commutation) lump sum consumes the same headroom —
+landing in the income step, ahead of the period's wrapper draws — and
+its excess over headroom is taxed as income (the UK's pension
+commencement excess lump sum); it never marks flexible access. The
+strategy-facing state reports the remaining headroom as the
+withdrawal step opens (`WithdrawalState.tax_free_cash_headroom`),
+while a source's `tax_free_fraction` stays the region's nominal
+fraction — the cap is an absolute amount, not a share. A phased
+draw's income leg is limited to the residue it designated within that
+draw: pre-existing drawdown funds answer only to their own
+crystallised source id, so a plan's source targeting is honoured
+exactly. The first draw with a taxable element from a
+partially-tax-free (pension) wrapper — either sub-balance — is
+flexible access and records the MPAA trigger date as the later of the
+period's first day and `today`; tax-free-only draws (PCLS-only
+crystallisations, the up-front lump sum) never trigger, and a
+pre-existing `mpaa_triggered_on` fact wins. Gross-defined plans
+resolve every mode as `SPLIT_EACH_PAYMENT`: an exact gross amount is
+a payment instruction, not a designation.
 Outside decumulation (planned-outflow funding), `UP_FRONT_LUMP_SUM`
 also resolves draws as split payments — the up-front designation is a
 retirement event. **Accepted v1 cost:** with no cash/GIA wrapper until

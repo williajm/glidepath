@@ -121,8 +121,10 @@ class PersonPeriodResult:
     ``db_income`` and ``state_pension_income`` are the period's DB and
     state pension income actually in payment (revalued/uprated,
     pro-rated from their exact start dates, §4.1); ``db_lump_sum`` is
-    tax-free commutation cash received when a DB pension starts this
-    period (roadmap 4.2/4.3). ``planned_outflows`` is the nominal total
+    the gross commutation cash received when a DB pension starts this
+    period (roadmap 4.2/4.3) — tax-free up to the remaining lump-sum
+    allowance, the excess taxed as income (roadmap 5.2).
+    ``planned_outflows`` is the nominal total
     of the household's dated one-offs landing this period (roadmap
     5.4) — a net need on top of ``spending_need``, so the shortfall
     accounting covers both.

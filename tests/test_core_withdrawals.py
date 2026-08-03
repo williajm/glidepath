@@ -219,6 +219,17 @@ class TestValidation:
         with pytest.raises(ValueError, match="between 0 and 1"):
             state_of(year_fraction="2")
 
+    def test_state_rejects_negative_headroom(self) -> None:
+        """Remaining tax-free cash headroom cannot be negative."""
+        headroom = Money(Decimal(-1))
+        year_fraction = Decimal(1)
+        with pytest.raises(ValueError, match="non-negative"):
+            WithdrawalState(
+                sources=(),
+                year_fraction=year_fraction,
+                tax_free_cash_headroom=headroom,
+            )
+
     def test_net_plan_rejects_negative_target(self) -> None:
         """A negative net target is a strategy bug, not a plan."""
         target = Money(Decimal(-1))

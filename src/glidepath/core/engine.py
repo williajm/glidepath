@@ -68,10 +68,12 @@ v1 engine conventions, superseded as later phases land:
   cash first with the residue designated to drawdown, or the whole-pot
   up-front crystallisation event whose lump sum joins the income
   offset. Tax-free elements are capped by the region's lump-sum
-  allowance, tracked cumulatively from the ``lsa_used`` fact; the
-  first taxable pension draw records the MPAA trigger date unless the
-  ``mpaa_triggered_on`` fact already set it. Crystallised funds never
-  yield fresh tax-free cash (planning §5.1).
+  allowance, tracked cumulatively from the ``lsa_used`` fact; an
+  in-run DB commutation lump sum consumes the same headroom in the
+  income step (ahead of wrapper draws) with its excess taxed as
+  income; the first taxable pension draw records the MPAA trigger
+  date unless the ``mpaa_triggered_on`` fact already set it.
+  Crystallised funds never yield fresh tax-free cash (planning §5.1).
 - Wrapper balance facts are taken as at the run start; annual-allowance
   measurement joins the loop when the AA charge is modelled
   (roadmap 5.x/9.5) — the in-run MPAA trigger is recorded now, ready
@@ -622,9 +624,12 @@ class _Projection:
                 * fraction
             )
         db_income, db_lump_sum = self._db_amounts(period)
+        db_lump_sum_excess = self._consume_lump_sum_headroom(db_lump_sum, period)
         state_pension = self._state_pension_amount(period)
         # Steps 3-4 — contributions, then withdrawals.
-        self._taxable_income = employment + db_income + state_pension
+        self._taxable_income = (
+            employment + db_income + state_pension + db_lump_sum_excess
+        )
         self._relief_at_source = _ZERO
         if not retired:
             self._contribution_step(ledgers, period, employment, factors, fraction)
@@ -638,11 +643,12 @@ class _Projection:
                 need = _spending_need(self.plan.spending, stage, inflation) * fraction
             if self.config.tax_free_cash is TaxFreeCashStrategy.UP_FRONT_LUMP_SUM:
                 pension_lump_sum = self._up_front_lump_sums(ledgers, period)
-            # Net-of-tax pension income, any commutation lump sum, and
-            # any up-front tax-free cash meet the net need — spending
-            # plus planned outflows — first; only the remainder is
-            # drawn from wrappers (income beyond the need is not
-            # banked — module docstring).
+            # Net-of-tax pension income, any commutation lump sum
+            # (gross here; the tax on its over-headroom excess is in
+            # the assessment), and any up-front tax-free cash meet the
+            # net need — spending plus planned outflows — first; only
+            # the remainder is drawn from wrappers (income beyond the
+            # need is not banked — module docstring).
             income_tax = self.region.tax.assess(period, self._tax_input()).tax_due
             income_net = (
                 db_income + state_pension + db_lump_sum + pension_lump_sum - income_tax
@@ -900,6 +906,7 @@ class _Projection:
         state = WithdrawalState(
             sources=tuple(source.view() for source in sources.values()),
             year_fraction=fraction,
+            tax_free_cash_headroom=self._lsa_headroom(period),
         )
         plan = strategy.withdraw(state, need)
         if isinstance(plan, NetWithdrawalPlan):
@@ -1126,10 +1133,12 @@ class _Projection:
         tax-free element. Under the lump-sum-as-needed mode the
         free-bearing slice designates its residue instead of paying it
         out, and the taxable slices draw drawdown income — first from
-        the crystallised sub-balance (the residue just designated),
-        then by crystallising the rest of the pot outright. Caps are
-        evaluated lazily as the caller resumes the iterator, so each
-        slice sees the balances and headroom its predecessors left.
+        the residue this draw just designated (never from pre-existing
+        drawdown funds, which answer only to their own crystallised
+        source id), then by crystallising the rest of the pot
+        outright. Caps are evaluated lazily as the caller resumes the
+        iterator, so each slice sees the balances and headroom its
+        predecessors left.
         """
         ledger = source.ledger
         if not source.pension or source.crystallised:
@@ -1146,6 +1155,7 @@ class _Projection:
         if headroom is not None:
             free_cap = min(Money(headroom.amount / fraction), free_cap)
         if mode is TaxFreeCashStrategy.LUMP_SUM_AS_NEEDED:
+            crystallised_before = ledger.crystallised
             if free_cap > _ZERO:
                 yield _DrawTranche(
                     free_share=fraction,
@@ -1153,11 +1163,12 @@ class _Projection:
                     max_gross=free_cap,
                     from_crystallised=False,
                 )
-            if ledger.crystallised > _ZERO:
+            residue = ledger.crystallised - crystallised_before
+            if residue > _ZERO:
                 yield _DrawTranche(
                     free_share=Decimal(0),
                     taxable_share=_ONE,
-                    max_gross=ledger.crystallised,
+                    max_gross=residue,
                     from_crystallised=True,
                 )
             if ledger.uncrystallised > _ZERO:
@@ -1232,6 +1243,24 @@ class _Projection:
         if allowance is None:
             return None
         return max(allowance - self._lsa_used, _ZERO)
+
+    def _consume_lump_sum_headroom(self, lump_sum: Money, period: Period) -> Money:
+        """Count an income lump sum against the cap; return the excess.
+
+        A DB commencement (commutation) lump sum consumes the same
+        lifetime allowance as wrapper tax-free cash (planning §5.2):
+        the part within the remaining headroom is tax-free and recorded
+        as used; the excess is returned for the caller to tax as income
+        (the UK's pension commencement excess lump sum). Landing in
+        step 2, it consumes headroom ahead of the period's wrapper
+        draws. A lump sum never marks flexible access.
+        """
+        if lump_sum <= _ZERO:
+            return _ZERO
+        headroom = self._lsa_headroom(period)
+        tax_free = lump_sum if headroom is None else min(lump_sum, headroom)
+        self._lsa_used = self._lsa_used + tax_free
+        return lump_sum - tax_free
 
     def _mark_flexible_access(self, period: Period) -> None:
         """Record the first taxable pension draw as the MPAA trigger.
