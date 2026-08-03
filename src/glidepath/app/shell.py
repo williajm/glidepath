@@ -15,6 +15,7 @@ from glidepath.app.copy import (
     DISCLAIMER_BODY,
     DISCLAIMER_DECLINE_LABEL,
     DISCLAIMER_TITLE,
+    HELP_MENU_LABEL,
 )
 
 if TYPE_CHECKING:
@@ -45,6 +46,7 @@ class ShellViewModel:
 
     window_title: str
     placeholder: str
+    help_menu_label: str
     disclaimer: DisclaimerViewModel
     about: AboutViewModel
 
@@ -65,6 +67,7 @@ def build_shell_view_model() -> ShellViewModel:
             "No plan open yet. Facts entry, the assumptions inspector, and "
             "projection views arrive in later milestones."
         ),
+        help_menu_label=HELP_MENU_LABEL,
         disclaimer=DisclaimerViewModel(
             title=DISCLAIMER_TITLE,
             body=DISCLAIMER_BODY,

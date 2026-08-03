@@ -14,6 +14,7 @@ from glidepath.app.copy import (
     DISCLAIMER_BODY,
     DISCLAIMER_DECLINE_LABEL,
     DISCLAIMER_TITLE,
+    HELP_MENU_LABEL,
 )
 from glidepath.app.firstrun import (
     FirstRunState,
@@ -36,6 +37,7 @@ __all__ = [
     "DISCLAIMER_BODY",
     "DISCLAIMER_DECLINE_LABEL",
     "DISCLAIMER_TITLE",
+    "HELP_MENU_LABEL",
     "AboutViewModel",
     "DisclaimerViewModel",
     "FirstRunState",

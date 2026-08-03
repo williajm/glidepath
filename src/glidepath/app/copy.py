@@ -23,3 +23,5 @@ DISCLAIMER_ACCEPT_LABEL: Final = "I understand — continue"
 DISCLAIMER_DECLINE_LABEL: Final = "Quit"
 
 ABOUT_TITLE: Final = f"About {APP_NAME}"
+
+HELP_MENU_LABEL: Final = "Help"

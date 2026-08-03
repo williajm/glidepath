@@ -1,11 +1,12 @@
 """First-run state: has the user acknowledged the disclaimer? (§1, §4.7).
 
 A tiny local JSON file records the acknowledgement date. Anything
-unreadable — missing file, bad JSON, wrong shape — degrades to "not
-acknowledged", so the disclaimer is shown again rather than silently
-skipped. The state lives in the platform's per-user configuration
-directory; shells pass ``default_state_path()`` (or a substitute) in,
-so this module never touches Qt or a display.
+unreadable — missing file, bad JSON, wrong shape, a schema version
+this reader does not know — degrades to "not acknowledged", so the
+disclaimer is shown again rather than silently skipped. The state
+lives in the platform's per-user configuration directory; shells pass
+``default_state_path()`` (or a substitute) in, so this module never
+touches Qt or a display.
 """
 
 import json
@@ -16,6 +17,7 @@ from datetime import date
 from pathlib import Path
 
 _STATE_SCHEMA_VERSION = 1
+_SCHEMA_KEY = "schema"
 _ACKNOWLEDGED_KEY = "disclaimer_acknowledged_on"
 
 
@@ -39,6 +41,8 @@ def load_state(path: Path) -> FirstRunState:
     """Read first-run state, degrading to "not acknowledged" on any defect."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
+        if raw[_SCHEMA_KEY] != _STATE_SCHEMA_VERSION:
+            return FirstRunState(disclaimer_acknowledged_on=None)
         acknowledged_on = date.fromisoformat(raw[_ACKNOWLEDGED_KEY])
     except OSError, ValueError, KeyError, TypeError:
         return FirstRunState(disclaimer_acknowledged_on=None)
@@ -48,7 +52,7 @@ def load_state(path: Path) -> FirstRunState:
 def record_disclaimer_acknowledged(path: Path, acknowledged_on: date) -> None:
     """Persist the acknowledgement so later runs skip the first-run screen."""
     payload = {
-        "schema": _STATE_SCHEMA_VERSION,
+        _SCHEMA_KEY: _STATE_SCHEMA_VERSION,
         _ACKNOWLEDGED_KEY: acknowledged_on.isoformat(),
     }
     path.parent.mkdir(parents=True, exist_ok=True)

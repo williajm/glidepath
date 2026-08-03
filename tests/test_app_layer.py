@@ -53,12 +53,18 @@ class TestFirstRunState:
             "{}",
             '{"disclaimer_acknowledged_on": "not-a-date"}',
             '{"disclaimer_acknowledged_on": 42}',
+            '{"disclaimer_acknowledged_on": "2026-08-03"}',
+            '{"schema": 2, "disclaimer_acknowledged_on": "2026-08-03"}',
         ],
     )
     def test_defective_file_means_not_acknowledged(
         self, tmp_path: Path, content: str
     ) -> None:
-        """A defective state file re-shows the disclaimer, never skips it."""
+        """A defective or unrecognised state file re-shows the disclaimer.
+
+        That includes a valid-looking date under a missing or unknown
+        schema version — only ``schema == 1`` acknowledgements count.
+        """
         path = tmp_path / "settings.json"
         path.write_text(content, encoding="utf-8")
         assert load_state(path).disclaimer_acknowledged_on is None

@@ -54,7 +54,9 @@ class MainWindow(QMainWindow):
         placeholder.setWordWrap(True)
         self.setCentralWidget(placeholder)
 
-        help_menu = self.menuBar().addMenu("&Help")
+        # The "&" mnemonic is toolkit mechanics, not copy — the label
+        # itself comes from the app layer (§4.7).
+        help_menu = self.menuBar().addMenu(f"&{view_model.help_menu_label}")
         about_action = help_menu.addAction(view_model.about.title)
         about_action.triggered.connect(self.show_about)
 

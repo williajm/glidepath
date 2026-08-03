@@ -80,7 +80,12 @@ def test_core_never_imports_regions() -> None:
 
 
 def test_qt_imports_confined_to_gui_shell() -> None:
-    """Only the PySide6 shell may import Qt (planning §4.7)."""
+    """Only the PySide6 shell may import Qt, directly or via the shell (§4.7).
+
+    Importing ``glidepath.gui`` from outside the shell would load Qt
+    transitively, so the dependency direction (shell → app, never the
+    reverse) is enforced alongside the direct-import ban.
+    """
     qt_distributions = {"PySide6", "shiboken6", "PyQt5", "PyQt6"}
     source_files = _python_files(SRC_ROOT)
     assert source_files, "src/glidepath not found — guard would pass vacuously"
@@ -89,10 +94,13 @@ def test_qt_imports_confined_to_gui_shell() -> None:
             continue  # the shell is the one place Qt may appear
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for module in _imported_modules(tree):
-            offending = module.split(".")[0] in qt_distributions
+            offending = module.split(".")[0] in qt_distributions or (
+                module == "glidepath.gui" or module.startswith("glidepath.gui.")
+            )
             assert not offending, (
-                f"{path.relative_to(SRC_ROOT)} imports Qt: {module}"
-                " — Qt is confined to glidepath/gui (planning §4.7)"
+                f"{path.relative_to(SRC_ROOT)} imports {module}"
+                " — Qt (and the gui shell) is confined to glidepath/gui"
+                " (planning §4.7)"
             )
 
 

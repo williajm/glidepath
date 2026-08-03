@@ -93,6 +93,8 @@ class TestMainWindow:
         central = window.centralWidget()
         assert central is not None
         assert central.property("text") == view_model.placeholder
+        menu_titles = [action.text() for action in window.menuBar().actions()]
+        assert menu_titles == [f"&{view_model.help_menu_label}"]
 
     def test_about_shows_view_model_copy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """About shows the about view model — which repeats the disclaimer."""
@@ -140,6 +142,23 @@ class TestRun:
         QTimer.singleShot(0, app.quit)
         assert run([]) == 0
         assert load_state(state_path).disclaimer_acknowledged_on is not None
+
+    @pytest.mark.usefixtures("state_path")
+    def test_accept_survives_an_unwritable_state_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Failing to record the acknowledgement must not kill the session."""
+
+        def unwritable(_path: Path, _on: date) -> None:
+            msg = "config directory is read-only"
+            raise OSError(msg)
+
+        monkeypatch.setattr(widgets, "prompt_disclaimer", lambda _vm: True)
+        monkeypatch.setattr(main_module, "record_disclaimer_acknowledged", unwritable)
+        app = QApplication.instance()
+        assert app is not None
+        QTimer.singleShot(0, app.quit)
+        assert run([]) == 0
 
     def test_acknowledged_run_skips_the_disclaimer(
         self, state_path: Path, monkeypatch: pytest.MonkeyPatch
