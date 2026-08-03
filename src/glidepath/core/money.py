@@ -61,12 +61,18 @@ class Money:
 
         This is the ledger-write rounding step of planning §4.6:
         ``ROUND_HALF_EVEN`` to two decimal places. Intermediate arithmetic
-        must stay exact; only ledger writes round.
+        must stay exact; only ledger writes round. A sub-penny negative
+        residual quantizes to ``Decimal("-0.00")`` — numerically zero but
+        serialized with a minus sign — so zero is normalized to the one
+        positive representation.
 
         Returns:
             A new ``Money`` whose amount has exponent ``-2``.
         """
-        return Money(self.amount.quantize(_PENNY, rounding=ROUND_HALF_EVEN))
+        rounded = self.amount.quantize(_PENNY, rounding=ROUND_HALF_EVEN)
+        if rounded == 0:
+            rounded = rounded.copy_abs()
+        return Money(rounded)
 
     @property
     def is_penny_exact(self) -> bool:

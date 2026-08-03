@@ -542,6 +542,22 @@ starting with under one whole month of a period models that period as
 zero-flow. Landed before the 4.5 golden scenario, so the hand-reviewed
 expected output is written once against the corrected behaviour.
 
+**Golden scenario (roadmap 4.5).** The "35-year-old, DC + ISA, retires
+at 60" run lives in `tests/test_golden_scenario.py` with its
+hand-reviewed expected output checked in at
+`tests/golden/dc_isa_retire_60.json` (nominal ledger figures per period
+plus each period's real closing balance, the provenance labels, and the
+assumption keys read). Any engine change that shifts the output fails
+the test by design; regenerate with
+`uv run --locked pytest --no-cov tests/test_golden_scenario.py
+--update-golden` (`--no-cov` because the repository-wide coverage gate
+would fail a single-module run) and explain the diff in the pull
+request. Companion tests pin
+independently hand-computed anchors (first partial period, the
+retirement transition, per-period ledger identities), so the file is
+anchored to reviewed arithmetic, not to whatever the engine emitted
+when it was first written.
+
 **Real vs nominal.** The engine computes nominal (tax bands are nominal
 objects); the reporting layer deflates by the run's CPI path. **Real
 (today's money) is the default presentation**; nominal available. One
