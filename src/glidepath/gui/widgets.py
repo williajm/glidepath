@@ -20,10 +20,13 @@ from PySide6.QtWidgets import (
 )
 
 from glidepath.app import (
+    DEFAULT_CHART_BASIS,
     AboutViewModel,
     DisclaimerViewModel,
     FactsFormData,
     ShellViewModel,
+    basis_from_key,
+    build_charts_view_model,
     build_inspector_view_model,
     facts_saved_message,
     format_form_errors,
@@ -32,6 +35,7 @@ from glidepath.app import (
     state_with_household,
     state_with_override,
 )
+from glidepath.gui.charts import ChartsPane
 from glidepath.gui.forms import FactsEntryPane
 from glidepath.gui.inspector import InspectorPane
 
@@ -72,17 +76,20 @@ class MainWindow(QMainWindow):
         self._view_model = view_model
         self._about_view_model = view_model.about
         self._state = initial_plan_state()
+        self._charts_basis = DEFAULT_CHART_BASIS
         self.setWindowTitle(view_model.window_title)
 
         self.facts_pane = FactsEntryPane(
             view_model.facts_form, self._handle_facts_submitted
         )
+        self.charts_pane = ChartsPane(self._handle_charts_basis)
         self.inspector_pane = InspectorPane(self._handle_override)
         tabs = QTabWidget(self)
         tabs.addTab(self.facts_pane, view_model.facts_tab_label)
+        tabs.addTab(self.charts_pane, view_model.charts_tab_label)
         tabs.addTab(self.inspector_pane, view_model.inspector_tab_label)
         self.setCentralWidget(tabs)
-        self.inspector_pane.refresh(build_inspector_view_model(self._state))
+        self._refresh_result_panes()
 
         # The "&" mnemonic is toolkit mechanics, not copy — the label
         # itself comes from the app layer (§4.7).
@@ -102,7 +109,7 @@ class MainWindow(QMainWindow):
         if result.household is None:
             return format_form_errors(self._view_model.facts_form, result.errors)
         self._state = state_with_household(self._state, result.household, today=today)
-        self.inspector_pane.refresh(build_inspector_view_model(self._state))
+        self._refresh_result_panes()
         return facts_saved_message(self._state)
 
     def _handle_override(self, key: str, raw_value: str) -> str | None:
@@ -114,8 +121,22 @@ class MainWindow(QMainWindow):
         if outcome.error is not None:
             return outcome.error
         self._state = outcome.state
-        self.inspector_pane.refresh(build_inspector_view_model(self._state))
+        self._refresh_result_panes()
         return None
+
+    def _handle_charts_basis(self, key: str) -> None:
+        """Re-present the charts in the basis the user selected."""
+        self._charts_basis = basis_from_key(key)
+        self.charts_pane.refresh(
+            build_charts_view_model(self._state, basis=self._charts_basis)
+        )
+
+    def _refresh_result_panes(self) -> None:
+        """Re-render every pane that reads the session's projection."""
+        self.charts_pane.refresh(
+            build_charts_view_model(self._state, basis=self._charts_basis)
+        )
+        self.inspector_pane.refresh(build_inspector_view_model(self._state))
 
     def show_about(self) -> None:
         """Show the About box; it repeats the disclaimer (§1)."""

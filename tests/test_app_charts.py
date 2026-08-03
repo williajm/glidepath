@@ -1,0 +1,265 @@
+"""Projection chart view-model tests (issue 8.4; planning §5.2, §4.7).
+
+The acceptance criterion: real terms (today's money) is the default
+presentation with a nominal toggle. The three chart surfaces —
+wrapper balances, income composition, tax — aggregate the core
+report to household level, one category per projected period.
+"""
+
+from datetime import UTC, date, datetime
+from decimal import Decimal
+
+import pytest
+
+from glidepath.app import (
+    NO_PROJECTION_MESSAGE,
+    RUN_FAILED_PREFIX,
+    ChartsViewModel,
+    PlanState,
+    ReportBasis,
+    basis_from_key,
+    build_charts_view_model,
+    initial_plan_state,
+    state_with_household,
+)
+from glidepath.core import (
+    Decision,
+    EntityId,
+    Fact,
+    Household,
+    Money,
+    Person,
+    SpendingPlan,
+    Wrapper,
+    WrapperKindId,
+    build_report,
+)
+from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY, SIPP_KIND
+
+TODAY = date(2026, 8, 2)
+RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+AS_OF = date(2026, 8, 1)
+
+
+def money_fact(amount: str) -> Fact[Money]:
+    """A user-stated monetary fact."""
+    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
+
+
+def wrapper(entity_id: str, kind: WrapperKindId, balance: str) -> Wrapper:
+    """A wrapper holding one stated balance."""
+    return Wrapper(id=EntityId(entity_id), kind=kind, balance=money_fact(balance))
+
+
+def _series_values(
+    view_model: ChartsViewModel, chart_title: str, series_label: str
+) -> tuple[Decimal, ...]:
+    """The values of one named series in one named chart."""
+    chart = next(entry for entry in view_model.charts if entry.title == chart_title)
+    series = next(entry for entry in chart.series if entry.label == series_label)
+    return series.values
+
+
+def household(wrappers: tuple[Wrapper, ...], employment: str | None) -> Household:
+    """A projectable household: one saver retiring at 60."""
+    person = Person(
+        id=EntityId("charts-person"),
+        date_of_birth=Fact(value=date(1991, 2, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=60, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+        employment_income=None if employment is None else money_fact(employment),
+        wrappers=wrappers,
+    )
+    return Household(
+        persons=(person,),
+        spending=SpendingPlan(annual_spending_real=money_fact("18000")),
+    )
+
+
+@pytest.fixture(scope="module", name="projected")
+def projected_fixture() -> PlanState:
+    """One projected session — ISA + SIPP saver with employment income."""
+    plan = household(
+        (
+            wrapper("charts-isa", ISA_KIND, "25000"),
+            wrapper("charts-sipp", SIPP_KIND, "40000"),
+        ),
+        employment="42000",
+    )
+    return state_with_household(initial_plan_state(), plan, today=TODAY)
+
+
+@pytest.fixture(scope="module", name="view_model")
+def view_model_fixture(projected: PlanState) -> ChartsViewModel:
+    """The charts screen over the projected state, default basis."""
+    return build_charts_view_model(projected)
+
+
+class TestBasisKeys:
+    """The toggle keys map to the core report bases."""
+
+    def test_real_key_maps_to_real_basis(self) -> None:
+        """The real option key selects the real basis."""
+        assert basis_from_key("real") is ReportBasis.REAL
+
+    def test_nominal_key_maps_to_nominal_basis(self) -> None:
+        """The nominal option key selects the nominal basis."""
+        assert basis_from_key("nominal") is ReportBasis.NOMINAL
+
+    def test_unknown_key_is_rejected(self) -> None:
+        """A key the app layer never issued is an error."""
+        with pytest.raises(ValueError, match="unknown chart basis key"):
+            basis_from_key("imaginary")
+
+
+class TestEmptyStates:
+    """Without a projection the screen carries only the message."""
+
+    def test_no_projection_shows_the_no_run_message(self) -> None:
+        """A fresh session has no charts, only the no-run copy."""
+        view_model = build_charts_view_model(initial_plan_state())
+        assert view_model.message == NO_PROJECTION_MESSAGE
+        assert view_model.charts == ()
+        assert view_model.categories == ()
+
+    def test_run_failure_is_reported(self) -> None:
+        """A failed run surfaces the engine's message."""
+        state = PlanState(
+            assumptions=initial_plan_state().assumptions,
+            run_error="balance dated in the future",
+        )
+        view_model = build_charts_view_model(state)
+        assert view_model.message == RUN_FAILED_PREFIX + "balance dated in the future"
+        assert view_model.charts == ()
+
+    def test_empty_state_keeps_the_basis_toggle(self) -> None:
+        """The toggle renders (real selected) even with nothing to chart."""
+        view_model = build_charts_view_model(initial_plan_state())
+        assert view_model.selected_basis_key == "real"
+        assert [option.key for option in view_model.basis_options] == [
+            "real",
+            "nominal",
+        ]
+
+
+class TestProjectedCharts:
+    """A projected state charts balances, income, and tax per period."""
+
+    def test_three_charts_in_order(self, view_model: ChartsViewModel) -> None:
+        """Balances, income composition, and tax — the §5.2 surfaces."""
+        titles = [chart.title for chart in view_model.charts]
+        assert titles == ["Wrapper balances", "Income composition", "Tax"]
+        assert view_model.message == ""
+
+    def test_real_is_the_default_basis(self, view_model: ChartsViewModel) -> None:
+        """Acceptance criterion: today's money unless toggled."""
+        assert view_model.selected_basis_key == "real"
+        for chart in view_model.charts:
+            assert "today's money" in chart.y_axis_label
+
+    def test_one_category_per_period(
+        self, projected: PlanState, view_model: ChartsViewModel
+    ) -> None:
+        """The x axis is the period-start years, in order."""
+        assert projected.result is not None
+        snapshot_years = [
+            str(snapshot.period.start.year) for snapshot in projected.result.snapshots
+        ]
+        assert list(view_model.categories) == snapshot_years
+        assert view_model.categories[0] == str(TODAY.year)
+
+    def test_every_series_spans_every_category(
+        self, view_model: ChartsViewModel
+    ) -> None:
+        """Series values align one-to-one with the categories."""
+        expected_length = len(view_model.categories)
+        for chart in view_model.charts:
+            for series in chart.series:
+                assert len(series.values) == expected_length
+
+    def test_balances_chart_has_one_series_per_wrapper(
+        self, view_model: ChartsViewModel
+    ) -> None:
+        """Each wrapper charts under its kind's display name."""
+        labels = [series.label for series in view_model.charts[0].series]
+        assert labels == ["ISA", "SIPP"]
+
+    def test_balances_stack_matches_the_report(
+        self, projected: PlanState, view_model: ChartsViewModel
+    ) -> None:
+        """The stacked total is the report's closing balance, per period."""
+        assert projected.result is not None
+        report = build_report(projected.result)
+        first_period = report.rows[0].period
+        first_rows = [row for row in report.rows if row.period == first_period]
+        report_total = sum(
+            (row.closing_balance.amount for row in first_rows), Decimal(0)
+        )
+        chart_total = sum(
+            (series.values[0] for series in view_model.charts[0].series), Decimal(0)
+        )
+        assert chart_total == report_total
+
+    def test_income_chart_drops_sources_never_drawn_on(
+        self, view_model: ChartsViewModel
+    ) -> None:
+        """No annuities or DB pensions in the plan — no empty series."""
+        labels = [series.label for series in view_model.charts[1].series]
+        assert "Employment" in labels
+        assert "Withdrawals (gross)" in labels
+        assert "Annuity income" not in labels
+        assert "DB pension" not in labels
+
+    def test_tax_chart_is_a_single_series(self, view_model: ChartsViewModel) -> None:
+        """Household tax due, one stacked series."""
+        tax_chart = view_model.charts[2]
+        assert [series.label for series in tax_chart.series] == ["Tax due"]
+        peak = max(tax_chart.series[0].values)
+        assert peak > 0
+        assert tax_chart.y_axis_max >= peak
+
+    def test_nominal_toggle_re_presents_the_same_ledger(
+        self, projected: PlanState, view_model: ChartsViewModel
+    ) -> None:
+        """Nominal amounts exceed real ones once inflation has run."""
+        nominal = build_charts_view_model(projected, basis=ReportBasis.NOMINAL)
+        assert nominal.selected_basis_key == "nominal"
+        for chart in nominal.charts:
+            assert "nominal" in chart.y_axis_label
+        real_employment = _series_values(view_model, "Income composition", "Employment")
+        nominal_employment = _series_values(nominal, "Income composition", "Employment")
+        assert nominal_employment[0] == real_employment[0]
+        assert nominal_employment[1] > real_employment[1]
+
+
+@pytest.fixture(scope="module", name="two_isas")
+def two_isas_fixture() -> ChartsViewModel:
+    """A projected state whose person holds two ISAs and no salary."""
+    plan = household(
+        (
+            wrapper("isa-a", ISA_KIND, "150000"),
+            wrapper("isa-b", ISA_KIND, "150000"),
+        ),
+        employment=None,
+    )
+    state = state_with_household(initial_plan_state(), plan, today=TODAY)
+    return build_charts_view_model(state)
+
+
+class TestWrapperLabelDisambiguation:
+    """Two wrappers of one kind chart under distinguishable labels."""
+
+    def test_duplicate_kinds_carry_their_entity_ids(
+        self, two_isas: ChartsViewModel
+    ) -> None:
+        """The kind name alone would be ambiguous, so ids are appended."""
+        labels = [series.label for series in two_isas.charts[0].series]
+        assert labels == ["ISA (isa-a)", "ISA (isa-b)"]
+
+    def test_all_zero_tax_still_renders_an_axis(
+        self, two_isas: ChartsViewModel
+    ) -> None:
+        """ISA-only funding is tax-free; the axis floor keeps a range."""
+        tax_chart = two_isas.charts[2]
+        assert all(value == 0 for value in tax_chart.series[0].values)
+        assert tax_chart.y_axis_max == 1

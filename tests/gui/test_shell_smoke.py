@@ -83,6 +83,7 @@ class TestMainWindow:
         tab_labels = [central.tabText(index) for index in range(central.count())]
         assert tab_labels == [
             view_model.facts_tab_label,
+            view_model.charts_tab_label,
             view_model.inspector_tab_label,
         ]
         menu_titles = [action.text() for action in window.menuBar().actions()]

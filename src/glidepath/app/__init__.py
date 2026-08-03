@@ -7,6 +7,17 @@ layer and engine — no Qt imports (guard test), no assumption of a
 desktop — so a future web shell can reuse it unchanged.
 """
 
+from glidepath.app.charts import (
+    DEFAULT_CHART_BASIS,
+    NO_PROJECTION_MESSAGE,
+    RUN_FAILED_PREFIX,
+    ChartBasisOption,
+    ChartSeries,
+    ChartSpec,
+    ChartsViewModel,
+    basis_from_key,
+    build_charts_view_model,
+)
 from glidepath.app.copy import (
     ABOUT_TITLE,
     APP_NAME,
@@ -66,18 +77,26 @@ from glidepath.app.shell import (
     build_shell_view_model,
     should_show_disclaimer,
 )
+from glidepath.core import ReportBasis
 
 __all__ = [
     "ABOUT_TITLE",
     "APP_NAME",
+    "DEFAULT_CHART_BASIS",
     "DISCLAIMER_ACCEPT_LABEL",
     "DISCLAIMER_BODY",
     "DISCLAIMER_DECLINE_LABEL",
     "DISCLAIMER_TITLE",
     "HELP_MENU_LABEL",
+    "NO_PROJECTION_MESSAGE",
     "OVERRIDE_SOURCE",
+    "RUN_FAILED_PREFIX",
     "AboutViewModel",
     "AssumptionRow",
+    "ChartBasisOption",
+    "ChartSeries",
+    "ChartSpec",
+    "ChartsViewModel",
     "ChoiceOption",
     "DecisionRow",
     "DisclaimerViewModel",
@@ -92,10 +111,13 @@ __all__ = [
     "InspectorViewModel",
     "OverrideOutcome",
     "PlanState",
+    "ReportBasis",
     "RollForwardRow",
     "SectionSpec",
     "ShellViewModel",
     "StructureRow",
+    "basis_from_key",
+    "build_charts_view_model",
     "build_facts_form_view_model",
     "build_inspector_view_model",
     "build_shell_view_model",

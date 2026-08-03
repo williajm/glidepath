@@ -9,10 +9,24 @@ user-entered text back into domain values — lives in
 from collections.abc import Mapping
 from datetime import date, datetime
 from enum import Enum
+from typing import Final
 
 from glidepath.core import Money
 
 _MAX_STRUCTURED_LENGTH = 120
+
+WRAPPER_KIND_NAMES: Final[Mapping[str, str]] = {
+    "uk.workplace_dc": "Workplace DC",
+    "uk.sipp": "SIPP",
+    "uk.isa": "ISA",
+}
+"""Display names for the shipped wrapper kinds (planning §2)."""
+
+
+def format_wrapper_kind(kind: object) -> str:
+    """A wrapper kind id as its display name, falling back to the id."""
+    text = str(kind)
+    return WRAPPER_KIND_NAMES.get(text, text)
 
 
 def _format_mapping(value: Mapping[object, object]) -> str:
