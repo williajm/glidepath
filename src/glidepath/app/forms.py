@@ -562,16 +562,23 @@ def _person_from(
         return None
 
 
-def parse_facts_form(data: FactsFormData, *, recorded_on: datetime) -> FactsFormResult:
+def parse_facts_form(
+    data: FactsFormData, *, recorded_on: datetime, today: date
+) -> FactsFormResult:
     """Parse a submission into a v1 household, or the errors preventing one.
 
     Every fact is stamped with the submission's ``recorded_on`` and the
-    ``as_of`` date the user entered (defaulting to the submission day),
-    so provenance is complete at entry time (planning §1).
+    ``as_of`` date the user entered (defaulting to ``today``), so
+    provenance is complete at entry time (planning §1). ``today`` is
+    the caller's civil date — the same one the projection will run
+    with, never derived from the UTC ``recorded_on`` timestamp: around
+    midnight the two calendars disagree, and a blank ``as_of``
+    defaulted to the UTC date could sit a day after the run's
+    ``today``, which §4.8 rejects as future-dated.
     """
     context = _FormContext(
         recorded_on=recorded_on,
-        default_as_of=recorded_on.date(),
+        default_as_of=today,
         errors=[],
     )
     spending = _spending_from(_SectionReader(context, "spending", data.spending))

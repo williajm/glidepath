@@ -279,7 +279,11 @@ the same integer-exponent-plus-linear-remainder arithmetic the DB
 statement-date convention uses (`revaluation_factor_for_months`, §5.1,
 §4.6). Each sub-balance fact (`balance`, `crystallised_balance`) rolls
 by its own `as_of`. A balance dated in the future is an engine error,
-mirroring the DB statement-date check. The expected (deterministic)
+mirroring the DB statement-date check; so is an expected nominal
+return of -100% per year or worse — an expectation must keep a
+positive gross return (the stochastic model's existing invariant,
+applied to the deterministic composition), which keeps the
+roll-forward factor strictly positive. The expected (deterministic)
 rate applies in every run mode: the pre-`today` span is not
 path-modelled, exactly as CPI stays deterministic across Monte Carlo
 paths. The stated fact is never altered — the rolled-forward figure is

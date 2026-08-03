@@ -204,6 +204,7 @@ if TYPE_CHECKING:
 
 _ZERO = Money(Decimal(0))
 _ONE = Decimal(1)
+_MINUS_ONE = Decimal(-1)
 _GROSS_UP_ITERATION_CAP = 48
 """Fixed-point iteration cap for the net-need gross-up (§5.2 step 4)."""
 _NET_TOLERANCE = Money(Decimal("0.005"))
@@ -643,10 +644,15 @@ class _Projection:
         month of ``today`` an exact no-op — no adjustment, no record.
         The factor compounds like the DB statement-date convention:
         integer-exponent whole years, linear remainder months, exact
-        ``Decimal`` arithmetic (planning §4.6).
+        ``Decimal`` arithmetic (planning §4.6). An *expected* nominal
+        return of -100% per year or worse is rejected — the same
+        positive-gross invariant the stochastic model enforces on its
+        expectation — so the factor is always strictly positive.
 
         Raises:
-            EngineError: If the fact is dated after ``today``.
+            EngineError: If the fact is dated after ``today``, or the
+                wrapper's expected nominal gross return is not
+                positive.
         """
         today = self.config.today
         if fact.as_of > today:
@@ -659,6 +665,13 @@ class _Projection:
         if months == 0:
             return fact.value
         rate = self._expected_nominal_rate(self._opening_allocation(wrapper))
+        if rate <= _MINUS_ONE:
+            msg = (
+                f"{label}: the wrapper's expected nominal return"
+                f" ({rate} per year) is -100% or worse; the roll-forward"
+                " needs a positive expected gross return (planning §4.8)"
+            )
+            raise EngineError(msg)
         factor = revaluation_factor_for_months(rate, months)
         opening = (fact.value * factor).quantized()
         self._roll_forwards.append(

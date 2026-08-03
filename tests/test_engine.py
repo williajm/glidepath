@@ -2287,6 +2287,22 @@ class TestBalanceRollForward:
         with pytest.raises(EngineError, match="after today"):
             run(plan, assumptions, region, config)
 
+    def test_total_loss_expected_return_is_rejected(self) -> None:
+        """An expected nominal return of -100% per year is an engine error.
+
+        The stochastic model already rejects a non-positive expected
+        gross return; the roll-forward applies the same invariant to
+        the deterministic expectation instead of compounding a stale
+        balance to zero or below.
+        """
+        pension = wrapper_of(PENSION, "10000", as_of=date(2025, 1, 1))
+        plan = household_of(person_of((pension,)))
+        assumptions = assumptions_with({"returns.equity.real": Decimal(-1)})
+        region = stub_region()
+        config = one_period_config()
+        with pytest.raises(EngineError, match="-100% or worse"):
+            run(plan, assumptions, region, config)
+
     def test_monte_carlo_rolls_at_the_deterministic_expectation(self) -> None:
         """Path randomness never reaches the pre-``today`` span (§4.8).
 

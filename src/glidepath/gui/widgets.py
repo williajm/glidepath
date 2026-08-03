@@ -94,13 +94,14 @@ class MainWindow(QMainWindow):
         """Parse a facts submission; on success, re-project and refresh."""
         now = datetime.now(tz=UTC)
         # Provenance timestamps stay UTC; "today" is the user's calendar
-        # day, which differs from the UTC date around midnight in BST.
-        result = parse_facts_form(data, recorded_on=now)
+        # day, which differs from the UTC date around midnight. The form
+        # defaults blank as_of dates from the same local day the run
+        # uses, so a defaulted balance date is never future-dated (§4.8).
+        today = now.astimezone().date()
+        result = parse_facts_form(data, recorded_on=now, today=today)
         if result.household is None:
             return format_form_errors(self._view_model.facts_form, result.errors)
-        self._state = state_with_household(
-            self._state, result.household, today=now.astimezone().date()
-        )
+        self._state = state_with_household(self._state, result.household, today=today)
         self.inspector_pane.refresh(build_inspector_view_model(self._state))
         return facts_saved_message(self._state)
 
