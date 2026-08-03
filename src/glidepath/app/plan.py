@@ -12,7 +12,9 @@ from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
+from glidepath.app.tables import parse_table_text
 from glidepath.core import (
+    AnnuityRateTable,
     Assumption,
     AssumptionKey,
     AssumptionSet,
@@ -20,9 +22,12 @@ from glidepath.core import (
     ProjectionResult,
     Provenance,
     RunConfig,
+    StatePensionUprating,
+    glide_path_from_shape,
     run,
 )
 from glidepath.regions.uk import (
+    FutureYearsPolicy,
     default_assumption_set,
     future_years_extension,
     state_pension_uprating,
@@ -30,14 +35,14 @@ from glidepath.regions.uk import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from datetime import date, datetime
+
+    from glidepath.regions.uk import AssumptionValue
 
 OVERRIDE_SOURCE = "User override (assumptions inspector)"
 
 _UNKNOWN_KEY_MESSAGE = "unknown assumption key"
-_STRUCTURED_MESSAGE = (
-    "this assumption is a structured table; it cannot be edited in place"
-)
 _INT_OVERRIDE_MESSAGE = "enter a whole number"
 _DECIMAL_OVERRIDE_MESSAGE = "enter a plain number, e.g. 0.05"
 
@@ -92,15 +97,19 @@ def state_with_household(
     )
 
 
-def _parsed_override_value(base: Assumption[Any], raw: str) -> Decimal | int:
+def _parsed_override_value(
+    base: Assumption[Any], raw: str
+) -> Decimal | int | dict[str, AssumptionValue]:
     """The typed value ``raw`` denotes for ``base``'s value shape.
 
     Every scalar in the shipped catalogue is a ``Decimal`` or an
-    ``int``; the structured policy tables are display-only in place.
+    ``int``; a structured table parses from ``key = value`` lines and
+    is vetted by its policy parser before it can reach the assumption
+    set (issue #71).
 
     Raises:
-        ValueError: If ``raw`` does not parse as the base value's type,
-            or the base value is a structured table.
+        ValueError: If ``raw`` does not parse as the base value's
+            shape, or a parsed table fails its policy parser.
     """
     if isinstance(base.value, Decimal):
         try:
@@ -115,7 +124,37 @@ def _parsed_override_value(base: Assumption[Any], raw: str) -> Decimal | int:
             return int(raw, 10)
         except ValueError:
             raise ValueError(_INT_OVERRIDE_MESSAGE) from None
-    raise ValueError(_STRUCTURED_MESSAGE)
+    table = parse_table_text(raw)
+    _check_table(base.key, table)
+    return table
+
+
+def _check_table(key: AssumptionKey, table: Mapping[str, AssumptionValue]) -> None:
+    """Vet a table override through its policy parser (issue #71).
+
+    A shape check alone would accept nonsense — any mapping passes —
+    so the parser that consumes the table at run time is the contract:
+    a table it rejects never enters the state. The parsers raise
+    ``ValueError`` subclasses except the glide-shape builder, whose
+    ``KeyError``/``TypeError`` are folded into the same channel.
+
+    Raises:
+        ValueError: If the table fails its policy parser.
+    """
+    try:
+        if key is AssumptionKey.GLIDEPATH_DEFAULT_SHAPE:
+            glide_path_from_shape(table)
+        elif key is AssumptionKey.POLICY_STATE_PENSION_UPRATING:
+            StatePensionUprating.from_assumption_value(table)
+        elif key is AssumptionKey.POLICY_TAX_FUTURE_YEARS:
+            FutureYearsPolicy.from_assumption_value(table)
+        elif key is AssumptionKey.ANNUITY_AGE_ADJUSTMENT:
+            AnnuityRateTable.from_assumption_value(table)
+    except KeyError as exc:
+        msg = f"missing required key {exc.args[0]!r}"
+        raise ValueError(msg) from exc
+    except TypeError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _with_assumption(state: PlanState, assumption: Assumption[Any]) -> AssumptionSet:

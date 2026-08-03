@@ -244,6 +244,16 @@ A future web UI would be a second shell over the same `glidepath.app`
 layer; nothing in `app` may assume a desktop (no file dialogs, no
 blocking prompts — shells own interaction mechanics).
 
+Table-valued assumptions are overridden in place as validated text —
+one `key = value` line per figure, dotted keys for nested tables — and
+the app layer vets a parsed table through the same policy parsers the
+engine reads it with (`glide_path_from_shape`,
+`StatePensionUprating`/`FutureYearsPolicy`/`AnnuityRateTable`
+`.from_assumption_value`) before it can enter the assumption set.
+**Rejected:** a bespoke structured editor per table — four editors'
+worth of shell surface for the same outcome; a richer shell can still
+add one later over the same override transition.
+
 **Why.** The same boundary that keeps the core region-agnostic keeps the
 product UI-agnostic; view models are plain objects, so the ≥90% coverage
 bar is met headless (no Qt event loop in tests), and the Qt layer stays
@@ -331,7 +341,8 @@ with no UI-side bookkeeping. The fact and decision lists cover the
 also drive results — wrapper kinds, fee schedules, relief mechanics, DB
 scheme structures (statement date, revaluation basis, factor tables) —
 are part of the persisted plan itself and surface entity-level in the
-Phase 6/8 inspector rather than as individual provenance rows.
+Phase 6/8 inspector rather than as individual provenance rows (the
+inspector's "Plan structure" section).
 Future-policy uncertainty (state pension
 uprating, post-freeze tax indexation) is just assumptions with keys, so
 scenarios can flip them.
