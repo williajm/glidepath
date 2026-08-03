@@ -43,7 +43,7 @@ def person_values(**overrides: str) -> dict[str, str]:
 
 def parse(data: FactsFormData) -> Household:
     """Parse a submission expected to succeed."""
-    result = parse_facts_form(data, recorded_on=RECORDED)
+    result = parse_facts_form(data, recorded_on=RECORDED, today=TODAY)
     assert result.errors == ()
     assert result.household is not None
     return result.household
@@ -237,6 +237,30 @@ class TestWrapperParsing:
         assert wrapper.contributions is None
         assert wrapper.balance.as_of == TODAY
 
+    def test_blank_as_of_defaults_to_the_callers_today(self) -> None:
+        """A blank date takes the run's civil day, never the UTC date.
+
+        In a zone west of UTC the evening's ``recorded_on`` timestamp
+        already carries tomorrow's UTC date; defaulting a balance to
+        it would sit one day after the projection's ``today`` and be
+        rejected as future-dated by the §4.8 roll-forward check.
+        """
+        late_evening = datetime(2026, 8, 4, 3, 0, tzinfo=UTC)
+        local_today = date(2026, 8, 3)
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                wrappers=({"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},),
+            ),
+            recorded_on=late_evening,
+            today=local_today,
+        )
+        assert result.errors == ()
+        assert result.household is not None
+        [wrapper] = result.household.persons[0].wrappers
+        assert wrapper.balance.as_of == local_today
+        assert wrapper.balance.recorded_on == late_evening
+
     def test_employer_contribution_requires_employee_amount(self) -> None:
         """Employer terms without the employee's own choice are rejected."""
         result = parse_facts_form(
@@ -251,6 +275,7 @@ class TestWrapperParsing:
                 ),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -318,6 +343,7 @@ class TestDBPensionParsing:
                 ),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -341,6 +367,7 @@ class TestDBPensionParsing:
                 ),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -362,6 +389,7 @@ class TestDBPensionParsing:
                 ),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         assert any(error.field_key == "early_late_factors" for error in result.errors)
@@ -449,7 +477,7 @@ class TestValidationMessages:
 
     def test_missing_required_fields(self) -> None:
         """A blank person section reports every missing required field."""
-        result = parse_facts_form(FactsFormData(), recorded_on=RECORDED)
+        result = parse_facts_form(FactsFormData(), recorded_on=RECORDED, today=TODAY)
         assert result.household is None
         missing = {error.field_key for error in result.errors}
         assert missing == {
@@ -469,6 +497,7 @@ class TestValidationMessages:
                 )
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         by_field = {error.field_key: error.message for error in result.errors}
@@ -481,6 +510,7 @@ class TestValidationMessages:
         result = parse_facts_form(
             FactsFormData(person=person_values(sex_for_longevity="other")),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -494,6 +524,7 @@ class TestValidationMessages:
                 wrappers=({"kind": str(WORKPLACE_DC_KIND), "balance": "-100"},),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -505,6 +536,7 @@ class TestValidationMessages:
         result = parse_facts_form(
             FactsFormData(person=person_values(lsa_used="Infinity")),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -527,6 +559,7 @@ class TestValidationMessages:
                 ),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -542,6 +575,7 @@ class TestValidationMessages:
                 db_pensions=({},),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         wrapper_fields = {
@@ -564,6 +598,7 @@ class TestValidationMessages:
                 spending={"annual_spending_real": "-1"},
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -578,6 +613,7 @@ class TestValidationMessages:
                 state_pension={"protected_payment": "12.50"},
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -596,6 +632,7 @@ class TestValidationMessages:
                 },
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         by_field = {error.field_key for error in result.errors}
@@ -618,6 +655,7 @@ class TestValidationMessages:
                 ),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -639,6 +677,7 @@ class TestValidationMessages:
                 ),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -650,6 +689,7 @@ class TestValidationMessages:
         result = parse_facts_form(
             FactsFormData(person=person_values(lsa_used="-1")),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
@@ -662,6 +702,7 @@ class TestValidationMessages:
         result = parse_facts_form(
             FactsFormData(person=person_values(lsa_used="-1")),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         text = format_form_errors(form, result.errors)
         assert text.startswith("About you: ")
@@ -678,6 +719,7 @@ class TestValidationMessages:
                 ),
             ),
             recorded_on=RECORDED,
+            today=TODAY,
         )
         text = format_form_errors(form, result.errors)
         assert "Savings wrapper 2" in text

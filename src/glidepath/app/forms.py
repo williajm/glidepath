@@ -562,16 +562,23 @@ def _person_from(
         return None
 
 
-def parse_facts_form(data: FactsFormData, *, recorded_on: datetime) -> FactsFormResult:
+def parse_facts_form(
+    data: FactsFormData, *, recorded_on: datetime, today: date
+) -> FactsFormResult:
     """Parse a submission into a v1 household, or the errors preventing one.
 
     Every fact is stamped with the submission's ``recorded_on`` and the
-    ``as_of`` date the user entered (defaulting to the submission day),
-    so provenance is complete at entry time (planning §1).
+    ``as_of`` date the user entered (defaulting to ``today``), so
+    provenance is complete at entry time (planning §1). ``today`` is
+    the caller's civil date — the same one the projection will run
+    with, never derived from the UTC ``recorded_on`` timestamp: around
+    midnight the two calendars disagree, and a blank ``as_of``
+    defaulted to the UTC date could sit a day after the run's
+    ``today``, which §4.8 rejects as future-dated.
     """
     context = _FormContext(
         recorded_on=recorded_on,
-        default_as_of=recorded_on.date(),
+        default_as_of=today,
         errors=[],
     )
     spending = _spending_from(_SectionReader(context, "spending", data.spending))
@@ -792,8 +799,10 @@ def _wrapper_section() -> SectionSpec:
         description=(
             "One pension or ISA. Balances are facts from a statement; "
             "contributions are your choices plus your employer's terms. "
-            "The projection treats balances as opening values today — "
-            "growth since the statement date is not rolled forward."
+            "A balance dated a whole month or more before today is "
+            "rolled forward to today at the assumed return — "
+            "contributions in the gap are not added, so restate the "
+            "balance if your statement is old."
         ),
         repeatable=True,
         add_label="Add wrapper",

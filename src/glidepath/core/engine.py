@@ -98,10 +98,15 @@ v1 engine conventions, superseded as later phases land:
   source's period income from the per-asset ``yield.*`` assumptions,
   so those keys enter the run's provenance exactly when a strategy
   spends portfolio income.
-- Wrapper balance facts are taken as at the run start; annual-allowance
-  measurement joins the loop when the AA charge is modelled
-  (roadmap 5.x/9.5) — the in-run MPAA trigger is recorded now, ready
-  for it.
+- Wrapper balance facts are dated by their statement (planning §4.8):
+  each sub-balance rolls forward from its ``as_of`` to ``today`` over
+  whole months at the wrapper's expected nominal return — the
+  deterministic composition, whatever the run mode — with every
+  non-zero adjustment reported in the run's provenance; a balance
+  dated after ``today`` is an engine error (the DB statement-date
+  convention). Annual-allowance measurement joins the loop when the
+  AA charge is modelled (roadmap 5.x/9.5) — the in-run MPAA trigger
+  is recorded now, ready for it.
 - Partial first and last periods (roadmap 4.6, planning §5.2): the run
   models only the window from ``config.today`` through the horizon end.
   A period partly outside that window has its flows (employment income,
@@ -153,6 +158,7 @@ from glidepath.core.provenance import (
     mapping_assumption_value,
 )
 from glidepath.core.results import (
+    BalanceRollForward,
     PeriodSnapshot,
     PersonPeriodResult,
     ProjectionResult,
@@ -161,7 +167,11 @@ from glidepath.core.results import (
     collect_plan_decisions,
     collect_plan_facts,
 )
-from glidepath.core.returns import DeterministicReturnModel, StochasticReturnModel
+from glidepath.core.returns import (
+    DeterministicReturnModel,
+    StochasticReturnModel,
+    nominal_rate,
+)
 from glidepath.core.state_pension import StatePensionUprating
 from glidepath.core.tax import TaxInput
 from glidepath.core.withdrawals import (
@@ -185,7 +195,7 @@ if TYPE_CHECKING:
     from glidepath.core.investments import AssetAllocation
     from glidepath.core.pensions import RevaluationBasis
     from glidepath.core.periods import Period
-    from glidepath.core.provenance import AssumptionSet
+    from glidepath.core.provenance import AssumptionSet, Fact
     from glidepath.core.region import Region
     from glidepath.core.returns import PeriodReturns, ReturnModel, ReturnModelFactory
     from glidepath.core.state_pension import StatePensionEntitlement
@@ -194,6 +204,7 @@ if TYPE_CHECKING:
 
 _ZERO = Money(Decimal(0))
 _ONE = Decimal(1)
+_MINUS_ONE = Decimal(-1)
 _GROSS_UP_ITERATION_CAP = 48
 """Fixed-point iteration cap for the net-need gross-up (§5.2 step 4)."""
 _NET_TOLERANCE = Money(Decimal("0.005"))
@@ -505,6 +516,7 @@ def run(
         assumptions=tuple(assumptions.get(key) for key in recorder.keys_read),
         region_data_version=region.data_version,
         seed=config.seed,
+        balance_roll_forwards=projection.roll_forwards,
     )
     return ProjectionResult(snapshots=snapshots, provenance=provenance, config=config)
 
@@ -556,6 +568,12 @@ class _Projection:
     _annuity_table: AnnuityRateTable | None = None
     _lsa_used: Money = _ZERO
     _mpaa_triggered_on: date | None = None
+    _roll_forwards: list[BalanceRollForward] = field(default_factory=list)
+
+    @property
+    def roll_forwards(self) -> tuple[BalanceRollForward, ...]:
+        """The §4.8 balance adjustments recorded while seeding the ledger."""
+        return tuple(self._roll_forwards)
 
     def execute(self) -> tuple[PeriodSnapshot, ...]:
         """Run the period loop and return the snapshots in order."""
@@ -563,15 +581,7 @@ class _Projection:
             self._lsa_used = self.person.lsa_used.value
         if self.person.mpaa_triggered_on is not None:
             self._mpaa_triggered_on = self.person.mpaa_triggered_on.value
-        self._balances = {
-            wrapper.id: (
-                wrapper.balance.value,
-                _ZERO
-                if wrapper.crystallised_balance is None
-                else wrapper.crystallised_balance.value,
-            )
-            for wrapper in self.person.wrappers
-        }
+        self._balances = self._opening_balances()
         factors = _NominalFactors(self.tracked, self._escalation_keys())
         self._build_income_streams()
         inflation = _ONE
@@ -601,6 +611,120 @@ class _Projection:
             previous_cpi = returns.cpi.value
             previous_fraction = fraction
         return tuple(snapshots)
+
+    def _opening_balances(self) -> dict[str, tuple[Money, Money]]:
+        """Seed each wrapper's opening sub-balances at ``today`` (§4.8).
+
+        Every balance fact rolls forward from its statement ``as_of``
+        over whole months at the wrapper's expected nominal return,
+        and each non-zero adjustment is recorded for the run's
+        provenance — an estimate layered on the stated fact is never
+        applied silently (planning §4.8).
+        """
+        balances: dict[str, tuple[Money, Money]] = {}
+        for wrapper in self.person.wrappers:
+            prefix = f"wrapper[{wrapper.id}]"
+            uncrystallised = self._rolled_balance(
+                wrapper, wrapper.balance, f"{prefix}.balance"
+            )
+            crystallised = _ZERO
+            if wrapper.crystallised_balance is not None:
+                crystallised = self._rolled_balance(
+                    wrapper,
+                    wrapper.crystallised_balance,
+                    f"{prefix}.crystallised_balance",
+                )
+            balances[wrapper.id] = (uncrystallised, crystallised)
+        return balances
+
+    def _rolled_balance(self, wrapper: Wrapper, fact: Fact[Money], label: str) -> Money:
+        """One balance fact rolled forward from ``as_of`` to today (§4.8).
+
+        The whole-month convention makes a balance stated within one
+        month of ``today`` an exact no-op — no adjustment, no record.
+        The factor compounds like the DB statement-date convention:
+        integer-exponent whole years, linear remainder months, exact
+        ``Decimal`` arithmetic (planning §4.6). An *expected* nominal
+        return of -100% per year or worse is rejected — the same
+        positive-gross invariant the stochastic model enforces on its
+        expectation — so the factor is always strictly positive.
+
+        Raises:
+            EngineError: If the fact is dated after ``today``, or the
+                wrapper's expected nominal gross return is not
+                positive.
+        """
+        today = self.config.today
+        if fact.as_of > today:
+            msg = (
+                f"{label}: balance as_of {fact.as_of} is after today"
+                f" {today} (planning §4.8)"
+            )
+            raise EngineError(msg)
+        months = whole_months_between(fact.as_of, today)
+        if months == 0:
+            return fact.value
+        rate = self._expected_nominal_rate(self._opening_allocation(wrapper))
+        if rate <= _MINUS_ONE:
+            msg = (
+                f"{label}: the wrapper's expected nominal return"
+                f" ({rate} per year) is -100% or worse; the roll-forward"
+                " needs a positive expected gross return (planning §4.8)"
+            )
+            raise EngineError(msg)
+        factor = revaluation_factor_for_months(rate, months)
+        opening = (fact.value * factor).quantized()
+        self._roll_forwards.append(
+            BalanceRollForward(
+                label=label,
+                stated=fact.value,
+                as_of=fact.as_of,
+                months=months,
+                factor=factor,
+                opening=opening,
+            )
+        )
+        return opening
+
+    def _expected_nominal_rate(self, allocation: AssetAllocation) -> Decimal:
+        """The allocation-weighted expected nominal annual return (§4.8).
+
+        The deterministic composition of each class's real-return
+        assumption with CPI — the expectation both return models are
+        built from — whatever the run mode: the pre-``today`` span is
+        never path-modelled, exactly as CPI stays deterministic across
+        Monte Carlo paths (planning §4.8).
+        """
+        cpi = decimal_assumption_value(self.tracked.get(AssumptionKey.INFLATION_CPI))
+        weighted = Decimal(0)
+        for weight, key in (
+            (allocation.equity, AssumptionKey.RETURNS_EQUITY_REAL),
+            (allocation.bonds, AssumptionKey.RETURNS_BONDS_REAL),
+            (allocation.cash, AssumptionKey.RETURNS_CASH_REAL),
+        ):
+            real = decimal_assumption_value(self.tracked.get(key))
+            weighted += weight * nominal_rate(real, cpi).value
+        return weighted
+
+    def _opening_allocation(self, wrapper: Wrapper) -> AssetAllocation:
+        """The allocation the wrapper opens the first period with (§4.8).
+
+        The wrapper's own stated split, else the glide path at the
+        run-start years-to-retirement — the same resolution step 1 of
+        the first period applies, standing in for the whole pre-run
+        span (an accepted §4.8 cost).
+        """
+        if wrapper.allocation is not None:
+            return wrapper.allocation
+        first_period = next(
+            iter(self.region.calendar.periods(self.config.today, self._horizon_end()))
+        )
+        ytr = years_to_target_retirement(
+            self.person.date_of_birth.value,
+            self.person.target_retirement_age.value,
+            first_period,
+        )
+        return self._glide().allocation_at(ytr)
 
     def _build_income_streams(self) -> None:
         """Resolve the person's DB and state pension income streams.

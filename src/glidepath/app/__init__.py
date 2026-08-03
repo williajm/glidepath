@@ -46,6 +46,7 @@ from glidepath.app.inspector import (
     DecisionRow,
     FactRow,
     InspectorViewModel,
+    RollForwardRow,
     StructureRow,
     build_inspector_view_model,
 )
@@ -91,6 +92,7 @@ __all__ = [
     "InspectorViewModel",
     "OverrideOutcome",
     "PlanState",
+    "RollForwardRow",
     "SectionSpec",
     "ShellViewModel",
     "StructureRow",

@@ -62,12 +62,16 @@ def money_fact(amount: str) -> Fact[Money]:
     return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
-def household() -> Household:
+def household(balances_as_of: date = AS_OF) -> Household:
     """A small projectable household: one ISA saver retiring at 60."""
     isa = Wrapper(
         id=EntityId("inspector-isa"),
         kind=ISA_KIND,
-        balance=money_fact("25000"),
+        balance=Fact(
+            value=Money(Decimal(25000)),
+            as_of=balances_as_of,
+            recorded_on=RECORDED,
+        ),
     )
     person = Person(
         id=EntityId("inspector-person"),
@@ -148,6 +152,26 @@ class TestProjectedSession:
         """Decisions render as the third column (§5.1)."""
         by_label = {row.label: row for row in view_model.decisions}
         assert by_label["You — target retirement age"].value == "60"
+
+    def test_fresh_balances_render_no_roll_forwards(
+        self, view_model: InspectorViewModel
+    ) -> None:
+        """A balance stated within a month of today needs no §4.8 row."""
+        assert view_model.roll_forwards == ()
+        assert view_model.roll_forwards_heading
+
+    def test_stale_balance_renders_a_roll_forward_row(self) -> None:
+        """A year-old statement surfaces the §4.8 adjustment (issue #72)."""
+        stale = household(balances_as_of=date(2025, 8, 1))
+        state = state_with_household(initial_plan_state(), stale, today=TODAY)
+        view_model = build_inspector_view_model(state)
+        [row] = view_model.roll_forwards
+        assert row.label == "Wrapper 1 (ISA) — balance"
+        assert row.stated == "£25,000.00"
+        assert row.as_of == "2025-08-01"
+        assert row.months == "12"
+        assert row.opening.startswith("£")
+        assert row.opening != row.stated
 
     def test_assumptions_used_come_first_with_status_and_source(
         self, view_model: InspectorViewModel, projected: PlanState

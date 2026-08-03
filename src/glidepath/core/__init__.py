@@ -116,6 +116,7 @@ from glidepath.core.reporting import (
     build_report,
 )
 from glidepath.core.results import (
+    BalanceRollForward,
     LabelledDecision,
     LabelledFact,
     PeriodSnapshot,
@@ -200,6 +201,7 @@ __all__ = [
     "AssumptionReadRecorder",
     "AssumptionSet",
     "AssumptionTarget",
+    "BalanceRollForward",
     "ComparisonRow",
     "ContributionRuleset",
     "ContributionSchedule",

@@ -65,7 +65,8 @@ from glidepath.core import (
 from glidepath.core.results import ProjectionResult
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
-AS_OF = date(2026, 8, 1)
+AS_OF = date(2026, 1, 1)
+"""Matches the runs' ``today``: balances dated after it are §4.8 errors."""
 RESIDENCY = TaxResidencyId("test.main")
 FREE = WrapperKindId("test.free")
 

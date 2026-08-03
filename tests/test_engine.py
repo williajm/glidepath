@@ -56,6 +56,7 @@ from glidepath.core import (
     RevaluationBasis,
     RevaluationReference,
     RunConfig,
+    RunMode,
     SpendingPlan,
     StatePensionEntitlement,
     StatePensionRecord,
@@ -78,7 +79,10 @@ from glidepath.core import (
 )
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
-AS_OF = date(2026, 8, 1)
+AS_OF = date(2026, 1, 1)
+"""Fact date matching the standard run start: balances dated after the
+run's ``today`` are §4.8 engine errors, and a balance dated at ``today``
+rolls forward by nothing."""
 RESIDENCY = TaxResidencyId("test.main")
 
 PENSION = WrapperKindId("test.pension")
@@ -102,9 +106,9 @@ DEFAULT_SHAPE = {
 }
 
 
-def money_fact(amount: str) -> Fact[Money]:
+def money_fact(amount: str, as_of: date = AS_OF) -> Fact[Money]:
     """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
+    return Fact(value=Money(Decimal(amount)), as_of=as_of, recorded_on=RECORDED)
 
 
 @dataclass(frozen=True)
@@ -347,13 +351,16 @@ def wrapper_of(
     crystallised: str | None = None,
     schedule: ContributionSchedule | None = None,
     allocation: AssetAllocation | None = EQUITY_ONLY,
+    as_of: date = AS_OF,
 ) -> Wrapper:
     """A zero-fee wrapper, allocated wholly to equity unless overridden."""
     return Wrapper(
         id=EntityId(f"wrapper-{kind}-{balance}-{crystallised}"),
         kind=kind,
-        balance=money_fact(balance),
-        crystallised_balance=None if crystallised is None else money_fact(crystallised),
+        balance=money_fact(balance, as_of=as_of),
+        crystallised_balance=None
+        if crystallised is None
+        else money_fact(crystallised, as_of=as_of),
         contributions=schedule,
         allocation=allocation,
         fees=NO_FEES,
@@ -2056,7 +2063,7 @@ class TestPartialPeriods:
         pension = Wrapper(
             id=EntityId("wrapper-half-year"),
             kind=PENSION,
-            balance=money_fact("10000"),
+            balance=money_fact("10000", as_of=date(2026, 7, 1)),
             contributions=schedule,
             allocation=EQUITY_ONLY,
             fees=FeeSchedule(platform=Rate(Decimal("0.01")), fund=Rate(Decimal(0))),
@@ -2156,7 +2163,7 @@ class TestPartialPeriods:
         15 December, so the period is emitted with zero flows and
         zero growth — the run never invents part-month amounts.
         """
-        pension = wrapper_of(PENSION, "10000")
+        pension = wrapper_of(PENSION, "10000", as_of=date(2026, 12, 15))
         plan = household_of(person_of((pension,), employment="50000"))
         result = run(
             plan,
@@ -2172,6 +2179,165 @@ class TestPartialPeriods:
         assert wrapper_result.growth == ZERO
         assert wrapper_result.fee == ZERO
         assert wrapper_result.closing_uncrystallised == Money(Decimal("10000.00"))
+
+
+class TestBalanceRollForward:
+    """Planning §4.8: stale wrapper balance facts roll forward to today."""
+
+    def test_balance_stated_within_a_month_is_a_no_op(self) -> None:
+        """Under one whole month rolls by nothing and records nothing."""
+        pension = wrapper_of(PENSION, "10000", as_of=date(2025, 12, 5))
+        plan = household_of(person_of((pension,)))
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        assert result.provenance.balance_roll_forwards == ()
+        [person_result] = result.snapshots[0].persons
+        assert person_result.wrappers[0].opening_uncrystallised == Money(
+            Decimal("10000.00")
+        )
+
+    def test_stale_balance_compounds_years_and_scales_months(self) -> None:
+        """18 months at 10% nominal: (1.1)^1 x 1.05 = 1.155 (§4.8).
+
+        10,000 stated on 1 July 2024 opens the 2026 run at 11,550 —
+        whole years compound with an integer exponent, the remaining
+        six months scale the annual rate linearly: the DB
+        statement-date arithmetic exactly, and the adjustment lands in
+        the run's provenance rather than passing silently.
+        """
+        pension = wrapper_of(PENSION, "10000", as_of=date(2024, 7, 1))
+        plan = household_of(person_of((pension,)))
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        [person_result] = result.snapshots[0].persons
+        assert person_result.wrappers[0].opening_uncrystallised == Money(
+            Decimal("11550.00")
+        )
+        [record] = result.provenance.balance_roll_forwards
+        assert record.label.endswith(".balance")
+        assert record.stated == Money(Decimal(10000))
+        assert record.as_of == date(2024, 7, 1)
+        assert record.months == 18
+        assert record.factor == Decimal("1.155")
+        assert record.opening == Money(Decimal(11550))
+
+    def test_cpi_composes_into_the_roll_forward_rate(self) -> None:
+        """The rate is the Fisher composition: 10% real + 10% CPI = 21%."""
+        pension = wrapper_of(PENSION, "10000", as_of=date(2025, 1, 1))
+        plan = household_of(person_of((pension,)))
+        result = run(
+            plan,
+            assumptions_with({"inflation.cpi": Decimal("0.10")}),
+            stub_region(),
+            one_period_config(),
+        )
+        [record] = result.provenance.balance_roll_forwards
+        assert record.factor == Decimal("1.21")
+        [person_result] = result.snapshots[0].persons
+        assert person_result.wrappers[0].opening_uncrystallised == Money(
+            Decimal("12100.00")
+        )
+
+    def test_each_sub_balance_rolls_by_its_own_statement_date(self) -> None:
+        """A fresh uncrystallised fact and a stale drawdown fact split.
+
+        Only the six-month-stale crystallised balance rolls (5% of
+        20,000); the balance stated at the run start seeds verbatim.
+        """
+        pension = Wrapper(
+            id=EntityId("wrapper-split-dates"),
+            kind=PENSION,
+            balance=money_fact("10000"),
+            crystallised_balance=money_fact("20000", as_of=date(2025, 7, 1)),
+            allocation=EQUITY_ONLY,
+            fees=NO_FEES,
+        )
+        plan = household_of(person_of((pension,)))
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        [person_result] = result.snapshots[0].persons
+        [wrapper_result] = person_result.wrappers
+        assert wrapper_result.opening_uncrystallised == Money(Decimal("10000.00"))
+        assert wrapper_result.opening_crystallised == Money(Decimal("21000.00"))
+        [record] = result.provenance.balance_roll_forwards
+        assert record.label.endswith(".crystallised_balance")
+        assert record.months == 6
+
+    def test_glide_path_allocation_prices_the_roll_forward(self) -> None:
+        """No stated split → the run-start glide allocation's rate.
+
+        The default shape holds 80% equity this far from retirement;
+        bonds and cash return zero here, so 12 stale months compound
+        at 8% and 10,000 opens at 10,800.
+        """
+        pension = wrapper_of(PENSION, "10000", allocation=None, as_of=date(2025, 1, 1))
+        plan = household_of(person_of((pension,)))
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        [record] = result.provenance.balance_roll_forwards
+        assert record.factor == Decimal("1.08")
+        [person_result] = result.snapshots[0].persons
+        assert person_result.wrappers[0].opening_uncrystallised == Money(
+            Decimal("10800.00")
+        )
+
+    def test_future_dated_balance_is_rejected(self) -> None:
+        """A balance dated after ``today`` is a §4.8 engine error."""
+        pension = wrapper_of(PENSION, "10000", as_of=date(2026, 2, 1))
+        plan = household_of(person_of((pension,)))
+        assumptions = assumptions_with()
+        region = stub_region()
+        config = one_period_config()
+        with pytest.raises(EngineError, match="after today"):
+            run(plan, assumptions, region, config)
+
+    def test_total_loss_expected_return_is_rejected(self) -> None:
+        """An expected nominal return of -100% per year is an engine error.
+
+        The stochastic model already rejects a non-positive expected
+        gross return; the roll-forward applies the same invariant to
+        the deterministic expectation instead of compounding a stale
+        balance to zero or below.
+        """
+        pension = wrapper_of(PENSION, "10000", as_of=date(2025, 1, 1))
+        plan = household_of(person_of((pension,)))
+        assumptions = assumptions_with({"returns.equity.real": Decimal(-1)})
+        region = stub_region()
+        config = one_period_config()
+        with pytest.raises(EngineError, match="-100% or worse"):
+            run(plan, assumptions, region, config)
+
+    def test_monte_carlo_rolls_at_the_deterministic_expectation(self) -> None:
+        """Path randomness never reaches the pre-``today`` span (§4.8).
+
+        With 20% equity volatility the modelled 2026 return varies by
+        seed, but the 18 stale months still compound at the expected
+        10% — the same 11,550 opening as the deterministic run.
+        """
+        pension = wrapper_of(PENSION, "10000", as_of=date(2024, 7, 1))
+        plan = household_of(person_of((pension,)))
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "volatility.equity": Decimal("0.20"),
+                    "volatility.bonds": Decimal(0),
+                    "volatility.cash": Decimal(0),
+                    "correlation.equity_bonds": Decimal(0),
+                    "correlation.equity_cash": Decimal(0),
+                    "correlation.bonds_cash": Decimal(0),
+                }
+            ),
+            stub_region(),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                mode=RunMode.MONTE_CARLO,
+                seed=4711,
+            ),
+        )
+        [record] = result.provenance.balance_roll_forwards
+        assert record.factor == Decimal("1.155")
+        [person_result] = result.snapshots[0].persons
+        assert person_result.wrappers[0].opening_uncrystallised == Money(
+            Decimal("11550.00")
+        )
 
 
 @dataclass(frozen=True)

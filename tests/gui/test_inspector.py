@@ -13,6 +13,7 @@ from glidepath.app import (
     DecisionRow,
     FactRow,
     InspectorViewModel,
+    RollForwardRow,
     StructureRow,
 )
 from glidepath.gui import inspector as inspector_module
@@ -48,7 +49,9 @@ STRUCTURED_ROW = AssumptionRow(
 )
 
 
-def view_model() -> InspectorViewModel:
+def view_model(
+    roll_forwards: tuple[RollForwardRow, ...] = (),
+) -> InspectorViewModel:
     """A hand-built inspector view model with one row per column."""
     return InspectorViewModel(
         title="Stated vs assumed",
@@ -63,6 +66,9 @@ def view_model() -> InspectorViewModel:
                 note="",
             ),
         ),
+        roll_forwards_heading="Balances rolled forward to today",
+        roll_forwards_columns=("Balance", "Stated", "As of", "Months", "Value today"),
+        roll_forwards=roll_forwards,
         assumptions_heading="Assumptions used",
         assumptions_columns=(
             "Assumption",
@@ -169,6 +175,30 @@ class TestRendering:
         assert status_item.text() == "Shipped default"
         assert pane.decisions_table.rowCount() == 1
         assert pane.summary_label.text() == "summary line"
+
+    def test_roll_forwards_table_hides_without_rows(self) -> None:
+        """No stale balances → the roll-forward section stays hidden."""
+        pane = refreshed_pane()
+        assert pane.roll_forwards_table.rowCount() == 0
+        assert not pane.roll_forwards_table.isVisibleTo(pane)
+
+    def test_roll_forwards_table_renders_rows(self) -> None:
+        """A rolled-forward balance renders and the section shows (#72)."""
+        row = RollForwardRow(
+            label="Wrapper 1 (SIPP) — balance",
+            stated="£45,000.00",
+            as_of="2026-02-01",
+            months="6",
+            opening="£46,321.09",
+        )
+        pane = InspectorPane(lambda _key, _raw: None)
+        pane.refresh(view_model(roll_forwards=(row,)))
+        assert pane.roll_forwards_table.rowCount() == 1
+        assert pane.roll_forwards_table.columnCount() == 5
+        item = pane.roll_forwards_table.item(0, 4)
+        assert item is not None
+        assert item.text() == "£46,321.09"
+        assert pane.roll_forwards_table.isVisibleTo(pane)
 
     def test_structure_table_renders_entity_rows(self) -> None:
         """The plan-structure section renders its entity-level rows (#70)."""
