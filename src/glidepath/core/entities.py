@@ -7,8 +7,8 @@ household level avoids a schema + engine migration when couples activate
 :func:`validate_household_v1`.
 
 Wrappers attach to :class:`Person` as of roadmap 3.1, the glide-path
-config as of 3.5, household spending as of 4.1, and DB pensions and
-state pension records as of 4.2/4.3.
+config as of 3.5, household spending as of 4.1, DB pensions and state
+pension records as of 4.2/4.3, and household planned outflows as of 5.4.
 """
 
 import uuid
@@ -135,26 +135,56 @@ class SpendingPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class PlannedOutflow:
+    """One dated one-off outflow — wholly a decision (planning §5.1).
+
+    A mortgage payoff, gift, or purchase: a *net* cash need on top of
+    the spending plan, hitting the period in which the referenced
+    person attains the stated age and funded tax-aware through the
+    withdrawal machinery (roadmap 5.4). ``amount_real`` is in today's
+    money; the engine inflates it by the run's CPI path.
+    """
+
+    id: EntityId
+    label: str
+    amount_real: Decision[Money]
+    at_age_of: tuple[EntityId, int]
+
+    def __post_init__(self) -> None:
+        """Reject a negative amount or age."""
+        if self.amount_real.value < _ZERO:
+            msg = "PlannedOutflow.amount_real must be non-negative"
+            raise ValueError(msg)
+        if self.at_age_of[1] < 0:
+            msg = "PlannedOutflow.at_age_of age must be non-negative"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
 class Household:
     """One or two persons plus shared economics (planning §4.4, §5.1).
 
     The 1..2 bound is the schema-level invariant (planning §4.4); the
     stricter v1 single-person rule is :func:`validate_household_v1`.
     ``spending`` is the household-level retirement spending need;
-    ``None`` means decumulation withdrawals are not modelled (planned
-    outflows follow in roadmap 5.4).
+    ``None`` means decumulation spending withdrawals are not modelled.
+    ``planned_outflows`` are household-level dated one-offs (roadmap
+    5.4), funded through the withdrawal machinery whether or not a
+    spending plan is present.
     """
 
     persons: tuple[Person, ...]
     spending: SpendingPlan | None = None
+    planned_outflows: tuple[PlannedOutflow, ...] = ()
 
     def __post_init__(self) -> None:
-        """Enforce the 1..2 bound and aggregate-wide distinct entity ids.
+        """Enforce the 1..2 bound, distinct entity ids, and outflow targets.
 
         Scenario overrides target entities by id + field path (planning
         §4.3), so ids must be unambiguous across the whole household —
-        two persons' wrappers or DB pensions may not share an id, nor
-        may either share one with a person.
+        two persons' wrappers, DB pensions, or planned outflows may not
+        share an id, nor may any share one with a person. A planned
+        outflow must reference a person in this household.
         """
         if not _MIN_PERSONS <= len(self.persons) <= _MAX_PERSONS:
             msg = f"a household holds 1 or 2 persons, got {len(self.persons)}"
@@ -162,12 +192,21 @@ class Household:
         ids = [person.id for person in self.persons]
         ids += [wrapper.id for person in self.persons for wrapper in person.wrappers]
         ids += [pension.id for person in self.persons for pension in person.db_pensions]
+        ids += [outflow.id for outflow in self.planned_outflows]
         if len(set(ids)) != len(ids):
             msg = (
-                "household entities (persons, wrappers, DB pensions) must"
-                " have distinct EntityIds"
+                "household entities (persons, wrappers, DB pensions, planned"
+                " outflows) must have distinct EntityIds"
             )
             raise ValueError(msg)
+        person_ids = {person.id for person in self.persons}
+        for outflow in self.planned_outflows:
+            if outflow.at_age_of[0] not in person_ids:
+                msg = (
+                    f"planned outflow {outflow.id} references person"
+                    f" {outflow.at_age_of[0]}, who is not in this household"
+                )
+                raise ValueError(msg)
 
 
 def validate_household_v1(household: Household) -> None:

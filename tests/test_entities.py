@@ -9,6 +9,7 @@ from glidepath.core.entities import (
     EntityId,
     Household,
     Person,
+    PlannedOutflow,
     Sex,
     TaxResidencyId,
     new_entity_id,
@@ -218,6 +219,62 @@ def test_person_rejects_db_pension_id_colliding_with_wrapper_id() -> None:
             wrappers=wrappers,
             db_pensions=pensions,
         )
+
+
+def make_outflow(
+    for_person: EntityId,
+    outflow_id: EntityId | None = None,
+    *,
+    amount: str = "15000",
+    age: int = 55,
+) -> PlannedOutflow:
+    """Build a planned outflow decision for tests (roadmap 5.4)."""
+    return PlannedOutflow(
+        id=outflow_id if outflow_id is not None else new_entity_id(),
+        label="mortgage payoff",
+        amount_real=Decision(value=Money(Decimal(amount)), recorded_on=RECORDED),
+        at_age_of=(for_person, age),
+    )
+
+
+def test_household_holds_planned_outflows() -> None:
+    """Outflows are household-level decisions (planning §5.1, roadmap 5.4)."""
+    person = make_person()
+    outflow = make_outflow(person.id)
+    household = Household(persons=(person,), planned_outflows=(outflow,))
+    assert household.planned_outflows == (outflow,)
+    assert Household(persons=(make_person(),)).planned_outflows == ()
+
+
+def test_planned_outflow_rejects_negative_amount() -> None:
+    """A negative outflow would be an inflow; there is no such wrapper."""
+    person = make_person()
+    with pytest.raises(ValueError, match="non-negative"):
+        make_outflow(person.id, amount="-1")
+
+
+def test_planned_outflow_rejects_negative_age() -> None:
+    """The occurrence age must be a real age."""
+    person = make_person()
+    with pytest.raises(ValueError, match="age must be non-negative"):
+        make_outflow(person.id, age=-1)
+
+
+def test_household_rejects_outflow_for_unknown_person() -> None:
+    """An outflow must reference a person in the household."""
+    person = make_person()
+    stranger = make_outflow(new_entity_id())
+    with pytest.raises(ValueError, match="not in this household"):
+        Household(persons=(person,), planned_outflows=(stranger,))
+
+
+def test_household_rejects_outflow_id_colliding_with_wrapper_id() -> None:
+    """Outflow ids are override targets too (planning §4.3)."""
+    shared = new_entity_id()
+    person = make_person(wrappers=(make_wrapper(shared),))
+    outflow = make_outflow(person.id, shared)
+    with pytest.raises(ValueError, match="distinct EntityIds"):
+        Household(persons=(person,), planned_outflows=(outflow,))
 
 
 def test_household_rejects_db_pension_ids_shared_across_persons() -> None:

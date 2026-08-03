@@ -30,6 +30,8 @@ from glidepath.core import (
     Fact,
     FactorTable,
     FeeSchedule,
+    FixedPercentWithdrawalStrategy,
+    FixedRealWithdrawalStrategy,
     GlidePathConfig,
     GlidePathPoint,
     GrowthTaxTreatment,
@@ -38,8 +40,10 @@ from glidepath.core import (
     MemberContributionOutcome,
     MemberContributionRequest,
     Money,
+    NetWithdrawalPlan,
     Period,
     Person,
+    PlannedOutflow,
     Provenance,
     Rate,
     Region,
@@ -54,6 +58,9 @@ from glidepath.core import (
     TaxLine,
     TaxResidencyId,
     TaxResult,
+    WithdrawalPlan,
+    WithdrawalSourceId,
+    WithdrawalState,
     WithdrawalTaxTreatment,
     Wrapper,
     WrapperKindId,
@@ -128,10 +135,16 @@ class StubAges:
 
 @dataclass(frozen=True)
 class StubWrapperRules:
-    """Two wrapper kinds: an EET pension and a TEE tax-free account."""
+    """Two wrapper kinds: an EET pension and a TEE tax-free account.
+
+    ``free_access_age`` age-gates the tax-free kind when set (a
+    LISA-like account, roadmap 9.2): tax treatment says nothing about
+    accessibility, so the engine must consult the gate for every kind.
+    """
 
     access_age: int = 55
     free_kind_cap: Money | None = None
+    free_access_age: int | None = None
 
     def tax_treatment(self, kind: WrapperKindId, period: Period) -> WrapperTaxTreatment:
         """The pension pays out 25% tax-free; the free kind wholly so."""
@@ -172,10 +185,14 @@ class StubWrapperRules:
     def is_access_open(
         self, kind: WrapperKindId, date_of_birth: date, period: Period
     ) -> bool:
-        """Pension access is age-gated; the free kind is always open."""
+        """Pension access is age-gated; the free kind only if configured."""
         if kind == PENSION:
             return is_age_attained_by_period_start(
                 date_of_birth, self.access_age, period
+            )
+        if self.free_access_age is not None:
+            return is_age_attained_by_period_start(
+                date_of_birth, self.free_access_age, period
             )
         return True
 
@@ -255,13 +272,16 @@ def stub_region(
     contributions: RecordingContributionRules | None = None,
     free_kind_cap: Money | None = None,
     state_pension: StubStatePension | None = None,
+    free_access_age: int | None = None,
 ) -> Region:
     """A calendar-year region over the stub implementations."""
     return Region(
         calendar=AnnualCalendar(),
         ages=StubAges(),
         tax=FlatTaxSystem(),
-        wrappers=StubWrapperRules(free_kind_cap=free_kind_cap),
+        wrappers=StubWrapperRules(
+            free_kind_cap=free_kind_cap, free_access_age=free_access_age
+        ),
         contributions=contributions or RecordingContributionRules(),
         state_pension=state_pension or StubStatePension(),
         data_version="stub region v1",
@@ -758,6 +778,29 @@ class TestWithdrawals:
         )
         [person_result] = result.snapshots[0].persons
         assert person_result.stage is LifeStage.DECUMULATION
+        assert person_result.wrappers[0].withdrawal_gross == ZERO
+        assert person_result.net_withdrawn == ZERO
+        assert person_result.shortfall == Money(Decimal("12000.00"))
+
+    def test_access_gate_applies_to_tax_free_wrappers_too(self) -> None:
+        """An age-gated tax-free account is not drawable before its gate.
+
+        Tax treatment says nothing about accessibility (a LISA-like
+        account, roadmap 9.2): a 50-year-old retiree with the free kind
+        gated at 60 cannot draw it, whatever its tax treatment.
+        """
+        free_account = wrapper_of(FREE, "50000")
+        plan = household_of(
+            person_of((free_account,), date_of_birth=date(1975, 6, 1), retire_at=45),
+            spending="12000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(free_access_age=60),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
         assert person_result.wrappers[0].withdrawal_gross == ZERO
         assert person_result.net_withdrawn == ZERO
         assert person_result.shortfall == Money(Decimal("12000.00"))
@@ -1589,6 +1632,366 @@ class TestPartialPeriods:
         assert wrapper_result.growth == ZERO
         assert wrapper_result.fee == ZERO
         assert wrapper_result.closing_uncrystallised == Money(Decimal("10000.00"))
+
+
+@dataclass(frozen=True)
+class OrderedNetStrategy:
+    """A test strategy returning a fixed net-defined plan verbatim."""
+
+    target: Money
+    order: tuple[WithdrawalSourceId, ...]
+
+    def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
+        """Ignore the state and need; the plan is preconfigured."""
+        del state, need
+        return NetWithdrawalPlan(target=self.target, order=self.order)
+
+
+class TestWithdrawalStrategies:
+    """Roadmap 5.1: the configured strategy drives step 4."""
+
+    def test_default_strategy_is_fixed_real(self) -> None:
+        """An unconfigured run meets the net need (planning §5.2)."""
+        assert one_period_config().withdrawal_strategy == FixedRealWithdrawalStrategy()
+
+    def test_fixed_percent_draws_its_share_without_a_spending_plan(self) -> None:
+        """4% of a 10,000 free account is a 400 gross = 400 net draw.
+
+        Gross-defined strategies run in every decumulation period, need
+        or no need — here with no spending plan at all.
+        """
+        free_account = wrapper_of(FREE, "10000")
+        plan = household_of(
+            person_of((free_account,), date_of_birth=date(1960, 1, 1), retire_at=60)
+        )
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                rate=Rate(Decimal("0.04"))
+            ),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            config,
+        )
+        [person_result] = result.snapshots[0].persons
+        [free_result] = person_result.wrappers
+        assert free_result.withdrawal_tax_free == Money(Decimal("400.00"))
+        assert person_result.net_withdrawn == Money(Decimal("400.00"))
+        assert person_result.spending_need == ZERO
+        assert person_result.shortfall == ZERO
+
+    def test_fixed_percent_taxable_draw_skips_the_gross_up(self) -> None:
+        """The gross draw is exact; the net is whatever survives tax.
+
+        10% of a pot of 4,000 crystallised + 6,000 uncrystallised is a
+        1,000 gross draw, taken from the crystallised funds first —
+        fully taxable, so the flat 25% leaves 750 net (no gross-up to
+        a net target, unlike the fixed-real draws of TestWithdrawals).
+        """
+        pension = wrapper_of(PENSION, "6000", crystallised="4000")
+        plan = household_of(
+            person_of((pension,), date_of_birth=date(1960, 1, 1), retire_at=60)
+        )
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                rate=Rate(Decimal("0.10"))
+            ),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            config,
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert pension_result.withdrawal_taxable == Money(Decimal("1000.00"))
+        assert pension_result.withdrawal_tax_free == ZERO
+        assert pension_result.closing_crystallised == Money(Decimal("3000.00"))
+        assert person_result.tax.tax_due == Money(Decimal("250.00"))
+        assert person_result.net_withdrawn == Money(Decimal("750.00"))
+
+    def test_fixed_percent_pot_excludes_gate_closed_funds(self) -> None:
+        """Uncrystallised pension funds under the access age stay out.
+
+        The 45-year-old retiree's pot is only the 5,000 free account;
+        10% draws 500 and the 20,000 pension is untouched (§4.1).
+        """
+        free_account = wrapper_of(FREE, "5000")
+        pension = wrapper_of(PENSION, "20000")
+        plan = household_of(
+            person_of(
+                (free_account, pension),
+                date_of_birth=date(1975, 6, 1),
+                retire_at=45,
+            )
+        )
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                rate=Rate(Decimal("0.10"))
+            ),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            config,
+        )
+        [person_result] = result.snapshots[0].persons
+        free_result, pension_result = person_result.wrappers
+        assert free_result.withdrawal_tax_free == Money(Decimal("500.00"))
+        assert pension_result.withdrawal_gross == ZERO
+
+    def test_fixed_percent_pot_excludes_gated_tax_free_funds(self) -> None:
+        """The gate holds for tax-free kinds in the pot base too.
+
+        With the free kind gated at 60, the 50-year-old retiree's pot
+        is only the 10,000 of crystallised pension funds: 10% draws
+        1,000 gross there (fully taxable, 750 net) and the 50,000
+        tax-free account is untouched.
+        """
+        free_account = wrapper_of(FREE, "50000")
+        pension = wrapper_of(PENSION, "0", crystallised="10000")
+        plan = household_of(
+            person_of(
+                (free_account, pension),
+                date_of_birth=date(1975, 6, 1),
+                retire_at=45,
+            )
+        )
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                rate=Rate(Decimal("0.10"))
+            ),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(free_access_age=60),
+            config,
+        )
+        [person_result] = result.snapshots[0].persons
+        free_result, pension_result = person_result.wrappers
+        assert free_result.withdrawal_gross == ZERO
+        assert pension_result.withdrawal_taxable == Money(Decimal("1000.00"))
+        assert person_result.net_withdrawn == Money(Decimal("750.00"))
+
+    def test_fixed_percent_gap_to_the_need_is_shortfall(self) -> None:
+        """A gross-defined draw below the need reports the miss.
+
+        The ruin signal of roadmap 7.3 must not vanish because the
+        strategy ignores the need: 4% of 10,000 delivers 400 against a
+        12,000 need, leaving 11,600 unmet.
+        """
+        free_account = wrapper_of(FREE, "10000")
+        plan = retiree_plan((free_account,))
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                rate=Rate(Decimal("0.04"))
+            ),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            config,
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.net_withdrawn == Money(Decimal("400.00"))
+        assert person_result.shortfall == Money(Decimal("11600.00"))
+
+    def test_plan_drawing_gate_closed_funds_is_rejected(self) -> None:
+        """Execution enforces the access gates on any strategy (§4.1)."""
+        pension = wrapper_of(PENSION, "100000")
+        strategy = OrderedNetStrategy(
+            target=Money(Decimal(1000)),
+            order=(WithdrawalSourceId(wrapper_id=pension.id, crystallised=False),),
+        )
+        plan = household_of(
+            person_of((pension,), date_of_birth=date(1975, 6, 1), retire_at=45),
+            spending="1000",
+        )
+        assumptions = assumptions_with({"returns.equity.real": Decimal(0)})
+        region = stub_region()
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=strategy,
+        )
+        with pytest.raises(EngineError, match="access gate"):
+            run(plan, assumptions, region, config)
+
+    def test_plan_referencing_an_unknown_source_is_rejected(self) -> None:
+        """A dangling source reference is a strategy bug, failed loudly."""
+        free_account = wrapper_of(FREE, "10000")
+        strategy = OrderedNetStrategy(
+            target=Money(Decimal(1000)),
+            order=(
+                WithdrawalSourceId(
+                    wrapper_id=EntityId("no-such-wrapper"), crystallised=False
+                ),
+            ),
+        )
+        plan = retiree_plan((free_account,))
+        assumptions = assumptions_with({"returns.equity.real": Decimal(0)})
+        region = stub_region()
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=strategy,
+        )
+        with pytest.raises(EngineError, match="unknown source"):
+            run(plan, assumptions, region, config)
+
+
+def outflow_at(age: int, amount: str = "10000") -> PlannedOutflow:
+    """An outflow for the standard test person at ``age`` (roadmap 5.4)."""
+    return PlannedOutflow(
+        id=EntityId("outflow-1"),
+        label="one-off",
+        amount_real=Decision(value=Money(Decimal(amount)), recorded_on=RECORDED),
+        at_age_of=(EntityId("person-1"), age),
+    )
+
+
+class TestPlannedOutflows:
+    """Roadmap 5.4: dated one-offs funded through the withdrawal machinery."""
+
+    def test_outflow_hits_the_period_its_age_is_attained(self) -> None:
+        """The outflow lands whole in its period and nowhere else."""
+        free_account = wrapper_of(FREE, "50000")
+        person = person_of((free_account,), date_of_birth=date(1990, 1, 1))
+        plan = Household(persons=(person,), planned_outflows=(outflow_at(37),))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first, second = result.snapshots
+        assert first.persons[0].planned_outflows == ZERO
+        assert first.persons[0].net_withdrawn == ZERO
+        assert second.persons[0].planned_outflows == Money(Decimal("10000.00"))
+        assert second.persons[0].net_withdrawn == Money(Decimal("10000.00"))
+        assert second.persons[0].shortfall == ZERO
+        assert second.persons[0].wrappers[0].withdrawal_tax_free == Money(
+            Decimal("10000.00")
+        )
+
+    def test_outflow_is_inflated_to_nominal_by_the_cpi_path(self) -> None:
+        """A today's-money decision inflates like the spending need."""
+        free_account = wrapper_of(FREE, "50000")
+        person = person_of((free_account,), date_of_birth=date(1990, 1, 1))
+        plan = Household(persons=(person,), planned_outflows=(outflow_at(37),))
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("0.10"),
+                    "returns.equity.real": Decimal(0),
+                }
+            ),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        second = result.snapshots[1]
+        assert second.persons[0].planned_outflows == Money(Decimal("11000.00"))
+        assert second.persons[0].net_withdrawn == Money(Decimal("11000.00"))
+
+    def test_outflow_before_today_is_ignored(self) -> None:
+        """A date already past lives in the stated balances, not the model."""
+        free_account = wrapper_of(FREE, "50000")
+        person = person_of((free_account,), date_of_birth=date(1990, 1, 1))
+        plan = Household(persons=(person,), planned_outflows=(outflow_at(36),))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(today=date(2026, 6, 1), horizon_end=date(2026, 12, 31)),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.planned_outflows == ZERO
+        assert person_result.net_withdrawn == ZERO
+
+    def test_outflow_after_the_horizon_end_is_ignored(self) -> None:
+        """A date past the horizon is outside the modelled window."""
+        free_account = wrapper_of(FREE, "50000")
+        person = person_of((free_account,), date_of_birth=date(1989, 9, 1))
+        plan = Household(persons=(person,), planned_outflows=(outflow_at(37),))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2026, 6, 30)),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.planned_outflows == ZERO
+        assert person_result.net_withdrawn == ZERO
+
+    def test_pre_retirement_outflow_is_funded_tax_aware(self) -> None:
+        """Before decumulation the default order funds the outflow.
+
+        A 10,000 outflow against a 4,000 free account and an accessible
+        pension: 4,000 net comes free, then the remaining 6,000 net
+        grosses up through the 25%-tax-free pension draw — 7,384.61
+        gross (1,846.15 tax-free, 5,538.46 taxable, 1,384.61 tax).
+        """
+        free_account = wrapper_of(FREE, "4000")
+        pension = wrapper_of(PENSION, "100000")
+        person = person_of((free_account, pension), date_of_birth=date(1970, 1, 1))
+        plan = Household(persons=(person,), planned_outflows=(outflow_at(56),))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        free_result, pension_result = person_result.wrappers
+        assert person_result.stage is not LifeStage.DECUMULATION
+        assert free_result.withdrawal_tax_free == Money(Decimal("4000.00"))
+        assert pension_result.withdrawal_tax_free == Money(Decimal("1846.15"))
+        assert pension_result.withdrawal_taxable == Money(Decimal("5538.46"))
+        assert person_result.tax.tax_due == Money(Decimal("1384.61"))
+        assert person_result.planned_outflows == Money(Decimal("10000.00"))
+        assert person_result.net_withdrawn == Money(Decimal("10000.00"))
+        assert person_result.shortfall == ZERO
+
+    def test_outflow_joins_the_spending_need_in_decumulation(self) -> None:
+        """In decumulation the outflow rides the configured strategy."""
+        free_account = wrapper_of(FREE, "100000")
+        person = person_of(
+            (free_account,), date_of_birth=date(1960, 1, 1), retire_at=60
+        )
+        spending = SpendingPlan(annual_spending_real=money_fact("12000"))
+        plan = Household(
+            persons=(person,),
+            spending=spending,
+            planned_outflows=(outflow_at(66),),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.spending_need == Money(Decimal("12000.00"))
+        assert person_result.planned_outflows == Money(Decimal("10000.00"))
+        assert person_result.net_withdrawn == Money(Decimal("22000.00"))
+        assert person_result.shortfall == ZERO
 
 
 class TestEngineErrors:
