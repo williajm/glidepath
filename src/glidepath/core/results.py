@@ -49,8 +49,12 @@ class WrapperPeriodResult:
     landed in the pot (of which ``provider_relief`` arrived from the
     provider's at-source reclaim); ``contribution_shortfall`` is the
     intended amount that could not be contributed (per-kind caps or the
-    region's relief limits). ``growth`` may be negative (a down
-    period); every other flow is non-negative.
+    region's relief limits). ``annuity_purchase`` is capital that left
+    the wrapper to buy annuity income this period (roadmap 5.5) — the
+    purchase's tax-free cash element is paid out through
+    ``withdrawal_tax_free`` instead, exactly like an up-front lump
+    sum. ``growth`` may be negative (a down period); every other flow
+    is non-negative.
     """
 
     wrapper_id: EntityId
@@ -68,6 +72,7 @@ class WrapperPeriodResult:
     growth: Money
     closing_uncrystallised: Money
     closing_crystallised: Money
+    annuity_purchase: Money = _ZERO
 
     def __post_init__(self) -> None:
         """Reject negative amounts in the non-negative fields."""
@@ -83,6 +88,7 @@ class WrapperPeriodResult:
             self.fee,
             self.closing_uncrystallised,
             self.closing_crystallised,
+            self.annuity_purchase,
         )
         if any(amount < _ZERO for amount in non_negative):
             msg = "WrapperPeriodResult amounts (except growth) must be non-negative"
@@ -124,6 +130,12 @@ class PersonPeriodResult:
     the gross commutation cash received when a DB pension starts this
     period (roadmap 4.2/4.3) — tax-free up to the remaining lump-sum
     allowance, the excess taxed as income (roadmap 5.2).
+    ``annuity_income`` is purchased annuity income in payment
+    (escalated per its type, pro-rated from its exact start date), and
+    ``annuity_lump_sum`` is the tax-free cash delivered alongside an
+    annuity purchase's crystallisation of uncrystallised funds this
+    period, capped by the remaining lump-sum allowance headroom
+    (roadmap 5.5).
     ``planned_outflows`` is the nominal total
     of the household's dated one-offs landing this period (roadmap
     5.4) — a net need on top of ``spending_need``, so the shortfall
@@ -153,6 +165,8 @@ class PersonPeriodResult:
     db_income: Money = _ZERO
     db_lump_sum: Money = _ZERO
     state_pension_income: Money = _ZERO
+    annuity_income: Money = _ZERO
+    annuity_lump_sum: Money = _ZERO
     planned_outflows: Money = _ZERO
     pension_lump_sum: Money = _ZERO
     lsa_used: Money = _ZERO
@@ -168,6 +182,8 @@ class PersonPeriodResult:
             self.db_income,
             self.db_lump_sum,
             self.state_pension_income,
+            self.annuity_income,
+            self.annuity_lump_sum,
             self.planned_outflows,
             self.pension_lump_sum,
             self.lsa_used,
@@ -346,6 +362,19 @@ def collect_plan_decisions(household: Household) -> tuple[LabelledDecision, ...]
                 LabelledDecision(
                     label=f"{pension_prefix}.commuted_fraction",
                     decision=pension.commuted_fraction,
+                )
+            )
+        for purchase in person.annuity_purchases:
+            purchase_prefix = f"annuity_purchase[{purchase.id}]"
+            decisions.append(
+                LabelledDecision(
+                    label=f"{purchase_prefix}.at_age", decision=purchase.at_age
+                )
+            )
+            decisions.append(
+                LabelledDecision(
+                    label=f"{purchase_prefix}.fraction_of_pot",
+                    decision=purchase.fraction_of_pot,
                 )
             )
         if person.state_pension is not None:

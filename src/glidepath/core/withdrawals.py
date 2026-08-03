@@ -28,7 +28,7 @@ so no account kind is ever named (planning §4.2).
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from glidepath.core.money import Money, Rate
 
@@ -41,6 +41,9 @@ if TYPE_CHECKING:
 _ZERO = Money(Decimal(0))
 _ZERO_FRACTION = Decimal(0)
 _ONE = Decimal(1)
+_DEFAULT_UPPER_GUARDRAIL = Rate(Decimal("0.06"))
+_DEFAULT_LOWER_GUARDRAIL = Rate(Decimal("0.04"))
+_DEFAULT_ADJUSTMENT = Decimal("0.1")
 
 
 class TaxFreeCashStrategy(Enum):
@@ -113,6 +116,15 @@ class WithdrawalSource:
     5.2); ``access_open`` follows the §4.1 gate convention —
     crystallised funds are always open (already accessed, never
     re-gated; planning §5.1).
+
+    ``natural_yield`` is the income this sub-balance throws off over
+    the period — its balance at the shipped per-asset yield
+    assumptions through the wrapper's allocation, scaled by the
+    period's active fraction (roadmap 5.3). The engine prices it only
+    for strategies declaring
+    :attr:`WithdrawalStrategy.uses_natural_yield`, so runs that never
+    read the yield assumptions never record them in provenance; other
+    strategies see zero.
     """
 
     id: WithdrawalSourceId
@@ -120,14 +132,18 @@ class WithdrawalSource:
     available: Money
     tax_free_fraction: Decimal
     access_open: bool
+    natural_yield: Money = _ZERO
 
     def __post_init__(self) -> None:
-        """Reject a negative balance or a fraction outside [0, 1]."""
+        """Reject a negative balance, yield, or fraction outside [0, 1]."""
         if self.available < _ZERO:
             msg = "WithdrawalSource.available must be non-negative"
             raise ValueError(msg)
         if not _ZERO_FRACTION <= self.tax_free_fraction <= _ONE:
             msg = "WithdrawalSource.tax_free_fraction must lie between 0 and 1"
+            raise ValueError(msg)
+        if self.natural_yield < _ZERO:
+            msg = "WithdrawalSource.natural_yield must be non-negative"
             raise ValueError(msg)
 
 
@@ -221,6 +237,15 @@ class WithdrawalStrategy(Protocol):
     scenario what-if whitelist (planning §4.3) — carried on the run
     configuration (§5.2). Implementations must be pure: the same state
     and need always produce the same plan (planning §4.6).
+
+    A strategy that spends portfolio income may additionally declare a
+    class-level ``uses_natural_yield = True`` (see
+    :class:`NaturalYieldWithdrawalStrategy`): the engine then prices
+    each source's natural yield from the ``yield.*`` assumption keys
+    (planning §7). The marker is deliberately *not* part of this
+    protocol — pricing is opt-in, so an absent marker simply means
+    ``False`` and a strategy that only implements ``withdraw`` keeps
+    working (roadmap 5.3).
     """
 
     def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
@@ -320,3 +345,95 @@ class FixedPercentWithdrawalStrategy:
             draws.append(GrossDraw(source=entry.id, amount=amount))
             remaining = remaining - amount
         return GrossWithdrawalPlan(draws=tuple(draws))
+
+
+@dataclass(frozen=True, slots=True)
+class GuardrailsWithdrawalStrategy:
+    """Guyton-Klinger-style guardrails, net-defined (roadmap 5.3).
+
+    The need the engine passes in — the CPI-inflated spending decision,
+    net of pension income — is the baseline; the strategy annualises
+    the withdrawal rate it implies (need over the period's active
+    fraction, over the accessible pot) and adjusts spending when that
+    rate crosses a configured guardrail: above ``upper_guardrail`` the
+    target is cut by ``cut_fraction`` (the capital-preservation rule),
+    below ``lower_guardrail`` it rises by ``rise_fraction`` (the
+    prosperity rule). The defaults are the conventional
+    Guyton-Klinger parameters: guardrails at 6%/4% around an implied
+    5% initial rate, adjusting spending by 10%.
+
+    The protocol is pure — the same state and need always produce the
+    same plan — so each period is judged afresh from the pot alone and
+    adjustments never compound across periods (planning §5.2). A cut's
+    unspent remainder is reported as shortfall, exactly as a
+    gross-defined under-draw is: the roadmap-7.3 metrics read spending
+    cuts from there.
+    """
+
+    upper_guardrail: Rate = _DEFAULT_UPPER_GUARDRAIL
+    lower_guardrail: Rate = _DEFAULT_LOWER_GUARDRAIL
+    cut_fraction: Decimal = _DEFAULT_ADJUSTMENT
+    rise_fraction: Decimal = _DEFAULT_ADJUSTMENT
+
+    def __post_init__(self) -> None:
+        """Require ordered positive guardrails and fractions in [0, 1]."""
+        if not _ZERO_FRACTION < self.lower_guardrail.value < self.upper_guardrail.value:
+            msg = (
+                "GuardrailsWithdrawalStrategy guardrails must satisfy"
+                " 0 < lower_guardrail < upper_guardrail"
+            )
+            raise ValueError(msg)
+        for name, fraction in (
+            ("cut_fraction", self.cut_fraction),
+            ("rise_fraction", self.rise_fraction),
+        ):
+            if not _ZERO_FRACTION <= fraction <= _ONE:
+                msg = f"GuardrailsWithdrawalStrategy.{name} must lie between 0 and 1"
+                raise ValueError(msg)
+
+    def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
+        """Target the need, adjusted on a guardrail crossing."""
+        ordered = tax_aware_order(state.sources)
+        order = tuple(entry.id for entry in ordered)
+        pot = _ZERO
+        for entry in ordered:
+            pot = pot + entry.available
+        target = need
+        if need > _ZERO and pot > _ZERO and state.year_fraction > _ZERO_FRACTION:
+            annualised = need.amount / state.year_fraction / pot.amount
+            if annualised > self.upper_guardrail.value:
+                target = need * (_ONE - self.cut_fraction)
+            elif annualised < self.lower_guardrail.value:
+                target = need * (_ONE + self.rise_fraction)
+        return NetWithdrawalPlan(target=target, order=order)
+
+
+@dataclass(frozen=True, slots=True)
+class NaturalYieldWithdrawalStrategy:
+    """Spend the portfolio's income, never its capital (roadmap 5.3).
+
+    Gross-defined: each accessible source is drawn by exactly its
+    period natural yield (:attr:`WithdrawalSource.natural_yield`) —
+    the income its balance throws off at the shipped per-asset yield
+    assumptions, which the engine prices only because this strategy
+    declares ``uses_natural_yield`` (an opt-in marker, not a protocol
+    member — see :class:`WithdrawalStrategy`). Draws follow the default
+    tax-aware order, and a yield taken from an uncrystallised pension
+    pot resolves through the normal payment machinery (in the model an
+    income draw is a withdrawal, so its tax follows the wrapper's
+    rules). The net delivered floats with the pot and the tax system;
+    any gap to the period's need is reported as shortfall (planning
+    §5.2).
+    """
+
+    uses_natural_yield: ClassVar[bool] = True
+
+    def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
+        """Draw every accessible source's natural yield, in order."""
+        del need  # Gross-defined: the yield, not the need, sets the draw.
+        draws = tuple(
+            GrossDraw(source=entry.id, amount=min(entry.natural_yield, entry.available))
+            for entry in tax_aware_order(state.sources)
+            if entry.natural_yield > _ZERO and entry.available > _ZERO
+        )
+        return GrossWithdrawalPlan(draws=draws)

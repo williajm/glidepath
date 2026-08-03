@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import date
 
+    from glidepath.core.annuities import AnnuityPurchase
     from glidepath.core.glide import GlidePathConfig, LifeStage
     from glidepath.core.pensions import DBPension
     from glidepath.core.provenance import Decision, Fact
@@ -97,6 +98,8 @@ class Person:
     wrappers: tuple[Wrapper, ...] = ()
     db_pensions: tuple[DBPension, ...] = ()
     """Deferred DB entitlements (roadmap 4.2; v1: no active accrual)."""
+    annuity_purchases: tuple[AnnuityPurchase, ...] = ()
+    """Planned annuity purchases — decision records (roadmap 5.5)."""
     state_pension: StatePensionRecord | None = None
     """This person's state pension record (roadmap 4.3).
 
@@ -113,8 +116,12 @@ class Person:
         """Require distinct entity ids (they are override targets, §4.3)."""
         ids = [wrapper.id for wrapper in self.wrappers]
         ids += [pension.id for pension in self.db_pensions]
+        ids += [purchase.id for purchase in self.annuity_purchases]
         if len(set(ids)) != len(ids):
-            msg = "a person's wrappers and DB pensions must have distinct EntityIds"
+            msg = (
+                "a person's wrappers, DB pensions, and annuity purchases"
+                " must have distinct EntityIds"
+            )
             raise ValueError(msg)
         if self.lsa_used is not None and self.lsa_used.value < _ZERO:
             msg = "Person.lsa_used must be non-negative"
@@ -194,9 +201,10 @@ class Household:
 
         Scenario overrides target entities by id + field path (planning
         §4.3), so ids must be unambiguous across the whole household —
-        two persons' wrappers, DB pensions, or planned outflows may not
-        share an id, nor may any share one with a person. A planned
-        outflow must reference a person in this household.
+        two persons' wrappers, DB pensions, annuity purchases, or
+        planned outflows may not share an id, nor may any share one
+        with a person. A planned outflow must reference a person in
+        this household.
         """
         if not _MIN_PERSONS <= len(self.persons) <= _MAX_PERSONS:
             msg = f"a household holds 1 or 2 persons, got {len(self.persons)}"
@@ -204,11 +212,16 @@ class Household:
         ids = [person.id for person in self.persons]
         ids += [wrapper.id for person in self.persons for wrapper in person.wrappers]
         ids += [pension.id for person in self.persons for pension in person.db_pensions]
+        ids += [
+            purchase.id
+            for person in self.persons
+            for purchase in person.annuity_purchases
+        ]
         ids += [outflow.id for outflow in self.planned_outflows]
         if len(set(ids)) != len(ids):
             msg = (
-                "household entities (persons, wrappers, DB pensions, planned"
-                " outflows) must have distinct EntityIds"
+                "household entities (persons, wrappers, DB pensions, annuity"
+                " purchases, planned outflows) must have distinct EntityIds"
             )
             raise ValueError(msg)
         person_ids = {person.id for person in self.persons}

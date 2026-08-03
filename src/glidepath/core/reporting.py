@@ -81,7 +81,9 @@ class PeriodReportRow:
     ``wrapper_balances``, so the row stays consistent after rounding.
     ``contributions`` totals what landed in the pots (employee gross,
     including provider relief, plus employer); ``withdrawals_gross``
-    totals the tax-free and taxable draws across wrappers.
+    totals the tax-free and taxable draws across wrappers;
+    ``annuity_purchases`` totals the capital that left the wrappers to
+    buy annuity income this period (roadmap 5.5).
     """
 
     period: Period
@@ -96,6 +98,9 @@ class PeriodReportRow:
     db_lump_sum: Money
     pension_lump_sum: Money
     state_pension_income: Money
+    annuity_income: Money
+    annuity_lump_sum: Money
+    annuity_purchases: Money
     tax_due: Money
     spending_need: Money
     planned_outflows: Money
@@ -189,6 +194,9 @@ def _person_row(
         db_lump_sum=flow(person.db_lump_sum),
         pension_lump_sum=flow(person.pension_lump_sum),
         state_pension_income=flow(person.state_pension_income),
+        annuity_income=flow(person.annuity_income),
+        annuity_lump_sum=flow(person.annuity_lump_sum),
+        annuity_purchases=flow(_total(entry.annuity_purchase for entry in wrappers)),
         tax_due=flow(person.tax.tax_due),
         spending_need=flow(person.spending_need),
         planned_outflows=flow(person.planned_outflows),

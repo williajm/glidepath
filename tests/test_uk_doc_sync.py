@@ -20,7 +20,7 @@ _NUMBER = re.compile(r"(?P<number>-?\d+(?:\.\d+)?)(?P<percent>%?)")
 
 # §7 rows whose defaults are structured (mirrored as TOML tables), so no
 # single number comparison applies.
-STRUCTURED_KEYS = 3
+STRUCTURED_KEYS = 4
 
 
 def _section7_rows() -> list[tuple[str, str]]:

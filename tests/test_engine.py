@@ -17,6 +17,9 @@ import pytest
 
 from glidepath.core import (
     AnnualCalendar,
+    AnnuityBasis,
+    AnnuityPurchase,
+    AnnuityType,
     AssetAllocation,
     Assumption,
     AssumptionKey,
@@ -35,11 +38,13 @@ from glidepath.core import (
     GlidePathConfig,
     GlidePathPoint,
     GrowthTaxTreatment,
+    GuardrailsWithdrawalStrategy,
     Household,
     LifeStage,
     MemberContributionOutcome,
     MemberContributionRequest,
     Money,
+    NaturalYieldWithdrawalStrategy,
     NetWithdrawalPlan,
     Period,
     Person,
@@ -362,6 +367,7 @@ def person_of(
     retire_at: int = 65,
     employment: str | None = None,
     db_pensions: tuple[DBPension, ...] = (),
+    annuity_purchases: tuple[AnnuityPurchase, ...] = (),
     state_pension: StatePensionRecord | None = None,
     lsa_used: str | None = None,
     mpaa_triggered_on: date | None = None,
@@ -379,6 +385,7 @@ def person_of(
         lsa_used=None if lsa_used is None else money_fact(lsa_used),
         wrappers=wrappers,
         db_pensions=db_pensions,
+        annuity_purchases=annuity_purchases,
         state_pension=state_pension,
     )
 
@@ -2562,4 +2569,447 @@ class TestEngineErrors:
         region = stub_region()
         config = RunConfig(today=date(2026, 1, 1))
         with pytest.raises(EngineError, match="planning age"):
+            run(plan, assumptions, region, config)
+
+
+class TestGuardrailsStrategy:
+    """Roadmap 5.3: guardrail crossings adjust spending in a real run."""
+
+    def test_above_the_upper_guardrail_the_cut_reports_as_shortfall(self) -> None:
+        """12,000 over 100,000 is 12%: the 10% cut leaves 1,200 unmet."""
+        free_account = wrapper_of(FREE, "100000")
+        plan = retiree_plan((free_account,))
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=GuardrailsWithdrawalStrategy(),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            config,
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.net_withdrawn == Money(Decimal("10800.00"))
+        assert person_result.shortfall == Money(Decimal("1200.00"))
+
+    def test_below_the_lower_guardrail_spending_rises(self) -> None:
+        """12,000 over 1,000,000 is 1.2%: the prosperity rule adds 10%."""
+        free_account = wrapper_of(FREE, "1000000")
+        plan = retiree_plan((free_account,))
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=GuardrailsWithdrawalStrategy(),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            config,
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.net_withdrawn == Money(Decimal("13200.00"))
+        assert person_result.shortfall == ZERO
+
+
+NATURAL_YIELDS = {
+    "yield.equity": Decimal("0.03"),
+    "yield.bonds": Decimal("0.02"),
+    "yield.cash": Decimal("0.01"),
+}
+
+
+class TestNaturalYieldStrategy:
+    """Roadmap 5.3: the engine prices yields only when a strategy asks."""
+
+    def run_natural_yield(self) -> tuple[Money, Money, Money]:
+        """One period on the income-only strategy; key wrapper figures.
+
+        A 10,000 tax-free account and 20,000 of crystallised pension,
+        both wholly in equity at a 3% yield: 300 arrives tax-free and
+        600 as taxable income (150 tax at the flat 25%), so 750 net is
+        delivered against the 12,000 need.
+        """
+        free_account = wrapper_of(FREE, "10000")
+        pension = wrapper_of(PENSION, "0", crystallised="20000")
+        plan = retiree_plan((free_account, pension))
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=NaturalYieldWithdrawalStrategy(),
+        )
+        overrides: dict[str, object] = {"returns.equity.real": Decimal(0)}
+        overrides.update(NATURAL_YIELDS)
+        result = run(plan, assumptions_with(overrides), stub_region(), config)
+        [person_result] = result.snapshots[0].persons
+        free_result, pension_result = person_result.wrappers
+        return (
+            free_result.withdrawal_tax_free,
+            pension_result.withdrawal_taxable,
+            person_result.net_withdrawn,
+        )
+
+    def test_each_source_is_drawn_by_its_priced_yield(self) -> None:
+        """The equity yield assumption prices every source's draw."""
+        free_draw, pension_draw, net = self.run_natural_yield()
+        assert free_draw == Money(Decimal("300.00"))
+        assert pension_draw == Money(Decimal("600.00"))
+        assert net == Money(Decimal("750.00"))
+
+    def test_yield_keys_enter_provenance_only_when_priced(self) -> None:
+        """A yield-aware run records the yield keys; fixed-real never does."""
+        free_account = wrapper_of(FREE, "10000")
+        plan = retiree_plan((free_account,))
+        yield_config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=NaturalYieldWithdrawalStrategy(),
+        )
+        overrides: dict[str, object] = {"returns.equity.real": Decimal(0)}
+        overrides.update(NATURAL_YIELDS)
+        assumptions = assumptions_with(overrides)
+        region = stub_region()
+        priced = run(plan, assumptions, region, yield_config)
+        unpriced = run(plan, assumptions, region, one_period_config())
+        priced_keys = {entry.key for entry in priced.provenance.assumptions}
+        unpriced_keys = {entry.key for entry in unpriced.provenance.assumptions}
+        assert AssumptionKey.YIELD_EQUITY in priced_keys
+        assert AssumptionKey.YIELD_BONDS in priced_keys
+        assert AssumptionKey.YIELD_CASH in priced_keys
+        assert not unpriced_keys & set(NATURAL_YIELDS)
+
+
+ANNUITY_TABLE: dict[str, object] = {
+    "escalation": Decimal("0.03"),
+    "joint_factor": Decimal("0.9"),
+    "level": {"65": Decimal("1.0"), "67": Decimal("1.25"), "70": Decimal("1.5")},
+    "escalating3": {"65": Decimal("1.0"), "67": Decimal("1.25")},
+    "inflation_linked": {"65": Decimal("1.0"), "67": Decimal("1.25")},
+}
+
+
+def annuity_assumptions(overrides: dict[str, object] | None = None) -> AssumptionSet:
+    """The stub assumptions plus zero returns and the annuity pricing."""
+    values: dict[str, object] = {
+        "returns.equity.real": Decimal(0),
+        "annuity.level.single.65": Decimal("0.08"),
+        "annuity.escalating3.single.65": Decimal("0.08"),
+        "annuity.inflation_linked.single.65": Decimal("0.08"),
+        "annuity.age_adjustment": ANNUITY_TABLE,
+    }
+    values.update(overrides or {})
+    return assumptions_with(values)
+
+
+def annuity_purchase_of(
+    at_age: int = 67,
+    fraction: str = "0.5",
+    annuity_type: AnnuityType = AnnuityType.LEVEL,
+    basis: AnnuityBasis = AnnuityBasis.SINGLE,
+) -> AnnuityPurchase:
+    """One annuity purchase decision record."""
+    return AnnuityPurchase(
+        id=EntityId("annuity-1"),
+        at_age=Decision(value=at_age, recorded_on=RECORDED),
+        fraction_of_pot=Decision(value=Decimal(fraction), recorded_on=RECORDED),
+        annuity_type=annuity_type,
+        basis=basis,
+    )
+
+
+def annuitant_plan(
+    purchase: AnnuityPurchase,
+    *,
+    uncrystallised: str = "40000",
+    crystallised: str = "20000",
+    spending: str | None = None,
+) -> Household:
+    """A 66-year-old retiree holding one pension pot and one purchase.
+
+    Born 1960, so the age-67 default purchase fires on 1 January 2027 —
+    the second calendar-year period of a run from 1 January 2026.
+    """
+    pension = wrapper_of(PENSION, uncrystallised, crystallised=crystallised)
+    return household_of(
+        person_of(
+            (pension,),
+            date_of_birth=date(1960, 1, 1),
+            retire_at=60,
+            annuity_purchases=(purchase,),
+        ),
+        spending=spending,
+    )
+
+
+def three_period_config(**kwargs: object) -> RunConfig:
+    """Calendar years 2026 through 2028."""
+    return RunConfig(
+        today=date(2026, 1, 1),
+        horizon_end=date(2028, 12, 31),
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+class TestAnnuityPurchases:
+    """Roadmap 5.5: purchases convert pot into priced lifetime income."""
+
+    def test_the_purchase_converts_the_pot_fraction_into_income(self) -> None:
+        """Half of a 40,000 + 20,000 pension pot annuitises at age 67.
+
+        The uncrystallised draw of 20,000 crystallises with 5,000
+        (25%) paid as tax-free cash; 15,000 of it plus the 10,000
+        crystallised draw buy income at 8% x the 1.25 age-67
+        multiplier = 10%: 2,500 a year.
+        """
+        result = run(
+            annuitant_plan(annuity_purchase_of()),
+            annuity_assumptions(),
+            stub_region(),
+            three_period_config(),
+        )
+        [before] = result.snapshots[0].persons
+        assert before.annuity_income == ZERO
+        assert before.annuity_lump_sum == ZERO
+        [at_purchase] = result.snapshots[1].persons
+        assert at_purchase.annuity_lump_sum == Money(Decimal("5000.00"))
+        assert at_purchase.annuity_income == Money(Decimal("2500.00"))
+        assert at_purchase.lsa_used == Money(Decimal("5000.00"))
+        [pension_result] = at_purchase.wrappers
+        assert pension_result.annuity_purchase == Money(Decimal("25000.00"))
+        assert pension_result.withdrawal_tax_free == Money(Decimal("5000.00"))
+        assert pension_result.closing_uncrystallised == Money(Decimal("20000.00"))
+        assert pension_result.closing_crystallised == Money(Decimal("10000.00"))
+        [after] = result.snapshots[2].persons
+        assert after.annuity_income == Money(Decimal("2500.00"))
+        assert after.annuity_lump_sum == ZERO
+        [later_pension] = after.wrappers
+        assert later_pension.annuity_purchase == ZERO
+
+    def test_annuity_income_is_taxable_but_never_flexible_access(self) -> None:
+        """The income is taxed as income; the purchase sets no MPAA date."""
+        result = run(
+            annuitant_plan(annuity_purchase_of()),
+            annuity_assumptions(),
+            stub_region(),
+            three_period_config(),
+        )
+        [at_purchase] = result.snapshots[1].persons
+        assert at_purchase.tax.tax_due == Money(Decimal("625.00"))
+        assert at_purchase.mpaa_triggered_on is None
+
+    def test_an_escalating_annuity_compounds_its_fixed_rate(self) -> None:
+        """The 3% escalation lifts 2,500 to 2,575 in the second year."""
+        purchase = annuity_purchase_of(annuity_type=AnnuityType.ESCALATING)
+        result = run(
+            annuitant_plan(purchase),
+            annuity_assumptions(),
+            stub_region(),
+            three_period_config(),
+        )
+        [at_purchase] = result.snapshots[1].persons
+        assert at_purchase.annuity_income == Money(Decimal("2500.00"))
+        [after] = result.snapshots[2].persons
+        assert after.annuity_income == Money(Decimal("2575.00"))
+
+    def test_a_mid_period_purchase_escalates_from_its_start_date(self) -> None:
+        """The first escalation covers only the months since purchase.
+
+        Born mid-1960, the age-67 purchase fires on 1 July 2027 — six
+        whole months of that period — so 2027 pays half the 2,500
+        bought income and the 2028 escalation accrues 3% over half a
+        year: 2,500 x 1.015 = 2,537.50, not a full year's 2,575.
+        """
+        pension = wrapper_of(PENSION, "40000", crystallised="20000")
+        plan = household_of(
+            person_of(
+                (pension,),
+                date_of_birth=date(1960, 7, 1),
+                retire_at=60,
+                annuity_purchases=(
+                    annuity_purchase_of(annuity_type=AnnuityType.ESCALATING),
+                ),
+            )
+        )
+        result = run(plan, annuity_assumptions(), stub_region(), three_period_config())
+        [at_purchase] = result.snapshots[1].persons
+        assert at_purchase.annuity_income == Money(Decimal("1250.00"))
+        [after] = result.snapshots[2].persons
+        assert after.annuity_income == Money(Decimal("2537.50"))
+
+    def test_an_inflation_linked_annuity_tracks_the_cpi_path(self) -> None:
+        """At 10% CPI the bought income rises 10% the following year.
+
+        Balances grow 10% nominal through 2026, so the age-67 purchase
+        annuitises half of 44,000 + 22,000: tax-free cash 5,500 and
+        27,500 of capital — 2,750 of income, 3,025 the year after.
+        """
+        purchase = annuity_purchase_of(annuity_type=AnnuityType.INFLATION_LINKED)
+        result = run(
+            annuitant_plan(purchase),
+            annuity_assumptions({"inflation.cpi": Decimal("0.10")}),
+            stub_region(),
+            three_period_config(),
+        )
+        [at_purchase] = result.snapshots[1].persons
+        assert at_purchase.annuity_lump_sum == Money(Decimal("5500.00"))
+        assert at_purchase.annuity_income == Money(Decimal("2750.00"))
+        [after] = result.snapshots[2].persons
+        assert after.annuity_income == Money(Decimal("3025.00"))
+
+    def test_a_joint_basis_prices_at_the_joint_factor(self) -> None:
+        """The 0.9 joint factor turns 2,500 of income into 2,250."""
+        purchase = annuity_purchase_of(basis=AnnuityBasis.JOINT)
+        result = run(
+            annuitant_plan(purchase),
+            annuity_assumptions(),
+            stub_region(),
+            three_period_config(),
+        )
+        [at_purchase] = result.snapshots[1].persons
+        assert at_purchase.annuity_income == Money(Decimal("2250.00"))
+
+    def test_annuity_income_and_lump_sum_offset_the_spending_need(self) -> None:
+        """Net annuity cash meets the need before wrappers are drawn.
+
+        2026's 12,000 need grosses 16,000 out of the crystallised
+        funds, leaving 4,000 there; the 2027 purchase therefore
+        annuitises 2,000 crystallised plus 15,000 of the 20,000
+        uncrystallised draw (5,000 goes out tax-free), buying 1,700 a
+        year. Net annuity cash — 1,700 less 425 tax plus the 5,000
+        lump sum — leaves 5,725 of the 2027 need to draw from
+        wrappers.
+        """
+        result = run(
+            annuitant_plan(annuity_purchase_of(), spending="12000"),
+            annuity_assumptions(),
+            stub_region(),
+            three_period_config(),
+        )
+        [at_purchase] = result.snapshots[1].persons
+        assert at_purchase.annuity_income == Money(Decimal("1700.00"))
+        assert at_purchase.net_withdrawn == Money(Decimal("5725.00"))
+        assert at_purchase.shortfall == ZERO
+
+    def test_purchase_resolves_before_an_up_front_crystallisation(self) -> None:
+        """In the same period the annuity buys first, then PCLS fires.
+
+        Born 1959, the age-67 purchase lands in the first period: half
+        the pot annuitises (tax-free cash 5,000), then the up-front
+        event crystallises the remaining 20,000 uncrystallised —
+        another 5,000 tax-free with 15,000 designated to drawdown.
+        """
+        pension = wrapper_of(PENSION, "40000", crystallised="20000")
+        plan = household_of(
+            person_of(
+                (pension,),
+                date_of_birth=date(1959, 1, 1),
+                retire_at=60,
+                annuity_purchases=(annuity_purchase_of(),),
+            )
+        )
+        config = three_period_config(
+            tax_free_cash=TaxFreeCashStrategy.UP_FRONT_LUMP_SUM
+        )
+        result = run(plan, annuity_assumptions(), stub_region(), config)
+        [first] = result.snapshots[0].persons
+        assert first.annuity_lump_sum == Money(Decimal("5000.00"))
+        assert first.pension_lump_sum == Money(Decimal("5000.00"))
+        assert first.annuity_income == Money(Decimal("2500.00"))
+        assert first.lsa_used == Money(Decimal("10000.00"))
+        [pension_result] = first.wrappers
+        assert pension_result.closing_uncrystallised == ZERO
+        assert pension_result.closing_crystallised == Money(Decimal("25000.00"))
+
+    def test_crystallised_funds_annuitise_before_the_access_age(self) -> None:
+        """Drawdown funds are already accessed, so no gate binds them.
+
+        A 36-year-old annuitises half of 10,000 of pre-existing
+        drawdown funds at 40 — priced from a table with a 40 knot at
+        the 8% base: 400 a year from 2030.
+        """
+        pension = wrapper_of(PENSION, "0", crystallised="10000")
+        plan = household_of(
+            person_of(
+                (pension,),
+                annuity_purchases=(annuity_purchase_of(at_age=40, fraction="0.5"),),
+            )
+        )
+        table = dict(ANNUITY_TABLE)
+        table["level"] = {"40": Decimal("1.0")}
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2030, 12, 31))
+        result = run(
+            plan,
+            annuity_assumptions({"annuity.age_adjustment": table}),
+            stub_region(),
+            config,
+        )
+        [at_purchase] = result.snapshots[4].persons
+        assert at_purchase.annuity_income == Money(Decimal("400.00"))
+        [pension_result] = at_purchase.wrappers
+        assert pension_result.closing_crystallised == Money(Decimal("5000.00"))
+
+    def test_a_purchase_past_the_horizon_never_fires(self) -> None:
+        """An age attained after the horizon end is simply not modelled."""
+        result = run(
+            annuitant_plan(annuity_purchase_of()),
+            annuity_assumptions(),
+            stub_region(),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.annuity_income == ZERO
+        [pension_result] = person_result.wrappers
+        assert pension_result.closing_uncrystallised == Money(Decimal("40000.00"))
+        assert pension_result.closing_crystallised == Money(Decimal("20000.00"))
+
+    def test_purchase_decisions_enter_provenance(self) -> None:
+        """The at-age and fraction decisions appear with stable labels."""
+        result = run(
+            annuitant_plan(annuity_purchase_of()),
+            annuity_assumptions(),
+            stub_region(),
+            three_period_config(),
+        )
+        labels = {entry.label for entry in result.provenance.decisions}
+        assert "annuity_purchase[annuity-1].at_age" in labels
+        assert "annuity_purchase[annuity-1].fraction_of_pot" in labels
+        keys = {entry.key for entry in result.provenance.assumptions}
+        assert AssumptionKey.ANNUITY_LEVEL_SINGLE_65 in keys
+        assert AssumptionKey.ANNUITY_AGE_ADJUSTMENT in keys
+
+    def test_a_purchase_age_already_attained_is_rejected(self) -> None:
+        """A past purchase cannot be priced from a modelled pot."""
+        plan = annuitant_plan(annuity_purchase_of(at_age=65))
+        assumptions = annuity_assumptions()
+        region = stub_region()
+        config = three_period_config()
+        with pytest.raises(EngineError, match="attained before today"):
+            run(plan, assumptions, region, config)
+
+    def test_crystallising_a_gated_pot_is_rejected(self) -> None:
+        """Uncrystallised funds cannot annuitise before access opens."""
+        pension = wrapper_of(PENSION, "10000")
+        table = dict(ANNUITY_TABLE)
+        table["level"] = {"40": Decimal("1.0")}
+        plan = household_of(
+            person_of(
+                (pension,),
+                annuity_purchases=(annuity_purchase_of(at_age=40),),
+            )
+        )
+        assumptions = annuity_assumptions({"annuity.age_adjustment": table})
+        region = stub_region()
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2030, 12, 31))
+        with pytest.raises(EngineError, match="access gate"):
+            run(plan, assumptions, region, config)
+
+    def test_a_purchase_age_outside_the_rate_table_is_rejected(self) -> None:
+        """No extrapolation: an uncovered age fails loudly (§5.3)."""
+        plan = annuitant_plan(annuity_purchase_of(at_age=80, fraction="0.5"))
+        assumptions = annuity_assumptions()
+        region = stub_region()
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2040, 12, 31))
+        with pytest.raises(EngineError, match="covers ages"):
             run(plan, assumptions, region, config)

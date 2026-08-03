@@ -11,11 +11,13 @@ spec (planning §5.2, tested):
 2. **Income** — employment income while accumulating, escalated by the
    earnings-growth assumption; DB pension income (revalued in
    deferment and increased in payment per the scheme basis, early/late
-   factors and commutation applied at start — roadmap 4.2) and state
+   factors and commutation applied at start — roadmap 4.2); state
    pension income (region entitlement, uprated per the
    ``policy.state_pension.uprating`` assumption with protected
    payments and deferral increments uprating by CPI only — roadmap
-   4.3). Entitlements begin at their exact start dates and are
+   4.3); and purchased annuity income (priced at purchase from the
+   annuity-rate assumptions, escalated per its product type — roadmap
+   5.5). Entitlements begin at their exact start dates and are
    pro-rated by whole months within their starting period (§4.1).
 3. **Contributions** — employee + employer per schedule, escalation,
    per-kind caps, then the region's relief mechanics.
@@ -74,6 +76,25 @@ v1 engine conventions, superseded as later phases land:
   income; the first taxable pension draw records the MPAA trigger
   date unless the ``mpaa_triggered_on`` fact already set it.
   Crystallised funds never yield fresh tax-free cash (planning §5.1).
+- Annuity purchases (roadmap 5.5) fire in the period containing the
+  date their person attains the chosen age — inside the run window
+  only; a purchase age already attained is an engine error, since a
+  past purchase cannot be priced from a modelled pot. The chosen
+  fraction of every pension wrapper's sub-balances — the pot at the
+  period's open, before that period's contributions — converts into
+  income at the assumption-priced rate (base single-life-at-65 rate,
+  per-age multiplier, joint factor). Uncrystallised funds crystallise
+  on the way: the region's tax-free fraction is paid out (capped at
+  the remaining lump-sum-allowance headroom, the excess buying more
+  annuity) and joins the income offset; crystallised funds annuitise
+  whole. A lifetime annuity purchase never marks flexible access.
+  When an up-front crystallisation event lands in the same period,
+  the purchase — a step-2 income event — resolves first.
+- Natural-yield pricing (roadmap 5.3): only for a withdrawal strategy
+  declaring ``uses_natural_yield`` does the engine price each drawable
+  source's period income from the per-asset ``yield.*`` assumptions,
+  so those keys enter the run's provenance exactly when a strategy
+  spends portfolio income.
 - Wrapper balance facts are taken as at the run start; annual-allowance
   measurement joins the loop when the AA charge is modelled
   (roadmap 5.x/9.5) — the in-run MPAA trigger is recorded now, ready
@@ -96,6 +117,12 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from glidepath.core.annuities import (
+    AnnuityRateTable,
+    AnnuityType,
+    annuity_base_rate_key,
+    annuity_start_date,
+)
 from glidepath.core.config import EngineError, RunConfig
 from glidepath.core.contributions import MemberContributionRequest
 from glidepath.core.entities import validate_household_v1
@@ -148,6 +175,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from datetime import date
 
+    from glidepath.core.annuities import AnnuityPurchase
     from glidepath.core.contributions import ContributionSchedule
     from glidepath.core.entities import Household, Person, SpendingPlan
     from glidepath.core.glide import GlidePathConfig, LifeStage
@@ -200,6 +228,7 @@ class _WrapperLedger:
     withdrawn_crystallised: Money = _ZERO
     withdrawal_tax_free: Money = _ZERO
     withdrawal_taxable: Money = _ZERO
+    annuity_purchase: Money = _ZERO
 
 
 @dataclass(slots=True)
@@ -227,14 +256,19 @@ class _WithdrawalSource:
             wrapper_id=self.ledger.wrapper.id, crystallised=self.crystallised
         )
 
-    def view(self) -> WithdrawalSource:
-        """The frozen strategy-facing view of this sub-balance."""
+    def view(self, natural_yield: Money = _ZERO) -> WithdrawalSource:
+        """The frozen strategy-facing view of this sub-balance.
+
+        ``natural_yield`` is the period income the engine priced for a
+        yield-aware strategy (roadmap 5.3); other strategies see zero.
+        """
         return WithdrawalSource(
             id=self.source_id,
             kind=self.ledger.wrapper.kind,
             available=self.available,
             tax_free_fraction=self.tax_free_fraction,
             access_open=self.access_open,
+            natural_yield=natural_yield,
         )
 
     @property
@@ -372,6 +406,51 @@ class _StatePensionStream:
         return base + self.increment
 
 
+@dataclass(slots=True)
+class _AnnuityStream:
+    """One purchased annuity's income stream (roadmap 5.5).
+
+    ``base_annual`` is the income the purchase bought — capital times
+    the priced rate, nominal at the purchase date. ``factor`` carries
+    the product's escalation forward per completed period under the
+    §5.2 linear scaling convention: nothing for a level annuity, the
+    table's fixed rate for an escalating one, the run's CPI for an
+    inflation-linked one (tracking the index exactly — annuity
+    contracts, unlike statutory upratings, are not floored at zero;
+    planning §5.1). A stream created mid-run first advances at the
+    period after its purchase, so its first period pays the purchased
+    rate pro-rated from the exact start date.
+
+    Escalation accrues from that exact start date, not the period
+    boundary: ``purchase_period_share`` is the entitlement's share of
+    the purchase period (the same share its first income pro-rates
+    by), and the first boundary advance consumes it in place of the
+    whole period's fraction — a mid-period purchase must not collect a
+    full period of escalation (§4.1 linear whole-month convention).
+    """
+
+    annuity_type: AnnuityType
+    start: date
+    base_annual: Money
+    escalation: Rate
+    purchase_period_share: Decimal | None = None
+    factor: Decimal = _ONE
+
+    def advance(self, cpi: Decimal, fraction: Decimal) -> None:
+        """Compound one completed period's escalation (§5.2 linear scaling)."""
+        share = fraction
+        if self.purchase_period_share is not None:
+            share = self.purchase_period_share
+            self.purchase_period_share = None
+        if self.annuity_type is AnnuityType.ESCALATING:
+            rate = self.escalation.value
+        elif self.annuity_type is AnnuityType.INFLATION_LINKED:
+            rate = cpi
+        else:
+            return
+        self.factor *= _ONE + rate * share
+
+
 def run(
     plan: Household,
     assumptions: AssumptionSet,
@@ -428,6 +507,8 @@ class _Projection:
     _relief_at_source: Money = _ZERO
     _db_streams: list[_DbStream] = field(default_factory=list)
     _sp_stream: _StatePensionStream | None = None
+    _annuity_streams: list[_AnnuityStream] = field(default_factory=list)
+    _annuity_table: AnnuityRateTable | None = None
     _lsa_used: Money = _ZERO
     _mpaa_triggered_on: date | None = None
 
@@ -466,6 +547,8 @@ class _Projection:
                 factors.advance(previous_cpi, previous_fraction)
                 for stream in self._db_streams:
                     stream.advance(previous_cpi, previous_fraction)
+                for annuity in self._annuity_streams:
+                    annuity.advance(previous_cpi, previous_fraction)
                 if self._sp_stream is not None:
                     self._sp_stream.advance(previous_cpi)
             snapshots.append(
@@ -485,11 +568,28 @@ class _Projection:
         entitlement comes from the region's scheme; its uprating rule
         is read (and recorded) only when a record is present.
 
+        Annuity purchases create their streams mid-run — pricing needs
+        the pot as it stands at the purchase date — so only their
+        dates are validated here: a purchase age already attained
+        cannot be priced from a modelled pot and is rejected rather
+        than guessed (roadmap 5.5); an annuity already in payment
+        belongs in the plan's stated income, not the model.
+
         Raises:
-            EngineError: If a DB statement date lies in the future.
+            EngineError: If a DB statement date lies in the future, or
+                an annuity purchase age was attained before ``today``.
         """
         person = self.person
         today = self.config.today
+        for purchase in person.annuity_purchases:
+            if annuity_start_date(purchase, person.date_of_birth.value) < today:
+                msg = (
+                    f"annuity purchase {purchase.id}: age"
+                    f" {purchase.at_age.value} was attained before today"
+                    f" {today}, so the purchase cannot be priced from the"
+                    " modelled pot (roadmap 5.5)"
+                )
+                raise EngineError(msg)
         cpi = decimal_assumption_value(self.tracked.get(AssumptionKey.INFLATION_CPI))
         for pension in person.db_pensions:
             if pension.statement_date > today:
@@ -625,10 +725,12 @@ class _Projection:
             )
         db_income, db_lump_sum = self._db_amounts(period)
         db_lump_sum_excess = self._consume_lump_sum_headroom(db_lump_sum, period)
+        annuity_lump_sum = self._annuity_purchase_step(ledgers, period)
+        annuity_income = self._annuity_amount(period)
         state_pension = self._state_pension_amount(period)
         # Steps 3-4 — contributions, then withdrawals.
         self._taxable_income = (
-            employment + db_income + state_pension + db_lump_sum_excess
+            employment + db_income + state_pension + db_lump_sum_excess + annuity_income
         )
         self._relief_at_source = _ZERO
         if not retired:
@@ -643,15 +745,22 @@ class _Projection:
                 need = _spending_need(self.plan.spending, stage, inflation) * fraction
             if self.config.tax_free_cash is TaxFreeCashStrategy.UP_FRONT_LUMP_SUM:
                 pension_lump_sum = self._up_front_lump_sums(ledgers, period)
-            # Net-of-tax pension income, any commutation lump sum
-            # (gross here; the tax on its over-headroom excess is in
-            # the assessment), and any up-front tax-free cash meet the
-            # net need — spending plus planned outflows — first; only
-            # the remainder is drawn from wrappers (income beyond the
+            # Net-of-tax pension and annuity income, any commutation
+            # lump sum (gross here; the tax on its over-headroom
+            # excess is in the assessment), and any up-front or
+            # annuity-purchase tax-free cash meet the net need —
+            # spending plus planned outflows — first; only the
+            # remainder is drawn from wrappers (income beyond the
             # need is not banked — module docstring).
             income_tax = self.region.tax.assess(period, self._tax_input()).tax_due
             income_net = (
-                db_income + state_pension + db_lump_sum + pension_lump_sum - income_tax
+                db_income
+                + state_pension
+                + annuity_income
+                + db_lump_sum
+                + annuity_lump_sum
+                + pension_lump_sum
+                - income_tax
             )
             wrapper_need = max(need + outflows - income_net, _ZERO)
             delivered = self._withdrawal_step(
@@ -690,6 +799,8 @@ class _Projection:
             db_income=db_income.quantized(),
             db_lump_sum=db_lump_sum.quantized(),
             state_pension_income=state_pension.quantized(),
+            annuity_income=annuity_income.quantized(),
+            annuity_lump_sum=annuity_lump_sum.quantized(),
             planned_outflows=outflows.quantized(),
             pension_lump_sum=pension_lump_sum.quantized(),
             lsa_used=self._lsa_used.quantized(),
@@ -745,6 +856,169 @@ class _Projection:
         if share <= Decimal(0):
             return _ZERO
         return stream.annual_amount() * share
+
+    def _annuity_purchase_step(
+        self, ledgers: list[_WrapperLedger], period: Period
+    ) -> Money:
+        """Step 2: execute annuity purchases due this period (roadmap 5.5).
+
+        Each due purchase converts its fraction of every pension
+        wrapper's sub-balances — the pot as it stands at the period's
+        open, before this period's contributions — into a lifetime
+        income stream priced from the annuity-rate assumptions.
+        Crystallised funds annuitise whole; uncrystallised funds
+        crystallise on the way, delivering the region's tax-free
+        fraction as cash — capped at the remaining lump-sum-allowance
+        headroom, the remainder simply buying more annuity — exactly
+        the §5.2 tax-free cash conventions. Buying a lifetime annuity
+        is not flexible access, so no MPAA trigger is recorded
+        (planning §5.1). Returns the tax-free cash delivered, which
+        joins the period's income offset like a commutation lump sum.
+
+        Raises:
+            EngineError: If a purchase must crystallise a pot whose
+                access gate has not opened (§4.1), or its age lies
+                outside the shipped rate table.
+        """
+        total_lump_sum = _ZERO
+        horizon_end = self._horizon_end()
+        for purchase in self.person.annuity_purchases:
+            due = annuity_start_date(purchase, self.person.date_of_birth.value)
+            if period.contains(due) and due <= horizon_end:
+                total_lump_sum = total_lump_sum + self._execute_annuity_purchase(
+                    purchase, ledgers, period, due
+                )
+        return total_lump_sum
+
+    def _execute_annuity_purchase(
+        self,
+        purchase: AnnuityPurchase,
+        ledgers: list[_WrapperLedger],
+        period: Period,
+        due: date,
+    ) -> Money:
+        """Execute one due purchase; return its tax-free cash (§5.2).
+
+        Annuitises the purchase's fraction of each pension wrapper and,
+        when any capital was converted, opens the income stream at the
+        priced rate. A zero-pot purchase converts nothing and opens no
+        stream — a depleted pot is a legitimate simulation outcome.
+        """
+        rate = self._annuity_rate_for(purchase.annuity_type, purchase)
+        capital = _ZERO
+        lump_sum = _ZERO
+        for ledger in ledgers:
+            partial = (
+                ledger.treatment.withdrawals
+                is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+            )
+            if not partial:
+                continue
+            annuitised, tax_free = self._annuitise_wrapper(purchase, ledger, period)
+            capital = capital + annuitised
+            lump_sum = lump_sum + tax_free
+        if capital > _ZERO:
+            self._annuity_streams.append(
+                _AnnuityStream(
+                    annuity_type=purchase.annuity_type,
+                    start=due,
+                    base_annual=capital * rate,
+                    escalation=self._annuity_pricing_table().escalation,
+                    purchase_period_share=entitlement_active_fraction(
+                        due, period, self.config.today, self._horizon_end()
+                    ),
+                )
+            )
+        return lump_sum
+
+    def _annuitise_wrapper(
+        self, purchase: AnnuityPurchase, ledger: _WrapperLedger, period: Period
+    ) -> tuple[Money, Money]:
+        """Annuitise one pension wrapper's share of a purchase.
+
+        Draws the purchase fraction of both sub-balances, pays the
+        uncrystallised draw's tax-free element (headroom-capped, §5.2)
+        through the wrapper like an up-front lump sum, and returns the
+        capital annuitised alongside the tax-free cash delivered.
+
+        Raises:
+            EngineError: If the draw must crystallise a pot whose
+                access gate has not opened (§4.1).
+        """
+        fraction = purchase.fraction_of_pot.value
+        crystallised_draw = ledger.crystallised * fraction
+        uncrystallised_draw = ledger.uncrystallised * fraction
+        gate_open = self.region.wrappers.is_access_open(
+            ledger.wrapper.kind, self.person.date_of_birth.value, period
+        )
+        if uncrystallised_draw > _ZERO and not gate_open:
+            msg = (
+                f"annuity purchase {purchase.id} crystallises wrapper"
+                f" {ledger.wrapper.id} before its access gate opens"
+            )
+            raise EngineError(msg)
+        tax_free = _ZERO
+        free_fraction = ledger.treatment.tax_free_fraction
+        if uncrystallised_draw > _ZERO and free_fraction is not None:
+            tax_free = uncrystallised_draw * free_fraction.value
+            headroom = self._lsa_headroom(period)
+            if headroom is not None:
+                tax_free = min(tax_free, headroom)
+            self._lsa_used = self._lsa_used + tax_free
+        ledger.uncrystallised = ledger.uncrystallised - uncrystallised_draw
+        ledger.crystallised = ledger.crystallised - crystallised_draw
+        ledger.withdrawn_uncrystallised = ledger.withdrawn_uncrystallised + tax_free
+        ledger.withdrawal_tax_free = ledger.withdrawal_tax_free + tax_free
+        annuitised = crystallised_draw + uncrystallised_draw - tax_free
+        ledger.annuity_purchase = ledger.annuity_purchase + annuitised
+        return annuitised, tax_free
+
+    def _annuity_rate_for(
+        self, annuity_type: AnnuityType, purchase: AnnuityPurchase
+    ) -> Decimal:
+        """The annual income per pound of purchase capital (planning §7).
+
+        The single-life-at-65 base rate for the type, shaped by the
+        ``annuity.age_adjustment`` table's per-age multiplier and — on
+        a joint basis — its joint-life factor. Read through the
+        tracked view only when a purchase actually fires, so the rate
+        assumptions enter provenance exactly when they enter the
+        result.
+        """
+        table = self._annuity_pricing_table()
+        base = decimal_assumption_value(
+            self.tracked.get(annuity_base_rate_key(annuity_type))
+        )
+        multiplier = table.age_multiplier(annuity_type, purchase.at_age.value)
+        return base * multiplier * table.basis_factor(purchase.basis)
+
+    def _annuity_pricing_table(self) -> AnnuityRateTable:
+        """The parsed age-adjustment table, read once per run on first use."""
+        if self._annuity_table is None:
+            self._annuity_table = AnnuityRateTable.from_assumption_value(
+                mapping_assumption_value(
+                    self.tracked.get(AssumptionKey.ANNUITY_AGE_ADJUSTMENT)
+                )
+            )
+        return self._annuity_table
+
+    def _annuity_amount(self, period: Period) -> Money:
+        """Step 2: purchased annuity income in payment for ``period``.
+
+        Each stream's bought income, escalated per its type, pro-rated
+        from its exact start date within the run window (§4.1). Wholly
+        taxable: annuities bought with pension funds pay taxable
+        income (planning §5.1).
+        """
+        total = _ZERO
+        horizon_end = self._horizon_end()
+        for stream in self._annuity_streams:
+            share = entitlement_active_fraction(
+                stream.start, period, self.config.today, horizon_end
+            )
+            if share > Decimal(0):
+                total = total + stream.base_annual * (stream.factor * share)
+        return total
 
     def _outflows_due(self, period: Period, inflation: Decimal) -> Money:
         """The planned outflows landing in ``period``, in nominal money.
@@ -899,12 +1173,28 @@ class _Projection:
         The strategy sees every sub-balance — gate-closed ones flagged
         (planning §5.2) — and returns a net-defined or gross-defined
         plan; execution enforces the access gates, so a plan drawing on
-        a closed source is an error, never a silent draw. Returns the
+        a closed source is an error, never a silent draw. For a
+        strategy declaring ``uses_natural_yield`` (roadmap 5.3), each
+        source also carries the income its balance throws off — the
+        wrapper allocation's weighted ``yield.*`` assumptions, scaled
+        by the period's active fraction; the yield keys are read only
+        then, so other runs' provenance never lists them. Returns the
         net cash delivered toward the need.
         """
         sources = self._withdrawal_sources(ledgers, period)
+        # Opt-in marker, deliberately not a protocol member: a strategy
+        # that never declares it simply gets no yield pricing (§5.2).
+        price_yield = getattr(strategy, "uses_natural_yield", False)
+        views: list[WithdrawalSource] = []
+        for source in sources.values():
+            natural_yield = _ZERO
+            if price_yield and source.available > _ZERO:
+                natural_yield = source.available * (
+                    self._portfolio_yield(source.ledger.allocation) * fraction
+                )
+            views.append(source.view(natural_yield=natural_yield))
         state = WithdrawalState(
-            sources=tuple(source.view() for source in sources.values()),
+            sources=tuple(views),
             year_fraction=fraction,
             tax_free_cash_headroom=self._lsa_headroom(period),
         )
@@ -912,6 +1202,23 @@ class _Projection:
         if isinstance(plan, NetWithdrawalPlan):
             return self._execute_net_plan(sources, period, plan)
         return self._execute_gross_plan(sources, period, plan)
+
+    def _portfolio_yield(self, allocation: AssetAllocation) -> Decimal:
+        """The allocation-weighted annual natural yield (roadmap 5.3).
+
+        The income an invested balance throws off per year — dividends,
+        coupons, interest — priced from the per-asset ``yield.*``
+        assumptions (planning §7); nominal, like the balances it
+        applies to.
+        """
+        return (
+            allocation.equity
+            * decimal_assumption_value(self.tracked.get(AssumptionKey.YIELD_EQUITY))
+            + allocation.bonds
+            * decimal_assumption_value(self.tracked.get(AssumptionKey.YIELD_BONDS))
+            + allocation.cash
+            * decimal_assumption_value(self.tracked.get(AssumptionKey.YIELD_CASH))
+        )
 
     def _withdrawal_sources(
         self, ledgers: list[_WrapperLedger], period: Period
@@ -1347,6 +1654,7 @@ class _Projection:
             contribution_shortfall=ledger.contribution_shortfall.quantized(),
             withdrawal_tax_free=ledger.withdrawal_tax_free.quantized(),
             withdrawal_taxable=ledger.withdrawal_taxable.quantized(),
+            annuity_purchase=ledger.annuity_purchase.quantized(),
             fee=fee_total.quantized(),
             growth=(growth_uncrystallised + growth_crystallised).quantized(),
             closing_uncrystallised=closing_uncrystallised,
