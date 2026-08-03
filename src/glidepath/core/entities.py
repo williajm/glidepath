@@ -83,7 +83,16 @@ class Person:
 
     A pre-plan fact (planning §5.1): once set, the region's
     money-purchase contribution limit applies from that date on
-    (roadmap 3.3). In-plan triggers land with decumulation (Phase 5).
+    (roadmap 3.3). An in-plan first flexible access records the
+    trigger in the period results instead (roadmap 5.2); when this
+    fact is present it wins.
+    """
+    lsa_used: Fact[Money] | None = None
+    """Tax-free lump sum allowance already used before the plan.
+
+    A pre-plan fact (planning §5.1): the run's tax-free-cash ledger is
+    seeded with it, reducing the headroom under the region's lifetime
+    cap (roadmap 5.2). ``None`` means none used.
     """
     wrappers: tuple[Wrapper, ...] = ()
     db_pensions: tuple[DBPension, ...] = ()
@@ -106,6 +115,9 @@ class Person:
         ids += [pension.id for pension in self.db_pensions]
         if len(set(ids)) != len(ids):
             msg = "a person's wrappers and DB pensions must have distinct EntityIds"
+            raise ValueError(msg)
+        if self.lsa_used is not None and self.lsa_used.value < _ZERO:
+            msg = "Person.lsa_used must be non-negative"
             raise ValueError(msg)
 
 

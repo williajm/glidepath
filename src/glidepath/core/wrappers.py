@@ -188,6 +188,18 @@ class WrapperRuleset(Protocol):
         """The relief mechanics ``kind`` may operate (empty: no relief)."""
         ...
 
+    def lump_sum_allowance(self, period: Period) -> Money | None:
+        """The lifetime cap on tax-free cash from pension kinds (§5.2).
+
+        A per-person cap on the cumulative tax-free elements paid from
+        partially-tax-free (pension) wrappers — the UK's lump sum
+        allowance (planning §6). ``None`` means the region has no such
+        cap. The engine tracks usage across the run, seeded from the
+        person's ``lsa_used`` fact (roadmap 5.2); this query only
+        supplies the period's cap figure.
+        """
+        ...
+
     def is_access_open(
         self, kind: WrapperKindId, date_of_birth: date, period: Period
     ) -> bool:

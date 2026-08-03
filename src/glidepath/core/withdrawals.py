@@ -27,6 +27,7 @@ so no account kind is ever named (planning §4.2).
 
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Protocol
 
 from glidepath.core.money import Money, Rate
@@ -40,6 +41,48 @@ if TYPE_CHECKING:
 _ZERO = Money(Decimal(0))
 _ZERO_FRACTION = Decimal(0)
 _ONE = Decimal(1)
+
+
+class TaxFreeCashStrategy(Enum):
+    """How pension tax-free cash is taken (planning §5.2, roadmap 5.2).
+
+    A decision record on the run configuration, orthogonal to the
+    withdrawal strategy — any combination of the two is valid. The
+    names are generic (planning §4.2); the region's tax treatment
+    supplies the tax-free fraction and the lifetime cap
+    (:meth:`~glidepath.core.wrappers.WrapperRuleset.lump_sum_allowance`).
+    Gross-defined plans resolve every mode as
+    :attr:`SPLIT_EACH_PAYMENT` — an exact gross amount is a payment
+    instruction, not a designation (planning §5.2).
+    """
+
+    SPLIT_EACH_PAYMENT = auto()
+    """Every uncrystallised draw carries the tax-free fraction (UK: UFPLS).
+
+    The default. The remainder of each payment arrives as taxable
+    income, so the first payment marks flexible access.
+    """
+
+    LUMP_SUM_AS_NEEDED = auto()
+    """Tax-free cash first, designating the rest (UK: phased FAD).
+
+    An uncrystallised draw delivers tax-free cash only, moving the
+    crystallised remainder into the wrapper's drawdown sub-balance,
+    which stays invested; taxable income is drawn only once tax-free
+    cash cannot meet the remaining need — so flexible access is not
+    marked until taxable income actually flows.
+    """
+
+    UP_FRONT_LUMP_SUM = auto()
+    """Full crystallisation at first open access (UK: PCLS up front).
+
+    In the first decumulation period whose access gate is open, each
+    uncrystallised pension pot crystallises whole: the capped tax-free
+    lump sum joins the period's income offset and the remainder moves
+    to the crystallised sub-balance. Accepted v1 cost (planning §5.2):
+    lump-sum cash beyond the period's need is spent, not banked, until
+    the roadmap-9.2 cash wrapper lands.
+    """
 
 
 @dataclass(frozen=True, slots=True)

@@ -63,9 +63,19 @@ v1 engine conventions, superseded as later phases land:
   before ``today`` means benefits are already in payment: income flows
   from the run start and the commutation lump sum is treated as
   already spent or banked in the user's stated balances.
+- Tax-free cash (roadmap 5.2): pension draws resolve per the run's
+  ``TaxFreeCashStrategy`` — split payments (the default), tax-free
+  cash first with the residue designated to drawdown, or the whole-pot
+  up-front crystallisation event whose lump sum joins the income
+  offset. Tax-free elements are capped by the region's lump-sum
+  allowance, tracked cumulatively from the ``lsa_used`` fact; the
+  first taxable pension draw records the MPAA trigger date unless the
+  ``mpaa_triggered_on`` fact already set it. Crystallised funds never
+  yield fresh tax-free cash (planning §5.1).
 - Wrapper balance facts are taken as at the run start; annual-allowance
   measurement joins the loop when the AA charge is modelled
-  (roadmap 5.x/9.5).
+  (roadmap 5.x/9.5) — the in-run MPAA trigger is recorded now, ready
+  for it.
 - Partial first and last periods (roadmap 4.6, planning §5.2): the run
   models only the window from ``config.today`` through the horizon end.
   A period partly outside that window has its flows (employment income,
@@ -125,6 +135,7 @@ from glidepath.core.tax import TaxInput
 from glidepath.core.withdrawals import (
     FixedRealWithdrawalStrategy,
     NetWithdrawalPlan,
+    TaxFreeCashStrategy,
     WithdrawalSource,
     WithdrawalSourceId,
     WithdrawalState,
@@ -132,6 +143,7 @@ from glidepath.core.withdrawals import (
 from glidepath.core.wrappers import WithdrawalTaxTreatment
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from datetime import date
 
     from glidepath.core.contributions import ContributionSchedule
@@ -194,13 +206,17 @@ class _WithdrawalSource:
 
     ``access_open`` follows the §4.1 gate convention; a crystallised
     sub-balance is always open (already accessed, never re-gated —
-    planning §5.1).
+    planning §5.1). ``pension`` marks a sub-balance of a
+    partially-tax-free (pension) wrapper kind: its tax-free cash
+    consumes the region's lump-sum allowance and its taxable draws
+    mark flexible access (roadmap 5.2).
     """
 
     ledger: _WrapperLedger
     crystallised: bool
     tax_free_fraction: Decimal
     access_open: bool = True
+    pension: bool = False
 
     @property
     def source_id(self) -> WithdrawalSourceId:
@@ -226,17 +242,28 @@ class _WithdrawalSource:
             return self.ledger.crystallised
         return self.ledger.uncrystallised
 
-    def draw(self, gross: Money, tax_free: Money, taxable: Money) -> None:
-        """Take ``gross`` from the sub-balance and record its tax split."""
-        ledger = self.ledger
-        if self.crystallised:
-            ledger.crystallised = ledger.crystallised - gross
-            ledger.withdrawn_crystallised = ledger.withdrawn_crystallised + gross
-        else:
-            ledger.uncrystallised = ledger.uncrystallised - gross
-            ledger.withdrawn_uncrystallised = ledger.withdrawn_uncrystallised + gross
-        ledger.withdrawal_tax_free = ledger.withdrawal_tax_free + tax_free
-        ledger.withdrawal_taxable = ledger.withdrawal_taxable + taxable
+
+@dataclass(frozen=True, slots=True)
+class _DrawTranche:
+    """One linear slice of a draw on a sub-balance (roadmap 5.2).
+
+    Of every pound of ``gross``, ``free_share`` arrives as tax-free
+    cash and ``taxable_share`` as taxable income; the remainder — the
+    crystallised residue of a lump-sum-as-needed designation — moves
+    into the wrapper's crystallised sub-balance and stays invested.
+    ``from_crystallised`` names the sub-balance the gross leaves (a
+    phased draw takes its income leg from the residue it just
+    designated). Within a tranche the shares are constant, so the
+    net-need fixed point of planning §5.2 step 4 converges exactly as
+    it does on a whole source; tranche caps are computed lazily at
+    draw time, so lump-sum-allowance headroom consumed by an earlier
+    draw is never double-counted.
+    """
+
+    free_share: Decimal
+    taxable_share: Decimal
+    max_gross: Money
+    from_crystallised: bool
 
 
 class _NominalFactors:
@@ -399,9 +426,15 @@ class _Projection:
     _relief_at_source: Money = _ZERO
     _db_streams: list[_DbStream] = field(default_factory=list)
     _sp_stream: _StatePensionStream | None = None
+    _lsa_used: Money = _ZERO
+    _mpaa_triggered_on: date | None = None
 
     def execute(self) -> tuple[PeriodSnapshot, ...]:
         """Run the period loop and return the snapshots in order."""
+        if self.person.lsa_used is not None:
+            self._lsa_used = self.person.lsa_used.value
+        if self.person.mpaa_triggered_on is not None:
+            self._mpaa_triggered_on = self.person.mpaa_triggered_on.value
         self._balances = {
             wrapper.id: (
                 wrapper.balance.value,
@@ -599,15 +632,21 @@ class _Projection:
         outflows = self._outflows_due(period, inflation)
         wrapper_need = _ZERO
         delivered = _ZERO
+        pension_lump_sum = _ZERO
         if retired:
             if self.plan.spending is not None:
                 need = _spending_need(self.plan.spending, stage, inflation) * fraction
-            # Net-of-tax pension income and any commutation lump sum
-            # meet the net need — spending plus planned outflows —
-            # first; only the remainder is drawn from wrappers (income
-            # beyond the need is not banked — module docstring).
+            if self.config.tax_free_cash is TaxFreeCashStrategy.UP_FRONT_LUMP_SUM:
+                pension_lump_sum = self._up_front_lump_sums(ledgers, period)
+            # Net-of-tax pension income, any commutation lump sum, and
+            # any up-front tax-free cash meet the net need — spending
+            # plus planned outflows — first; only the remainder is
+            # drawn from wrappers (income beyond the need is not
+            # banked — module docstring).
             income_tax = self.region.tax.assess(period, self._tax_input()).tax_due
-            income_net = db_income + state_pension + db_lump_sum - income_tax
+            income_net = (
+                db_income + state_pension + db_lump_sum + pension_lump_sum - income_tax
+            )
             wrapper_need = max(need + outflows - income_net, _ZERO)
             delivered = self._withdrawal_step(
                 ledgers,
@@ -646,6 +685,9 @@ class _Projection:
             db_lump_sum=db_lump_sum.quantized(),
             state_pension_income=state_pension.quantized(),
             planned_outflows=outflows.quantized(),
+            pension_lump_sum=pension_lump_sum.quantized(),
+            lsa_used=self._lsa_used.quantized(),
+            mpaa_triggered_on=self._mpaa_triggered_on,
         )
         return PeriodSnapshot(
             period=period,
@@ -878,16 +920,14 @@ class _Projection:
         sources: dict[WithdrawalSourceId, _WithdrawalSource] = {}
         for ledger in ledgers:
             treatment = ledger.treatment
+            pension = treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
             if treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE:
                 free_fraction = _ONE
                 crystallised_fraction = _ONE
             else:
                 free_fraction = Decimal(0)
                 crystallised_fraction = Decimal(0)
-                if (
-                    treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
-                    and treatment.tax_free_fraction is not None
-                ):
+                if pension and treatment.tax_free_fraction is not None:
                     free_fraction = treatment.tax_free_fraction.value
             entries = (
                 _WithdrawalSource(
@@ -899,11 +939,13 @@ class _Projection:
                         self.person.date_of_birth.value,
                         period,
                     ),
+                    pension=pension,
                 ),
                 _WithdrawalSource(
                     ledger=ledger,
                     crystallised=True,
                     tax_free_fraction=crystallised_fraction,
+                    pension=pension,
                 ),
             )
             for source in entries:
@@ -943,23 +985,29 @@ class _Projection:
 
         No fixed-point iteration (planning §5.2): a gross-defined
         strategy declares itself gross. Each draw is capped at what its
-        source holds, and the marginal tax on the taxable share is
-        priced through the same regional assessment the final step-5
-        pass uses, so the two cannot disagree.
+        source holds and resolved as a split payment whatever the
+        run's tax-free cash mode — an exact gross amount is a payment
+        instruction, not a designation (planning §5.2). The marginal
+        tax on the taxable share is priced through the same regional
+        assessment the final step-5 pass uses, so the two cannot
+        disagree.
         """
         delivered = _ZERO
         for draw in plan.draws:
             source = _plan_source(sources, draw.source)
-            gross = min(draw.amount, source.available)
-            if gross <= _ZERO:
-                continue
-            taxable = gross * (_ONE - source.tax_free_fraction)
-            net = gross - self._incremental_tax(period, taxable)
-            source.draw(
-                gross, tax_free=gross * source.tax_free_fraction, taxable=taxable
-            )
-            self._taxable_income = self._taxable_income + taxable
-            delivered = delivered + net
+            remaining = min(draw.amount, source.available)
+            for tranche in self._tranches(
+                source, period, TaxFreeCashStrategy.SPLIT_EACH_PAYMENT
+            ):
+                if remaining <= _ZERO:
+                    break
+                gross = min(remaining, tranche.max_gross)
+                if gross <= _ZERO:
+                    continue
+                delivered = delivered + self._apply_tranche(
+                    source, period, tranche, gross
+                )
+                remaining = remaining - gross
         return delivered
 
     def _draw_from(
@@ -967,29 +1015,234 @@ class _Projection:
     ) -> Money:
         """Draw up to ``need`` net from one source, grossing up for tax.
 
+        The source resolves into linear tranches per the run's
+        tax-free cash mode (roadmap 5.2) — for a plain source exactly
+        one — each drawn through the fixed point of
+        :meth:`_draw_tranche` until the need is met to within ledger
+        tolerance or the tranches are exhausted.
+        """
+        mode = self.config.tax_free_cash
+        if mode is TaxFreeCashStrategy.UP_FRONT_LUMP_SUM:
+            # The up-front mode is a decumulation crystallisation
+            # event; any other draw it leaves to make (an outflow
+            # funded before retirement) is a split payment (§5.2).
+            mode = TaxFreeCashStrategy.SPLIT_EACH_PAYMENT
+        delivered = _ZERO
+        for tranche in self._tranches(source, period, mode):
+            remaining = need - delivered
+            if remaining <= _NET_TOLERANCE:
+                break
+            if tranche.max_gross <= _ZERO:
+                continue
+            delivered = delivered + self._draw_tranche(
+                source, period, tranche, remaining
+            )
+        return delivered
+
+    def _draw_tranche(
+        self,
+        source: _WithdrawalSource,
+        period: Period,
+        tranche: _DrawTranche,
+        need: Money,
+    ) -> Money:
+        """Draw up to ``need`` net from one tranche, grossing up for tax.
+
         The fixed point of planning §5.2 step 4: iterate gross →
         assess → net until the net matches the need (piecewise-constant
         marginal rates converge in a few rounds), capped at
         ``_GROSS_UP_ITERATION_CAP`` with any sub-penny residual settled
-        rather than chased. A draw the balance cannot cover takes the
-        whole balance instead.
+        rather than chased. A draw the tranche cannot cover takes the
+        tranche's whole cap instead. ``cash_share`` divides because a
+        designating tranche delivers only its tax-free slice as cash:
+        meeting one pound of need takes ``1 / cash_share`` pounds
+        gross.
         """
-        taxable_share = _ONE - source.tax_free_fraction
-        gross = min(need, source.available)
+        cash_share = tranche.free_share + tranche.taxable_share
+        gross = min(Money(need.amount / cash_share), tranche.max_gross)
         for _ in range(_GROSS_UP_ITERATION_CAP):
-            extra_tax = self._incremental_tax(period, gross * taxable_share)
-            target = need + extra_tax
-            if target >= source.available:
-                gross = source.available
+            extra_tax = self._incremental_tax(period, gross * tranche.taxable_share)
+            target = Money((need + extra_tax).amount / cash_share)
+            if target >= tranche.max_gross:
+                gross = tranche.max_gross
                 break
             if (target - gross) < _NET_TOLERANCE and (gross - target) < _NET_TOLERANCE:
                 break
             gross = target
-        taxable = gross * taxable_share
-        net = gross - self._incremental_tax(period, taxable)
-        source.draw(gross, tax_free=gross * source.tax_free_fraction, taxable=taxable)
+        return self._apply_tranche(source, period, tranche, gross)
+
+    def _apply_tranche(
+        self,
+        source: _WithdrawalSource,
+        period: Period,
+        tranche: _DrawTranche,
+        gross: Money,
+    ) -> Money:
+        """Execute ``gross`` against one tranche; return the net cash.
+
+        Splits the gross into tax-free cash, taxable income, and the
+        designated residue (moved to the wrapper's crystallised
+        sub-balance, not withdrawn), updates the ledger, consumes
+        lump-sum-allowance headroom, and marks flexible access on a
+        taxable pension draw (roadmap 5.2).
+        """
+        tax_free = gross * tranche.free_share
+        taxable = gross * tranche.taxable_share
+        designated = gross - tax_free - taxable
+        net = tax_free + taxable - self._incremental_tax(period, taxable)
+        ledger = source.ledger
+        if tranche.from_crystallised:
+            ledger.crystallised = ledger.crystallised - gross
+            ledger.withdrawn_crystallised = ledger.withdrawn_crystallised + gross
+        else:
+            ledger.uncrystallised = ledger.uncrystallised - gross
+            ledger.crystallised = ledger.crystallised + designated
+            ledger.withdrawn_uncrystallised = (
+                ledger.withdrawn_uncrystallised + gross - designated
+            )
+        ledger.withdrawal_tax_free = ledger.withdrawal_tax_free + tax_free
+        ledger.withdrawal_taxable = ledger.withdrawal_taxable + taxable
         self._taxable_income = self._taxable_income + taxable
+        if source.pension:
+            self._lsa_used = self._lsa_used + tax_free
+            if taxable > _ZERO:
+                self._mark_flexible_access(period)
         return net
+
+    def _tranches(
+        self,
+        source: _WithdrawalSource,
+        period: Period,
+        mode: TaxFreeCashStrategy,
+    ) -> Iterator[_DrawTranche]:
+        """The linear slices a draw on ``source`` resolves into (§5.2).
+
+        A non-pension sub-balance and a crystallised pension pot are a
+        single tranche — the latter wholly taxable, never fresh
+        tax-free cash (planning §5.1). An uncrystallised pension pot
+        splits at the lump-sum-allowance boundary: the free-bearing
+        slice runs while headroom lasts, then a wholly taxable slice —
+        payments beyond the allowance keep flowing, just without the
+        tax-free element. Under the lump-sum-as-needed mode the
+        free-bearing slice designates its residue instead of paying it
+        out, and the taxable slices draw drawdown income — first from
+        the crystallised sub-balance (the residue just designated),
+        then by crystallising the rest of the pot outright. Caps are
+        evaluated lazily as the caller resumes the iterator, so each
+        slice sees the balances and headroom its predecessors left.
+        """
+        ledger = source.ledger
+        if not source.pension or source.crystallised:
+            yield _DrawTranche(
+                free_share=source.tax_free_fraction,
+                taxable_share=_ONE - source.tax_free_fraction,
+                max_gross=source.available,
+                from_crystallised=source.crystallised,
+            )
+            return
+        fraction = source.tax_free_fraction
+        headroom = self._lsa_headroom(period)
+        free_cap = ledger.uncrystallised
+        if headroom is not None:
+            free_cap = min(Money(headroom.amount / fraction), free_cap)
+        if mode is TaxFreeCashStrategy.LUMP_SUM_AS_NEEDED:
+            if free_cap > _ZERO:
+                yield _DrawTranche(
+                    free_share=fraction,
+                    taxable_share=Decimal(0),
+                    max_gross=free_cap,
+                    from_crystallised=False,
+                )
+            if ledger.crystallised > _ZERO:
+                yield _DrawTranche(
+                    free_share=Decimal(0),
+                    taxable_share=_ONE,
+                    max_gross=ledger.crystallised,
+                    from_crystallised=True,
+                )
+            if ledger.uncrystallised > _ZERO:
+                yield _DrawTranche(
+                    free_share=Decimal(0),
+                    taxable_share=_ONE,
+                    max_gross=ledger.uncrystallised,
+                    from_crystallised=False,
+                )
+            return
+        if free_cap > _ZERO:
+            yield _DrawTranche(
+                free_share=fraction,
+                taxable_share=_ONE - fraction,
+                max_gross=free_cap,
+                from_crystallised=False,
+            )
+        if ledger.uncrystallised > _ZERO:
+            yield _DrawTranche(
+                free_share=Decimal(0),
+                taxable_share=_ONE,
+                max_gross=ledger.uncrystallised,
+                from_crystallised=False,
+            )
+
+    def _up_front_lump_sums(
+        self, ledgers: list[_WrapperLedger], period: Period
+    ) -> Money:
+        """The ``UP_FRONT_LUMP_SUM`` crystallisation event (§5.2).
+
+        In a decumulation period, every uncrystallised pension pot
+        whose access gate is open crystallises whole: the tax-free
+        fraction — capped at the remaining lump-sum-allowance headroom
+        — is paid out and joins the period's income offset; the rest
+        moves to the crystallised sub-balance. Pure tax-free cash
+        never marks flexible access (planning §5.2). Later periods
+        find the pots already empty, so the event fires once per
+        wrapper — or later, for a pot whose gate opens after
+        retirement (the §4.1 NMPA schedule).
+        """
+        total = _ZERO
+        for ledger in ledgers:
+            treatment = ledger.treatment
+            fraction = treatment.tax_free_fraction
+            partial = treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+            if not partial or fraction is None or ledger.uncrystallised <= _ZERO:
+                continue
+            if not self.region.wrappers.is_access_open(
+                ledger.wrapper.kind, self.person.date_of_birth.value, period
+            ):
+                continue
+            pot = ledger.uncrystallised
+            tax_free = pot * fraction.value
+            headroom = self._lsa_headroom(period)
+            if headroom is not None:
+                tax_free = min(tax_free, headroom)
+            ledger.uncrystallised = _ZERO
+            ledger.crystallised = ledger.crystallised + pot - tax_free
+            ledger.withdrawn_uncrystallised = ledger.withdrawn_uncrystallised + tax_free
+            ledger.withdrawal_tax_free = ledger.withdrawal_tax_free + tax_free
+            self._lsa_used = self._lsa_used + tax_free
+            total = total + tax_free
+        return total
+
+    def _lsa_headroom(self, period: Period) -> Money | None:
+        """Tax-free cash still allowed under the region's lifetime cap.
+
+        ``None`` when the region has no cap. Usage accumulates across
+        the run from the person's ``lsa_used`` fact (roadmap 5.2).
+        """
+        allowance = self.region.wrappers.lump_sum_allowance(period)
+        if allowance is None:
+            return None
+        return max(allowance - self._lsa_used, _ZERO)
+
+    def _mark_flexible_access(self, period: Period) -> None:
+        """Record the first taxable pension draw as the MPAA trigger.
+
+        The trigger date is the later of the period's first day and
+        the run's ``today`` — the first modelled day of the period
+        (§5.2). A pre-existing ``mpaa_triggered_on`` fact wins: once a
+        date is set it never moves.
+        """
+        if self._mpaa_triggered_on is None:
+            self._mpaa_triggered_on = max(period.start, self.config.today)
 
     def _incremental_tax(self, period: Period, taxable: Money) -> Money:
         """The extra tax ``taxable`` adds on top of the period's income.

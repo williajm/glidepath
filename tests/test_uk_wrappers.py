@@ -92,6 +92,21 @@ def test_sub_period_limit_is_the_full_year_figure(ruleset: UkWrapperRuleset) -> 
     assert ruleset.annual_contribution_limit(ISA_KIND, part) == full
 
 
+def test_lump_sum_allowance_comes_from_data(ruleset: UkWrapperRuleset) -> None:
+    """The LSA is the year's figure from the data file (roadmap 5.2)."""
+    allowance = ruleset.lump_sum_allowance(TAX_YEAR_2026_27)
+    assert allowance == load_tax_year(2026).pension.lump_sum_allowance
+
+
+def test_lump_sum_allowance_outside_coverage_fails_loudly(
+    ruleset: UkWrapperRuleset,
+) -> None:
+    """A query outside the shipped years never answers from the wrong year."""
+    uncovered = Period(start=date(1999, 4, 6), end=date(2000, 4, 5))
+    with pytest.raises(UkWrapperError, match="no shipped tax-year data"):
+        ruleset.lump_sum_allowance(uncovered)
+
+
 @pytest.mark.parametrize("kind", PENSION_KINDS)
 def test_pension_kinds_have_no_per_kind_cap(
     ruleset: UkWrapperRuleset, kind: WrapperKindId
