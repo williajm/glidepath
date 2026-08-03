@@ -54,6 +54,9 @@ convention = "google"
 max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
+"src/glidepath/core/randomness.py" = [
+    "S311", # Seeded Monte Carlo simulation draws, never security material (planning §4.6).
+]
 "tests/**" = [
     "S101",    # pytest tests use bare assert by design.
     "PLR2004", # Literal expected values in assertions are idiomatic in tests.

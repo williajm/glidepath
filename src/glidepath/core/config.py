@@ -43,8 +43,9 @@ class RunConfig:
     ``today`` anchors the first period and defines "today's money" for
     the reporting layer. ``horizon_end`` defaults to the date the (v1
     single) person attains the ``horizon.planning_age`` assumption.
-    ``seed`` is recorded in provenance now and drives the random source
-    once Monte Carlo lands (roadmap 7.1). ``withdrawal_strategy`` is
+    ``seed`` is recorded in provenance and seeds the stochastic return
+    model's substreams (roadmap 7.1/7.2); the Monte Carlo path runner
+    (roadmap 7.3) wires it into runs. ``withdrawal_strategy`` is
     the decumulation withdrawal decision (planning §5.2; roadmap 5.1),
     defaulting to fixed real spending — it governs decumulation
     periods only; planned outflows falling earlier are funded

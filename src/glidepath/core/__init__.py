@@ -95,6 +95,11 @@ from glidepath.core.provenance import (
     int_assumption_value,
     mapping_assumption_value,
 )
+from glidepath.core.randomness import (
+    RandomSource,
+    SeededRandomSource,
+    derive_seed,
+)
 from glidepath.core.region import Region
 from glidepath.core.reporting import (
     PeriodReportRow,
@@ -118,6 +123,8 @@ from glidepath.core.returns import (
     DeterministicReturnModel,
     PeriodReturns,
     ReturnModel,
+    StochasticReturnModel,
+    cholesky_lower,
     nominal_rate,
 )
 from glidepath.core.scenarios import (
@@ -230,6 +237,7 @@ __all__ = [
     "ProjectionReport",
     "ProjectionResult",
     "Provenance",
+    "RandomSource",
     "Rate",
     "Region",
     "ReliefMechanic",
@@ -245,12 +253,14 @@ __all__ = [
     "ScenarioError",
     "ScenarioPeriodEntry",
     "ScenarioResolution",
+    "SeededRandomSource",
     "Sex",
     "SpendingPlan",
     "StatePensionEntitlement",
     "StatePensionRecord",
     "StatePensionScheme",
     "StatePensionUprating",
+    "StochasticReturnModel",
     "TaxFreeCashStrategy",
     "TaxInput",
     "TaxLine",
@@ -278,6 +288,7 @@ __all__ = [
     "apply_fees_and_growth",
     "birthday_in_year",
     "build_report",
+    "cholesky_lower",
     "collect_plan_decisions",
     "collect_plan_facts",
     "compare_scenario_results",
@@ -287,6 +298,7 @@ __all__ = [
     "db_taken_age",
     "decimal_assumption_value",
     "deferral_months",
+    "derive_seed",
     "entitlement_active_fraction",
     "glide_path_from_shape",
     "int_assumption_value",
