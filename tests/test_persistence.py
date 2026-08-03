@@ -462,9 +462,10 @@ class TestCanonicalForm:
 
     def test_equal_documents_serialize_byte_identically(self) -> None:
         """Two independently built equal documents give identical text."""
-        assert dumps_plan(kitchen_sink_document()) == dumps_plan(
-            kitchen_sink_document()
-        )
+        first = kitchen_sink_document()
+        second = kitchen_sink_document()
+        assert first is not second
+        assert dumps_plan(first) == dumps_plan(second)
 
     def test_decimals_travel_as_strings(self) -> None:
         """No JSON floats anywhere in the output (planning §4.6)."""
