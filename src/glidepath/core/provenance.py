@@ -96,6 +96,9 @@ class AssumptionKey(StrEnum):
     CORRELATION_BONDS_CASH = "correlation.bonds_cash"
     FEES_PLATFORM = "fees.platform"
     FEES_FUND = "fees.fund"
+    YIELD_EQUITY = "yield.equity"
+    YIELD_BONDS = "yield.bonds"
+    YIELD_CASH = "yield.cash"
     HORIZON_PLANNING_AGE = "horizon.planning_age"
     GLIDEPATH_DEFAULT_SHAPE = "glidepath.default_shape"
     POLICY_STATE_PENSION_UPRATING = "policy.state_pension.uprating"
@@ -103,6 +106,7 @@ class AssumptionKey(StrEnum):
     ANNUITY_LEVEL_SINGLE_65 = "annuity.level.single.65"
     ANNUITY_ESCALATING3_SINGLE_65 = "annuity.escalating3.single.65"
     ANNUITY_INFLATION_LINKED_SINGLE_65 = "annuity.inflation_linked.single.65"
+    ANNUITY_AGE_ADJUSTMENT = "annuity.age_adjustment"
 
 
 @dataclass(frozen=True, slots=True)

@@ -313,6 +313,7 @@ class Person:
     lsa_used: Fact[Money] | None  # lump sum allowance already used
     wrappers: tuple[Wrapper, ...]
     db_pensions: tuple[DBPension, ...]
+    annuity_purchases: tuple[AnnuityPurchase, ...]  # decision records (5.5)
     state_pension: StatePensionRecord | None  # None: not modelled
     glide_path: GlidePathConfig | None  # None: default-shape assumption applies
 
@@ -385,8 +386,8 @@ class PlannedOutflow:  # mortgage payoff, gift, purchase — a decision
 @dataclass(frozen=True)
 class AnnuityPurchase:  # wholly a decision record (5.1)
     id: EntityId
-    at_age: int
-    fraction_of_pot: Decimal  # partial annuitisation supported
+    at_age: Decision[int]
+    fraction_of_pot: Decision[Decimal]  # partial annuitisation supported
     annuity_type: AnnuityType  # LEVEL | ESCALATING | INFLATION_LINKED
     basis: AnnuityBasis  # SINGLE | JOINT
     # rate comes from the annuity-rate assumption table by age/type
@@ -442,6 +443,34 @@ only from nine weeks (~5.8%/52 weeks; shipped as data); the uplift
 fraction applies to the rate payable **at claim** — upratings earned
 during deferment included — and the resulting increment uprates by CPI
 only from then on (§6).
+
+Annuity purchases are decision records on the person (roadmap 5.5).
+Conventions: a purchase fires in the period containing the date the
+person attains `at_age` — inside the run window only, and an age
+already attained at `today` is an engine error, since a past purchase
+cannot be priced from a modelled pot (an annuity already in payment
+belongs in stated income, which v1 does not yet model). The chosen
+fraction applies to every pension wrapper's sub-balances as they stand
+at the period's open (before that period's contributions):
+crystallised funds annuitise whole; uncrystallised funds crystallise
+on the way, delivering the region's tax-free fraction as cash — capped
+at the remaining lump-sum-allowance headroom, the excess simply buying
+more annuity — which joins the period's income offset exactly like a
+DB commutation lump sum. Crystallising a pot whose access gate has not
+opened is an engine error (§4.1). Buying a lifetime annuity never
+marks flexible access (no MPAA trigger — UK rule and model
+convention). Pricing is assumption-driven (§7): the single-life-at-65
+base rate for the type, times the `annuity.age_adjustment` table's
+per-age multiplier (whole-year knots, linear interpolation between,
+no extrapolation outside), times its joint-life factor on a joint
+basis. Income is wholly taxable, starts at the exact purchase date
+(pro-rated in its first period, §4.1), and escalates per product:
+level holds nominal; escalating compounds the table's fixed rate;
+inflation-linked tracks the run's CPI path exactly — annuity
+contracts, unlike statutory upratings, are not floored at zero. When
+an `UP_FRONT_LUMP_SUM` crystallisation event lands in the same
+period, the purchase — a step-2 income event — resolves first, so its
+uncrystallised slice still carries tax-free cash (§5.2).
 
 Planned outflows are dated one-offs. Conventions (roadmap 5.4): an
 outflow lands whole — never pro-rated — in the period containing the
@@ -611,6 +640,29 @@ is an engine error, never a silent draw); a gross-defined under-draw
 against the need is reported as shortfall — the roadmap-7.3 ruin signal
 survives strategies that ignore the need — and an over-draw is spent,
 not banked (no cash/GIA wrapper before 9.2).
+
+**Guardrails and natural yield (decided — roadmap 5.3).** Two post-v1
+strategies behind the same protocol. *Guardrails*
+(Guyton–Klinger-style) is net-defined: the engine's need — the
+inflated spending decision net of pension income — is the baseline,
+and the strategy annualises the withdrawal rate it implies (need over
+the period's active fraction, over the accessible pot) against two
+configured guardrails, cutting the target by a configured fraction
+above the upper rail (capital preservation) and raising it below the
+lower rail (prosperity); defaults are the conventional 6%/4% rails
+with 10% adjustments. The protocol is pure — same state and need,
+same plan — so each period is judged afresh and adjustments do not
+compound across periods; a cut's unspent remainder is reported as
+shortfall, exactly like a gross-defined under-draw. *Natural yield*
+is gross-defined: each accessible source is drawn by exactly the
+income its balance throws off — the wrapper allocation weighted over
+the `yield.*` assumptions (§7), scaled by the period's active
+fraction. The engine prices those yields only for a strategy that
+declares it spends portfolio income (`uses_natural_yield`), so the
+yield keys enter provenance exactly when they enter the result; a
+yield drawn from an uncrystallised pension pot resolves through the
+normal payment machinery (an income draw is a withdrawal, taxed by
+the wrapper's rules).
 
 **Tax-free cash strategy (decided — roadmap 5.2).** How pension
 tax-free cash is taken is its own decision record on `RunConfig`,
@@ -867,8 +919,9 @@ become the Phase 2 data files.
 ## 7. Default assumptions (proposed)
 
 Every row is a shipped default the user can override; each carries its
-basis. Recorded 2026-08-01. This table is the human-readable mirror of the
-future `regions/uk/data/assumptions_default.toml` (doc-sync test in
+basis. Recorded 2026-08-01 (the `yield.*` rows and the annuity
+age-adjustment table 2026-08-03). This table is the human-readable
+mirror of `regions/uk/data/assumptions_default.toml` (doc-sync test in
 Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 
 ### Economic
@@ -888,6 +941,9 @@ Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 | `correlation.bonds_cash` | 0.2 | Modest positive long-run historical correlation (short rates feed both) |
 | `fees.platform` | 0.25%/yr | Typical UK platform fee |
 | `fees.fund` | 0.15%/yr | Typical index-tracker OCF |
+| `yield.equity` | 2.0%/yr | Long-run global equity dividend yield (~2%); consistent with the shipped 4% real return default as income plus real capital growth |
+| `yield.bonds` | 2.5%/yr | Bond income ≈ the nominal return for portfolios held near par: the shipped 0.5% real return default plus 2% CPI |
+| `yield.cash` | 1.5%/yr | Cash return is wholly income: the shipped −0.5% real return default plus 2% CPI |
 
 ### Longevity, policy futures, annuities
 
@@ -900,10 +956,11 @@ Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 | `annuity.level.single.65` | 7.75%/yr per £ purchase | Which? market table, snapshot 2026-07-27, retrieved 2026-08-01 ([which.co.uk](https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm)); best rate 7.946% — volatile market snapshot, refresh before relying on |
 | `annuity.escalating3.single.65` | 5.47%/yr | same snapshot |
 | `annuity.inflation_linked.single.65` | 5.5%/yr | Indicative only — secondary source ([IFA Magazine](https://ifamagazine.com/annuity-rates-hit-7-75-as-retirement-incomes-reach-18-year-high/)); weakest-sourced default here |
+| `annuity.age_adjustment` | Per-age/type multipliers on the single-65 base rates (knots at 55–75, linear interpolation between, no extrapolation outside); joint-life factor 0.92; escalating products increase 3%/yr | Relativities from the Hargreaves Lansdown best-buy annuity tables (single/joint life; level, RPI-linked, 3% escalation), snapshot 2026-07-31, retrieved 2026-08-03 ([hl.co.uk](https://www.hl.co.uk/retirement/annuities/best-buy-rates)); the inflation-linked curve uses the RPI-linked product's relativities |
 
-*Planned but not yet shipped (excluded from the Phase 2 doc-sync mirror
-until Phase 5): `annuity.age_adjustment` — a per-age/type + joint-life
-rate table from a current market source.*
+*The `yield.*` rows price the natural-yield withdrawal strategy
+(roadmap 5.3); they are read — and recorded in provenance — only when
+that strategy runs.*
 
 ## 8. Phased roadmap — issue basis
 

@@ -7,12 +7,13 @@
 schema_version = 1
 
 [meta]
-verified_on = 2026-08-01
+verified_on = 2026-08-03
 sources = [
   "https://obr.uk/efo/economic-and-fiscal-outlook-march-2026/",
   "https://www.handbook.fca.org.uk/handbook/COBS/13/Annex2.html",
   "https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07",
   "https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm",
+  "https://www.hl.co.uk/retirement/annuities/best-buy-rates",
 ]
 
 [[assumption]]
@@ -81,6 +82,21 @@ value = "0.0015"
 basis = "Typical index-tracker OCF"
 
 [[assumption]]
+key = "yield.equity"
+value = "0.02"
+basis = "Long-run global equity dividend yield (~2%); consistent with the shipped 4% real return default as income plus real capital growth"
+
+[[assumption]]
+key = "yield.bonds"
+value = "0.025"
+basis = "Bond income approximates the nominal return for portfolios held near par: the shipped 0.5% real return default plus 2% CPI"
+
+[[assumption]]
+key = "yield.cash"
+value = "0.015"
+basis = "Cash return is wholly income: the shipped -0.5% real return default plus 2% CPI"
+
+[[assumption]]
 key = "horizon.planning_age"
 value = 95
 basis = "~1-in-4 longevity risk at 65 per ONS cohort life expectancy (exact values from 2024-based cohort tables at implementation)"
@@ -114,3 +130,40 @@ basis = "Which? market table, same snapshot"
 key = "annuity.inflation_linked.single.65"
 value = "0.055"
 basis = "Indicative only - secondary source (IFA Magazine); weakest-sourced default here"
+
+# Per-age/type relativities to the single-life-at-65 base rates above,
+# plus the joint-life factor and the escalating product's fixed annual
+# increase. Derived from the Hargreaves Lansdown best-buy annuity tables
+# (annual income per GBP 100,000: single life level / RPI-linked / 3%
+# escalation, joint life 50% level), snapshot 2026-07-31, retrieved
+# 2026-08-03; the inflation-linked curve uses the RPI-linked product's
+# relativities. Ages between the knots interpolate linearly; ages
+# outside 55-75 are a modelling error, never an extrapolation.
+[[assumption]]
+key = "annuity.age_adjustment"
+basis = "Relativities from the Hargreaves Lansdown best-buy annuity tables, snapshot 2026-07-31, retrieved 2026-08-03; joint factor is joint-life 50% over single-life level at 65 (~0.92); escalation is the escalating product's fixed 3%/yr increase"
+
+[assumption.value]
+escalation = "0.03"
+joint_factor = "0.92"
+
+[assumption.value.level]
+"55" = "0.846"
+"60" = "0.897"
+"65" = "1.0"
+"70" = "1.072"
+"75" = "1.230"
+
+[assumption.value.escalating3]
+"55" = "0.797"
+"60" = "0.870"
+"65" = "1.0"
+"70" = "1.124"
+"75" = "1.333"
+
+[assumption.value.inflation_linked]
+"55" = "0.794"
+"60" = "0.874"
+"65" = "1.0"
+"70" = "1.144"
+"75" = "1.380"

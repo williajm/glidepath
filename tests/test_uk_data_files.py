@@ -192,7 +192,7 @@ def test_new_state_pension_system_start() -> None:
 def test_default_assumptions_cover_every_key() -> None:
     """The defaults file defines every AssumptionKey exactly once."""
     file = load_default_assumptions()
-    assert file.meta.verified_on == date(2026, 8, 1)
+    assert file.meta.verified_on == date(2026, 8, 3)
     assert {entry.key for entry in file.defaults} == set(AssumptionKey)
 
 

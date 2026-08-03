@@ -5,6 +5,14 @@ It never imports region code (planning §4.2) — enforced by a guard test —
 and never contains policy figures, which live in region data files.
 """
 
+from glidepath.core.annuities import (
+    AnnuityBasis,
+    AnnuityPurchase,
+    AnnuityRateTable,
+    AnnuityType,
+    annuity_base_rate_key,
+    annuity_start_date,
+)
 from glidepath.core.config import EngineError, RunConfig, RunMode
 from glidepath.core.contributions import (
     ContributionRuleset,
@@ -117,6 +125,8 @@ from glidepath.core.withdrawals import (
     FixedRealWithdrawalStrategy,
     GrossDraw,
     GrossWithdrawalPlan,
+    GuardrailsWithdrawalStrategy,
+    NaturalYieldWithdrawalStrategy,
     NetWithdrawalPlan,
     TaxFreeCashStrategy,
     WithdrawalPlan,
@@ -140,6 +150,10 @@ from glidepath.core.wrappers import (
 __all__ = [
     "AgeRules",
     "AnnualCalendar",
+    "AnnuityBasis",
+    "AnnuityPurchase",
+    "AnnuityRateTable",
+    "AnnuityType",
     "AssetAllocation",
     "AssetReturns",
     "Assumption",
@@ -166,6 +180,7 @@ __all__ = [
     "GrossDraw",
     "GrossWithdrawalPlan",
     "GrowthTaxTreatment",
+    "GuardrailsWithdrawalStrategy",
     "Household",
     "LabelledDecision",
     "LabelledFact",
@@ -173,6 +188,7 @@ __all__ = [
     "MemberContributionOutcome",
     "MemberContributionRequest",
     "Money",
+    "NaturalYieldWithdrawalStrategy",
     "NetWithdrawalPlan",
     "Period",
     "PeriodReportRow",
@@ -222,6 +238,8 @@ __all__ = [
     "WrapperTaxTreatment",
     "add_months",
     "age_on",
+    "annuity_base_rate_key",
+    "annuity_start_date",
     "apply_fees_and_growth",
     "birthday_in_year",
     "build_report",
