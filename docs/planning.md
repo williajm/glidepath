@@ -441,6 +441,18 @@ fraction applies to the rate payable **at claim** — upratings earned
 during deferment included — and the resulting increment uprates by CPI
 only from then on (§6).
 
+Planned outflows are dated one-offs. Conventions (roadmap 5.4): an
+outflow lands whole — never pro-rated — in the period containing the
+date its person attains the stated age, and only when that date lies
+inside the run window `[today, horizon_end]`; an outflow already past
+lives in the stated balances, not the model (the DB lump-sum
+convention). The real amount inflates to nominal by the period-start
+price level (the run's one inflation truth) and joins the period's net
+need: in decumulation the configured strategy funds it after the income
+offset above; before decumulation it is funded net-defined in the
+default tax-aware order, since the withdrawal strategy is a
+decumulation decision (§5.2).
+
 Pre-existing pension access is likewise a set of facts:
 `crystallised_balance` (funds already designated to drawdown), `lsa_used`,
 and `mpaa_triggered_on`. They make an already-in-drawdown user modellable
@@ -575,7 +587,21 @@ then guardrails (Guyton–Klinger-style bands) and natural yield. Strategies
 also encode wrapper ordering (tax-aware, configurable; the full default is
 GIA/cash → ISA → pension, which in v1 — before the GIA/cash wrappers land
 in Phase 9 — reduces to ISA → pension) and the tax-free cash strategy
-(PCLS up front vs UFPLS-style phased).
+(PCLS up front vs UFPLS-style phased). Conventions (roadmap 5.1): the
+strategy is a decision record carried on `RunConfig`, defaulting to
+fixed-real; the state a strategy sees lists every sub-balance
+(uncrystallised and crystallised per wrapper, gate-closed ones present
+but flagged) plus the period's active fraction. A plan is either
+**net-defined** — a net target over an ordered source list, grossed up
+source by source through the step-4 fixed point — or **gross-defined** —
+exact gross amounts per source, no iteration; fixed-% draws its rate
+times the *accessible* pot (gate-closed funds excluded), scaled by the
+period's active fraction, allocated in the default order. Execution
+enforces the access gates on every plan (a draw on a gate-closed source
+is an engine error, never a silent draw); a gross-defined under-draw
+against the need is reported as shortfall — the roadmap-7.3 ruin signal
+survives strategies that ignore the need — and an over-draw is spent,
+not banked (no cash/GIA wrapper before 9.2).
 
 **Return model and Monte Carlo.** `ReturnModel.returns_for(period, path)`:
 deterministic impl = expected real returns + CPI → nominal, same every

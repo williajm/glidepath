@@ -32,6 +32,7 @@ from glidepath.core import (
     PeriodSnapshot,
     Person,
     PersonPeriodResult,
+    PlannedOutflow,
     Provenance,
     Rate,
     Region,
@@ -336,7 +337,13 @@ def sample_household() -> Household:
             value=Money(Decimal(24000)), as_of=AS_OF, recorded_on=RECORDED
         )
     )
-    return Household(persons=(person,), spending=spending)
+    outflow = PlannedOutflow(
+        id=EntityId("outflow-1"),
+        label="mortgage payoff",
+        amount_real=Decision(value=Money(Decimal(15000)), recorded_on=RECORDED),
+        at_age_of=(EntityId("person-1"), 55),
+    )
+    return Household(persons=(person,), spending=spending, planned_outflows=(outflow,))
 
 
 class TestPlanCollectors:
@@ -358,6 +365,7 @@ class TestPlanCollectors:
         """Decisions are the scenario what-if whitelist (planning §4.3)."""
         labels = {entry.label for entry in collect_plan_decisions(sample_household())}
         assert labels == {
+            "planned_outflow[outflow-1].amount_real",
             "person[person-1].target_retirement_age",
             "wrapper[wrapper-scheduled].contributions.employee_amount",
         }

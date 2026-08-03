@@ -116,7 +116,10 @@ class PersonPeriodResult:
     state pension income actually in payment (revalued/uprated,
     pro-rated from their exact start dates, §4.1); ``db_lump_sum`` is
     tax-free commutation cash received when a DB pension starts this
-    period (roadmap 4.2/4.3).
+    period (roadmap 4.2/4.3). ``planned_outflows`` is the nominal total
+    of the household's dated one-offs landing this period (roadmap
+    5.4) — a net need on top of ``spending_need``, so the shortfall
+    accounting covers both.
     """
 
     person_id: EntityId
@@ -132,6 +135,7 @@ class PersonPeriodResult:
     db_income: Money = _ZERO
     db_lump_sum: Money = _ZERO
     state_pension_income: Money = _ZERO
+    planned_outflows: Money = _ZERO
 
     def __post_init__(self) -> None:
         """Reject negative flows."""
@@ -143,6 +147,7 @@ class PersonPeriodResult:
             self.db_income,
             self.db_lump_sum,
             self.state_pension_income,
+            self.planned_outflows,
         )
         if any(amount < _ZERO for amount in amounts):
             msg = "PersonPeriodResult amounts must be non-negative"
@@ -290,6 +295,13 @@ def collect_plan_decisions(household: Household) -> tuple[LabelledDecision, ...]
     and annuity choices as later phases add them.
     """
     decisions: list[LabelledDecision] = []
+    decisions.extend(
+        LabelledDecision(
+            label=f"planned_outflow[{outflow.id}].amount_real",
+            decision=outflow.amount_real,
+        )
+        for outflow in household.planned_outflows
+    )
     for person in household.persons:
         decisions.append(
             LabelledDecision(

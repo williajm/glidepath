@@ -37,14 +37,24 @@ v1 engine conventions, superseded as later phases land:
   retirement age (§4.1 convention): employment income and
   contributions run while years-to-retirement is positive; spending
   withdrawals start once it is not.
-- Withdrawal order is tax-aware and fixed (planning §5.2's default,
-  pending the strategy protocol of roadmap 5.1): tax-free wrappers
-  first, then funds already in drawdown (no fresh tax-free cash), then
-  new pension access where the region's gate is open. In decumulation
-  the net-of-tax DB/state-pension income (and any commutation lump
-  sum) received in the period offsets the net spending need before
-  wrappers are drawn; income beyond the need is not banked — there is
-  no cash/GIA wrapper until roadmap 9.2.
+- Withdrawals follow the configured strategy (roadmap 5.1): the
+  strategy plans net-defined or gross-defined draws over the drawable
+  sub-balances and the engine executes the plan, enforcing the
+  region's access gates. The default fixed-real strategy meets the
+  net need in the tax-aware order of planning §5.2 — tax-free
+  wrappers first, then funds already in drawdown (no fresh tax-free
+  cash), then new pension access where the region's gate is open. In
+  decumulation the net-of-tax DB/state-pension income (and any
+  commutation lump sum) received in the period offsets the net
+  spending need before wrappers are drawn; income beyond the need is
+  not banked — there is no cash/GIA wrapper until roadmap 9.2.
+- Planned outflows (roadmap 5.4) land whole in the period containing
+  the date their person attains the stated age — inside the run
+  window only — inflated from today's money by the period-start
+  price level. They join the period's net need: in decumulation the
+  configured strategy funds them after the income offset; before
+  decumulation they are funded net-defined in the default tax-aware
+  order, since the strategy is a decumulation decision.
 - DB revaluation for the span before ``today`` — which the run never
   models period-by-period — compounds the scheme basis over the whole
   months from the statement date at the assumed CPI (planning §5.1);
@@ -111,6 +121,13 @@ from glidepath.core.results import (
 from glidepath.core.returns import DeterministicReturnModel
 from glidepath.core.state_pension import StatePensionUprating
 from glidepath.core.tax import TaxInput
+from glidepath.core.withdrawals import (
+    FixedRealWithdrawalStrategy,
+    NetWithdrawalPlan,
+    WithdrawalSource,
+    WithdrawalSourceId,
+    WithdrawalState,
+)
 from glidepath.core.wrappers import WithdrawalTaxTreatment
 
 if TYPE_CHECKING:
@@ -126,6 +143,7 @@ if TYPE_CHECKING:
     from glidepath.core.region import Region
     from glidepath.core.returns import PeriodReturns
     from glidepath.core.state_pension import StatePensionEntitlement
+    from glidepath.core.withdrawals import GrossWithdrawalPlan, WithdrawalStrategy
     from glidepath.core.wrappers import Wrapper, WrapperTaxTreatment
 
 _ZERO = Money(Decimal(0))
@@ -134,6 +152,13 @@ _GROSS_UP_ITERATION_CAP = 48
 """Fixed-point iteration cap for the net-need gross-up (§5.2 step 4)."""
 _NET_TOLERANCE = Money(Decimal("0.005"))
 """Half a penny: residuals below ledger precision are settled, not chased."""
+_OUTFLOW_FUNDING = FixedRealWithdrawalStrategy()
+"""Funds planned outflows falling before decumulation (roadmap 5.4).
+
+The configured strategy is a *decumulation* decision; an outflow due
+while still accumulating is simply a net cash need, met in the default
+tax-aware order.
+"""
 
 
 @dataclass(slots=True)
@@ -164,11 +189,34 @@ class _WrapperLedger:
 
 @dataclass(slots=True)
 class _WithdrawalSource:
-    """One drawable sub-balance, with the tax-free fraction of a draw."""
+    """One drawable sub-balance, with the tax-free fraction of a draw.
+
+    ``access_open`` follows the §4.1 gate convention; a crystallised
+    sub-balance is always open (already accessed, never re-gated —
+    planning §5.1).
+    """
 
     ledger: _WrapperLedger
     crystallised: bool
     tax_free_fraction: Decimal
+    access_open: bool = True
+
+    @property
+    def source_id(self) -> WithdrawalSourceId:
+        """The stable key withdrawal plans reference this source by."""
+        return WithdrawalSourceId(
+            wrapper_id=self.ledger.wrapper.id, crystallised=self.crystallised
+        )
+
+    def view(self) -> WithdrawalSource:
+        """The frozen strategy-facing view of this sub-balance."""
+        return WithdrawalSource(
+            id=self.source_id,
+            kind=self.ledger.wrapper.kind,
+            available=self.available,
+            tax_free_fraction=self.tax_free_fraction,
+            access_open=self.access_open,
+        )
 
     @property
     def available(self) -> Money:
@@ -547,18 +595,34 @@ class _Projection:
         if not retired:
             self._contribution_step(ledgers, period, employment, factors, fraction)
         need = _ZERO
+        outflows = self._outflows_due(period, inflation)
         wrapper_need = _ZERO
         delivered = _ZERO
-        if retired and self.plan.spending is not None:
-            need = _spending_need(self.plan.spending, stage, inflation) * fraction
+        if retired:
+            if self.plan.spending is not None:
+                need = _spending_need(self.plan.spending, stage, inflation) * fraction
             # Net-of-tax pension income and any commutation lump sum
-            # meet the net need first; only the remainder is drawn from
-            # wrappers (income beyond the need is not banked — module
-            # docstring).
+            # meet the net need — spending plus planned outflows —
+            # first; only the remainder is drawn from wrappers (income
+            # beyond the need is not banked — module docstring).
             income_tax = self.region.tax.assess(period, self._tax_input()).tax_due
             income_net = db_income + state_pension + db_lump_sum - income_tax
-            wrapper_need = max(need - income_net, _ZERO)
-            delivered = self._withdrawal_step(ledgers, period, wrapper_need)
+            wrapper_need = max(need + outflows - income_net, _ZERO)
+            delivered = self._withdrawal_step(
+                ledgers,
+                period,
+                wrapper_need,
+                fraction,
+                self.config.withdrawal_strategy,
+            )
+        elif outflows > _ZERO:
+            # An outflow due while still accumulating is a net cash
+            # need met in the default tax-aware order — the configured
+            # strategy governs decumulation only (module docstring).
+            wrapper_need = outflows
+            delivered = self._withdrawal_step(
+                ledgers, period, wrapper_need, fraction, _OUTFLOW_FUNDING
+            )
         # Step 5 — final tax assessment on the full income picture.
         tax = self.region.tax.assess(period, self._tax_input())
         # Steps 6-8 — fees, growth, close.
@@ -580,6 +644,7 @@ class _Projection:
             db_income=db_income.quantized(),
             db_lump_sum=db_lump_sum.quantized(),
             state_pension_income=state_pension.quantized(),
+            planned_outflows=outflows.quantized(),
         )
         return PeriodSnapshot(
             period=period,
@@ -631,6 +696,29 @@ class _Projection:
         if share <= Decimal(0):
             return _ZERO
         return stream.annual_amount() * share
+
+    def _outflows_due(self, period: Period, inflation: Decimal) -> Money:
+        """The planned outflows landing in ``period``, in nominal money.
+
+        A planned outflow is a dated one-off (roadmap 5.4): it hits the
+        period containing the date its person attains the stated age —
+        whole, never pro-rated, the DB lump-sum convention — and only
+        when that date lies inside the run window; an outflow already
+        past lives in the stated balances, not the model. The real
+        amount is inflated by the period-start price level, the same
+        single inflation truth the spending need uses (§5.2).
+        """
+        total = _ZERO
+        if not self.plan.planned_outflows:
+            return total
+        horizon_end = self._horizon_end()
+        births = {person.id: person.date_of_birth.value for person in self.plan.persons}
+        for outflow in self.plan.planned_outflows:
+            person_id, age = outflow.at_age_of
+            due = date_age_attained(births[person_id], age)
+            if period.contains(due) and self.config.today <= due <= horizon_end:
+                total = total + outflow.amount_real.value * inflation
+        return total
 
     def _open_ledger(
         self, wrapper: Wrapper, period: Period, glide: GlidePathConfig, ytr: int
@@ -750,66 +838,130 @@ class _Projection:
             raise EngineError(msg)
 
     def _withdrawal_step(
-        self, ledgers: list[_WrapperLedger], period: Period, need: Money
+        self,
+        ledgers: list[_WrapperLedger],
+        period: Period,
+        need: Money,
+        fraction: Decimal,
+        strategy: WithdrawalStrategy,
     ) -> Money:
-        """Step 4: meet the net need from wrappers, grossing up for tax.
+        """Step 4: run the withdrawal strategy over the drawable sources.
 
-        Sources are ordered tax-aware (module docstring): tax-free
-        wrappers, then crystallised funds (already in drawdown), then
-        uncrystallised pension funds where the access gate is open.
-        Returns the net cash delivered toward the need.
+        The strategy sees every sub-balance — gate-closed ones flagged
+        (planning §5.2) — and returns a net-defined or gross-defined
+        plan; execution enforces the access gates, so a plan drawing on
+        a closed source is an error, never a silent draw. Returns the
+        net cash delivered toward the need.
+        """
+        sources = self._withdrawal_sources(ledgers, period)
+        state = WithdrawalState(
+            sources=tuple(source.view() for source in sources.values()),
+            year_fraction=fraction,
+        )
+        plan = strategy.withdraw(state, need)
+        if isinstance(plan, NetWithdrawalPlan):
+            return self._execute_net_plan(sources, period, plan)
+        return self._execute_gross_plan(sources, period, plan)
+
+    def _withdrawal_sources(
+        self, ledgers: list[_WrapperLedger], period: Period
+    ) -> dict[WithdrawalSourceId, _WithdrawalSource]:
+        """Every sub-balance keyed for plan execution, in wrapper order.
+
+        A wholly tax-free wrapper is open on both sub-balances; on any
+        other kind the crystallised funds are always drawable (already
+        accessed, planning §5.1) while the uncrystallised pot answers
+        to the region's access gate (§4.1).
+        """
+        sources: dict[WithdrawalSourceId, _WithdrawalSource] = {}
+        for ledger in ledgers:
+            treatment = ledger.treatment
+            if treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE:
+                entries = (
+                    _WithdrawalSource(
+                        ledger=ledger, crystallised=False, tax_free_fraction=_ONE
+                    ),
+                    _WithdrawalSource(
+                        ledger=ledger, crystallised=True, tax_free_fraction=_ONE
+                    ),
+                )
+            else:
+                free_fraction = Decimal(0)
+                if (
+                    treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+                    and treatment.tax_free_fraction is not None
+                ):
+                    free_fraction = treatment.tax_free_fraction.value
+                entries = (
+                    _WithdrawalSource(
+                        ledger=ledger,
+                        crystallised=False,
+                        tax_free_fraction=free_fraction,
+                        access_open=self.region.wrappers.is_access_open(
+                            ledger.wrapper.kind,
+                            self.person.date_of_birth.value,
+                            period,
+                        ),
+                    ),
+                    _WithdrawalSource(
+                        ledger=ledger, crystallised=True, tax_free_fraction=Decimal(0)
+                    ),
+                )
+            for source in entries:
+                sources[source.source_id] = source
+        return sources
+
+    def _execute_net_plan(
+        self,
+        sources: dict[WithdrawalSourceId, _WithdrawalSource],
+        period: Period,
+        plan: NetWithdrawalPlan,
+    ) -> Money:
+        """Deliver the plan's net target, grossing up source by source.
+
+        Walks the plan's order, drawing from each source until the
+        target is met to within ledger tolerance or the listed sources
+        are exhausted; the unmet remainder is the caller's shortfall.
         """
         delivered = _ZERO
-        for source in self._withdrawal_sources(ledgers, period):
-            remaining = need - delivered
+        for source_id in plan.order:
+            remaining = plan.target - delivered
             if remaining <= _NET_TOLERANCE:
                 break
+            source = _plan_source(sources, source_id)
             if source.available <= _ZERO:
                 continue
             delivered = delivered + self._draw_from(source, period, remaining)
         return delivered
 
-    def _withdrawal_sources(
-        self, ledgers: list[_WrapperLedger], period: Period
-    ) -> list[_WithdrawalSource]:
-        """The drawable sub-balances, in the v1 tax-aware order."""
-        free: list[_WithdrawalSource] = []
-        crystallised: list[_WithdrawalSource] = []
-        uncrystallised: list[_WithdrawalSource] = []
-        for ledger in ledgers:
-            treatment = ledger.treatment
-            if treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE:
-                free.append(
-                    _WithdrawalSource(
-                        ledger=ledger, crystallised=False, tax_free_fraction=_ONE
-                    )
-                )
-                free.append(
-                    _WithdrawalSource(
-                        ledger=ledger, crystallised=True, tax_free_fraction=_ONE
-                    )
-                )
+    def _execute_gross_plan(
+        self,
+        sources: dict[WithdrawalSourceId, _WithdrawalSource],
+        period: Period,
+        plan: GrossWithdrawalPlan,
+    ) -> Money:
+        """Take the plan's exact gross draws; net is what survives tax.
+
+        No fixed-point iteration (planning §5.2): a gross-defined
+        strategy declares itself gross. Each draw is capped at what its
+        source holds, and the marginal tax on the taxable share is
+        priced through the same regional assessment the final step-5
+        pass uses, so the two cannot disagree.
+        """
+        delivered = _ZERO
+        for draw in plan.draws:
+            source = _plan_source(sources, draw.source)
+            gross = min(draw.amount, source.available)
+            if gross <= _ZERO:
                 continue
-            crystallised.append(
-                _WithdrawalSource(
-                    ledger=ledger, crystallised=True, tax_free_fraction=Decimal(0)
-                )
+            taxable = gross * (_ONE - source.tax_free_fraction)
+            net = gross - self._incremental_tax(period, taxable)
+            source.draw(
+                gross, tax_free=gross * source.tax_free_fraction, taxable=taxable
             )
-            fraction = Decimal(0)
-            if (
-                treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
-                and treatment.tax_free_fraction is not None
-            ):
-                fraction = treatment.tax_free_fraction.value
-            if self.region.wrappers.is_access_open(
-                ledger.wrapper.kind, self.person.date_of_birth.value, period
-            ):
-                uncrystallised.append(
-                    _WithdrawalSource(
-                        ledger=ledger, crystallised=False, tax_free_fraction=fraction
-                    )
-                )
-        return [*free, *crystallised, *uncrystallised]
+            self._taxable_income = self._taxable_income + taxable
+            delivered = delivered + net
+        return delivered
 
     def _draw_from(
         self, source: _WithdrawalSource, period: Period, need: Money
@@ -919,6 +1071,32 @@ class _Projection:
             closing_uncrystallised=closing_uncrystallised,
             closing_crystallised=closing_crystallised,
         )
+
+
+def _plan_source(
+    sources: dict[WithdrawalSourceId, _WithdrawalSource],
+    source_id: WithdrawalSourceId,
+) -> _WithdrawalSource:
+    """Resolve a plan's source reference, enforcing the access gates.
+
+    Raises:
+        EngineError: If the plan references a source that does not
+            exist or whose access gate has not opened (§4.1).
+    """
+    source = sources.get(source_id)
+    if source is None:
+        msg = (
+            f"withdrawal plan references unknown source: wrapper"
+            f" {source_id.wrapper_id} (crystallised={source_id.crystallised})"
+        )
+        raise EngineError(msg)
+    if not source.access_open:
+        msg = (
+            f"withdrawal plan draws on wrapper {source_id.wrapper_id}"
+            " before its access gate opens"
+        )
+        raise EngineError(msg)
+    return source
 
 
 def _spending_need(

@@ -330,3 +330,33 @@ class TestPensionIncomeColumns:
         assert nominal_row.db_income == money("2200.00")
         assert nominal_row.db_lump_sum == money("1100.00")
         assert nominal_row.state_pension_income == money("3300.00")
+
+
+class TestPlannedOutflowColumn:
+    """Planned outflows present as a flow (roadmap 5.4)."""
+
+    def test_planned_outflows_deflate_like_other_flows(self) -> None:
+        """Real presentation divides the outflow column by the CPI path."""
+        person = PersonPeriodResult(
+            person_id=PERSON,
+            age_at_period_start=55,
+            years_to_retirement=5,
+            stage=LifeStage.PRE_RETIREMENT,
+            employment_income=ZERO,
+            tax=tax_of("0"),
+            spending_need=ZERO,
+            net_withdrawn=money("5500.00"),
+            shortfall=ZERO,
+            wrappers=(),
+            planned_outflows=money("5500.00"),
+        )
+        snapshot = PeriodSnapshot(
+            period=Period(date(2026, 1, 1), date(2026, 12, 31)),
+            returns=FLAT_RETURNS,
+            inflation_factor=Decimal("1.1"),
+            persons=(person,),
+        )
+        [row] = build_report(result_of(snapshot)).rows
+        assert row.planned_outflows == money("5000.00")
+        [nominal_row] = build_report(result_of(snapshot), ReportBasis.NOMINAL).rows
+        assert nominal_row.planned_outflows == money("5500.00")

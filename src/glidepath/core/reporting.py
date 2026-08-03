@@ -97,6 +97,7 @@ class PeriodReportRow:
     state_pension_income: Money
     tax_due: Money
     spending_need: Money
+    planned_outflows: Money
     net_withdrawn: Money
     shortfall: Money
     contributions: Money
@@ -188,6 +189,7 @@ def _person_row(
         state_pension_income=flow(person.state_pension_income),
         tax_due=flow(person.tax.tax_due),
         spending_need=flow(person.spending_need),
+        planned_outflows=flow(person.planned_outflows),
         net_withdrawn=flow(person.net_withdrawn),
         shortfall=flow(person.shortfall),
         contributions=flow(
