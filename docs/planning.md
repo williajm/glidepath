@@ -860,8 +860,16 @@ version are function inputs, never imports). Top level:
 ```
 
 Conventions: canonical output is `json.dumps(sort_keys=True, indent=2)`
-plus one trailing LF, written with newline translation disabled — equal
-documents are byte-identical (a golden file pins the format). `Decimal`
+plus one trailing LF, written with newline translation disabled — a
+given document always serializes to the same bytes and a load→save
+round trip is byte-stable (a golden file pins the format). Value
+representations are preserved exactly, never normalized: a `Decimal`
+keeps the exponent the user stated (`1.0` and `1.00` compare equal but
+keep their spellings) and a datetime keeps its offset. The writer never
+produces a file the reader rejects — non-finite decimals, booleans in
+whole-number fields, and empty entity ids are refused at save, and
+serialization completes before the target file is opened so a failed
+save cannot truncate the last valid file. `Decimal`
 and `Money` are strings, never JSON floats (the reader rejects any JSON
 float); datetimes are ISO-8601 with offset; dates ISO-8601. Every entity
 field is present in full shape (`null` for absent optionals) and decoded

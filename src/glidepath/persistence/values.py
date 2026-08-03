@@ -209,7 +209,7 @@ def _tagged(value: object, path: str) -> tuple[str, object]:
     if isinstance(value, bool):
         msg = f"{path}: booleans are not a persisted value type"
         raise PersistenceError(msg)
-    scalar = _tagged_scalar(value)
+    scalar = _tagged_scalar(value, path)
     if scalar is not None:
         return scalar
     if isinstance(value, AnnuityType):
@@ -222,13 +222,24 @@ def _tagged(value: object, path: str) -> tuple[str, object]:
     raise PersistenceError(msg)
 
 
-def _tagged_scalar(value: object) -> tuple[str, object] | None:
-    """The tag and payload for a scalar value; ``None`` for non-scalars."""
+def _tagged_scalar(value: object, path: str) -> tuple[str, object] | None:
+    """The tag and payload for a scalar value; ``None`` for non-scalars.
+
+    A non-finite ``Decimal`` is rejected here so the writer never
+    produces a file :func:`parse_decimal` would refuse on reload
+    (``Money`` enforces finiteness at construction already).
+
+    Raises:
+        PersistenceError: If a ``Decimal`` value is not finite.
+    """
     if isinstance(value, int):
         return (_KIND_INT, value)
     if isinstance(value, str):
         return (_KIND_TEXT, value)
     if isinstance(value, Decimal):
+        if not value.is_finite():
+            msg = f"{path}: decimal values must be finite, got {value!r}"
+            raise PersistenceError(msg)
         return (_KIND_DECIMAL, str(value))
     if isinstance(value, Money):
         return (_KIND_MONEY, str(value.amount))

@@ -2,9 +2,18 @@
 
 Deterministic output for clean diffs: ``schema_version`` stamped in,
 keys sorted, 2-space indent, LF line endings, ``Decimal`` as strings,
-ISO-8601 timezone-aware datetimes. Equal documents produce
-byte-identical text. Only the user's assumption *overrides* are
-written; defaults re-resolve on load against shipped region data.
+ISO-8601 timezone-aware datetimes. A given document always serializes
+to the same bytes and a load→save round trip is byte-stable; value
+representations are preserved exactly (a ``Decimal`` keeps the
+exponent the user stated, a datetime its offset), so two values that
+compare equal but were written differently keep their distinct
+spellings. Only the user's assumption *overrides* are written;
+defaults re-resolve on load against shipped region data.
+
+The writer never produces a file the reader rejects: everything the
+strict reader refuses that the domain model does not already rule out
+(non-finite decimals, booleans in whole-number fields, empty entity
+ids) is rejected here too.
 """
 
 import json
@@ -22,7 +31,11 @@ from glidepath.core import (
     StatePensionRecord,
     Wrapper,
 )
-from glidepath.persistence.document import SCHEMA_VERSION, PlanDocument
+from glidepath.persistence.document import (
+    SCHEMA_VERSION,
+    PersistenceError,
+    PlanDocument,
+)
 from glidepath.persistence.values import (
     ANNUITY_BASIS_TOKENS,
     ANNUITY_TYPE_TOKENS,
@@ -43,6 +56,7 @@ if TYPE_CHECKING:
         AnnuityPurchase,
         AssetAllocation,
         Decision,
+        EntityId,
         Fact,
         FeeSchedule,
         GlidePathConfig,
@@ -69,11 +83,14 @@ def dumps_plan(document: PlanDocument) -> str:
 def save_plan(document: PlanDocument, path: Path) -> None:
     """Write the document to ``path`` in canonical form.
 
+    Serialization completes before the file is opened, so a document
+    that cannot be encoded never truncates an existing file.
     ``newline=""`` disables platform newline translation so the file
     carries LF endings on every platform (planning §4.5).
     """
+    text = dumps_plan(document)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        handle.write(dumps_plan(document))
+        handle.write(text)
 
 
 def _document_payload(document: PlanDocument) -> dict[str, object]:
@@ -127,7 +144,7 @@ def _override(override: Override, path: str) -> dict[str, object]:
     else:
         target_payload = {
             "kind": "decision",
-            "entity_id": str(target.entity_id),
+            "entity_id": _entity_id(target.entity_id),
             "field_path": target.field_path,
         }
     return {
@@ -151,7 +168,7 @@ def _household(household: Household) -> dict[str, object]:
 def _person(person: Person) -> dict[str, object]:
     """One person and everything that hangs off them."""
     return {
-        "id": str(person.id),
+        "id": _entity_id(person.id),
         "date_of_birth": _fact(person.date_of_birth, _date_value),
         "target_retirement_age": _decision(person.target_retirement_age, _int_value),
         "tax_residency": str(person.tax_residency),
@@ -172,7 +189,7 @@ def _person(person: Person) -> dict[str, object]:
 def _wrapper(wrapper: Wrapper) -> dict[str, object]:
     """One account, of an opaque region-defined kind."""
     return {
-        "id": str(wrapper.id),
+        "id": _entity_id(wrapper.id),
         "kind": str(wrapper.kind),
         "balance": _fact(wrapper.balance, _money_value),
         "crystallised_balance": _optional_fact(
@@ -215,7 +232,7 @@ def _fee_schedule(fees: FeeSchedule) -> dict[str, object]:
 def _db_pension(pension: DBPension) -> dict[str, object]:
     """One deferred DB entitlement's scheme facts and choices."""
     return {
-        "id": str(pension.id),
+        "id": _entity_id(pension.id),
         "accrued_annual_pension": _fact(pension.accrued_annual_pension, _money_value),
         "statement_date": pension.statement_date.isoformat(),
         "normal_pension_age": _fact(pension.normal_pension_age, _int_value),
@@ -246,7 +263,7 @@ def _factor_table(factors: Mapping[int, Decimal]) -> dict[str, str]:
 def _annuity_purchase(purchase: AnnuityPurchase) -> dict[str, object]:
     """One planned annuity purchase — wholly a decision record."""
     return {
-        "id": str(purchase.id),
+        "id": _entity_id(purchase.id),
         "at_age": _decision(purchase.at_age, _int_value),
         "fraction_of_pot": _decision(purchase.fraction_of_pot, _decimal_value),
         "annuity_type": ANNUITY_TYPE_TOKENS.token(purchase.annuity_type),
@@ -273,7 +290,7 @@ def _glide_path(config: GlidePathConfig) -> dict[str, object]:
     return {
         "points": [
             {
-                "years_to_retirement": point.years_to_retirement,
+                "years_to_retirement": _int_value(point.years_to_retirement),
                 "allocation": _allocation(point.allocation),
             }
             for point in config.points
@@ -304,10 +321,10 @@ def _planned_outflow(outflow: PlannedOutflow) -> dict[str, object]:
     """One dated one-off outflow."""
     person_id, age = outflow.at_age_of
     return {
-        "id": str(outflow.id),
+        "id": _entity_id(outflow.id),
         "label": outflow.label,
         "amount_real": _decision(outflow.amount_real, _money_value),
-        "at_age_of": {"person_id": str(person_id), "age": age},
+        "at_age_of": {"person_id": _entity_id(person_id), "age": _int_value(age)},
     }
 
 
@@ -364,8 +381,28 @@ def _decimal_value(value: Decimal) -> str:
 
 
 def _int_value(value: int) -> int:
-    """A whole number, natively JSON."""
+    """A whole number, natively JSON (``bool`` rejected, as ever).
+
+    Raises:
+        PersistenceError: If the value is a smuggled boolean — the
+            strict reader would refuse it on reload.
+    """
+    if isinstance(value, bool):
+        msg = "booleans are not persisted whole numbers"
+        raise PersistenceError(msg)
     return value
+
+
+def _entity_id(entity_id: EntityId) -> str:
+    """A stable entity id, required non-empty so the reader accepts it.
+
+    Raises:
+        PersistenceError: If the id is empty.
+    """
+    if not entity_id:
+        msg = "entity ids must be non-empty"
+        raise PersistenceError(msg)
+    return str(entity_id)
 
 
 def _date_value(value: date) -> str:

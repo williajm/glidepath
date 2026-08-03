@@ -4,8 +4,10 @@ The kitchen-sink document here carries one of everything the schema can
 hold — every optional field populated, every enum token, every tagged
 value kind — so the canonical golden file pins the wire format and the
 round-trip tests exercise every codec branch. Determinism is asserted
-at the byte level: equal documents must serialize byte-identically
-(planning §4.5).
+at the byte level: a given document always serializes to the same
+bytes and load→save round trips are byte-stable, while value
+representations are preserved rather than normalized (planning §4.5,
+§5.4).
 
 Regenerate the golden file after a reviewed format change with::
 
@@ -13,6 +15,7 @@ Regenerate the golden file after a reviewed format change with::
 """
 
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -489,6 +492,33 @@ class TestCanonicalForm:
         save_plan(document, target)
         assert load_plan(target) == document
 
+    def test_failed_save_leaves_the_existing_file_intact(self, tmp_path: Path) -> None:
+        """A document that cannot be encoded never truncates the target."""
+        target = tmp_path / "plan.glidepath.json"
+        save_plan(minimal_document(), target)
+        before = target.read_bytes()
+        unsavable = _document_with_override_value(object())
+        with pytest.raises(PersistenceError, match="cannot persist"):
+            save_plan(unsavable, target)
+        assert target.read_bytes() == before
+
+    def test_decimal_representations_are_preserved_not_normalized(self) -> None:
+        """Equal-but-differently-written decimals keep their spellings.
+
+        `Decimal("1.0")` and `Decimal("1.00")` compare equal, so two
+        documents differing only in exponent are equal too — but their
+        bytes intentionally differ: the writer preserves the stated
+        representation rather than normalizing it (planning §5.4). The
+        guarantee is per-representation determinism plus byte-stable
+        round trips, not byte-identity across equal values.
+        """
+        precise = _document_with_override_value(Decimal("1.00"))
+        loose = _document_with_override_value(Decimal("1.0"))
+        assert precise == loose
+        assert '"1.00"' in dumps_plan(precise)
+        assert '"1.0"' in dumps_plan(loose)
+        assert loads_plan(dumps_plan(precise)) == precise
+
 
 class TestRoundTrip:
     """loads ∘ dumps is the identity (issue 6.2's acceptance)."""
@@ -878,6 +908,46 @@ class TestEncodeErrors:
         document = _document_with_override_value({1: Decimal("0.5")})
         with pytest.raises(PersistenceError, match="table keys must be strings"):
             dumps_plan(document)
+
+    @pytest.mark.parametrize("raw", ["NaN", "Infinity", "-Infinity"])
+    def test_rejects_non_finite_decimal_values(self, raw: str) -> None:
+        """The writer refuses the non-finite values its reader refuses."""
+        document = _document_with_override_value(Decimal(raw))
+        with pytest.raises(PersistenceError, match="must be finite"):
+            dumps_plan(document)
+
+    def test_rejects_non_finite_decimals_inside_tables(self) -> None:
+        """The finiteness rule recurses through table values."""
+        document = _document_with_override_value({"rate": Decimal("Infinity")})
+        with pytest.raises(PersistenceError, match="must be finite"):
+            dumps_plan(document)
+
+    def test_rejects_a_boolean_in_a_whole_number_field(self) -> None:
+        """A bool smuggled past the type checker cannot be written."""
+        smuggled = True
+        person = replace(
+            minimal_document().household.persons[0],
+            target_retirement_age=decision(cast("int", smuggled)),
+        )
+        document = _document_with_household(Household(persons=(person,)))
+        with pytest.raises(PersistenceError, match="not persisted whole numbers"):
+            dumps_plan(document)
+
+    def test_rejects_an_empty_entity_id(self) -> None:
+        """An empty id would be unloadable, so it is unsavable too."""
+        person = replace(minimal_document().household.persons[0], id=EntityId(""))
+        document = _document_with_household(Household(persons=(person,)))
+        with pytest.raises(PersistenceError, match="entity ids must be non-empty"):
+            dumps_plan(document)
+
+
+def _document_with_household(household: Household) -> PlanDocument:
+    """A minimal document around the given household."""
+    return PlanDocument(
+        region="uk",
+        assumptions_resolved_against=DATA_VERSION,
+        household=household,
+    )
 
 
 def _document_with_override_value(value: object) -> PlanDocument:
