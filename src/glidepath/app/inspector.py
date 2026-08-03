@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from glidepath.app.display import format_date, format_recorded, format_value
-from glidepath.core import Assumption, Household, Provenance
+from glidepath.core import Assumption, AssumptionKey, Household, Provenance
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -38,6 +38,17 @@ _WRAPPER_KIND_NAMES: Mapping[str, str] = {
 _USED_LABEL = "Used in this projection"
 _UNUSED_LABEL = "Not used by this projection"
 _NO_RUN_LABEL = "No projection yet"
+_REGION_BUILD_LABEL = "Applied at region build (see the run manifest)"
+
+_REGION_BUILD_KEYS = frozenset(
+    {
+        AssumptionKey.POLICY_STATE_PENSION_UPRATING,
+        AssumptionKey.POLICY_TAX_FUTURE_YEARS,
+    }
+)
+"""Keys read while building the region, before the run's read recorder
+exists — their effect is identified through the region data version,
+not the assumption read list (planning §5.1)."""
 
 
 @dataclass(frozen=True)
@@ -153,10 +164,18 @@ def _assumption_rows(state: PlanState) -> tuple[AssumptionRow, ...]:
     """Read assumptions in first-read order, then the rest of the catalogue."""
     read = state.result.provenance.assumptions if state.result is not None else ()
     read_keys = {assumption.key for assumption in read}
-    unread_usage = _UNUSED_LABEL if state.result is not None else _NO_RUN_LABEL
+    has_result = state.result is not None
+
+    def unread_usage(key: AssumptionKey) -> str:
+        if not has_result:
+            return _NO_RUN_LABEL
+        if key in _REGION_BUILD_KEYS:
+            return _REGION_BUILD_LABEL
+        return _UNUSED_LABEL
+
     rows = [_assumption_row(assumption, _USED_LABEL) for assumption in read]
     rows.extend(
-        _assumption_row(state.assumptions.get(key), unread_usage)
+        _assumption_row(state.assumptions.get(key), unread_usage(key))
         for key in sorted(state.assumptions.keys - read_keys, key=str)
     )
     return tuple(rows)

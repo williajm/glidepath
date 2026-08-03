@@ -147,6 +147,14 @@ class TestProjectedSession:
         assert trailing == sorted(trailing)
         assert len(view_model.assumptions) == len(projected.assumptions.keys)
 
+    def test_region_build_keys_are_not_labelled_unused(
+        self, view_model: InspectorViewModel
+    ) -> None:
+        """Policy tables read at region build say so, not "not used"."""
+        by_key = {row.key: row for row in view_model.assumptions}
+        for key in ("policy.tax.future_years", "policy.state_pension.uprating"):
+            assert by_key[key].usage == "Applied at region build (see the run manifest)"
+
     def test_summary_carries_the_run_manifest(
         self, view_model: InspectorViewModel
     ) -> None:

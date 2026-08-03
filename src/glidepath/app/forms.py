@@ -331,6 +331,9 @@ class _SectionReader:
             except ValueError, InvalidOperation:
                 self.error(field_key, _FACTORS_MESSAGE)
                 return None
+            if not factor.is_finite():
+                self.error(field_key, _FACTORS_MESSAGE)
+                return None
             factors[age] = factor
         try:
             return FactorTable(factors=factors)
@@ -661,12 +664,14 @@ def _person_section() -> SectionSpec:
                     ChoiceOption(value="male", label="Male"),
                 ),
             ),
+            _as_of_field("sex_as_of", "Sex stated as of"),
             FieldSpec(
                 key="tax_residency",
                 label="Tax residency",
                 kind=FieldKind.CHOICE,
                 required=True,
                 choices=(
+                    ChoiceOption(value="", label="Select…"),
                     ChoiceOption(
                         value=str(RUK_RESIDENCY),
                         label="England, Wales or Northern Ireland",
@@ -781,7 +786,9 @@ def _wrapper_section() -> SectionSpec:
         title="Savings wrapper",
         description=(
             "One pension or ISA. Balances are facts from a statement; "
-            "contributions are your choices plus your employer's terms."
+            "contributions are your choices plus your employer's terms. "
+            "The projection treats balances as opening values today — "
+            "growth since the statement date is not rolled forward."
         ),
         repeatable=True,
         add_label="Add wrapper",
@@ -793,6 +800,7 @@ def _wrapper_section() -> SectionSpec:
                 kind=FieldKind.CHOICE,
                 required=True,
                 choices=(
+                    ChoiceOption(value="", label="Select…"),
                     ChoiceOption(
                         value=str(WORKPLACE_DC_KIND), label="Workplace DC pension"
                     ),
@@ -828,7 +836,7 @@ def _wrapper_section() -> SectionSpec:
                 label="Tax relief mechanic",
                 kind=FieldKind.CHOICE,
                 choices=(
-                    ChoiceOption(value="", label="Region default"),
+                    ChoiceOption(value="", label="None (ISAs; pensions must pick one)"),
                     ChoiceOption(value="relief_at_source", label="Relief at source"),
                     ChoiceOption(value="net_pay", label="Net pay"),
                 ),
@@ -884,6 +892,7 @@ def _db_pension_section() -> SectionSpec:
                 kind=FieldKind.CHOICE,
                 required=True,
                 choices=(
+                    ChoiceOption(value="", label="Select…"),
                     ChoiceOption(value="cpi", label="CPI (optionally capped)"),
                     ChoiceOption(value="fixed", label="Fixed annual rate"),
                     ChoiceOption(value="none", label="No revaluation"),

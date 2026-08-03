@@ -39,12 +39,20 @@ class TestFormatValue:
             (61, "61"),
             ("triple_lock", "triple_lock"),
             (Sex.FEMALE, "Female"),
-            ({"a": 1, "b": 2}, "structured table (2 entries)"),
+            ({"a": 1, "b": 2}, "a=1; b=2"),
+            ({"rule": "cpi", "floor": Decimal("0.025")}, "rule=cpi; floor=0.025"),
         ],
     )
     def test_values(self, value: object, expected: str) -> None:
         """Each value type has one canonical rendering."""
         assert format_value(value) == expected
+
+    def test_long_structured_values_are_truncated(self) -> None:
+        """A big table renders compactly, ending in an ellipsis."""
+        table = {f"knot_{index}": Decimal(index) for index in range(40)}
+        rendered = format_value(table)
+        assert len(rendered) <= 120
+        assert rendered.endswith("…")
 
 
 class TestFormatRecorded:

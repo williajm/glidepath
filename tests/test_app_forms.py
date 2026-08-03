@@ -8,6 +8,8 @@ round trip into `Fact`/`Decision`-wrapped domain objects.
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
+import pytest
+
 from glidepath.app import (
     FactsFormData,
     build_facts_form_view_model,
@@ -57,6 +59,7 @@ class TestFormSpec:
             "date_of_birth",
             "date_of_birth_as_of",
             "sex_for_longevity",
+            "sex_as_of",
             "tax_residency",
             "employment_income",
             "employment_income_as_of",
@@ -112,6 +115,14 @@ class TestFormSpec:
             "deferral_years",
         }
 
+    def test_required_choices_start_blank(self) -> None:
+        """No required choice pre-selects a real value — never a guess (§1)."""
+        form = build_facts_form_view_model()
+        for section in form.sections:
+            for spec in section.fields:
+                if spec.choices and spec.required:
+                    assert spec.choices[0].value == ""
+
     def test_repeatable_sections_are_marked(self) -> None:
         """Wrappers and DB pensions repeat; the others do not."""
         form = build_facts_form_view_model()
@@ -146,6 +157,7 @@ class TestPersonParsing:
                 person=person_values(
                     date_of_birth_as_of="2026-07-01",
                     sex_for_longevity="female",
+                    sex_as_of="2026-06-15",
                     employment_income="£52,000",
                     employment_income_as_of="2026-04-06",
                     mpaa_triggered_on="2024-01-15",
@@ -159,6 +171,7 @@ class TestPersonParsing:
         assert person.date_of_birth.as_of == date(2026, 7, 1)
         assert person.sex_for_longevity is not None
         assert person.sex_for_longevity.value is Sex.FEMALE
+        assert person.sex_for_longevity.as_of == date(2026, 6, 15)
         assert person.employment_income is not None
         assert person.employment_income.value == Money(Decimal(52000))
         assert person.employment_income.as_of == date(2026, 4, 6)
@@ -587,6 +600,28 @@ class TestValidationMessages:
         assert result.household is None
         by_field = {error.field_key for error in result.errors}
         assert by_field == {"qualifying_years", "deferral_years", "ni_record_start"}
+
+    @pytest.mark.parametrize("factor", ["NaN", "Infinity"])
+    def test_non_finite_factors_are_rejected(self, factor: str) -> None:
+        """NaN and Infinity factors are form errors, never domain values."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                db_pensions=(
+                    {
+                        "accrued_annual_pension": "8500",
+                        "statement_date": "2025-11-30",
+                        "normal_pension_age": "65",
+                        "revaluation_reference": "cpi",
+                        "early_late_factors": f"60:{factor}",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.field_key == "early_late_factors"
 
     def test_zero_age_factor_table_surfaces_the_core_message(self) -> None:
         """Factor-table validation (positive ages) surfaces on the field."""

@@ -12,6 +12,16 @@ from enum import Enum
 
 from glidepath.core import Money
 
+_MAX_STRUCTURED_LENGTH = 120
+
+
+def _format_mapping(value: Mapping[object, object]) -> str:
+    """A structured table as compact ``key=value`` pairs, truncated."""
+    rendered = "; ".join(f"{key}={format_value(entry)}" for key, entry in value.items())
+    if len(rendered) > _MAX_STRUCTURED_LENGTH:
+        return rendered[: _MAX_STRUCTURED_LENGTH - 1] + "…"
+    return rendered
+
 
 def format_money(value: Money) -> str:
     """A money amount as pounds and pence, e.g. ``£1,234.56``."""
@@ -36,8 +46,7 @@ def format_value(value: object) -> str:
 
     Covers every value type the domain model wraps: money, dates,
     numbers, enum choices, policy strings, and structured tables
-    (which summarise rather than dump — they are inspected in their
-    own views, not in a table cell).
+    (rendered as compact ``key=value`` pairs, truncated when long).
     """
     if isinstance(value, Money):
         return format_money(value)
@@ -48,5 +57,5 @@ def format_value(value: object) -> str:
     if isinstance(value, Enum):
         return str(value.name).replace("_", " ").capitalize()
     if isinstance(value, Mapping):
-        return f"structured table ({len(value)} entries)"
+        return _format_mapping(value)
     return str(value)

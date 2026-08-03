@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from glidepath.app import build_shell_view_model
 from glidepath.gui import inspector as inspector_module
 from glidepath.gui.widgets import MainWindow
-from glidepath.regions.uk import ISA_KIND
+from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
 
 if TYPE_CHECKING:
     import pytest
@@ -21,6 +21,7 @@ def filled_window() -> MainWindow:
     window = MainWindow(build_shell_view_model())
     facts = window.facts_pane
     facts.person_form.set_value("date_of_birth", "1991-02-01")
+    facts.person_form.set_value("tax_residency", str(RUK_RESIDENCY))
     facts.person_form.set_value("target_retirement_age", "60")
     facts.spending_form.set_value("annual_spending_real", "18000")
     wrapper_form = facts.wrappers.add_entry()
