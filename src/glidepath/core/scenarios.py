@@ -356,7 +356,8 @@ def _apply_to_household(
         _apply_to_outflow(outflow, picks) for outflow in household.planned_outflows
     )
     persons = tuple(_apply_to_person(person, picks) for person in household.persons)
-    return replace(household, persons=persons, planned_outflows=outflows)
+    resolved: Household = replace(household, persons=persons, planned_outflows=outflows)
+    return resolved
 
 
 def _apply_to_outflow(
@@ -367,9 +368,10 @@ def _apply_to_outflow(
     if override is None:
         return outflow
     label = f"planned_outflow[{outflow.id}].amount_real"
-    return replace(
+    resolved: PlannedOutflow = replace(
         outflow, amount_real=_resolved_decision(outflow.amount_real, override, label)
     )
+    return resolved
 
 
 def _apply_to_person(
@@ -424,7 +426,8 @@ def _apply_to_wrapper(
             wrapper.contributions.employee_amount, override, label
         ),
     )
-    return replace(wrapper, contributions=contributions)
+    resolved: Wrapper = replace(wrapper, contributions=contributions)
+    return resolved
 
 
 def _apply_to_db_pension(
