@@ -26,9 +26,11 @@ from typing import TYPE_CHECKING, Protocol
 from glidepath.core.investments import AssetReturns
 from glidepath.core.money import Rate
 from glidepath.core.provenance import AssumptionKey, decimal_assumption_value
-from glidepath.core.randomness import SeededRandomSource, derive_seed
+from glidepath.core.randomness import RandomSource, SeededRandomSource, derive_seed
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from glidepath.core.periods import Period
     from glidepath.core.provenance import TrackedAssumptions
 
@@ -173,10 +175,18 @@ class StochasticReturnModel:
     on the arguments — call order is irrelevant, paths are
     order-independent, and any single period of any path is
     individually re-runnable.
+
+    ``source_factory`` is the injectable :class:`RandomSource`
+    boundary of planning §4.6: it builds the substream for a derived
+    seed, defaulting to :class:`SeededRandomSource`. Injecting a
+    factory (a test double, an alternative generator) must preserve
+    purity: the source it returns may depend on nothing but the seed
+    it is given.
     """
 
     assumptions: TrackedAssumptions
     seed: int
+    source_factory: Callable[[int], RandomSource] = SeededRandomSource
 
     def returns_for(self, period: Period, path: int, /) -> PeriodReturns:
         """Draw the period's correlated nominal returns on ``path``.
@@ -208,7 +218,7 @@ class StochasticReturnModel:
             )
         )
         factor = cholesky_lower(self._correlation_matrix())
-        source = SeededRandomSource(
+        source = self.source_factory(
             derive_seed(self.seed, path, period.start.isoformat())
         )
         draws = source.standard_normals(_ASSET_CLASS_COUNT)

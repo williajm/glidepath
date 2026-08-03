@@ -25,6 +25,7 @@ from glidepath.core import (
     StochasticReturnModel,
     TrackedAssumptions,
     cholesky_lower,
+    derive_seed,
 )
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -273,6 +274,36 @@ class TestStochasticReturnModelBehaviour:
             equity_logs.append((_ONE + returns.assets.equity.value).ln())
             bond_logs.append((_ONE + returns.assets.bonds.value).ln())
         assert _pearson(equity_logs, bond_logs) > Decimal("0.6")
+
+    def test_source_factory_is_injectable(self) -> None:
+        """An injected RandomSource factory replaces the default streams.
+
+        The stub draws all-zero normals, so each rate collapses to the
+        closed form ``exp(ln(gross) - sigma^2/2) - 1`` — proof the
+        model's randomness came from the injected source, seeded with
+        the documented ``derive_seed(seed, path, period start)``.
+        """
+        requested: list[int] = []
+
+        class _ZeroSource:
+            """A stub source recording its seed and drawing zeros."""
+
+            def __init__(self, seed: int) -> None:
+                requested.append(seed)
+
+            def standard_normals(self, count: int, /) -> tuple[Decimal, ...]:
+                """All-zero draws, so rates take their closed form."""
+                return (_ZERO,) * count
+
+        instance = StochasticReturnModel(
+            assumptions=tracked(), seed=17, source_factory=_ZeroSource
+        )
+        returns = instance.returns_for(PERIOD, 4)
+        assert requested == [derive_seed(17, 4, PERIOD.start.isoformat())]
+        gross = (_ONE + Decimal("0.04")) * (_ONE + Decimal("0.02"))
+        sigma = Decimal("0.18")
+        mu = gross.ln() - sigma * sigma / Decimal(2)
+        assert returns.assets.equity.value == mu.exp() - _ONE
 
     def test_every_assumption_read_is_recorded(self) -> None:
         """All ten stochastic inputs land in the run's provenance."""

@@ -49,6 +49,10 @@ class TestDeriveSeed:
         assert derive_seed(0, 1, 2) != derive_seed(0, 12)
         assert derive_seed(0, "a", "b") != derive_seed(0, "ab")
 
+    def test_integer_and_string_spellings_are_distinct_parts(self) -> None:
+        """The type tag keeps ``1`` and ``"1"`` on different substreams."""
+        assert derive_seed(0, 1) != derive_seed(0, "1")
+
     def test_string_parts_scope_substreams(self) -> None:
         """A period label yields a different substream from the bare path."""
         assert derive_seed(7, 4, "2026-04-06") != derive_seed(7, 4)
@@ -56,11 +60,11 @@ class TestDeriveSeed:
     def test_derivation_scheme_is_pinned(self) -> None:
         """A changed digest scheme would re-randomise stored runs.
 
-        The expected value is the BLAKE2b-128 digest of the
+        The expected value is the BLAKE2b-128 digest of the type-tagged,
         length-prefixed parts ``(0, 0)``, computed once when the scheme
         was fixed (roadmap 7.1).
         """
-        assert derive_seed(0, 0) == 0xF2CA0B5858EC2319842FFAACFC8E53AE
+        assert derive_seed(0, 0) == 0x66B9B5A5923F03EB9F5C3AB9911D30E3
 
 
 class TestSeededRandomSource:

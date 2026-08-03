@@ -196,7 +196,13 @@ The derivation must be an explicit integer/bytes function (e.g. a
 fixed-width digest of seed and path index): `random.Random((seed, i))` is
 a `TypeError` on our pinned Python (3.11+ restricts seed types to
 None/int/float/str/bytes/bytearray), so the derivation cannot be delegated
-to the seed argument. Reproducibility is defined over a **run manifest**
+to the seed argument. Normal draws come from `random()` uniforms (the one
+generator sequence Python guarantees stable across versions) transformed
+by Marsaglia's polar method computed in `Decimal` — never the libm-backed
+float distribution methods (`gauss` et al.), whose last-bit rounding
+varies by platform — so identical seeds give bit-identical draws across
+Python versions and operating systems (this checkout runs on both Windows
+and WSL). Reproducibility is defined over a **run manifest**
 persisted with every result: effective plan (facts + decisions), effective
 assumptions, the full `RunConfig` (`today`, horizon, mode, path count,
 withdrawal strategy, seed), the region data content version, and the
@@ -211,8 +217,8 @@ internally. **Accepted cost:** Decimal MC is slow — annual steps and small
 state keep it tractable; a measurement task gates any revisit (§8, 7.2).
 Measured 2026-08-03 (roadmap 7.2; Windows 11, Python 3.14.6, via
 `scripts/measure_mc_performance.py`): one stochastic `returns_for` draw
-≈ 75 µs; one 60-period engine pass ≈ 28 ms; projected per-path cost
-≈ 32 ms → ≈ 3 s per 100 paths, ≈ 32 s per 1,000 paths. Within the
+≈ 146 µs; one 60-period engine pass ≈ 28 ms; projected per-path cost
+≈ 36 ms → ≈ 4 s per 100 paths, ≈ 36 s per 1,000 paths. Within the
 accepted envelope — no optimisation before the 7.3 path runner exists
 and is measured end-to-end.
 
