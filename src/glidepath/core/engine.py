@@ -420,23 +420,35 @@ class _AnnuityStream:
     planning §5.1). A stream created mid-run first advances at the
     period after its purchase, so its first period pays the purchased
     rate pro-rated from the exact start date.
+
+    Escalation accrues from that exact start date, not the period
+    boundary: ``purchase_period_share`` is the entitlement's share of
+    the purchase period (the same share its first income pro-rates
+    by), and the first boundary advance consumes it in place of the
+    whole period's fraction — a mid-period purchase must not collect a
+    full period of escalation (§4.1 linear whole-month convention).
     """
 
     annuity_type: AnnuityType
     start: date
     base_annual: Money
     escalation: Rate
+    purchase_period_share: Decimal | None = None
     factor: Decimal = _ONE
 
     def advance(self, cpi: Decimal, fraction: Decimal) -> None:
         """Compound one completed period's escalation (§5.2 linear scaling)."""
+        share = fraction
+        if self.purchase_period_share is not None:
+            share = self.purchase_period_share
+            self.purchase_period_share = None
         if self.annuity_type is AnnuityType.ESCALATING:
             rate = self.escalation.value
         elif self.annuity_type is AnnuityType.INFLATION_LINKED:
             rate = cpi
         else:
             return
-        self.factor *= _ONE + rate * fraction
+        self.factor *= _ONE + rate * share
 
 
 def run(
@@ -912,6 +924,9 @@ class _Projection:
                     start=due,
                     base_annual=capital * rate,
                     escalation=self._annuity_pricing_table().escalation,
+                    purchase_period_share=entitlement_active_fraction(
+                        due, period, self.config.today, self._horizon_end()
+                    ),
                 )
             )
         return lump_sum
@@ -1167,7 +1182,9 @@ class _Projection:
         net cash delivered toward the need.
         """
         sources = self._withdrawal_sources(ledgers, period)
-        price_yield = strategy.uses_natural_yield
+        # Opt-in marker, deliberately not a protocol member: a strategy
+        # that never declares it simply gets no yield pricing (§5.2).
+        price_yield = getattr(strategy, "uses_natural_yield", False)
         views: list[WithdrawalSource] = []
         for source in sources.values():
             natural_yield = _ZERO

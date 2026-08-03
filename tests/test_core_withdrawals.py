@@ -294,10 +294,6 @@ class TestGuardrails:
         assert isinstance(plan, NetWithdrawalPlan)
         assert plan.target == ZERO
 
-    def test_does_not_use_natural_yield(self) -> None:
-        """Guardrails never asks the engine to price portfolio income."""
-        assert GuardrailsWithdrawalStrategy().uses_natural_yield is False
-
     def test_unordered_guardrails_are_rejected(self) -> None:
         """The lower rail must sit strictly below the upper."""
         rail = Rate(Decimal("0.05"))
@@ -361,13 +357,20 @@ class TestNaturalYield:
         assert plan.draws == ()
 
     def test_declares_it_uses_natural_yield(self) -> None:
-        """The engine prices yields only for strategies that declare it."""
+        """Only this strategy carries the opt-in pricing marker.
+
+        The marker is deliberately not a protocol member: a strategy
+        that never declares it — every other shipped one included —
+        simply gets no yield pricing, so implementations that only
+        define ``withdraw`` keep working.
+        """
         assert NaturalYieldWithdrawalStrategy().uses_natural_yield is True
-        assert FixedRealWithdrawalStrategy().uses_natural_yield is False
-        assert (
-            FixedPercentWithdrawalStrategy(rate=Rate(Decimal(0))).uses_natural_yield
-            is False
-        )
+        for unmarked in (
+            FixedRealWithdrawalStrategy(),
+            FixedPercentWithdrawalStrategy(rate=Rate(Decimal(0))),
+            GuardrailsWithdrawalStrategy(),
+        ):
+            assert getattr(unmarked, "uses_natural_yield", False) is False
 
 
 class TestValidation:

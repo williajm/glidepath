@@ -467,7 +467,12 @@ basis. Income is wholly taxable, starts at the exact purchase date
 (pro-rated in its first period, §4.1), and escalates per product:
 level holds nominal; escalating compounds the table's fixed rate;
 inflation-linked tracks the run's CPI path exactly — annuity
-contracts, unlike statutory upratings, are not floored at zero. When
+contracts, unlike statutory upratings, are not floored at zero.
+Escalation accrues from the exact start date, not the period
+boundary: the purchase period's boundary advance scales by the
+entitlement's share of that period (§4.1 linear whole-month
+convention), so a mid-period purchase never collects a full period
+of escalation. When
 an `UP_FRONT_LUMP_SUM` crystallisation event lands in the same
 period, the purchase — a step-2 income event — resolves first, so its
 uncrystallised slice still carries tax-free cash (§5.2).
@@ -658,7 +663,10 @@ is gross-defined: each accessible source is drawn by exactly the
 income its balance throws off — the wrapper allocation weighted over
 the `yield.*` assumptions (§7), scaled by the period's active
 fraction. The engine prices those yields only for a strategy that
-declares it spends portfolio income (`uses_natural_yield`), so the
+declares it spends portfolio income (`uses_natural_yield`, an
+optional class-level marker rather than a protocol member — an
+absent marker means false, so strategies implementing only
+`withdraw` keep working), so the
 yield keys enter provenance exactly when they enter the result; a
 yield drawn from an uncrystallised pension pot resolves through the
 normal payment machinery (an income draw is a withdrawal, taxed by

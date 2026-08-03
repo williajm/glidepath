@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from decimal import ROUND_DOWN, Decimal
-from typing import ClassVar
 
 import pytest
 
@@ -723,8 +722,6 @@ class UncrystallisedOnlyStrategy:
     pre-existing drawdown funds the plan did not select.
     """
 
-    uses_natural_yield: ClassVar[bool] = False
-
     def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
         """Target the need over open uncrystallised sources only."""
         order = tuple(
@@ -740,8 +737,6 @@ class RecordingWithdrawalStrategy:
     """Fixed-real behaviour that captures each period's state."""
 
     states: list[WithdrawalState] = dataclass_field(default_factory=list)
-
-    uses_natural_yield: ClassVar[bool] = False
 
     def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
         """Record the state, then plan exactly as fixed-real does."""
@@ -2186,8 +2181,6 @@ class OrderedNetStrategy:
     target: Money
     order: tuple[WithdrawalSourceId, ...]
 
-    uses_natural_yield: ClassVar[bool] = False
-
     def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
         """Ignore the state and need; the plan is preconfigured."""
         del state, need
@@ -2819,6 +2812,31 @@ class TestAnnuityPurchases:
         assert at_purchase.annuity_income == Money(Decimal("2500.00"))
         [after] = result.snapshots[2].persons
         assert after.annuity_income == Money(Decimal("2575.00"))
+
+    def test_a_mid_period_purchase_escalates_from_its_start_date(self) -> None:
+        """The first escalation covers only the months since purchase.
+
+        Born mid-1960, the age-67 purchase fires on 1 July 2027 — six
+        whole months of that period — so 2027 pays half the 2,500
+        bought income and the 2028 escalation accrues 3% over half a
+        year: 2,500 x 1.015 = 2,537.50, not a full year's 2,575.
+        """
+        pension = wrapper_of(PENSION, "40000", crystallised="20000")
+        plan = household_of(
+            person_of(
+                (pension,),
+                date_of_birth=date(1960, 7, 1),
+                retire_at=60,
+                annuity_purchases=(
+                    annuity_purchase_of(annuity_type=AnnuityType.ESCALATING),
+                ),
+            )
+        )
+        result = run(plan, annuity_assumptions(), stub_region(), three_period_config())
+        [at_purchase] = result.snapshots[1].persons
+        assert at_purchase.annuity_income == Money(Decimal("1250.00"))
+        [after] = result.snapshots[2].persons
+        assert after.annuity_income == Money(Decimal("2537.50"))
 
     def test_an_inflation_linked_annuity_tracks_the_cpi_path(self) -> None:
         """At 10% CPI the bought income rises 10% the following year.

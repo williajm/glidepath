@@ -237,20 +237,16 @@ class WithdrawalStrategy(Protocol):
     scenario what-if whitelist (planning §4.3) — carried on the run
     configuration (§5.2). Implementations must be pure: the same state
     and need always produce the same plan (planning §4.6).
+
+    A strategy that spends portfolio income may additionally declare a
+    class-level ``uses_natural_yield = True`` (see
+    :class:`NaturalYieldWithdrawalStrategy`): the engine then prices
+    each source's natural yield from the ``yield.*`` assumption keys
+    (planning §7). The marker is deliberately *not* part of this
+    protocol — pricing is opt-in, so an absent marker simply means
+    ``False`` and a strategy that only implements ``withdraw`` keeps
+    working (roadmap 5.3).
     """
-
-    @property
-    def uses_natural_yield(self) -> bool:
-        """Whether the engine must price each source's natural yield.
-
-        Pricing reads the ``yield.*`` assumption keys (planning §7),
-        and every assumption read lands in the run's provenance — so
-        only strategies that actually spend portfolio income declare
-        this, and every other run's provenance stays free of yield
-        keys (roadmap 5.3). Implementations state it as a class-level
-        constant.
-        """
-        ...
 
     def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
         """Plan one period's withdrawals toward ``need`` net cash.
@@ -304,8 +300,6 @@ class FixedRealWithdrawalStrategy:
     default strategy.
     """
 
-    uses_natural_yield: ClassVar[bool] = False
-
     def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
         """Target the whole need over the default tax-aware order."""
         order = tuple(entry.id for entry in tax_aware_order(state.sources))
@@ -326,8 +320,6 @@ class FixedPercentWithdrawalStrategy:
     """
 
     rate: Rate
-
-    uses_natural_yield: ClassVar[bool] = False
 
     def __post_init__(self) -> None:
         """Require a rate in [0, 1] — a share of the pot, per year."""
@@ -383,8 +375,6 @@ class GuardrailsWithdrawalStrategy:
     cut_fraction: Decimal = _DEFAULT_ADJUSTMENT
     rise_fraction: Decimal = _DEFAULT_ADJUSTMENT
 
-    uses_natural_yield: ClassVar[bool] = False
-
     def __post_init__(self) -> None:
         """Require ordered positive guardrails and fractions in [0, 1]."""
         if not _ZERO_FRACTION < self.lower_guardrail.value < self.upper_guardrail.value:
@@ -426,7 +416,8 @@ class NaturalYieldWithdrawalStrategy:
     period natural yield (:attr:`WithdrawalSource.natural_yield`) —
     the income its balance throws off at the shipped per-asset yield
     assumptions, which the engine prices only because this strategy
-    declares ``uses_natural_yield``. Draws follow the default
+    declares ``uses_natural_yield`` (an opt-in marker, not a protocol
+    member — see :class:`WithdrawalStrategy`). Draws follow the default
     tax-aware order, and a yield taken from an uncrystallised pension
     pot resolves through the normal payment machinery (in the model an
     income draw is a withdrawal, so its tax follows the wrapper's
