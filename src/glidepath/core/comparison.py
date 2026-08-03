@@ -11,9 +11,10 @@ against the base.
 Rows cover the union of the runs' periods (a scenario overriding the
 planning-age assumption projects a different horizon); a run simply has
 no entry in a period it never modelled, and a delta appears only where
-the base modelled the period too. Metric amounts are presentation
-values (quantized, planning §4.6); deltas are exact differences of
-those.
+the base modelled the period too — over the *same* interval: a
+horizon-clipped partial period (``year_fraction`` < 1) never diffs
+against a whole one. Metric amounts are presentation values (quantized,
+planning §4.6); deltas are exact differences of those.
 """
 
 from dataclasses import dataclass, fields
@@ -26,6 +27,7 @@ from glidepath.core.scenarios import ScenarioError, resolve_scenario
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from decimal import Decimal
 
     from glidepath.core.config import RunConfig
     from glidepath.core.entities import Household
@@ -90,12 +92,18 @@ class PeriodMetrics:
 class ScenarioPeriodEntry:
     """One run's metrics in one period, with its delta vs the base.
 
-    ``delta_vs_base`` is ``None`` on the base run's own entries and on
-    a period the base run never modelled.
+    ``year_fraction`` is the whole-month fraction of the period this
+    run actually modelled (planning §5.2) — less than 1 when ``today``
+    or the run's horizon fell mid-period. ``delta_vs_base`` is ``None``
+    on the base run's own entries, on a period the base run never
+    modelled, and on a period the two runs modelled over *different*
+    intervals (unequal year fractions): flows over half a year minus
+    flows over a whole year is not a meaningful delta.
     """
 
     run_name: str
     metrics: PeriodMetrics
+    year_fraction: Decimal
     delta_vs_base: PeriodMetrics | None
 
 
@@ -124,15 +132,24 @@ def run_scenarios(
     household: Household,
     assumptions: AssumptionSet,
     scenarios: Sequence[Scenario],
-    region: Region,
+    region_for: Callable[[AssumptionSet], Region],
     config: RunConfig,
 ) -> tuple[tuple[str, ProjectionResult], ...]:
     """Project the base plan and every scenario's resolved inputs.
 
     Returns named runs — the base first under :data:`BASE_RUN_NAME`,
     then one per scenario in the given order — ready for
-    :func:`compare_scenario_results`. All runs share ``config``: run
-    settings are not scenario-overridable in v1.
+    :func:`compare_scenario_results`.
+
+    ``region_for`` builds the region bundle for one run from that
+    run's *effective* assumption set. Regions derive data from
+    assumptions at build time (e.g. the UK future-years tax extension
+    and state pension uprating read ``policy.tax.future_years``,
+    ``inflation.cpi``, and ``policy.state_pension.uprating``), so a
+    prebuilt region shared across runs would silently pin every
+    scenario to the base policy and misreport the region data version;
+    the factory rebuilds it per resolved set instead. All runs share
+    ``config``: run settings are not scenario-overridable in v1.
 
     Raises:
         ScenarioError: If a scenario has orphaned overrides, a
@@ -144,13 +161,19 @@ def run_scenarios(
     if BASE_RUN_NAME in names or len(set(names)) != len(names):
         msg = f"scenario names must be unique and none may be {BASE_RUN_NAME!r}"
         raise ScenarioError(msg)
-    runs = [(BASE_RUN_NAME, run(household, assumptions, region, config))]
+    base_region = region_for(assumptions)
+    runs = [(BASE_RUN_NAME, run(household, assumptions, base_region, config))]
     for scenario in scenarios:
         resolution = resolve_scenario(household, assumptions, scenario)
         runs.append(
             (
                 scenario.name,
-                run(resolution.household, resolution.assumptions, region, config),
+                run(
+                    resolution.household,
+                    resolution.assumptions,
+                    region_for(resolution.assumptions),
+                    config,
+                ),
             )
         )
     return tuple(runs)
@@ -172,38 +195,61 @@ def compare_scenario_results(
     if len(set(names)) != len(names):
         msg = "scenario comparison run names must be unique"
         raise ValueError(msg)
-    per_run = [(name, _metrics_by_period(result, basis)) for name, result in runs]
-    base_metrics = per_run[0][1]
-    periods = sorted({period for _, metrics in per_run for period in metrics})
+    per_run = [(name, _totals_by_period(result, basis)) for name, result in runs]
+    base_totals = per_run[0][1]
+    periods = sorted({period for _, totals in per_run for period in totals})
     rows = []
     for period in periods:
         entries = []
-        base_in_period = base_metrics.get(period)
-        for index, (name, metrics) in enumerate(per_run):
-            in_period = metrics.get(period)
-            if in_period is None:
+        base_total = base_totals.get(period)
+        for index, (name, totals) in enumerate(per_run):
+            total = totals.get(period)
+            if total is None:
                 continue
             delta = None
-            if index > 0 and base_in_period is not None:
-                delta = in_period - base_in_period
+            if (
+                index > 0
+                and base_total is not None
+                and total.year_fraction == base_total.year_fraction
+            ):
+                delta = total.metrics - base_total.metrics
             entries.append(
                 ScenarioPeriodEntry(
-                    run_name=name, metrics=in_period, delta_vs_base=delta
+                    run_name=name,
+                    metrics=total.metrics,
+                    year_fraction=total.year_fraction,
+                    delta_vs_base=delta,
                 )
             )
         rows.append(ComparisonRow(period=period, entries=tuple(entries)))
     return ScenarioComparison(basis=basis, run_names=tuple(names), rows=tuple(rows))
 
 
-def _metrics_by_period(
+@dataclass(frozen=True, slots=True)
+class _PeriodTotals:
+    """One run's household totals for one period, with its interval."""
+
+    metrics: PeriodMetrics
+    year_fraction: Decimal
+
+
+def _totals_by_period(
     result: ProjectionResult, basis: ReportBasis
-) -> dict[Period, PeriodMetrics]:
-    """Household-level period totals of one run, in the report's basis."""
-    totals: dict[Period, PeriodMetrics] = {}
+) -> dict[Period, _PeriodTotals]:
+    """Household-level period totals of one run, in the report's basis.
+
+    Persons within a period sum; the period's ``year_fraction`` is the
+    snapshot's own (one snapshot per period, so persons share it).
+    """
+    totals: dict[Period, _PeriodTotals] = {}
     for row in build_report(result, basis).rows:
         metrics = _row_metrics(row)
         existing = totals.get(row.period)
-        totals[row.period] = metrics if existing is None else existing + metrics
+        if existing is not None:
+            metrics = existing.metrics + metrics
+        totals[row.period] = _PeriodTotals(
+            metrics=metrics, year_fraction=row.year_fraction
+        )
     return totals
 
 

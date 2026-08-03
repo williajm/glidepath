@@ -6,14 +6,15 @@ corrections propagate to every what-if automatically. Targets are either
 assumption keys or **decision variables** addressed by stable entity id +
 field path, so overrides survive reordering and insertion.
 
-The facts/decisions boundary is type-enforced (planning §4.3): only
-``Decision[T]``-wrapped plan fields are addressable — the field-path
-grammar simply has no way to name a ``Fact``, so nothing user-stated can
-be silently replaced. An override whose target cannot be addressed in the
-plan (the entity is gone, the field path is unknown, or the optional
-record it lives on is absent) is an *orphan*: it flags the scenario
-invalid (:func:`scenario_orphans`) without breaking anything else, until
-the user removes or retargets it.
+The facts/decisions boundary is type-enforced (planning §4.3): the
+field-path grammar names only decision variables — ``Decision[T]``
+fields, plus the annuity purchase's plain enum choices (the record is
+wholly a decision, §5.1) — and has no way to name a ``Fact``, so
+nothing user-stated can be silently replaced. An override whose target
+cannot be addressed in the plan (the entity is gone, the field path is
+unknown, or the optional record it lives on is absent) is an *orphan*:
+it flags the scenario invalid (:func:`scenario_orphans`) without
+breaking anything else, until the user removes or retargets it.
 
 Resolution (:func:`resolve_scenario`) computes effective inputs =
 base ⊕ overrides: overridden assumptions carry ``SCENARIO_OVERRIDE``
@@ -23,6 +24,7 @@ provenance in-type; overridden decisions keep the base's ``recorded_on``
 where a decision override's ``SCENARIO_OVERRIDE`` provenance lives.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -67,8 +69,13 @@ class DecisionTarget:
       ``state_pension.deferral_years``
     - wrapper: ``contributions.employee_amount``
     - DB pension: ``taken_at_age``, ``commuted_fraction``
-    - annuity purchase: ``at_age``, ``fraction_of_pot``
+    - annuity purchase: ``at_age``, ``fraction_of_pot``,
+      ``annuity_type``, ``basis``
     - planned outflow: ``amount_real``
+
+    Most paths name ``Decision[T]`` fields; the annuity purchase's
+    ``annuity_type`` and ``basis`` are plain enum fields, addressable
+    because the record is wholly a decision (planning §5.1).
     """
 
     entity_id: EntityId
@@ -282,9 +289,38 @@ def _person_decision_target_labels(person: Person) -> dict[tuple[EntityId, str],
             f"db_pension[{pension.id}].commuted_fraction"
         )
     for purchase in person.annuity_purchases:
-        for field in ("at_age", "fraction_of_pot"):
+        for field in ("at_age", "fraction_of_pot", "annuity_type", "basis"):
             labels[(purchase.id, field)] = f"annuity_purchase[{purchase.id}].{field}"
     return labels
+
+
+def _check_value_type(base_value: object, override_value: object, label: str) -> None:
+    """Reject an override value shaped unlike the base value it replaces.
+
+    Scalars must match the base's exact runtime type (``bool`` is an
+    ``int`` subtype but never a number here, §4.6 spirit). A mapping
+    base accepts *any* mapping: shipped structured defaults arrive as
+    read-only ``MappingProxyType`` views, while user overrides are
+    ordinarily plain dicts, and the structured-assumption parsers
+    accept either.
+
+    Raises:
+        ScenarioError: If the value's shape does not match.
+    """
+    if isinstance(base_value, Mapping):
+        if isinstance(override_value, Mapping):
+            return
+        msg = (
+            f"override on {label} must hold a mapping,"
+            f" got {type(override_value).__name__}"
+        )
+        raise ScenarioError(msg)
+    if type(override_value) is not type(base_value):
+        msg = (
+            f"override on {label} must hold a {type(base_value).__name__},"
+            f" got {type(override_value).__name__}"
+        )
+        raise ScenarioError(msg)
 
 
 def _resolved_decision(
@@ -296,12 +332,7 @@ def _resolved_decision(
     (planning §4.6); the override's own provenance lives in the
     resolution's ``applied`` record.
     """
-    if type(override.value) is not type(base.value):
-        msg = (
-            f"override on {label} must hold a {type(base.value).__name__},"
-            f" got {type(override.value).__name__}"
-        )
-        raise ScenarioError(msg)
+    _check_value_type(base.value, override.value, label)
     return Decision(
         value=override.value, recorded_on=base.recorded_on, note=override.note
     )
@@ -337,12 +368,7 @@ def _overridden_assumption(
     still answer "what would this have been?"; provenance becomes
     ``SCENARIO_OVERRIDE``.
     """
-    if type(override.value) is not type(base.value):
-        msg = (
-            f"override on {base.key.value} must hold a"
-            f" {type(base.value).__name__}, got {type(override.value).__name__}"
-        )
-        raise ScenarioError(msg)
+    _check_value_type(base.value, override.value, base.key.value)
     return replace(base, value=override.value, provenance=Provenance.SCENARIO_OVERRIDE)
 
 
@@ -453,7 +479,13 @@ def _apply_to_db_pension(
 def _apply_to_annuity_purchase(
     purchase: AnnuityPurchase, picks: dict[tuple[EntityId, str], Override]
 ) -> AnnuityPurchase:
-    """One annuity purchase with its decision overrides applied."""
+    """One annuity purchase with its decision overrides applied.
+
+    ``annuity_type`` and ``basis`` are plain enum fields — the whole
+    record is a decision (planning §5.1) — so their overrides replace
+    the value directly; the override's note lives only in the
+    resolution's ``applied`` record.
+    """
     changes: dict[str, Any] = {}
     for field in ("at_age", "fraction_of_pot"):
         override = picks.get((purchase.id, field))
@@ -463,4 +495,10 @@ def _apply_to_annuity_purchase(
                 override,
                 f"annuity_purchase[{purchase.id}].{field}",
             )
+    for field in ("annuity_type", "basis"):
+        override = picks.get((purchase.id, field))
+        if override is not None:
+            label = f"annuity_purchase[{purchase.id}].{field}"
+            _check_value_type(getattr(purchase, field), override.value, label)
+            changes[field] = override.value
     return replace(purchase, **changes) if changes else purchase

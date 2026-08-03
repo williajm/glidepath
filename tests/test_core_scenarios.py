@@ -9,6 +9,7 @@ along with orphan detection and the type-enforced facts boundary.
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import MappingProxyType
 
 import pytest
 
@@ -160,11 +161,18 @@ def base_household(*, with_state_pension: bool = True) -> Household:
 
 
 def base_assumptions() -> AssumptionSet:
-    """A small default-provenance assumption set."""
-    entries = {
+    """A small default-provenance assumption set.
+
+    The glide-shape entry is a read-only mapping proxy, matching how
+    the UK loader ships structured defaults.
+    """
+    entries: dict[AssumptionKey, object] = {
         AssumptionKey.INFLATION_CPI: Decimal("0.02"),
         AssumptionKey.RETURNS_EQUITY_REAL: Decimal("0.05"),
         AssumptionKey.HORIZON_PLANNING_AGE: 95,
+        AssumptionKey.GLIDEPATH_DEFAULT_SHAPE: MappingProxyType(
+            {"equity_start": Decimal("0.8")}
+        ),
     }
     return AssumptionSet(
         Assumption(
@@ -394,6 +402,37 @@ class TestResolution:
         assert purchase.at_age.value == 75
         assert purchase.fraction_of_pot.value == Decimal("0.75")
 
+    def test_annuity_product_overrides(self) -> None:
+        """Product type and basis are addressable: the record is a decision."""
+        scenario = Scenario(
+            name="inflation-linked-joint",
+            overrides=(
+                decision_override(
+                    ANNUITY_ID, "annuity_type", AnnuityType.INFLATION_LINKED
+                ),
+                decision_override(ANNUITY_ID, "basis", AnnuityBasis.JOINT),
+            ),
+        )
+        resolution = resolve_scenario(base_household(), base_assumptions(), scenario)
+        purchase = resolution.household.persons[0].annuity_purchases[0]
+        assert purchase.annuity_type is AnnuityType.INFLATION_LINKED
+        assert purchase.basis is AnnuityBasis.JOINT
+        assert purchase.at_age.value == 70
+
+    def test_mapping_assumption_accepts_any_mapping(self) -> None:
+        """Shipped mapping defaults are proxies; dict overrides are legal."""
+        shape = {"equity_start": Decimal("0.6")}
+        scenario = Scenario(
+            name="flatter-glide",
+            overrides=(
+                assumption_override(AssumptionKey.GLIDEPATH_DEFAULT_SHAPE, shape),
+            ),
+        )
+        resolution = resolve_scenario(base_household(), base_assumptions(), scenario)
+        resolved = resolution.assumptions.get(AssumptionKey.GLIDEPATH_DEFAULT_SHAPE)
+        assert resolved.value == shape
+        assert resolved.provenance is Provenance.SCENARIO_OVERRIDE
+
     def test_state_pension_overrides(self) -> None:
         """Both state pension decisions replace on the person's record."""
         scenario = Scenario(
@@ -494,6 +533,26 @@ class TestTypeEnforcement:
         household = base_household()
         assumptions = base_assumptions()
         with pytest.raises(ScenarioError, match="must hold a Decimal, got int"):
+            resolve_scenario(household, assumptions, scenario)
+
+    def test_non_mapping_cannot_replace_mapping(self) -> None:
+        """A scalar cannot replace a structured table assumption."""
+        override = assumption_override(
+            AssumptionKey.GLIDEPATH_DEFAULT_SHAPE, Decimal(1)
+        )
+        scenario = Scenario(name="mistyped", overrides=(override,))
+        household = base_household()
+        assumptions = base_assumptions()
+        with pytest.raises(ScenarioError, match="must hold a mapping, got Decimal"):
+            resolve_scenario(household, assumptions, scenario)
+
+    def test_mistyped_enum_value_is_rejected(self) -> None:
+        """A string cannot replace an annuity product enum."""
+        override = decision_override(ANNUITY_ID, "annuity_type", "level")
+        scenario = Scenario(name="mistyped", overrides=(override,))
+        household = base_household()
+        assumptions = base_assumptions()
+        with pytest.raises(ScenarioError, match="must hold a AnnuityType, got str"):
             resolve_scenario(household, assumptions, scenario)
 
     def test_entity_invariants_still_apply(self) -> None:

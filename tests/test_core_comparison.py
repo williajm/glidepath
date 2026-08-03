@@ -140,13 +140,18 @@ def person_result(
     )
 
 
-def snapshot_of(year: int, *persons: PersonPeriodResult) -> PeriodSnapshot:
+def snapshot_of(
+    year: int,
+    *persons: PersonPeriodResult,
+    year_fraction: Decimal = Decimal(1),
+) -> PeriodSnapshot:
     """One period's snapshot at zero inflation."""
     return PeriodSnapshot(
         period=period_of(year),
         returns=zero_returns(),
         inflation_factor=Decimal(1),
         persons=persons,
+        year_fraction=year_fraction,
     )
 
 
@@ -221,6 +226,19 @@ class TestCompareScenarioResults:
         couple_entry = row.entries[1]
         assert couple_entry.metrics.closing_balance == Money(Decimal(160))
         assert couple_entry.metrics.income_total == Money(Decimal(10))
+
+    def test_mismatched_intervals_suppress_the_delta(self) -> None:
+        """A partial period never diffs against a whole one."""
+        base = result_of(snapshot_of(2026, person_result("p", "100")))
+        clipped = result_of(
+            snapshot_of(2026, person_result("p", "50"), year_fraction=Decimal("0.5"))
+        )
+        comparison = compare_scenario_results([("base", base), ("clipped", clipped)])
+        (row,) = comparison.rows
+        base_entry, clipped_entry = row.entries
+        assert base_entry.year_fraction == Decimal(1)
+        assert clipped_entry.year_fraction == Decimal("0.5")
+        assert clipped_entry.delta_vs_base is None
 
     def test_basis_is_recorded(self) -> None:
         """The chosen presentation basis lands on the comparison."""
@@ -349,6 +367,12 @@ def stub_region() -> Region:
     )
 
 
+def stub_region_for(assumptions: AssumptionSet) -> Region:
+    """A region factory for runs; the stubs carry no assumption-derived data."""
+    del assumptions
+    return stub_region()
+
+
 def base_assumptions() -> AssumptionSet:
     """Zero inflation, 10% real equity return, no fees, planning age 95."""
     values: dict[AssumptionKey, object] = {
@@ -416,7 +440,7 @@ class TestRunScenarios:
             one_wrapper_household(),
             base_assumptions(),
             (flat_markets_scenario(),),
-            stub_region(),
+            stub_region_for,
             config,
         )
         assert [name for name, _ in runs] == ["base", "flat-markets"]
@@ -428,22 +452,48 @@ class TestRunScenarios:
         assert flat_entry.delta_vs_base is not None
         assert flat_entry.delta_vs_base.closing_balance == Money(Decimal(-100))
 
+    def test_region_factory_receives_resolved_assumptions(self) -> None:
+        """Each run's region builds from that run's effective assumptions.
+
+        Regions derive data from assumptions at build time (the UK
+        future-years extension and uprating policy), so a scenario's
+        region must see the scenario's overrides, not the base values.
+        """
+        seen: list[AssumptionSet] = []
+
+        def recording_region_for(assumptions: AssumptionSet) -> Region:
+            seen.append(assumptions)
+            return stub_region()
+
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2026, 12, 31))
+        run_scenarios(
+            one_wrapper_household(),
+            base_assumptions(),
+            (flat_markets_scenario(),),
+            recording_region_for,
+            config,
+        )
+        base_seen, scenario_seen = seen
+        base_value = base_seen.get(AssumptionKey.RETURNS_EQUITY_REAL)
+        assert base_value.value == Decimal("0.10")
+        resolved = scenario_seen.get(AssumptionKey.RETURNS_EQUITY_REAL)
+        assert resolved.value == Decimal(0)
+        assert resolved.provenance is Provenance.SCENARIO_OVERRIDE
+
     def test_reserved_base_name_is_rejected(self) -> None:
         """No scenario may shadow the base run's name."""
         household = one_wrapper_household()
         assumptions = base_assumptions()
-        region = stub_region()
         config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2026, 12, 31))
         scenarios = (Scenario(name="base"),)
         with pytest.raises(ScenarioError, match="none may be 'base'"):
-            run_scenarios(household, assumptions, scenarios, region, config)
+            run_scenarios(household, assumptions, scenarios, stub_region_for, config)
 
     def test_duplicate_scenario_names_are_rejected(self) -> None:
         """Two scenarios under one name would be indistinguishable."""
         household = one_wrapper_household()
         assumptions = base_assumptions()
-        region = stub_region()
         config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2026, 12, 31))
         scenarios = (Scenario(name="twin"), Scenario(name="twin"))
         with pytest.raises(ScenarioError, match="unique"):
-            run_scenarios(household, assumptions, scenarios, region, config)
+            run_scenarios(household, assumptions, scenarios, stub_region_for, config)
