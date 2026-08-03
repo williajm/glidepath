@@ -872,61 +872,91 @@ class _Projection:
         horizon_end = self._horizon_end()
         for purchase in self.person.annuity_purchases:
             due = annuity_start_date(purchase, self.person.date_of_birth.value)
-            if not period.contains(due) or due > horizon_end:
-                continue
-            rate = self._annuity_rate_for(purchase.annuity_type, purchase)
-            fraction = purchase.fraction_of_pot.value
-            capital = _ZERO
-            for ledger in ledgers:
-                treatment = ledger.treatment
-                pension = (
-                    treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
-                )
-                if not pension:
-                    continue
-                crystallised_draw = ledger.crystallised * fraction
-                uncrystallised_draw = ledger.uncrystallised * fraction
-                gate_open = self.region.wrappers.is_access_open(
-                    ledger.wrapper.kind, self.person.date_of_birth.value, period
-                )
-                if uncrystallised_draw > _ZERO and not gate_open:
-                    msg = (
-                        f"annuity purchase {purchase.id} crystallises wrapper"
-                        f" {ledger.wrapper.id} before its access gate opens"
-                    )
-                    raise EngineError(msg)
-                tax_free = _ZERO
-                free_fraction = treatment.tax_free_fraction
-                if uncrystallised_draw > _ZERO and free_fraction is not None:
-                    tax_free = uncrystallised_draw * free_fraction.value
-                    headroom = self._lsa_headroom(period)
-                    if headroom is not None:
-                        tax_free = min(tax_free, headroom)
-                    self._lsa_used = self._lsa_used + tax_free
-                ledger.uncrystallised = ledger.uncrystallised - uncrystallised_draw
-                ledger.crystallised = ledger.crystallised - crystallised_draw
-                ledger.withdrawn_uncrystallised = (
-                    ledger.withdrawn_uncrystallised + tax_free
-                )
-                ledger.withdrawal_tax_free = ledger.withdrawal_tax_free + tax_free
-                ledger.annuity_purchase = (
-                    ledger.annuity_purchase
-                    + crystallised_draw
-                    + uncrystallised_draw
-                    - tax_free
-                )
-                capital = capital + crystallised_draw + uncrystallised_draw - tax_free
-                total_lump_sum = total_lump_sum + tax_free
-            if capital > _ZERO:
-                self._annuity_streams.append(
-                    _AnnuityStream(
-                        annuity_type=purchase.annuity_type,
-                        start=due,
-                        base_annual=capital * rate,
-                        escalation=self._annuity_pricing_table().escalation,
-                    )
+            if period.contains(due) and due <= horizon_end:
+                total_lump_sum = total_lump_sum + self._execute_annuity_purchase(
+                    purchase, ledgers, period, due
                 )
         return total_lump_sum
+
+    def _execute_annuity_purchase(
+        self,
+        purchase: AnnuityPurchase,
+        ledgers: list[_WrapperLedger],
+        period: Period,
+        due: date,
+    ) -> Money:
+        """Execute one due purchase; return its tax-free cash (§5.2).
+
+        Annuitises the purchase's fraction of each pension wrapper and,
+        when any capital was converted, opens the income stream at the
+        priced rate. A zero-pot purchase converts nothing and opens no
+        stream — a depleted pot is a legitimate simulation outcome.
+        """
+        rate = self._annuity_rate_for(purchase.annuity_type, purchase)
+        capital = _ZERO
+        lump_sum = _ZERO
+        for ledger in ledgers:
+            partial = (
+                ledger.treatment.withdrawals
+                is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+            )
+            if not partial:
+                continue
+            annuitised, tax_free = self._annuitise_wrapper(purchase, ledger, period)
+            capital = capital + annuitised
+            lump_sum = lump_sum + tax_free
+        if capital > _ZERO:
+            self._annuity_streams.append(
+                _AnnuityStream(
+                    annuity_type=purchase.annuity_type,
+                    start=due,
+                    base_annual=capital * rate,
+                    escalation=self._annuity_pricing_table().escalation,
+                )
+            )
+        return lump_sum
+
+    def _annuitise_wrapper(
+        self, purchase: AnnuityPurchase, ledger: _WrapperLedger, period: Period
+    ) -> tuple[Money, Money]:
+        """Annuitise one pension wrapper's share of a purchase.
+
+        Draws the purchase fraction of both sub-balances, pays the
+        uncrystallised draw's tax-free element (headroom-capped, §5.2)
+        through the wrapper like an up-front lump sum, and returns the
+        capital annuitised alongside the tax-free cash delivered.
+
+        Raises:
+            EngineError: If the draw must crystallise a pot whose
+                access gate has not opened (§4.1).
+        """
+        fraction = purchase.fraction_of_pot.value
+        crystallised_draw = ledger.crystallised * fraction
+        uncrystallised_draw = ledger.uncrystallised * fraction
+        gate_open = self.region.wrappers.is_access_open(
+            ledger.wrapper.kind, self.person.date_of_birth.value, period
+        )
+        if uncrystallised_draw > _ZERO and not gate_open:
+            msg = (
+                f"annuity purchase {purchase.id} crystallises wrapper"
+                f" {ledger.wrapper.id} before its access gate opens"
+            )
+            raise EngineError(msg)
+        tax_free = _ZERO
+        free_fraction = ledger.treatment.tax_free_fraction
+        if uncrystallised_draw > _ZERO and free_fraction is not None:
+            tax_free = uncrystallised_draw * free_fraction.value
+            headroom = self._lsa_headroom(period)
+            if headroom is not None:
+                tax_free = min(tax_free, headroom)
+            self._lsa_used = self._lsa_used + tax_free
+        ledger.uncrystallised = ledger.uncrystallised - uncrystallised_draw
+        ledger.crystallised = ledger.crystallised - crystallised_draw
+        ledger.withdrawn_uncrystallised = ledger.withdrawn_uncrystallised + tax_free
+        ledger.withdrawal_tax_free = ledger.withdrawal_tax_free + tax_free
+        annuitised = crystallised_draw + uncrystallised_draw - tax_free
+        ledger.annuity_purchase = ledger.annuity_purchase + annuitised
+        return annuitised, tax_free
 
     def _annuity_rate_for(
         self, annuity_type: AnnuityType, purchase: AnnuityPurchase
