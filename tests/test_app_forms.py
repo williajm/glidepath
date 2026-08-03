@@ -53,7 +53,7 @@ class TestFormSpec:
     def test_person_section_covers_the_person_facts(self) -> None:
         """DOB, sex, income, and the pre-existing access facts are present."""
         keys = {spec.key for spec in build_facts_form_view_model().person.fields}
-        assert {
+        assert keys == {
             "date_of_birth",
             "date_of_birth_as_of",
             "sex_for_longevity",
@@ -65,12 +65,12 @@ class TestFormSpec:
             "mpaa_as_of",
             "lsa_used",
             "lsa_as_of",
-        } == keys
+        }
 
     def test_wrapper_section_covers_balances_and_contributions(self) -> None:
         """Balances (with as_of) and the contribution terms are present."""
         keys = {spec.key for spec in build_facts_form_view_model().wrapper.fields}
-        assert {
+        assert keys == {
             "kind",
             "balance",
             "crystallised_balance",
@@ -80,12 +80,12 @@ class TestFormSpec:
             "contributions_as_of",
             "relief_mechanic",
             "escalation",
-        } == keys
+        }
 
     def test_db_section_covers_the_scheme_parameters(self) -> None:
         """Every §5.1 DB scheme parameter is present."""
         keys = {spec.key for spec in build_facts_form_view_model().db_pension.fields}
-        assert {
+        assert keys == {
             "accrued_annual_pension",
             "statement_date",
             "normal_pension_age",
@@ -96,12 +96,12 @@ class TestFormSpec:
             "commutation_factor",
             "taken_at_age",
             "commuted_fraction",
-        } == keys
+        }
 
     def test_state_pension_section_covers_forecast_and_ni_record(self) -> None:
         """Forecast, protected payment, and the NI record are present."""
         keys = {spec.key for spec in build_facts_form_view_model().state_pension.fields}
-        assert {
+        assert keys == {
             "forecast_weekly_amount",
             "protected_payment",
             "forecast_as_of",
@@ -110,7 +110,7 @@ class TestFormSpec:
             "ni_as_of",
             "planned_extra_years",
             "deferral_years",
-        } == keys
+        }
 
     def test_repeatable_sections_are_marked(self) -> None:
         """Wrappers and DB pensions repeat; the others do not."""
@@ -439,11 +439,11 @@ class TestValidationMessages:
         result = parse_facts_form(FactsFormData(), recorded_on=RECORDED)
         assert result.household is None
         missing = {error.field_key for error in result.errors}
-        assert {
+        assert missing == {
             "date_of_birth",
             "tax_residency",
             "target_retirement_age",
-        } == missing
+        }
 
     def test_bad_values_are_field_addressed(self) -> None:
         """Unparsable text lands on the field that carried it."""
@@ -534,7 +534,7 @@ class TestValidationMessages:
         wrapper_fields = {
             error.field_key for error in result.errors if error.section == "wrapper"
         }
-        assert {"kind", "balance"} == wrapper_fields
+        assert wrapper_fields == {"kind", "balance"}
         db_fields = {
             error.field_key for error in result.errors if error.section == "db_pension"
         }
@@ -586,7 +586,7 @@ class TestValidationMessages:
         )
         assert result.household is None
         by_field = {error.field_key for error in result.errors}
-        assert {"qualifying_years", "deferral_years", "ni_record_start"} == by_field
+        assert by_field == {"qualifying_years", "deferral_years", "ni_record_start"}
 
     def test_zero_age_factor_table_surfaces_the_core_message(self) -> None:
         """Factor-table validation (positive ages) surfaces on the field."""
