@@ -27,7 +27,9 @@ class TestDeriveSeed:
     @given(seed=seeds, path=paths)
     def test_same_inputs_derive_the_same_seed(self, seed: int, path: int) -> None:
         """The derivation is a pure function of its inputs."""
-        assert derive_seed(seed, path) == derive_seed(seed, path)
+        first = derive_seed(seed, path)
+        second = derive_seed(seed, path)
+        assert first == second
 
     @given(seed=seeds, path=paths)
     def test_paths_get_distinct_substreams(self, seed: int, path: int) -> None:

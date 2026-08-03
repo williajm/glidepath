@@ -173,9 +173,9 @@ class TestStochasticReturnModelReproducibility:
         self, seed: int, path: int
     ) -> None:
         """Two independent models with the same inputs agree exactly."""
-        assert model(seed).returns_for(PERIOD, path) == model(seed).returns_for(
-            PERIOD, path
-        )
+        first = model(seed).returns_for(PERIOD, path)
+        second = model(seed).returns_for(PERIOD, path)
+        assert first == second
 
     def test_paths_are_order_independent(self) -> None:
         """Draw order across paths never changes a path's returns."""
