@@ -1,9 +1,12 @@
-"""The deterministic projection engine (roadmap 4.1; planning §4.6, §5.2).
+"""The projection engine (roadmap 4.1; planning §4.6, §5.2).
 
 ``run(plan, assumptions, region, config)`` is a pure function: no I/O,
 no clock reads (``config.today`` is an input), no global state
-(planning §4.6). Within each period the operation order is part of the
-spec (planning §5.2, tested):
+(planning §4.6). The same step function runs under the deterministic
+and Monte Carlo modes; only the return model — resolved from
+``config.mode``, or injected — differs (planning §5.2). Within each
+period the operation order is part of the spec (planning §5.2,
+tested):
 
 1. **Open** — resolve ages, stage, glide-path allocation (§4.1 gate
    convention: retirement is attained only if reached by the period's
@@ -123,7 +126,7 @@ from glidepath.core.annuities import (
     annuity_base_rate_key,
     annuity_start_date,
 )
-from glidepath.core.config import EngineError, RunConfig
+from glidepath.core.config import EngineError, RunConfig, RunMode
 from glidepath.core.contributions import MemberContributionRequest
 from glidepath.core.entities import validate_household_v1
 from glidepath.core.glide import glide_path_from_shape, years_to_target_retirement
@@ -158,7 +161,7 @@ from glidepath.core.results import (
     collect_plan_decisions,
     collect_plan_facts,
 )
-from glidepath.core.returns import DeterministicReturnModel
+from glidepath.core.returns import DeterministicReturnModel, StochasticReturnModel
 from glidepath.core.state_pension import StatePensionUprating
 from glidepath.core.tax import TaxInput
 from glidepath.core.withdrawals import (
@@ -184,7 +187,7 @@ if TYPE_CHECKING:
     from glidepath.core.periods import Period
     from glidepath.core.provenance import AssumptionSet
     from glidepath.core.region import Region
-    from glidepath.core.returns import PeriodReturns
+    from glidepath.core.returns import PeriodReturns, ReturnModel, ReturnModelFactory
     from glidepath.core.state_pension import StatePensionEntitlement
     from glidepath.core.withdrawals import GrossWithdrawalPlan, WithdrawalStrategy
     from glidepath.core.wrappers import Wrapper, WrapperTaxTreatment
@@ -456,18 +459,30 @@ def run(
     assumptions: AssumptionSet,
     region: Region,
     config: RunConfig,
+    *,
+    return_model_factory: ReturnModelFactory | None = None,
 ) -> ProjectionResult:
-    """Project ``plan`` deterministically over the horizon (planning §5.2).
+    """Project ``plan`` over the horizon (planning §5.2).
 
     Pure and deterministic (planning §4.6): identical inputs produce an
-    identical result. Every tunable number is read through the
-    assumption set and recorded; the result's provenance lists the
-    facts used, assumptions read, decisions in effect, the region data
-    version, and the seed.
+    identical result — under ``RunMode.MONTE_CARLO`` the randomness is
+    exactly determined by ``config.seed`` and ``config.path``, so any
+    single path is individually re-runnable. Every tunable number is
+    read through the assumption set and recorded; the result's
+    provenance lists the facts used, assumptions read, decisions in
+    effect, the region data version, and the seed.
+
+    The same step function runs under every mode; only the return
+    model differs (planning §5.2). ``config.mode`` selects it —
+    deterministic expected returns, or seeded stochastic draws where
+    ``config.path`` names the substream (roadmap 7.3) — unless
+    ``return_model_factory`` injects one built from the run's tracked
+    assumption view (a scripted sequence fixture, roadmap 7.4).
 
     Raises:
-        EngineError: If the horizon is empty or the plan is not
-            projectable (v1: exactly one person).
+        EngineError: If the horizon is empty, the plan is not
+            projectable (v1: exactly one person), or a ``MONTE_CARLO``
+            config carries no seed.
     """
     try:
         validate_household_v1(plan)
@@ -481,6 +496,7 @@ def run(
         region=region,
         tracked=tracked,
         config=config,
+        model=_return_model(config, tracked, return_model_factory),
     )
     snapshots = projection.execute()
     provenance = RunProvenance(
@@ -493,6 +509,28 @@ def run(
     return ProjectionResult(snapshots=snapshots, provenance=provenance, config=config)
 
 
+def _return_model(
+    config: RunConfig,
+    tracked: TrackedAssumptions,
+    factory: ReturnModelFactory | None,
+) -> ReturnModel:
+    """The run's return model — injected, or resolved from the mode.
+
+    Raises:
+        EngineError: If a ``MONTE_CARLO`` config carries no seed — an
+            unseeded stochastic run could never be reproduced, so it
+            is rejected rather than defaulted (planning §4.6).
+    """
+    if factory is not None:
+        return factory(tracked)
+    if config.mode is RunMode.MONTE_CARLO:
+        if config.seed is None:
+            msg = "RunMode.MONTE_CARLO requires RunConfig.seed (planning §4.6)"
+            raise EngineError(msg)
+        return StochasticReturnModel(assumptions=tracked, seed=config.seed)
+    return DeterministicReturnModel(assumptions=tracked)
+
+
 @dataclass(slots=True)
 class _Projection:
     """One run's working state: the loop of planning §5.2 over the horizon."""
@@ -502,6 +540,7 @@ class _Projection:
     region: Region
     tracked: TrackedAssumptions
     config: RunConfig
+    model: ReturnModel
     _balances: dict[str, tuple[Money, Money]] = field(default_factory=dict)
     _taxable_income: Money = _ZERO
     _relief_at_source: Money = _ZERO
@@ -527,7 +566,6 @@ class _Projection:
             )
             for wrapper in self.person.wrappers
         }
-        model = DeterministicReturnModel(assumptions=self.tracked)
         factors = _NominalFactors(self.tracked, self._escalation_keys())
         self._build_income_streams()
         inflation = _ONE
@@ -537,7 +575,7 @@ class _Projection:
         previous_fraction = _ONE
         for period in self.region.calendar.periods(self.config.today, horizon_end):
             fraction = period_active_fraction(period, self.config.today, horizon_end)
-            returns = model.returns_for(period, 0)
+            returns = self.model.returns_for(period, self.config.path)
             if previous_cpi is not None:
                 # Advance the price/earnings levels by the growth of the
                 # period just completed, scaled by its active fraction
