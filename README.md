@@ -10,7 +10,8 @@
 [![License: MIT](https://img.shields.io/github/license/williajm/glidepath)](LICENSE)
 
 A desktop retirement and investment planner. UK-first, built so other
-regions can be added later. Early scaffolding — no app features yet.
+regions can be added later. Early days — the engine and desktop shell
+exist; feature screens land phase by phase.
 
 ## Disclaimer
 

@@ -32,6 +32,14 @@ jobs:
       - name: Sync locked dependencies
         run: uv sync --locked
 
+      # PySide6 needs the platform's GL/EGL stack even on the offscreen
+      # QPA platform the GUI smoke tests run under (tests/gui/conftest.py).
+      - name: Install Qt runtime libraries (offscreen GUI tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libopengl0 libgl1 libxkbcommon0
+
       - name: Ruff lint
         run: uv run ruff check .
 

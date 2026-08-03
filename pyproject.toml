@@ -6,7 +6,12 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "pyside6>=6.11.1",
+]
+
+[project.gui-scripts]
+glidepath = "glidepath.gui.main:main"
 
 [dependency-groups]
 dev = [
@@ -27,7 +32,7 @@ build-backend = "uv_build"
 [tool.uv]
 # Supply-chain cooldown: resolution ignores anything published to PyPI after
 # this timestamp (now minus 7 days). Updated ONLY by `make deps`.
-exclude-newer = "2026-07-25T14:56:00Z"
+exclude-newer = "2026-07-27T16:50:15Z"
 
 # PyPI is the ONLY permitted index (supply-chain policy; see CLAUDE.md).
 [[tool.uv.index]]
