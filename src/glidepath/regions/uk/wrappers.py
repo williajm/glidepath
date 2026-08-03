@@ -165,6 +165,16 @@ class UkWrapperRuleset:
             _unknown_kind(kind)
         return mechanics
 
+    def lump_sum_allowance(self, period: Period) -> Money | None:
+        """The year's lump sum allowance (planning §6; roadmap 5.2).
+
+        The per-person lifetime cap on pension tax-free cash — PCLS
+        and the tax-free elements of UFPLS payments. The engine tracks
+        usage across the run; this only answers the period's figure,
+        with the usual coverage semantics (class docstring).
+        """
+        return self._year_for(period).pension.lump_sum_allowance
+
     def is_access_open(
         self, kind: WrapperKindId, date_of_birth: date, period: Period
     ) -> bool:

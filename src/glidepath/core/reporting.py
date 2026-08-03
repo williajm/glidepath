@@ -94,6 +94,7 @@ class PeriodReportRow:
     employment_income: Money
     db_income: Money
     db_lump_sum: Money
+    pension_lump_sum: Money
     state_pension_income: Money
     tax_due: Money
     spending_need: Money
@@ -186,6 +187,7 @@ def _person_row(
         employment_income=flow(person.employment_income),
         db_income=flow(person.db_income),
         db_lump_sum=flow(person.db_lump_sum),
+        pension_lump_sum=flow(person.pension_lump_sum),
         state_pension_income=flow(person.state_pension_income),
         tax_due=flow(person.tax.tax_due),
         spending_need=flow(person.spending_need),

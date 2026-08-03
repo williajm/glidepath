@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
-from glidepath.core.withdrawals import FixedRealWithdrawalStrategy
+from glidepath.core.withdrawals import (
+    FixedRealWithdrawalStrategy,
+    TaxFreeCashStrategy,
+)
 
 if TYPE_CHECKING:
     from datetime import date
@@ -45,7 +48,9 @@ class RunConfig:
     the decumulation withdrawal decision (planning §5.2; roadmap 5.1),
     defaulting to fixed real spending — it governs decumulation
     periods only; planned outflows falling earlier are funded
-    net-defined in the default tax-aware order.
+    net-defined in the default tax-aware order. ``tax_free_cash`` is
+    the orthogonal tax-free cash decision (roadmap 5.2), defaulting to
+    the split-each-payment mode.
     """
 
     today: date
@@ -53,6 +58,7 @@ class RunConfig:
     mode: RunMode = RunMode.DETERMINISTIC
     seed: int | None = None
     withdrawal_strategy: WithdrawalStrategy = _DEFAULT_STRATEGY
+    tax_free_cash: TaxFreeCashStrategy = TaxFreeCashStrategy.SPLIT_EACH_PAYMENT
 
     def __post_init__(self) -> None:
         """Reject a horizon that ends before it starts."""

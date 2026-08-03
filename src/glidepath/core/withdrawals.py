@@ -27,6 +27,7 @@ so no account kind is ever named (planning §4.2).
 
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Protocol
 
 from glidepath.core.money import Money, Rate
@@ -40,6 +41,48 @@ if TYPE_CHECKING:
 _ZERO = Money(Decimal(0))
 _ZERO_FRACTION = Decimal(0)
 _ONE = Decimal(1)
+
+
+class TaxFreeCashStrategy(Enum):
+    """How pension tax-free cash is taken (planning §5.2, roadmap 5.2).
+
+    A decision record on the run configuration, orthogonal to the
+    withdrawal strategy — any combination of the two is valid. The
+    names are generic (planning §4.2); the region's tax treatment
+    supplies the tax-free fraction and the lifetime cap
+    (:meth:`~glidepath.core.wrappers.WrapperRuleset.lump_sum_allowance`).
+    Gross-defined plans resolve every mode as
+    :attr:`SPLIT_EACH_PAYMENT` — an exact gross amount is a payment
+    instruction, not a designation (planning §5.2).
+    """
+
+    SPLIT_EACH_PAYMENT = auto()
+    """Every uncrystallised draw carries the tax-free fraction (UK: UFPLS).
+
+    The default. The remainder of each payment arrives as taxable
+    income, so the first payment marks flexible access.
+    """
+
+    LUMP_SUM_AS_NEEDED = auto()
+    """Tax-free cash first, designating the rest (UK: phased FAD).
+
+    An uncrystallised draw delivers tax-free cash only, moving the
+    crystallised remainder into the wrapper's drawdown sub-balance,
+    which stays invested; taxable income is drawn only once tax-free
+    cash cannot meet the remaining need — so flexible access is not
+    marked until taxable income actually flows.
+    """
+
+    UP_FRONT_LUMP_SUM = auto()
+    """Full crystallisation at first open access (UK: PCLS up front).
+
+    In the first decumulation period whose access gate is open, each
+    uncrystallised pension pot crystallises whole: the capped tax-free
+    lump sum joins the period's income offset and the remainder moves
+    to the crystallised sub-balance. Accepted v1 cost (planning §5.2):
+    lump-sum cash beyond the period's need is spent, not banked, until
+    the roadmap-9.2 cash wrapper lands.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,11 +103,16 @@ class WithdrawalSource:
     """One drawable sub-balance as a strategy sees it (planning §5.2).
 
     ``available`` is the balance at the start of the withdrawal step;
-    ``tax_free_fraction`` is the share of a draw that arrives tax-free
-    (1 for a wholly tax-free wrapper, the region's fraction for a
-    partially tax-free pot, 0 for taxable income); ``access_open``
-    follows the §4.1 gate convention — crystallised funds are always
-    open (already accessed, never re-gated; planning §5.1).
+    ``tax_free_fraction`` is the *nominal* share of a draw that
+    arrives tax-free (1 for a wholly tax-free wrapper, the region's
+    fraction for a partially tax-free pot, 0 for taxable income) —
+    for pension sources the tax-free element is additionally capped by
+    the remaining lifetime headroom
+    (:attr:`WithdrawalState.tax_free_cash_headroom`), so a draw past
+    the cap delivers less than the fraction alone promises (roadmap
+    5.2); ``access_open`` follows the §4.1 gate convention —
+    crystallised funds are always open (already accessed, never
+    re-gated; planning §5.1).
     """
 
     id: WithdrawalSourceId
@@ -91,15 +139,28 @@ class WithdrawalState:
     gate-closed sources included, flagged, so a strategy can see the
     whole pot; ``year_fraction`` is the period's active fraction
     (roadmap 4.6), by which gross-defined annual amounts scale.
+    ``tax_free_cash_headroom`` is the tax-free cash still allowed
+    under the region's lifetime cap as the withdrawal step opens —
+    cumulative usage (the ``lsa_used`` fact plus everything this run
+    has paid, income lump sums included) already deducted — or
+    ``None`` where the region has no cap (roadmap 5.2), so a
+    tax-aware strategy can size pension draws against the cap the
+    engine will actually enforce.
     """
 
     sources: tuple[WithdrawalSource, ...]
     year_fraction: Decimal
+    tax_free_cash_headroom: Money | None = None
 
     def __post_init__(self) -> None:
-        """Require a fraction in [0, 1]."""
+        """Require a fraction in [0, 1] and non-negative headroom."""
         if not _ZERO_FRACTION <= self.year_fraction <= _ONE:
             msg = "WithdrawalState.year_fraction must lie between 0 and 1"
+            raise ValueError(msg)
+        if self.tax_free_cash_headroom is not None and (
+            self.tax_free_cash_headroom < _ZERO
+        ):
+            msg = "WithdrawalState.tax_free_cash_headroom must be non-negative"
             raise ValueError(msg)
 
 

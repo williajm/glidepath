@@ -54,6 +54,7 @@ from glidepath.core import (
     SpendingPlan,
     StatePensionEntitlement,
     StatePensionRecord,
+    TaxFreeCashStrategy,
     TaxInput,
     TaxLine,
     TaxResidencyId,
@@ -140,11 +141,14 @@ class StubWrapperRules:
     ``free_access_age`` age-gates the tax-free kind when set (a
     LISA-like account, roadmap 9.2): tax treatment says nothing about
     accessibility, so the engine must consult the gate for every kind.
+    ``lsa_cap`` is the lifetime cap on pension tax-free cash (roadmap
+    5.2); ``None`` — the default — means uncapped.
     """
 
     access_age: int = 55
     free_kind_cap: Money | None = None
     free_access_age: int | None = None
+    lsa_cap: Money | None = None
 
     def tax_treatment(self, kind: WrapperKindId, period: Period) -> WrapperTaxTreatment:
         """The pension pays out 25% tax-free; the free kind wholly so."""
@@ -181,6 +185,11 @@ class StubWrapperRules:
         if kind == PENSION:
             return frozenset({ReliefMechanic.RELIEF_AT_SOURCE, ReliefMechanic.NET_PAY})
         return frozenset()
+
+    def lump_sum_allowance(self, period: Period) -> Money | None:
+        """The configured lifetime tax-free cash cap (None: uncapped)."""
+        del period
+        return self.lsa_cap
 
     def is_access_open(
         self, kind: WrapperKindId, date_of_birth: date, period: Period
@@ -273,6 +282,7 @@ def stub_region(
     free_kind_cap: Money | None = None,
     state_pension: StubStatePension | None = None,
     free_access_age: int | None = None,
+    lsa_cap: Money | None = None,
 ) -> Region:
     """A calendar-year region over the stub implementations."""
     return Region(
@@ -280,7 +290,9 @@ def stub_region(
         ages=StubAges(),
         tax=FlatTaxSystem(),
         wrappers=StubWrapperRules(
-            free_kind_cap=free_kind_cap, free_access_age=free_access_age
+            free_kind_cap=free_kind_cap,
+            free_access_age=free_access_age,
+            lsa_cap=lsa_cap,
         ),
         contributions=contributions or RecordingContributionRules(),
         state_pension=state_pension or StubStatePension(),
@@ -351,6 +363,8 @@ def person_of(
     employment: str | None = None,
     db_pensions: tuple[DBPension, ...] = (),
     state_pension: StatePensionRecord | None = None,
+    lsa_used: str | None = None,
+    mpaa_triggered_on: date | None = None,
 ) -> Person:
     """A single test person."""
     return Person(
@@ -359,6 +373,10 @@ def person_of(
         target_retirement_age=Decision(value=retire_at, recorded_on=RECORDED),
         tax_residency=RESIDENCY,
         employment_income=None if employment is None else money_fact(employment),
+        mpaa_triggered_on=None
+        if mpaa_triggered_on is None
+        else Fact(value=mpaa_triggered_on, as_of=AS_OF, recorded_on=RECORDED),
+        lsa_used=None if lsa_used is None else money_fact(lsa_used),
         wrappers=wrappers,
         db_pensions=db_pensions,
         state_pension=state_pension,
@@ -688,6 +706,37 @@ def retiree_plan(wrappers: tuple[Wrapper, ...], spending: str = "12000") -> Hous
     )
 
 
+@dataclass(frozen=True)
+class UncrystallisedOnlyStrategy:
+    """A net plan listing only uncrystallised sources.
+
+    Probes the source-targeting contract (roadmap 5.2): execution of
+    a phased draw on an uncrystallised source must never reach into
+    pre-existing drawdown funds the plan did not select.
+    """
+
+    def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
+        """Target the need over open uncrystallised sources only."""
+        order = tuple(
+            entry.id
+            for entry in state.sources
+            if not entry.id.crystallised and entry.access_open
+        )
+        return NetWithdrawalPlan(target=need, order=order)
+
+
+@dataclass
+class RecordingWithdrawalStrategy:
+    """Fixed-real behaviour that captures each period's state."""
+
+    states: list[WithdrawalState] = dataclass_field(default_factory=list)
+
+    def withdraw(self, state: WithdrawalState, need: Money) -> WithdrawalPlan:
+        """Record the state, then plan exactly as fixed-real does."""
+        self.states.append(state)
+        return FixedRealWithdrawalStrategy().withdraw(state, need)
+
+
 class TestWithdrawals:
     """Step 4: net-need withdrawals, gross-up, ordering, gates, shortfall."""
 
@@ -901,6 +950,490 @@ class TestWithdrawals:
         first, second = result.snapshots
         assert first.persons[0].spending_need == Money(Decimal("10000.00"))
         assert second.persons[0].spending_need == Money(Decimal("11000.00"))
+
+
+class TestTaxFreeCash:
+    """Roadmap 5.2: LSA-capped tax-free cash, MPAA triggers, strategies.
+
+    All numbers are hand-worked against the stub region: flat 25% tax
+    floored to the penny, a 25% pension tax-free fraction, access at
+    55. The lump-sum cap is uncapped unless a test sets ``lsa_cap``.
+    """
+
+    def test_split_payment_tax_free_element_is_capped_by_headroom(self) -> None:
+        """A split payment beyond the cap keeps flowing, fully taxable.
+
+        Need 7,500 net against a 1,500 cap: the free-bearing slice is
+        balance-limited to 6,000 gross (1,500 free + 4,500 taxable,
+        1,125 tax, 4,875 net); the remaining 2,625 net comes wholly
+        taxable — 3,499.99 gross. The cap is exhausted and the first
+        taxable payment marks flexible access.
+        """
+        pension = wrapper_of(PENSION, "100000")
+        plan = retiree_plan((pension,), spending="7500")
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(1500))),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert pension_result.withdrawal_tax_free == Money(Decimal("1500.00"))
+        assert pension_result.withdrawal_taxable == Money(Decimal("7999.99"))
+        assert pension_result.closing_uncrystallised == Money(Decimal("90500.01"))
+        assert person_result.tax.tax_due == Money(Decimal("1999.99"))
+        assert person_result.net_withdrawn == Money(Decimal("7500.00"))
+        assert person_result.shortfall == ZERO
+        assert person_result.lsa_used == Money(Decimal("1500.00"))
+        assert person_result.mpaa_triggered_on == date(2026, 1, 1)
+
+    def test_lsa_used_fact_seeds_the_headroom(self) -> None:
+        """Pre-plan tax-free cash reduces what the run may still pay.
+
+        A 1,500 cap with 1,100 already used leaves 400 of headroom:
+        the free-bearing slice caps at 1,600 gross (400 free), and the
+        snapshot's cumulative figure includes the fact.
+        """
+        pension = wrapper_of(PENSION, "100000")
+        plan = household_of(
+            person_of(
+                (pension,),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                lsa_used="1100",
+            ),
+            spending="7500",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(1500))),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert pension_result.withdrawal_tax_free == Money(Decimal("400.00"))
+        assert pension_result.withdrawal_taxable == Money(Decimal("9466.66"))
+        assert person_result.net_withdrawn == Money(Decimal("7500.00"))
+        assert person_result.lsa_used == Money(Decimal("1500.00"))
+
+    def test_free_wrapper_draws_never_consume_the_allowance(self) -> None:
+        """Tax-free cash from a non-pension wrapper is not pension cash."""
+        free_account = wrapper_of(FREE, "50000")
+        plan = retiree_plan((free_account,))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(1500))),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.net_withdrawn == Money(Decimal("12000.00"))
+        assert person_result.lsa_used == ZERO
+        assert person_result.mpaa_triggered_on is None
+
+    def test_mpaa_fact_wins_over_in_run_triggers(self) -> None:
+        """A pre-plan trigger date is reported unchanged, never moved."""
+        pension = wrapper_of(PENSION, "0", crystallised="50000")
+        plan = household_of(
+            person_of(
+                (pension,),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                mpaa_triggered_on=date(2020, 5, 5),
+            ),
+            spending="3000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.wrappers[0].withdrawal_taxable > ZERO
+        assert person_result.mpaa_triggered_on == date(2020, 5, 5)
+
+    def test_mpaa_trigger_date_is_the_first_modelled_day(self) -> None:
+        """Mid-period ``today`` dates the trigger, not the period start."""
+        pension = wrapper_of(PENSION, "100000")
+        plan = retiree_plan((pension,), spending="6000")
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(today=date(2026, 3, 1), horizon_end=date(2026, 12, 31)),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.wrappers[0].withdrawal_taxable > ZERO
+        assert person_result.mpaa_triggered_on == date(2026, 3, 1)
+
+    def test_lump_sum_as_needed_pays_tax_free_cash_first(self) -> None:
+        """Phased designation: tax-free cash now, income only when needed.
+
+        Need 600 net in each of two periods (zero returns and CPI).
+        Period one crystallises 2,400: 600 arrives tax-free and 1,800
+        is designated to the drawdown sub-balance — no taxable income,
+        so flexible access is not marked. Period two draws its 600
+        net from that residue as taxable income (799.99 gross), and
+        the MPAA trigger fires then.
+        """
+        pension = wrapper_of(PENSION, "100000")
+        plan = retiree_plan((pension,), spending="600")
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2027, 12, 31),
+                tax_free_cash=TaxFreeCashStrategy.LUMP_SUM_AS_NEEDED,
+            ),
+        )
+        first, second = result.snapshots
+        [person_one] = first.persons
+        [pension_one] = person_one.wrappers
+        assert pension_one.withdrawal_tax_free == Money(Decimal("600.00"))
+        assert pension_one.withdrawal_taxable == ZERO
+        assert pension_one.closing_uncrystallised == Money(Decimal("97600.00"))
+        assert pension_one.closing_crystallised == Money(Decimal("1800.00"))
+        assert person_one.net_withdrawn == Money(Decimal("600.00"))
+        assert person_one.lsa_used == Money(Decimal("600.00"))
+        assert person_one.mpaa_triggered_on is None
+        [person_two] = second.persons
+        [pension_two] = person_two.wrappers
+        assert pension_two.withdrawal_tax_free == ZERO
+        assert pension_two.withdrawal_taxable == Money(Decimal("799.99"))
+        assert pension_two.closing_uncrystallised == Money(Decimal("97600.00"))
+        assert pension_two.closing_crystallised == Money(Decimal("1000.01"))
+        assert person_two.lsa_used == Money(Decimal("600.00"))
+        assert person_two.mpaa_triggered_on == date(2027, 1, 1)
+
+    def test_lump_sum_as_needed_draws_income_once_the_cap_is_gone(self) -> None:
+        """With no headroom a phased draw crystallises straight to income."""
+        pension = wrapper_of(PENSION, "100000")
+        plan = retiree_plan((pension,), spending="600")
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(0))),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                tax_free_cash=TaxFreeCashStrategy.LUMP_SUM_AS_NEEDED,
+            ),
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert pension_result.withdrawal_tax_free == ZERO
+        assert pension_result.withdrawal_taxable == Money(Decimal("799.99"))
+        assert pension_result.closing_uncrystallised == Money(Decimal("99200.01"))
+        assert pension_result.closing_crystallised == ZERO
+        assert person_result.net_withdrawn == Money(Decimal("600.00"))
+        assert person_result.mpaa_triggered_on == date(2026, 1, 1)
+
+    def test_split_payment_with_no_headroom_is_wholly_taxable(self) -> None:
+        """An exhausted cap leaves split payments with no free element."""
+        pension = wrapper_of(PENSION, "100000")
+        plan = retiree_plan((pension,), spending="600")
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(0))),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert pension_result.withdrawal_tax_free == ZERO
+        assert pension_result.withdrawal_taxable == Money(Decimal("799.99"))
+        assert person_result.lsa_used == ZERO
+
+    def test_up_front_lump_sum_crystallises_the_whole_pot(self) -> None:
+        """The retirement event pays the capped lump sum, once.
+
+        Period one: the 100,000 pot crystallises whole — 25,000
+        arrives tax-free and meets the 12,000 need entirely (the
+        excess is spent, not banked — planning §5.2's accepted v1
+        cost), so no wrapper is drawn and the free account is
+        untouched. Pure tax-free cash never marks flexible access.
+        Period two: the pots are already crystallised, so the need is
+        met from the free account and then drawdown income — and that
+        first taxable draw fires the trigger.
+        """
+        free_account = wrapper_of(FREE, "1000")
+        pension = wrapper_of(PENSION, "100000")
+        plan = retiree_plan((free_account, pension))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2027, 12, 31),
+                tax_free_cash=TaxFreeCashStrategy.UP_FRONT_LUMP_SUM,
+            ),
+        )
+        first, second = result.snapshots
+        [person_one] = first.persons
+        free_one, pension_one = person_one.wrappers
+        assert person_one.pension_lump_sum == Money(Decimal("25000.00"))
+        assert pension_one.withdrawal_tax_free == Money(Decimal("25000.00"))
+        assert pension_one.closing_uncrystallised == ZERO
+        assert pension_one.closing_crystallised == Money(Decimal("75000.00"))
+        assert free_one.withdrawal_gross == ZERO
+        assert person_one.net_withdrawn == ZERO
+        assert person_one.shortfall == ZERO
+        assert person_one.lsa_used == Money(Decimal("25000.00"))
+        assert person_one.mpaa_triggered_on is None
+        [person_two] = second.persons
+        free_two, pension_two = person_two.wrappers
+        assert person_two.pension_lump_sum == ZERO
+        assert free_two.withdrawal_tax_free == Money(Decimal("1000.00"))
+        assert pension_two.withdrawal_taxable == Money(Decimal("14666.66"))
+        assert person_two.mpaa_triggered_on == date(2027, 1, 1)
+
+    def test_up_front_lump_sum_is_capped_by_the_allowance(self) -> None:
+        """The event pays only the remaining headroom tax-free.
+
+        A 10,000 cap on the 100,000 pot: the lump sum is 10,000, the
+        full 90,000 remainder is designated, and the unmet 2,000 of
+        the need is drawn from drawdown funds as taxable income —
+        2,666.66 gross — which marks flexible access.
+        """
+        pension = wrapper_of(PENSION, "100000")
+        plan = retiree_plan((pension,))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(10000))),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                tax_free_cash=TaxFreeCashStrategy.UP_FRONT_LUMP_SUM,
+            ),
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert person_result.pension_lump_sum == Money(Decimal("10000.00"))
+        assert pension_result.withdrawal_taxable == Money(Decimal("2666.66"))
+        assert person_result.net_withdrawn == Money(Decimal("2000.00"))
+        assert person_result.shortfall == ZERO
+        assert person_result.lsa_used == Money(Decimal("10000.00"))
+        assert person_result.mpaa_triggered_on == date(2026, 1, 1)
+
+    def test_up_front_lump_sum_waits_for_the_access_gate(self) -> None:
+        """A gate still shut defers the event to the period it opens.
+
+        Born 1 June 1975 and retired early, the person attains the
+        stub's access age of 55 on 1 June 2030 — after the 2030
+        period's first day (§4.1), so the event fires with the 2031
+        period, and fires even with no spending need (the strategy
+        says take the cash; the excess is spent, planning §5.2).
+        """
+        pension = wrapper_of(PENSION, "100000")
+        plan = household_of(
+            person_of((pension,), date_of_birth=date(1975, 6, 1), retire_at=45)
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2031, 12, 31),
+                tax_free_cash=TaxFreeCashStrategy.UP_FRONT_LUMP_SUM,
+            ),
+        )
+        for snapshot in result.snapshots[:-1]:
+            [person_result] = snapshot.persons
+            assert person_result.pension_lump_sum == ZERO
+            assert person_result.wrappers[0].closing_uncrystallised == Money(
+                Decimal("100000.00")
+            )
+        [person_last] = result.snapshots[-1].persons
+        assert person_last.pension_lump_sum == Money(Decimal("25000.00"))
+        assert person_last.wrappers[0].closing_crystallised == Money(
+            Decimal("75000.00")
+        )
+
+    def test_db_lump_sum_consumes_the_allowance_and_excess_is_taxed(self) -> None:
+        """A commencement lump sum counts against the cap, excess taxed.
+
+        Commuting 25% of an 8,000 DB pension at factor 12 pays 24,000
+        when benefits start; a 10,000 cap leaves 10,000 tax-free and
+        14,000 taxed as income alongside the 6,000 residual pension —
+        5,000 tax in all. The offset (6,000 + 24,000 - 5,000 = 25,000)
+        covers the whole need, and a lump sum never marks flexible
+        access.
+        """
+        pension = db_pension_of(
+            accrued="8000", npa=66, commuted="0.25", commutation_factor="12"
+        )
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+            ),
+            spending="12000",
+        )
+        result = run(
+            plan,
+            assumptions_with(),
+            stub_region(lsa_cap=Money(Decimal(10000))),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.db_lump_sum == Money(Decimal("24000.00"))
+        assert person_result.tax.tax_due == Money(Decimal("5000.00"))
+        assert person_result.lsa_used == Money(Decimal("10000.00"))
+        assert person_result.shortfall == ZERO
+        assert person_result.mpaa_triggered_on is None
+
+    def test_db_lump_sum_headroom_is_consumed_before_wrapper_draws(self) -> None:
+        """The income step's lump sum comes off the cap first.
+
+        A 25,000 cap against a 24,000 DB lump sum leaves 1,000 for the
+        wrapper draws: net income covers 28,500 of the 36,000 need,
+        and the remaining 7,500 splits at the 4,000-gross free-bearing
+        boundary (1,000 free + 3,000 taxable) before running wholly
+        taxable (5,666.66 gross).
+        """
+        wrapper = wrapper_of(PENSION, "100000")
+        pension = db_pension_of(
+            accrued="8000", npa=66, commuted="0.25", commutation_factor="12"
+        )
+        plan = household_of(
+            person_of(
+                (wrapper,),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+            ),
+            spending="36000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(25000))),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert person_result.db_lump_sum == Money(Decimal("24000.00"))
+        assert pension_result.withdrawal_tax_free == Money(Decimal("1000.00"))
+        assert pension_result.withdrawal_taxable == Money(Decimal("8666.66"))
+        assert person_result.tax.tax_due == Money(Decimal("3666.66"))
+        assert person_result.net_withdrawn == Money(Decimal("7500.00"))
+        assert person_result.shortfall == ZERO
+        assert person_result.lsa_used == Money(Decimal("25000.00"))
+
+    def test_phased_income_leg_never_taps_unselected_drawdown_funds(self) -> None:
+        """A plan's source targeting is honoured exactly (roadmap 5.2).
+
+        A plan listing only the uncrystallised source, phased mode,
+        exhausted cap: the draw crystallises straight to income from
+        the uncrystallised pot (799.99 gross) and the 50,000 of
+        pre-existing drawdown funds — which the plan did not select —
+        are untouched.
+        """
+        pension = wrapper_of(PENSION, "100000", crystallised="50000")
+        plan = retiree_plan((pension,), spending="600")
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(0))),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                withdrawal_strategy=UncrystallisedOnlyStrategy(),
+                tax_free_cash=TaxFreeCashStrategy.LUMP_SUM_AS_NEEDED,
+            ),
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert pension_result.withdrawal_taxable == Money(Decimal("799.99"))
+        assert pension_result.closing_crystallised == Money(Decimal("50000.00"))
+        assert pension_result.closing_uncrystallised == Money(Decimal("99200.01"))
+        assert person_result.net_withdrawn == Money(Decimal("600.00"))
+
+    def test_strategy_state_reports_remaining_headroom(self) -> None:
+        """Strategies see the headroom the engine will enforce.
+
+        With a 1,500 cap and 1,100 already used, the withdrawal step
+        opens with 400 of headroom; with no cap the state reports
+        ``None``.
+        """
+        recording_capped = RecordingWithdrawalStrategy()
+        pension = wrapper_of(PENSION, "100000")
+        capped_plan = household_of(
+            person_of(
+                (pension,),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                lsa_used="1100",
+            ),
+            spending="600",
+        )
+        run(
+            capped_plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(1500))),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                withdrawal_strategy=recording_capped,
+            ),
+        )
+        assert recording_capped.states[0].tax_free_cash_headroom == Money(Decimal(400))
+        recording_uncapped = RecordingWithdrawalStrategy()
+        run(
+            retiree_plan((wrapper_of(PENSION, "100000"),), spending="600"),
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                withdrawal_strategy=recording_uncapped,
+            ),
+        )
+        assert recording_uncapped.states[0].tax_free_cash_headroom is None
+
+    def test_gross_defined_plans_resolve_as_split_payments(self) -> None:
+        """A fixed-% draw splits at the cap boundary, phased modes aside.
+
+        10% of the 100,000 pot is a 10,000 gross instruction: 4,000
+        through the free-bearing slice (1,000 free under the 1,000
+        cap + 3,000 taxable) and 6,000 wholly taxable. Net delivered
+        is 10,000 less 2,250 tax; the rest of the need is shortfall.
+        """
+        pension = wrapper_of(PENSION, "100000")
+        plan = retiree_plan((pension,))
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(1000))),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                    rate=Rate(Decimal("0.10"))
+                ),
+                tax_free_cash=TaxFreeCashStrategy.LUMP_SUM_AS_NEEDED,
+            ),
+        )
+        [person_result] = result.snapshots[0].persons
+        [pension_result] = person_result.wrappers
+        assert pension_result.withdrawal_tax_free == Money(Decimal("1000.00"))
+        assert pension_result.withdrawal_taxable == Money(Decimal("9000.00"))
+        assert pension_result.closing_crystallised == ZERO
+        assert person_result.tax.tax_due == Money(Decimal("2250.00"))
+        assert person_result.net_withdrawn == Money(Decimal("7750.00"))
+        assert person_result.shortfall == Money(Decimal("4250.00"))
+        assert person_result.lsa_used == Money(Decimal("1000.00"))
+        assert person_result.mpaa_triggered_on == date(2026, 1, 1)
 
 
 class TestPensionIncome:

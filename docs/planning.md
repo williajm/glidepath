@@ -404,7 +404,9 @@ Within the run, revaluation advances with each period's CPI under the
 assumed CPI over whole months (integer-exponent whole years plus a
 linear remainder, exact `Decimal` per §4.6). Commutation trades pension
 for `pension given up x commutation factor` of tax-free cash in the
-period benefits start; a start date before `today` means the pension is
+period benefits start — tax-free up to the remaining lump-sum
+allowance headroom, the excess taxed as income (§5.2 tax-free cash
+conventions); a start date before `today` means the pension is
 already in payment and the lump sum already lives in the stated
 balances. In decumulation, net-of-tax DB/state-pension income and any
 commutation lump sum meet the net spending need before wrappers are
@@ -459,7 +461,12 @@ and `mpaa_triggered_on`. They make an already-in-drawdown user modellable
 — no fresh tax-free cash on crystallised funds, MPAA from day one, LSA
 headroom reduced — and they carry the NMPA 2028 transition correctly:
 benefits already in payment continue below 57, while new crystallisations
-and UFPLS are gated by the NMPA schedule (§4.1).
+and UFPLS are gated by the NMPA schedule (§4.1). In-run tracking
+(roadmap 5.2): the run seeds a per-person tax-free-cash ledger from
+`lsa_used` and its flexible-access state from `mpaa_triggered_on`; each
+period's snapshot reports the cumulative tax-free cash used and the
+MPAA trigger date in effect at period end, so the UI and the later AA
+machinery (roadmap 9.5) read them straight off the result.
 
 **Life stages and glide path.** A person is not a snapshot: the projection
 moves them through `EARLY_ACCUMULATION → MID_ACCUMULATION → PRE_RETIREMENT
@@ -586,8 +593,10 @@ internally consistent after penny rounding.
 then guardrails (Guyton–Klinger-style bands) and natural yield. Strategies
 also encode wrapper ordering (tax-aware, configurable; the full default is
 GIA/cash → ISA → pension, which in v1 — before the GIA/cash wrappers land
-in Phase 9 — reduces to ISA → pension) and the tax-free cash strategy
-(PCLS up front vs UFPLS-style phased). Conventions (roadmap 5.1): the
+in Phase 9 — reduces to ISA → pension); the tax-free cash strategy
+(PCLS up front vs UFPLS-style phased vs phased flexi-access drawdown)
+is a separate, orthogonal decision on `RunConfig` — any combination of
+the two is valid (see below). Conventions (roadmap 5.1): the
 strategy is a decision record carried on `RunConfig`, defaulting to
 fixed-real; the state a strategy sees lists every sub-balance
 (uncrystallised and crystallised per wrapper, gate-closed ones present
@@ -602,6 +611,63 @@ is an engine error, never a silent draw); a gross-defined under-draw
 against the need is reported as shortfall — the roadmap-7.3 ruin signal
 survives strategies that ignore the need — and an over-draw is spent,
 not banked (no cash/GIA wrapper before 9.2).
+
+**Tax-free cash strategy (decided — roadmap 5.2).** How pension
+tax-free cash is taken is its own decision record on `RunConfig`,
+orthogonal to the withdrawal strategy. Three modes, named generically
+in the core (the region's tax treatment supplies the fraction and the
+cap; UK equivalents in brackets):
+
+- `SPLIT_EACH_PAYMENT` (UK: UFPLS) — the default and the pre-5.2
+  behaviour: every draw from an uncrystallised pension pot carries the
+  region's tax-free fraction, the remainder arriving as taxable
+  income.
+- `LUMP_SUM_AS_NEEDED` (UK: phased flexi-access drawdown) — a draw on
+  an uncrystallised pot delivers tax-free cash first: the pot
+  crystallises `1/fraction` times the cash delivered, designating the
+  remainder to the wrapper's crystallised (drawdown) sub-balance,
+  which stays invested; taxable drawdown income is drawn only once
+  tax-free cash cannot meet the remaining need (headroom or pot
+  exhausted).
+- `UP_FRONT_LUMP_SUM` (UK: full PCLS at designation) — in the first
+  decumulation period whose access gate is open, each uncrystallised
+  pension pot crystallises whole: the capped tax-free lump sum joins
+  that period's income offset (the DB commutation convention) and the
+  rest moves to the crystallised sub-balance, drawn thereafter as
+  taxable income.
+
+Conventions: the engine tracks cumulative tax-free cash per person
+across the run, seeded from the `lsa_used` fact; the region supplies
+the lifetime cap per period (`WrapperRuleset.lump_sum_allowance`;
+`None` means no cap), and a payment's tax-free element is capped at
+the remaining headroom with the excess arriving as taxable income —
+crystallised funds never yield fresh tax-free cash (§5.1). An in-run
+DB commencement (commutation) lump sum consumes the same headroom —
+landing in the income step, ahead of the period's wrapper draws — and
+its excess over headroom is taxed as income (the UK's pension
+commencement excess lump sum); it never marks flexible access. The
+strategy-facing state reports the remaining headroom as the
+withdrawal step opens (`WithdrawalState.tax_free_cash_headroom`),
+while a source's `tax_free_fraction` stays the region's nominal
+fraction — the cap is an absolute amount, not a share. A phased
+draw's income leg is limited to the residue it designated within that
+draw: pre-existing drawdown funds answer only to their own
+crystallised source id, so a plan's source targeting is honoured
+exactly. The first draw with a taxable element from a
+partially-tax-free (pension) wrapper — either sub-balance — is
+flexible access and records the MPAA trigger date as the later of the
+period's first day and `today`; tax-free-only draws (PCLS-only
+crystallisations, the up-front lump sum) never trigger, and a
+pre-existing `mpaa_triggered_on` fact wins. Gross-defined plans
+resolve every mode as `SPLIT_EACH_PAYMENT`: an exact gross amount is
+a payment instruction, not a designation.
+Outside decumulation (planned-outflow funding), `UP_FRONT_LUMP_SUM`
+also resolves draws as split payments — the up-front designation is a
+retirement event. **Accepted v1 cost:** with no cash/GIA wrapper until
+roadmap 9.2, an up-front lump sum beyond the period's need is spent,
+not banked (exactly the DB commutation-lump-sum convention), so
+`UP_FRONT_LUMP_SUM` understates what a real saver would keep; the 9.2
+cash wrapper removes the distortion.
 
 **Return model and Monte Carlo.** `ReturnModel.returns_for(period, path)`:
 deterministic impl = expected real returns + CPI → nominal, same every

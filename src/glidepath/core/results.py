@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 from glidepath.core.money import Money
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from glidepath.core.config import RunConfig
     from glidepath.core.entities import EntityId, Household
     from glidepath.core.glide import LifeStage
@@ -119,11 +121,23 @@ class PersonPeriodResult:
     ``db_income`` and ``state_pension_income`` are the period's DB and
     state pension income actually in payment (revalued/uprated,
     pro-rated from their exact start dates, §4.1); ``db_lump_sum`` is
-    tax-free commutation cash received when a DB pension starts this
-    period (roadmap 4.2/4.3). ``planned_outflows`` is the nominal total
+    the gross commutation cash received when a DB pension starts this
+    period (roadmap 4.2/4.3) — tax-free up to the remaining lump-sum
+    allowance, the excess taxed as income (roadmap 5.2).
+    ``planned_outflows`` is the nominal total
     of the household's dated one-offs landing this period (roadmap
     5.4) — a net need on top of ``spending_need``, so the shortfall
     accounting covers both.
+
+    Tax-free cash tracking (roadmap 5.2): ``pension_lump_sum`` is
+    up-front tax-free cash delivered by a whole-pot crystallisation
+    this period (the ``UP_FRONT_LUMP_SUM`` event — phased tax-free
+    elements appear in the wrappers' ``withdrawal_tax_free`` instead);
+    ``lsa_used`` is the person's cumulative tax-free cash at period
+    end, including the pre-plan ``lsa_used`` fact;
+    ``mpaa_triggered_on`` is the flexible-access trigger date in
+    effect at period end — the pre-plan fact or the in-run first
+    taxable pension draw — or ``None`` if never triggered.
     """
 
     person_id: EntityId
@@ -140,6 +154,9 @@ class PersonPeriodResult:
     db_lump_sum: Money = _ZERO
     state_pension_income: Money = _ZERO
     planned_outflows: Money = _ZERO
+    pension_lump_sum: Money = _ZERO
+    lsa_used: Money = _ZERO
+    mpaa_triggered_on: date | None = None
 
     def __post_init__(self) -> None:
         """Reject negative flows."""
@@ -152,6 +169,8 @@ class PersonPeriodResult:
             self.db_lump_sum,
             self.state_pension_income,
             self.planned_outflows,
+            self.pension_lump_sum,
+            self.lsa_used,
         )
         if any(amount < _ZERO for amount in amounts):
             msg = "PersonPeriodResult amounts must be non-negative"
@@ -261,6 +280,7 @@ def collect_plan_facts(household: Household) -> tuple[LabelledFact, ...]:
         note(f"{prefix}.sex_for_longevity", person.sex_for_longevity)
         note(f"{prefix}.employment_income", person.employment_income)
         note(f"{prefix}.mpaa_triggered_on", person.mpaa_triggered_on)
+        note(f"{prefix}.lsa_used", person.lsa_used)
         for pension in person.db_pensions:
             pension_prefix = f"db_pension[{pension.id}]"
             note(
