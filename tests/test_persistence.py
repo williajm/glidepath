@@ -15,6 +15,7 @@ Regenerate the golden file after a reviewed format change with::
 """
 
 import json
+import os
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -512,6 +513,36 @@ class TestCanonicalForm:
         with pytest.raises(PersistenceError, match="cannot persist"):
             save_plan(unsavable, target)
         assert target.read_bytes() == before
+
+    def test_save_leaves_no_temporary_file_behind(self, tmp_path: Path) -> None:
+        """The atomic-write staging file is gone after a clean save."""
+        target = tmp_path / "plan.glidepath.json"
+        save_plan(minimal_document(), target)
+        assert list(tmp_path.iterdir()) == [target]
+
+    def test_failed_write_never_truncates_the_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A mid-write failure leaves the last saved plan untouched.
+
+        The write goes to a sibling temporary file that only replaces
+        the target after closing cleanly; a failure at the replace step
+        stands in for disk-full or power loss mid-write.
+        """
+        target = tmp_path / "plan.glidepath.json"
+        save_plan(minimal_document(), target)
+        before = target.read_bytes()
+
+        def refuse(_src: object, _dst: object) -> None:
+            msg = "disk full"
+            raise OSError(msg)
+
+        monkeypatch.setattr(os, "replace", refuse)
+        document = kitchen_sink_document()
+        with pytest.raises(OSError, match="disk full"):
+            save_plan(document, target)
+        assert target.read_bytes() == before
+        assert list(tmp_path.iterdir()) == [target]
 
     def test_decimal_representations_are_preserved_not_normalized(self) -> None:
         """Equal-but-differently-written decimals keep their spellings.

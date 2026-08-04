@@ -17,10 +17,34 @@ from glidepath.app.copy import (
     DISCLAIMER_TITLE,
     HELP_MENU_LABEL,
 )
+from glidepath.app.files import (
+    FILE_MENU_LABEL,
+    OPEN_DIALOG_TITLE,
+    OPEN_PLAN_LABEL,
+    PLAN_FILE_FILTER,
+    PLAN_FILE_SUFFIX,
+    SAVE_DIALOG_TITLE,
+    SAVE_PLAN_AS_LABEL,
+    SAVE_PLAN_LABEL,
+)
 from glidepath.app.forms import FactsFormViewModel, build_facts_form_view_model
 
 if TYPE_CHECKING:
     from glidepath.app.firstrun import FirstRunState
+
+
+@dataclass(frozen=True)
+class FileMenuViewModel:
+    """The File menu: open and save the plan document (§4.5)."""
+
+    menu_label: str
+    open_label: str
+    save_label: str
+    save_as_label: str
+    open_dialog_title: str
+    save_dialog_title: str
+    file_filter: str
+    file_suffix: str
 
 
 @dataclass(frozen=True)
@@ -46,6 +70,7 @@ class ShellViewModel:
     """Top-level application shell."""
 
     window_title: str
+    file_menu: FileMenuViewModel
     help_menu_label: str
     facts_tab_label: str
     charts_tab_label: str
@@ -68,6 +93,16 @@ def build_shell_view_model() -> ShellViewModel:
     """Assemble the shell view model from canonical copy and metadata."""
     return ShellViewModel(
         window_title=APP_NAME,
+        file_menu=FileMenuViewModel(
+            menu_label=FILE_MENU_LABEL,
+            open_label=OPEN_PLAN_LABEL,
+            save_label=SAVE_PLAN_LABEL,
+            save_as_label=SAVE_PLAN_AS_LABEL,
+            open_dialog_title=OPEN_DIALOG_TITLE,
+            save_dialog_title=SAVE_DIALOG_TITLE,
+            file_filter=PLAN_FILE_FILTER,
+            file_suffix=PLAN_FILE_SUFFIX,
+        ),
         help_menu_label=HELP_MENU_LABEL,
         facts_tab_label="Facts",
         charts_tab_label="Charts",

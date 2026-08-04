@@ -17,6 +17,7 @@ from glidepath.app import (
     ChartsViewModel,
     PlanState,
     ReportBasis,
+    bar_tooltip,
     basis_from_key,
     build_charts_view_model,
     initial_plan_state,
@@ -285,3 +286,12 @@ class TestWrapperLabelDisambiguation:
         tax_chart = two_isas.charts[2]
         assert all(value == 0 for value in tax_chart.series[0].values)
         assert tax_chart.y_axis_max == 1
+
+
+class TestBarTooltip:
+    """The bar hover copy shells bind to their plotting widgets."""
+
+    def test_names_the_series_and_period_with_the_formatted_amount(self) -> None:
+        """Series label, category, and pounds-and-pence amount."""
+        text = bar_tooltip("2043", "State pension", Decimal("12345.67"))
+        assert text == "State pension\n2043: £12,345.67"

@@ -5,12 +5,15 @@ it through the pure transitions in :mod:`glidepath.app`; widgets only
 render view models and forward raw user input back.
 """
 
+import contextlib
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -32,11 +35,15 @@ from glidepath.app import (
     build_inspector_view_model,
     build_scenarios_view_model,
     example_facts_form_data,
+    facts_form_data_from_household,
     facts_saved_message,
     format_form_errors,
     initial_plan_state,
+    load_plan_state,
     metric_from_key,
     parse_facts_form,
+    record_last_plan_path,
+    save_plan_state,
     state_with_household,
     state_with_override,
     state_with_scenario_added,
@@ -86,11 +93,20 @@ class DisclaimerDialog(QDialog):
 class MainWindow(QMainWindow):
     """The application shell: facts entry, the inspector, and Help → About."""
 
-    def __init__(self, view_model: ShellViewModel) -> None:
-        """Bind the shell view model to the window and start a session."""
+    def __init__(
+        self, view_model: ShellViewModel, settings_path: Path | None = None
+    ) -> None:
+        """Bind the shell view model to the window and start a session.
+
+        ``settings_path`` is the per-user settings file recording the
+        last plan path for the next launch; ``None`` (tests, embedded
+        shells) records nothing.
+        """
         super().__init__()
         self._view_model = view_model
         self._about_view_model = view_model.about
+        self._settings_path = settings_path
+        self._plan_path: Path | None = None
         self._state = initial_plan_state()
         self._charts_basis = DEFAULT_CHART_BASIS
         self._comparison_basis = DEFAULT_CHART_BASIS
@@ -123,11 +139,88 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(tabs)
         self._load_example()
 
-        # The "&" mnemonic is toolkit mechanics, not copy — the label
-        # itself comes from the app layer (§4.7).
+        # The "&" mnemonic is toolkit mechanics, not copy — the labels
+        # themselves come from the app layer (§4.7).
+        file_menu = self.menuBar().addMenu(f"&{view_model.file_menu.menu_label}")
+        open_action = file_menu.addAction(view_model.file_menu.open_label)
+        open_action.triggered.connect(self.open_plan_dialog)
+        save_action = file_menu.addAction(view_model.file_menu.save_label)
+        save_action.triggered.connect(self.save_plan)
+        save_as_action = file_menu.addAction(view_model.file_menu.save_as_label)
+        save_as_action.triggered.connect(self.save_plan_as_dialog)
         help_menu = self.menuBar().addMenu(f"&{view_model.help_menu_label}")
         about_action = help_menu.addAction(view_model.about.title)
         about_action.triggered.connect(self.show_about)
+
+    def open_plan(self, path: Path) -> bool:
+        """Load the plan at ``path`` into the session; True when it loaded.
+
+        On success every pane re-renders from the loaded state and the
+        facts form repopulates from the loaded household, so an edit
+        starts from what the file says. On failure the session is left
+        untouched and the status bar explains.
+        """
+        outcome = load_plan_state(path, today=_today())
+        self.statusBar().showMessage(outcome.message)
+        if outcome.state is None:
+            return False
+        self._state = outcome.state
+        self._plan_path = path
+        self._remember_plan_path(path)
+        household = outcome.state.household
+        if household is not None:
+            self.facts_pane.set_form_data(facts_form_data_from_household(household))
+            self.facts_pane.status_label.setText(outcome.message)
+        self._refresh_result_panes()
+        return True
+
+    def save_plan(self) -> None:
+        """Save to the session's plan file, or ask for one the first time."""
+        if self._plan_path is None:
+            self.save_plan_as_dialog()
+            return
+        self._write_plan(self._plan_path)
+
+    def open_plan_dialog(self) -> None:
+        """Ask for a plan file and load it."""
+        menu = self._view_model.file_menu
+        filename, _selected = QFileDialog.getOpenFileName(
+            self, menu.open_dialog_title, "", menu.file_filter
+        )
+        if filename:
+            self.open_plan(Path(filename))
+
+    def save_plan_as_dialog(self) -> None:
+        """Ask where to save the plan and write it there."""
+        menu = self._view_model.file_menu
+        filename, _selected = QFileDialog.getSaveFileName(
+            self, menu.save_dialog_title, "", menu.file_filter
+        )
+        if not filename:
+            return
+        if not filename.endswith(menu.file_suffix):
+            filename += menu.file_suffix
+        self._write_plan(Path(filename))
+
+    def _write_plan(self, path: Path) -> None:
+        """Write the session's plan to ``path`` and report the outcome."""
+        outcome = save_plan_state(self._state, path)
+        self.statusBar().showMessage(outcome.message)
+        if outcome.saved:
+            self._plan_path = path
+            self._remember_plan_path(path)
+
+    def _remember_plan_path(self, path: Path) -> None:
+        """Record the plan path for the next launch, best-effort.
+
+        An unwritable config directory must not break the save or load
+        that just succeeded — worst case the next launch starts on the
+        example again.
+        """
+        if self._settings_path is None:
+            return
+        with contextlib.suppress(OSError):
+            record_last_plan_path(self._settings_path, path)
 
     def _load_example(self) -> None:
         """Open with the example plan on screen and projected (§4.9).
@@ -141,8 +234,14 @@ class MainWindow(QMainWindow):
         self.facts_pane.status_label.setText(self._view_model.facts_form.example_note)
 
     def _handle_cleared(self) -> str:
-        """Reset the session to no plan and re-render the result panes."""
+        """Reset the session to no plan and re-render the result panes.
+
+        The session's plan file detaches too: after a clear, the next
+        Save asks where to write rather than overwriting the file the
+        cleared plan came from.
+        """
         self._state = initial_plan_state()
+        self._plan_path = None
         self._refresh_result_panes()
         return self._view_model.facts_form.cleared_note
 

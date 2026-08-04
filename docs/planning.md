@@ -1510,6 +1510,26 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   a Fusion-based theme in `gui/style.py` (presentation only, no copy or
   policy) built around the brand green, with the icon and About/README
   wordmark shipped as packaged assets under `gui/assets/`.*
+- [x] 9.8 Plan save/load in the shell — *the §4.5 persistence layer wired
+  to a File menu (Open/Save/Save As over `.glidepath.json`, stored
+  wherever the user chooses). Shipped: `app/files.py` folds save/load
+  into status messages, records the shipped data version at save, and
+  notes on load when shipped defaults have moved since;
+  `facts_form_data_from_household` inverts `parse_facts_form` so a
+  loaded plan repopulates the facts form (round-trip pinned by test,
+  entity ids preserved via the resubmission path so scenario overrides
+  survive); the per-user settings file additionally remembers the last
+  plan path and the next launch reopens it, falling back to the launch
+  example. Data-safety guarantees: saves are atomic (sibling temp file
+  + rename, so a mid-write failure never truncates the last saved
+  plan); a plan the v1 form cannot faithfully edit
+  (`form_cannot_represent` — extra persons, planned outflows, annuity
+  purchases, personal glide paths, stage multipliers, wrapper
+  allocations/fees, independently dated fact pairs) is refused at open
+  rather than silently reduced on the next save; stored table
+  overrides (base and per-scenario) are vetted by their policy parsers
+  at load so a defective table fails the open, never a run mid-flight;
+  clearing the form detaches the session's plan file so Save re-asks.*
 
 ## 9. Open questions
 

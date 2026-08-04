@@ -9,10 +9,12 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
+from PySide6.QtCharts import QBarSet, QChartView, QStackedBarSeries
 from PySide6.QtWidgets import QRadioButton
 
 from glidepath.app import (
     ChartsViewModel,
+    bar_tooltip,
     build_charts_view_model,
     build_shell_view_model,
     initial_plan_state,
@@ -28,6 +30,7 @@ from glidepath.core import (
     SpendingPlan,
     Wrapper,
 )
+from glidepath.gui import charts as gui_charts
 from glidepath.gui.charts import ChartsPane
 from glidepath.gui.widgets import MainWindow
 from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
@@ -116,6 +119,82 @@ class TestChartsPane:
         assert buttons[labels["real"]].isChecked()
         buttons[labels["nominal"]].click()
         assert selected == ["nominal"]
+
+
+class _ToolTipRecorder:
+    """A stand-in QToolTip recording the show and hide calls."""
+
+    def __init__(self) -> None:
+        self.shown: list[str] = []
+        self.hides = 0
+
+    def showText(self, _pos: object, text: str) -> None:  # noqa: N802
+        """Record the copy a hover would pop up."""
+        self.shown.append(text)
+
+    def hideText(self) -> None:  # noqa: N802
+        """Record that the tooltip was dismissed."""
+        self.hides += 1
+
+
+def _first_bar_set(pane: ChartsPane) -> QBarSet:
+    """The first chart's first bar set, fresh from a refresh."""
+    view = pane.chart_tabs.widget(0)
+    assert isinstance(view, QChartView)
+    [series] = view.chart().series()
+    assert isinstance(series, QStackedBarSeries)
+    [bar_set] = series.barSets()
+    return bar_set
+
+
+class TestBarTooltips:
+    """Hovering a bar segment shows the app layer's tooltip copy."""
+
+    @pytest.fixture(name="tooltips")
+    def tooltips_fixture(self, monkeypatch: pytest.MonkeyPatch) -> _ToolTipRecorder:
+        """Capture the tooltip calls the charts module makes."""
+        recorder = _ToolTipRecorder()
+        monkeypatch.setattr(gui_charts, "QToolTip", recorder)
+        return recorder
+
+    def test_hover_shows_the_segment_copy(self, tooltips: _ToolTipRecorder) -> None:
+        """The hovered segment pops its series, period, and amount."""
+        pane = ChartsPane(lambda _key: None)
+        view_model = projected_view_model()
+        pane.refresh(view_model)
+        bar_set = _first_bar_set(pane)
+        hovering = True
+        bar_set.hovered.emit(hovering, 1)
+        chart = view_model.charts[0]
+        expected = bar_tooltip(
+            view_model.categories[1], chart.series[0].label, chart.series[0].values[1]
+        )
+        assert tooltips.shown == [expected]
+        assert tooltips.hides == 0
+
+    def test_leaving_the_bar_hides_the_tooltip(
+        self, tooltips: _ToolTipRecorder
+    ) -> None:
+        """Hover-off dismisses rather than leaving stale copy up."""
+        pane = ChartsPane(lambda _key: None)
+        pane.refresh(projected_view_model())
+        bar_set = _first_bar_set(pane)
+        hovering = False
+        bar_set.hovered.emit(hovering, 0)
+        assert tooltips.shown == []
+        assert tooltips.hides == 1
+
+    def test_out_of_range_hover_hides_rather_than_misreports(
+        self, tooltips: _ToolTipRecorder
+    ) -> None:
+        """A hover index off the categories shows nothing."""
+        pane = ChartsPane(lambda _key: None)
+        pane.refresh(projected_view_model())
+        bar_set = _first_bar_set(pane)
+        hovering = True
+        bar_set.hovered.emit(hovering, -1)
+        assert tooltips.shown == []
+        assert tooltips.hides == 1
 
 
 class TestMainWindowChartsFlow:

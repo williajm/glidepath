@@ -7,6 +7,7 @@ fields, collect raw text back, and forward it to the submit callback.
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -25,6 +26,31 @@ from glidepath.app import FactsFormData, FactsFormViewModel, FieldKind, SectionS
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from PySide6.QtGui import QWheelEvent
+
+
+class ScrollSafeComboBox(QComboBox):
+    """A combo box that scroll gestures pass over instead of spinning.
+
+    Inside a scrolling form, a stock ``QComboBox`` under the pointer
+    swallows wheel events and changes its value — so scrolling the
+    page silently edits the plan. This variant only reacts to the
+    wheel once the user has clicked into it; otherwise the event
+    propagates to the surrounding scroll area.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Take focus by click or tab only, never by wheel-over."""
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+        """Spin the value only when focused; else let the page scroll."""
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
 
 class SectionForm(QGroupBox):
     """One titled group of fields rendered from a :class:`SectionSpec`."""
@@ -40,7 +66,7 @@ class SectionForm(QGroupBox):
             layout.addRow(description)
         for field in spec.fields:
             if field.kind is FieldKind.CHOICE:
-                combo = QComboBox(self)
+                combo = ScrollSafeComboBox(self)
                 for option in field.choices:
                     combo.addItem(option.label, option.value)
                 self._editors[field.key] = combo
@@ -238,5 +264,6 @@ class FactsEntryPane(QWidget):
 __all__ = [
     "FactsEntryPane",
     "RepeatableSection",
+    "ScrollSafeComboBox",
     "SectionForm",
 ]
