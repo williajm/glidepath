@@ -5,6 +5,7 @@ extrapolation past the last shipped data file. Golden figures are
 hand-worked from the shipped 2026/27 file with 2% assumed CPI.
 """
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -13,10 +14,13 @@ import pytest
 from glidepath.core import AssumptionKey, Money, Period, Rate, TaxInput
 from glidepath.regions.uk import (
     RUK_RESIDENCY,
+    SCOTLAND_RESIDENCY,
     DataFileError,
     FutureYearsExtension,
     FutureYearsMode,
     FutureYearsPolicy,
+    IncomeTaxSchedule,
+    TaxBand,
     TaxYearFile,
     UkTaxError,
     UkTaxSystem,
@@ -26,6 +30,11 @@ from glidepath.regions.uk import (
 )
 
 CPI = Rate(Decimal("0.02"))
+
+SCOTLAND_VALUE = {
+    "lower_bands_frozen_until_tax_year": "2026/27",
+    "upper_bands_frozen_until_tax_year": "2028/29",
+}
 
 
 @pytest.fixture(scope="module", name="base")
@@ -45,9 +54,17 @@ def default_policy_fixture() -> FutureYearsPolicy:
 
 
 def test_shipped_default_parses(default_policy: FutureYearsPolicy) -> None:
-    """The shipped default is frozen to 2030/31, then CPI-indexed (§7)."""
+    """The shipped default is frozen to 2030/31, then CPI-indexed (§7).
+
+    The devolved Scottish band groups carry their own freeze ends: the
+    lower bands hold only through the shipped 2026/27 year, the
+    Higher/Advanced/Top group through the announced 2028/29 commitment.
+    """
     assert default_policy.mode is FutureYearsMode.FROZEN_THEN_CPI_INDEXED
     assert default_policy.frozen_until_start_year == 2030
+    assert default_policy.scotland is not None
+    assert default_policy.scotland.lower_frozen_until_start_year == 2026
+    assert default_policy.scotland.upper_frozen_until_start_year == 2028
 
 
 def test_frozen_needs_no_freeze_end() -> None:
@@ -85,6 +102,60 @@ def test_frozen_needs_no_freeze_end() -> None:
             {"mode": "frozen", "frozen_until_tax_year": "2030/31"},
             "does not take frozen_until_tax_year",
         ),
+        (
+            {"mode": "frozen_then_cpi_indexed", "frozen_until_tax_year": "2030/31"},
+            "requires a scotland table",
+        ),
+        (
+            {"mode": "frozen", "scotland": dict(SCOTLAND_VALUE)},
+            "does not take a scotland table",
+        ),
+        (
+            {
+                "mode": "frozen_then_cpi_indexed",
+                "frozen_until_tax_year": "2030/31",
+                "scotland": "everything frozen",
+            },
+            "scotland: expected a table value",
+        ),
+        (
+            {
+                "mode": "frozen_then_cpi_indexed",
+                "frozen_until_tax_year": "2030/31",
+                "scotland": {"upper_bands_frozen_until_tax_year": "2028/29"},
+            },
+            "missing required key 'lower_bands_frozen_until_tax_year'",
+        ),
+        (
+            {
+                "mode": "frozen_then_cpi_indexed",
+                "frozen_until_tax_year": "2030/31",
+                "scotland": {**SCOTLAND_VALUE, "extra": "x"},
+            },
+            "unknown keys: extra",
+        ),
+        (
+            {
+                "mode": "frozen_then_cpi_indexed",
+                "frozen_until_tax_year": "2030/31",
+                "scotland": {
+                    **SCOTLAND_VALUE,
+                    "lower_bands_frozen_until_tax_year": "2026-27",
+                },
+            },
+            "not 'YYYY/YY'",
+        ),
+        (
+            {
+                "mode": "frozen_then_cpi_indexed",
+                "frozen_until_tax_year": "2030/31",
+                "scotland": {
+                    **SCOTLAND_VALUE,
+                    "upper_bands_frozen_until_tax_year": 2028,
+                },
+            },
+            "'YYYY/YY' string",
+        ),
     ],
 )
 def test_invalid_policy_values_are_rejected(value: object, problem: str) -> None:
@@ -97,6 +168,14 @@ def test_direct_construction_enforces_the_same_invariants() -> None:
     """The freeze end is required exactly when the mode uses one."""
     with pytest.raises(DataFileError, match="requires frozen_until_tax_year"):
         FutureYearsPolicy(mode=FutureYearsMode.FROZEN_THEN_CPI_INDEXED)
+
+
+def test_direct_construction_requires_the_scotland_table() -> None:
+    """Indexing without a devolved Scottish policy is a construction error."""
+    with pytest.raises(DataFileError, match="requires a scotland table"):
+        FutureYearsPolicy(
+            mode=FutureYearsMode.FROZEN_THEN_CPI_INDEXED, frozen_until_start_year=2030
+        )
 
 
 def test_mode_must_be_an_enum_member() -> None:
@@ -161,11 +240,35 @@ def test_frozen_mode_carries_every_figure_forward(base: TaxYearFile) -> None:
 def test_default_policy_is_frozen_through_2030_31(
     base: TaxYearFile, default_policy: FutureYearsPolicy
 ) -> None:
-    """Inside the legislated freeze the figures match the base year."""
+    """Inside the legislated freeze the rUK/reserved figures match the base."""
     extended = extend_tax_year(base, 2030, policy=default_policy, cpi=CPI)
     assert extended.meta.tax_year == "2030/31"
     assert extended.income_tax_ruk == base.income_tax_ruk
     assert extended.pension == base.pension
+
+
+def test_scottish_thresholds_move_inside_the_ruk_freeze(
+    base: TaxYearFile, default_policy: FutureYearsPolicy
+) -> None:
+    """The rUK freeze never governs the devolved Scottish band uppers.
+
+    2030/31: the reserved PA and taper hold (the legislated freeze),
+    but the lower Scottish uppers get four CPI steps past the shipped
+    2026/27 year and the Higher/Advanced/Top uppers two steps past the
+    announced 2028/29 commitment.
+    """
+    extended = extend_tax_year(base, 2030, policy=default_policy, cpi=CPI)
+    scotland = extended.income_tax_scotland
+    assert scotland.personal_allowance == Money(Decimal(12570))
+    assert scotland.pa_taper_threshold == Money(Decimal(100000))
+    assert [band.upper for band in scotland.bands] == [
+        Money(Decimal(4294)),  # 3,967 x 1.02^4 = 4,294.01
+        Money(Decimal(18354)),  # 16,956 x 1.02^4 = 18,353.72
+        Money(Decimal(33655)),  # 31,092 x 1.02^4 = 33,654.98
+        Money(Decimal(64952)),  # 62,430 x 1.02^2 = 64,952.17
+        Money(Decimal(130196)),  # 125,140 x 1.02^2 = 130,195.66
+        None,
+    ]
 
 
 def test_first_indexed_year_figures(
@@ -182,13 +285,14 @@ def test_first_indexed_year_figures(
         None,
     ]
     scotland = extended.income_tax_scotland
-    assert scotland.personal_allowance == Money(Decimal(12821))
+    assert scotland.personal_allowance == Money(Decimal(12821))  # reserved: 1 step
+    assert scotland.pa_taper_threshold == Money(Decimal(102000))
     assert [band.upper for band in scotland.bands] == [
-        Money(Decimal(4046)),  # 4,046.34 down
-        Money(Decimal(17295)),
-        Money(Decimal(31714)),
-        Money(Decimal(63679)),
-        Money(Decimal(127643)),
+        Money(Decimal(4380)),  # 3,967 x 1.02^5 = 4,379.89 (5 steps past 2026/27)
+        Money(Decimal(18721)),  # 16,956 x 1.02^5 = 18,720.79
+        Money(Decimal(34328)),  # 31,092 x 1.02^5 = 34,328.08
+        Money(Decimal(66251)),  # 62,430 x 1.02^3 = 66,251.22 (3 steps past 2028/29)
+        Money(Decimal(132800)),  # 125,140 x 1.02^3 = 132,799.57
         None,
     ]
     pension = extended.pension
@@ -213,6 +317,9 @@ def test_rates_never_extrapolate(
     extended = extend_tax_year(base, 2031, policy=default_policy, cpi=CPI)
     base_rates = [band.rate for band in base.income_tax_ruk.bands]
     assert [band.rate for band in extended.income_tax_ruk.bands] == base_rates
+    base_scottish_rates = [band.rate for band in base.income_tax_scotland.bands]
+    scottish_rates = [band.rate for band in extended.income_tax_scotland.bands]
+    assert scottish_rates == base_scottish_rates
     assert extended.income_tax_ruk.pa_taper_rate == base.income_tax_ruk.pa_taper_rate
     assert extended.pension.aa_taper_rate == base.pension.aa_taper_rate
     assert extended.pension.relief_at_source_rate == base.pension.relief_at_source_rate
@@ -247,11 +354,36 @@ def test_lapsed_freeze_end_indexes_from_the_base_year(base: TaxYearFile) -> None
     freeze lapses — there is deliberately no index-immediately mode.
     """
     policy = FutureYearsPolicy.from_assumption_value(
-        {"mode": "frozen_then_cpi_indexed", "frozen_until_tax_year": "2020/21"}
+        {
+            "mode": "frozen_then_cpi_indexed",
+            "frozen_until_tax_year": "2020/21",
+            "scotland": dict(SCOTLAND_VALUE),
+        }
     )
     extended = extend_tax_year(base, 2028, policy=policy, cpi=CPI)
     # Two steps from 2026/27: 12,570 x 1.02^2 = 13,077.83 -> 13,078.
     assert extended.income_tax_ruk.personal_allowance == Money(Decimal(13078))
+
+
+def test_scottish_extension_needs_the_higher_band_anchor(
+    base: TaxYearFile, default_policy: FutureYearsPolicy
+) -> None:
+    """A Scottish ladder without a higher band cannot group its uppers."""
+    scotland = base.income_tax_scotland
+    schedule = IncomeTaxSchedule(
+        personal_allowance=scotland.personal_allowance,
+        pa_taper_threshold=scotland.pa_taper_threshold,
+        pa_taper_rate=scotland.pa_taper_rate,
+        bands=(
+            TaxBand(
+                name="basic", rate=Rate(Decimal("0.20")), upper=Money(Decimal(16956))
+            ),
+            TaxBand(name="top", rate=Rate(Decimal("0.48")), upper=None),
+        ),
+    )
+    lopsided = replace(base, income_tax_scotland=schedule)
+    with pytest.raises(DataFileError, match="no band named 'higher'"):
+        extend_tax_year(lopsided, 2031, policy=default_policy, cpi=CPI)
 
 
 # --- UkTaxSystem integration ------------------------------------------------
@@ -283,6 +415,21 @@ def test_assessment_in_a_frozen_future_year(system: UkTaxSystem) -> None:
     base_year = Period(start=date(2026, 4, 6), end=date(2027, 4, 5))
     income = ruk_income("60000")
     assert system.assess(year_2030_31, income) == system.assess(base_year, income)
+
+
+def test_scottish_assessment_in_a_partially_frozen_year(system: UkTaxSystem) -> None:
+    """2030/31 at 50,000: reserved PA frozen, Scottish uppers indexed.
+
+    Hand-worked from the group-indexed ladder (4,294 / 18,354 / 33,655
+    / 64,952 / 130,196): 815.86 + 2,812.00 + 3,213.21 + 1,585.50.
+    """
+    year_2030_31 = Period(start=date(2030, 4, 6), end=date(2031, 4, 5))
+    scottish = TaxInput(
+        residency=SCOTLAND_RESIDENCY, non_savings_income=Money(Decimal(50000))
+    )
+    result = system.assess(year_2030_31, scottish)
+    assert result.tax_free_allowance == Money(Decimal(12570))
+    assert result.tax_due == Money(Decimal("8426.57"))
 
 
 def test_extension_never_reaches_backwards(system: UkTaxSystem) -> None:

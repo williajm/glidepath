@@ -192,7 +192,7 @@ def test_new_state_pension_system_start() -> None:
 def test_default_assumptions_cover_every_key() -> None:
     """The defaults file defines every AssumptionKey exactly once."""
     file = load_default_assumptions()
-    assert file.meta.verified_on == date(2026, 8, 3)
+    assert file.meta.verified_on == date(2026, 8, 4)
     assert {entry.key for entry in file.defaults} == set(AssumptionKey)
 
 
@@ -228,9 +228,13 @@ def test_default_assumption_spot_values() -> None:
 
     future_years = file.get(AssumptionKey.POLICY_TAX_FUTURE_YEARS).value
     assert isinstance(future_years, Mapping)
-    assert set(future_years) == {"mode", "frozen_until_tax_year"}
+    assert set(future_years) == {"mode", "frozen_until_tax_year", "scotland"}
     assert future_years["mode"] == "frozen_then_cpi_indexed"
     assert future_years["frozen_until_tax_year"] == "2030/31"
+    scotland = future_years["scotland"]
+    assert isinstance(scotland, Mapping)
+    assert scotland["lower_bands_frozen_until_tax_year"] == "2026/27"
+    assert scotland["upper_bands_frozen_until_tax_year"] == "2028/29"
 
 
 def test_every_default_states_a_basis() -> None:

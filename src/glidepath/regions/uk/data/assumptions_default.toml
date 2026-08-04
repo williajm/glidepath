@@ -7,9 +7,10 @@
 schema_version = 1
 
 [meta]
-verified_on = 2026-08-03
+verified_on = 2026-08-04
 sources = [
   "https://obr.uk/efo/economic-and-fiscal-outlook-march-2026/",
+  "https://www.gov.scot/publications/scottish-budget-2026-2027/pages/4/",
   "https://www.handbook.fca.org.uk/handbook/COBS/13/Annex2.html",
   "https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07",
   "https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm",
@@ -113,8 +114,8 @@ basis = "Triple lock = max(earnings, CPI, floor 2.5%); deterministic mode proxie
 
 [[assumption]]
 key = "policy.tax.future_years"
-value = { mode = "frozen_then_cpi_indexed", frozen_until_tax_year = "2030/31" }
-basis = "Freeze to 2030/31 is legislated fact (planning §6); post-2031 CPI indexation is assumption. Alternative: frozen indefinitely"
+value = { mode = "frozen_then_cpi_indexed", frozen_until_tax_year = "2030/31", scotland = { lower_bands_frozen_until_tax_year = "2026/27", upper_bands_frozen_until_tax_year = "2028/29" } }
+basis = "rUK thresholds + PA/taper (reserved, both regimes) frozen to 2030/31 is legislated fact (planning §6); Scottish band uppers are set annually - lower bands uprate in practice (CPI proxy past the shipped year), Higher/Advanced/Top committed frozen to 2028/29 per Scottish Budget 2026-27 (announced policy, not legislation); post-freeze CPI indexation is assumption. Alternative: frozen indefinitely"
 
 [[assumption]]
 key = "annuity.level.single.65"

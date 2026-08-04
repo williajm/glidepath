@@ -23,6 +23,7 @@ from glidepath.regions.uk.extension import (
     FutureYearsExtension,
     FutureYearsMode,
     FutureYearsPolicy,
+    ScottishBandsPolicy,
     extend_tax_year,
 )
 from glidepath.regions.uk.loader import (
@@ -111,6 +112,7 @@ __all__ = [
     "NewStatePension",
     "NmpaStep",
     "PensionRules",
+    "ScottishBandsPolicy",
     "SpaAgeBand",
     "SpaBand",
     "SpaDateBand",

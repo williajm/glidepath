@@ -142,7 +142,8 @@ def _data_version(
     Names every file with its ``verified_on`` date and a short content
     digest — the date alone cannot tell two same-day revisions apart
     (planning §4.6) — plus the full future-years policy (mode, freeze
-    end, CPI) and the state pension uprating policy when configured:
+    ends incl. the Scottish band groups, CPI) and the state pension
+    uprating policy when configured:
     both are region-build inputs whose effect must be identifiable
     from the version string, not the assumption read list.
     """
@@ -164,9 +165,15 @@ def _data_version(
         f" sha256={assumptions_digest}"
     )
     if future_years is not None:
-        detail = future_years.policy.mode.value
-        if future_years.policy.frozen_until_start_year is not None:
-            detail += f" until={future_years.policy.frozen_until_start_year}"
+        policy = future_years.policy
+        detail = policy.mode.value
+        if policy.frozen_until_start_year is not None:
+            detail += f" until={policy.frozen_until_start_year}"
+        if policy.scotland is not None:
+            detail += (
+                f" scot_lower_until={policy.scotland.lower_frozen_until_start_year}"
+                f" scot_upper_until={policy.scotland.upper_frozen_until_start_year}"
+            )
         parts.append(f"future_years {detail} cpi={future_years.cpi.value}")
     if uprating is not None:
         detail = uprating.rule.name.lower()

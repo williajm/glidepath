@@ -959,8 +959,16 @@ derivation, §5.1).
 **Future years:** past the last shipped file, the region extends the final
 year per the `policy.tax.future_years` assumption (scenario-flippable):
 `frozen` (indefinitely) vs `frozen_then_cpi_indexed` (the shipped default:
-the legislated freeze end, then CPI-indexed). There is deliberately no
-index-immediately mode — a legislated freeze end is a fact (§6), and a
+the legislated freeze end, then CPI-indexed). The freeze end governs only
+the rUK/reserved figures — the rUK schedule, pension/ISA allowances, and
+in both schedules the personal allowance and its taper (reserved to
+Westminster). The devolved Scottish band uppers are set annually by the
+Scottish Parliament (§6), so `frozen_then_cpi_indexed` carries a mandatory
+`scotland` sub-table with separate freeze ends for the lower bands (below
+the higher rate; shipped default: held only through the last shipped year,
+then CPI-indexed as the uprating proxy) and the Higher/Advanced/Top group
+(shipped default: the announced 2028/29 commitment). There is deliberately
+no index-immediately mode — a legislated freeze end is a fact (§6), and a
 mode without one could synthesize years contradicting known legislation;
 a freeze end at or before the last shipped year already degrades to pure
 CPI indexation. Legislated future changes (freeze end, pre-announced
@@ -1055,6 +1063,16 @@ become the Phase 2 data files.
 | Advanced | 45% | £62,431–£125,140 | same |
 | Top | 48% | above £125,140 | same |
 
+Scottish thresholds are set annually by the Scottish Parliament — the rUK
+freeze to 2030/31 never governs them (the PA and its taper are reserved
+and do follow it). Budget 2026-27 uprated the Basic and Intermediate
+thresholds by 7.4% and maintains the Higher, Advanced and Top thresholds
+at current levels until 2028-29 — a stated commitment, not legislation
+(verified 2026-08-04:
+[Scottish Budget 2026-27](https://www.gov.scot/publications/scottish-budget-2026-2027/pages/4/)).
+Future-year extrapolation therefore treats the Scottish band groups
+separately (§5.3, §7).
+
 ### Announced future-dated changes (model as data, not code)
 
 | Change | Effective | Source |
@@ -1142,7 +1160,7 @@ Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 | `horizon.planning_age` | 95 | ~1-in-4 longevity risk at 65 per ONS cohort life expectancy ([ONS calculator](https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07); exact values from 2024-based cohort tables at implementation) |
 | `glidepath.default_shape` | 80/20 equity/bonds until 15 years to retirement, then linear de-risk to 40/60 at retirement, held through drawdown | Typical UK target-date/lifestyling shape; a starting point only — per-person glide paths override it |
 | `policy.state_pension.uprating` | `triple_lock` (deterministic mode: CPI + 0.5% proxy for the long-run earnings premium) | Alternative scenario: `cpi`. In Monte Carlo the true rule — max(earnings, CPI, 2.5%) — is applied per path from the path's earnings and CPI draws; protected payments always uprate by CPI only (§5.1). Triple lock committed only to ~2029 (§6) |
-| `policy.tax.future_years` | frozen to 2030/31 (legislated), then CPI-indexed | Freeze is fact (§6); post-2031 indexation is assumption. Alternative: frozen indefinitely |
+| `policy.tax.future_years` | rUK + reserved figures (PA/taper both regimes, pension/ISA allowances) frozen to 2030/31 (legislated), then CPI-indexed; Scottish lower-band uppers CPI-indexed past the shipped year (set annually — uprating proxy), Higher/Advanced/Top uppers frozen to 2028/29 (announced), then CPI-indexed | rUK/reserved freeze is fact (§6); Scottish freeze horizons are announced policy, not legislation (§6); post-freeze indexation is assumption. Alternative: frozen indefinitely |
 | `annuity.level.single.65` | 7.75%/yr per £ purchase | Which? market table, snapshot 2026-07-27, retrieved 2026-08-01 ([which.co.uk](https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm)); best rate 7.946% — volatile market snapshot, refresh before relying on |
 | `annuity.escalating3.single.65` | 5.47%/yr | same snapshot |
 | `annuity.inflation_linked.single.65` | 5.5%/yr | Indicative only — secondary source ([IFA Magazine](https://ifamagazine.com/annuity-rates-hit-7-75-as-retirement-incomes-reach-18-year-high/)); weakest-sourced default here |

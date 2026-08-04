@@ -108,7 +108,10 @@ class TestUkRegionBundle:
         """
         extension = future_years_extension(default_assumption_set())
         version = uk_region(extension).data_version
-        assert "future_years frozen_then_cpi_indexed until=2030 cpi=0.02" in version
+        assert (
+            "future_years frozen_then_cpi_indexed until=2030"
+            " scot_lower_until=2026 scot_upper_until=2028 cpi=0.02"
+        ) in version
 
     def test_data_version_records_the_state_pension_uprating(self) -> None:
         """The uprating policy is a region-build input like the extension.
