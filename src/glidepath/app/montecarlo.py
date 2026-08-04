@@ -19,7 +19,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from glidepath.app.display import format_money, format_percent
-from glidepath.app.plan import PlanState, region_for
+from glidepath.app.plan import PlanState, region_for, replanned_state
 from glidepath.core import Money, RunConfig, RunMode, run_paths
 
 if TYPE_CHECKING:
@@ -59,6 +59,12 @@ MONTE_CARLO_PATHS_MESSAGE: Final = (
 )
 
 MONTE_CARLO_FAILED_PREFIX: Final = "The Monte Carlo run failed: "
+
+MONTE_CARLO_RUNNING_MESSAGE: Final = "Running Monte Carlo…"
+
+MONTE_CARLO_STALE_MESSAGE: Final = (
+    "Monte Carlo result discarded — the plan changed while it ran."
+)
 
 SUCCESS_RATE_LABEL: Final = "Success rate"
 
@@ -184,8 +190,13 @@ def state_with_monte_carlo(
     them; anything unusable — no plan, an unparseable seed or path
     count, an engine rejection — folds into ``monte_carlo_error`` on
     the returned state, never raising at a shell (the
-    :mod:`glidepath.app.plan` rule). Same seed + inputs reproduce
-    identical results (§4.6).
+    :mod:`glidepath.app.plan` rule). Before the paths run, the base
+    projection (and the scenario runs with it) is recomputed at the
+    same ``today`` through :func:`~glidepath.app.plan.replanned_state`
+    — the :func:`~glidepath.app.plan.state_with_scenarios` rule: in a
+    session left open across a date boundary, the bands and the
+    deterministic chart they overlay must share one anchor date. Same
+    seed + inputs reproduce identical results (§4.6).
     """
     if state.household is None:
         return _with_monte_carlo_error(state, MONTE_CARLO_NO_PLAN_MESSAGE)
@@ -199,6 +210,9 @@ def state_with_monte_carlo(
         return _with_monte_carlo_error(state, MONTE_CARLO_PATHS_MESSAGE)
     if not 1 <= paths <= MAX_PATHS:
         return _with_monte_carlo_error(state, MONTE_CARLO_PATHS_MESSAGE)
+    base = replanned_state(
+        state.assumptions, state.household, state.scenarios, today=today
+    )
     config = RunConfig(today=today, mode=RunMode.MONTE_CARLO, seed=seed)
     try:
         result = run_paths(
@@ -209,9 +223,9 @@ def state_with_monte_carlo(
             paths=paths,
         )
     except ValueError as exc:
-        return _with_monte_carlo_error(state, MONTE_CARLO_FAILED_PREFIX + str(exc))
+        return _with_monte_carlo_error(base, MONTE_CARLO_FAILED_PREFIX + str(exc))
     changes: dict[str, Any] = {"monte_carlo": result, "monte_carlo_error": None}
-    return replace(state, **changes) if changes else state
+    return replace(base, **changes) if changes else base
 
 
 def build_monte_carlo_panel(

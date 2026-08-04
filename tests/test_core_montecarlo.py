@@ -654,6 +654,13 @@ class TestMonteCarloMetrics:
         with pytest.raises(ValueError, match="between 0 and 100"):
             result.balance_percentile(negative)
 
+    def test_balance_percentiles_validate_before_iterating(self) -> None:
+        """Outcomes with no balance series must not swallow the check."""
+        result = result_of(outcome_of(0, "50"))
+        negative = Decimal(-1)
+        with pytest.raises(ValueError, match="between 0 and 100"):
+            result.balance_percentile(negative)
+
     def test_rejects_an_empty_outcome_set(self) -> None:
         """Metrics over no paths are undefined."""
         config = mc_config()

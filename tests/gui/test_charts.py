@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCharts import QBarSet, QChartView, QStackedBarSeries
-from PySide6.QtWidgets import QRadioButton
+from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
 
 from glidepath.app import (
+    MONTE_CARLO_STALE_MESSAGE,
+    NO_MONTE_CARLO_MESSAGE,
     ChartsViewModel,
     PlanState,
     bar_tooltip,
@@ -96,6 +98,12 @@ def monte_carlo_view_model() -> ChartsViewModel:
     """The charts screen after a 2-path Monte Carlo run, Monte Carlo mode."""
     state = state_with_monte_carlo(projected_state(), "7", "2", today=TODAY)
     return build_charts_view_model(state, mode=RunMode.MONTE_CARLO)
+
+
+def wait_for_monte_carlo(window: MainWindow) -> None:
+    """Wait out the worker, then deliver its queued finish signal."""
+    assert window.monte_carlo_pool.waitForDone(60_000)
+    QApplication.processEvents()
 
 
 class TestChartsPane:
@@ -330,6 +338,11 @@ class TestMainWindowChartsFlow:
         pane.seed_edit.setText("7")
         pane.paths_edit.setText("2")
         pane.run_button.click()
+        # The run executes off the GUI thread; the button stays disabled
+        # until the finished state is delivered back.
+        assert not pane.run_button.isEnabled()
+        wait_for_monte_carlo(window)
+        assert pane.run_button.isEnabled()
         assert "Success rate" in pane.metrics_label.text()
         assert pane.seed_edit.text() == "7"
         assert pane.paths_edit.text() == "2"
@@ -341,3 +354,55 @@ class TestMainWindowChartsFlow:
         deterministic_view = pane.chart_tabs.widget(0)
         assert isinstance(deterministic_view, QChartView)
         assert len(deterministic_view.chart().series()) == 1
+
+    def test_a_second_run_request_while_one_is_in_flight_is_ignored(
+        self, window: MainWindow
+    ) -> None:
+        """Overlapping runs would race over the session state."""
+        pane = window.charts_pane
+        buttons = {button.text(): button for button in pane.findChildren(QRadioButton)}
+        buttons["Monte Carlo"].click()
+        pane.seed_edit.setText("7")
+        pane.paths_edit.setText("2")
+        pane.run_button.click()
+        pane.run_button.click()
+        wait_for_monte_carlo(window)
+        assert "Success rate" in pane.metrics_label.text()
+
+    def test_a_plan_change_discards_an_in_flight_run(self, window: MainWindow) -> None:
+        """A result computed from a replaced state never lands (9.13)."""
+        pane = window.charts_pane
+        buttons = {button.text(): button for button in pane.findChildren(QRadioButton)}
+        buttons["Monte Carlo"].click()
+        pane.seed_edit.setText("7")
+        pane.paths_edit.setText("2")
+        pane.run_button.click()
+        window.facts_pane.submit_button.click()
+        wait_for_monte_carlo(window)
+        assert window.statusBar().currentMessage() == MONTE_CARLO_STALE_MESSAGE
+        assert pane.metrics_label.isHidden()
+        assert pane.run_button.isEnabled()
+
+    def test_scenario_edits_clear_the_monte_carlo_charts(
+        self, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A scenario change re-renders the charts without the old run."""
+        pane = window.charts_pane
+        buttons = {button.text(): button for button in pane.findChildren(QRadioButton)}
+        buttons["Monte Carlo"].click()
+        pane.seed_edit.setText("7")
+        pane.paths_edit.setText("2")
+        pane.run_button.click()
+        wait_for_monte_carlo(window)
+        assert "Success rate" in pane.metrics_label.text()
+        monkeypatch.setattr(
+            QInputDialog,
+            "getText",
+            staticmethod(lambda *_args, **_kwargs: ("what if", True)),
+        )
+        window.scenarios_pane.add_scenario_button.click()
+        assert pane.metrics_label.isHidden()
+        assert pane.monte_carlo_message_label.text() == NO_MONTE_CARLO_MESSAGE
+        view = pane.chart_tabs.widget(0)
+        assert isinstance(view, QChartView)
+        assert len(view.chart().series()) == 1

@@ -174,6 +174,7 @@ class MonteCarloResult:
             ValueError: If ``percentile`` lies outside [0, 100], or
                 the outcomes carry differing period counts.
         """
+        _check_percentile(percentile)
         lengths = {len(outcome.closing_balances) for outcome in self.outcomes}
         if len(lengths) != 1:
             msg = "balance_percentile needs every path to cover the same periods"
@@ -340,6 +341,17 @@ def sustainable_income(
     return low
 
 
+def _check_percentile(percentile: Decimal) -> None:
+    """Reject a percentile outside [0, 100].
+
+    Raises:
+        ValueError: If ``percentile`` lies outside [0, 100].
+    """
+    if not Decimal(0) <= percentile <= _HUNDRED:
+        msg = f"percentile must lie between 0 and 100, got {percentile}"
+        raise ValueError(msg)
+
+
 def _interpolated_percentile(balances: Sequence[Money], percentile: Decimal) -> Money:
     """The ``percentile`` of ``balances`` between order statistics.
 
@@ -351,9 +363,7 @@ def _interpolated_percentile(balances: Sequence[Money], percentile: Decimal) -> 
     Raises:
         ValueError: If ``percentile`` lies outside [0, 100].
     """
-    if not Decimal(0) <= percentile <= _HUNDRED:
-        msg = f"percentile must lie between 0 and 100, got {percentile}"
-        raise ValueError(msg)
+    _check_percentile(percentile)
     ordered = sorted(balances)
     rank = (Decimal(len(ordered)) - _ONE) * percentile / _HUNDRED
     lower = int(rank)

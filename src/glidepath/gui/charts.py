@@ -174,6 +174,15 @@ class ChartsPane(QWidget):
         """Forward the raw seed and path-count text to the shell."""
         self._callbacks.run_monte_carlo(self.seed_edit.text(), self.paths_edit.text())
 
+    def set_monte_carlo_busy(self, *, busy: bool) -> None:
+        """Disable the run action while a Monte Carlo run is in flight.
+
+        The run happens off the GUI thread (the window owns the
+        worker); disabling the button prevents a second overlapping
+        run from the same inputs.
+        """
+        self.run_button.setEnabled(not busy)
+
     def _sync_basis_buttons(self, view_model: ChartsViewModel) -> None:
         """Create the basis radio buttons once; keep the selection bound."""
         for option in view_model.basis_options:

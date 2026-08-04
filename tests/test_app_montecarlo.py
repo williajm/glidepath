@@ -30,6 +30,7 @@ from glidepath.app import (
     state_with_override,
 )
 from glidepath.app.montecarlo import MONTE_CARLO_FAILED_PREFIX
+from glidepath.app.plan import replanned_state
 from glidepath.core import (
     Decision,
     EntityId,
@@ -197,6 +198,26 @@ class TestStateWithMonteCarlo:
         state = state_with_household(mc_state, household(), today=TODAY)
         assert state.monte_carlo is None
         assert state.monte_carlo_error is None
+
+    def test_the_run_re_anchors_the_base_projection(self, projected: PlanState) -> None:
+        """The bands and the chart they overlay share one anchor date.
+
+        In a session left open across a date boundary the held
+        deterministic projection is anchored on the earlier day; the
+        transition recomputes it at the run's own ``today`` so the
+        roll-forwards and partial periods can never diverge.
+        """
+        later = date(2026, 9, 15)
+        state = state_with_monte_carlo(projected, "7", "2", today=later)
+        assert state.monte_carlo is not None
+        assert state.monte_carlo.config.today == later
+        re_anchored = replanned_state(
+            projected.assumptions, projected.household, (), today=later
+        )
+        assert state.result == re_anchored.result
+        assert state.result != projected.result
+        view_model = build_charts_view_model(state, mode=RunMode.MONTE_CARLO)
+        assert len(view_model.charts[0].bands) == 3
 
 
 class TestMonteCarloPanel:
