@@ -1,14 +1,14 @@
 # Glidepath planning
 
 > Status: master planning document — implementation issues are raised from
-> §8 · Last updated 2026-08-01 · All UK figures verified against primary
-> sources on 2026-08-01 (§6).
+> §8 · Last updated 2026-08-04 · All UK figures verified against primary
+> sources on 2026-08-01, with later re-verifications dated per row (§6).
 
 Contents: [1 Vision](#1-vision-and-product-principles) ·
 [2 Scope](#2-scope) · [3 Architecture](#3-architecture) ·
-[4 Decisions](#4-decision-records-proposed--awaiting-approval) ·
+[4 Decisions](#4-decision-records) ·
 [5 Design](#5-design) · [6 Verified figures](#6-verified-uk-policy-figures-202627) ·
-[7 Default assumptions](#7-default-assumptions-proposed) ·
+[7 Default assumptions](#7-default-assumptions) ·
 [8 Roadmap](#8-phased-roadmap--issue-basis) ·
 [9 Open questions](#9-open-questions)
 
@@ -41,8 +41,8 @@ decumulation — under explicit, inspectable inputs.
 
 | | Contents |
 | --- | --- |
-| **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions: deferred/accrued entitlements, plus active membership with CARE-style accrual (accrual rate, pensionable salary, service projection — 9.6). State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
-| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; couples activation; announced future rules (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs); final-salary linkage and split deferment/in-payment revaluation bases for DB schemes (9.6 ships CARE-style accrual on the single basis). |
+| **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions: deferred/accrued entitlements, plus active membership with CARE-style accrual (accrual rate, pensionable salary, service projection — 9.6). State pension incl. deferral. Deterministic and Monte Carlo annual projection (one step function, two return models — §5.2). Withdrawal strategies: fixed real, fixed %, guardrails, natural yield. Annuity purchases incl. partial annuitisation. Scenarios + comparison. JSON persistence. |
+| **Deferred (phased)** | Couples activation (the 9.4 spike scopes it first); announced future rules shipping as data in their year's files (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs); final-salary linkage and split deferment/in-payment revaluation bases for DB schemes (9.6 ships CARE-style accrual on the single basis). |
 | **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy); capital gains tax — the GIA models dividend and savings *income* only (9.2), never disposals. |
 
 ## 3. Architecture
@@ -62,7 +62,7 @@ decumulation — under explicit, inspectable inputs.
 └────────────────┘                                              └──────────────────────────┘
 ```
 
-## 4. Decision records (Proposed — awaiting approval)
+## 4. Decision records
 
 Each records: decision, rationale, rejected alternatives, accepted costs.
 Once approved, a decision changes only by a superseding entry here.
@@ -1267,7 +1267,7 @@ the GIA/cash wrappers bring these into the model).
 | SPA review | third review launched July 2025, ongoing; no change legislated as of 2026-08-01 | [third SPA review](https://www.gov.uk/government/collections/third-state-pension-age-review) |
 | Triple lock | committed "for this parliament" (~2029); nothing legislated beyond | [Budget 2025 fact sheet](https://www.gov.uk/government/news/budget-2025-fact-sheet-cutting-the-cost-of-living) |
 
-## 7. Default assumptions (proposed)
+## 7. Default assumptions
 
 Every row is a shipped default the user can override; each carries its
 basis. Recorded 2026-08-01 (the `yield.*` rows and the annuity
@@ -1316,120 +1316,120 @@ that strategy runs or the plan holds a GIA/cash wrapper.*
 
 ## 8. Phased roadmap — issue basis
 
-Each unchecked item becomes one GitHub issue (~½–2 days). Format: item —
-*acceptance criterion*. Items within a phase are mostly parallelisable;
-phases are dependency-ordered. Labels: `core`, `region:uk`, `data-files`,
-`docs`, `gui`, `needs-verification`.
+Each item becomes one GitHub issue (~½–2 days); a tick means the issue
+shipped to `main`. Format: item — *acceptance criterion*. Items within a
+phase are mostly parallelisable; phases are dependency-ordered. Labels:
+`core`, `region:uk`, `data-files`, `docs`, `gui`, `needs-verification`.
 
 ### Phase 1 — Core primitives (no UK anything)
 
-- [ ] 1.1 `Money`/`Rate` value types + rounding policy — *quantization rules
+- [x] 1.1 `Money`/`Rate` value types + rounding policy — *quantization rules
   of §5.2 enforced and property-tested (Hypothesis).*
-- [ ] 1.2 `Period` + `FiscalCalendar` protocol + generic annual calendar —
+- [x] 1.2 `Period` + `FiscalCalendar` protocol + generic annual calendar —
   *periods iterate an arbitrary horizon; birthday-in-period helpers tested
   at boundaries (§4.1).*
-- [ ] 1.3 `Fact[T]`, `Assumption[T]`, `Decision[T]`, `AssumptionKey`,
+- [x] 1.3 `Fact[T]`, `Assumption[T]`, `Decision[T]`, `AssumptionKey`,
   `AssumptionSet` with read-tracking — *engine-side reads recorded;
   provenance enum round-trips.*
-- [ ] 1.4 `Household`/`Person` skeleton — *1–2 persons representable with
+- [x] 1.4 `Household`/`Person` skeleton — *1–2 persons representable with
   stable `EntityId`s; v1 validator rejects 2 (§4.4).*
-- [ ] 1.5 Boundary guard tests — *test fails if `core` imports `regions.*`;
+- [x] 1.5 Boundary guard tests — *test fails if `core` imports `regions.*`;
   grep test fails on policy-figure literals outside `regions/uk/data/`.*
 
 ### Phase 2 — UK region data and tax
 
-- [ ] 2.1 Promote `regions/uk.py` → package; TOML loader with strict
+- [x] 2.1 Promote `regions/uk.py` → package; TOML loader with strict
   validation — *unknown keys, missing meta, or float-typed money are load
   errors (§5.3).*
-- [ ] 2.2 `tax_year_2026_27.toml` + `age_rules.toml` +
+- [x] 2.2 `tax_year_2026_27.toml` + `age_rules.toml` +
   `assumptions_default.toml` from §6/§7 — *loader tests pass; `verified_on`
   + `sources` present; doc-sync test keeps §7 aligned with the defaults
   file.*
-- [ ] 2.3 rUK income tax assessment (bands + PA taper) — *golden tests match
+- [x] 2.3 rUK income tax assessment (bands + PA taper) — *golden tests match
   hand-worked HMRC examples incl. the £100k–£125,140 zone.*
-- [ ] 2.4 `AgeRules`: SPA from DOB (banded), NMPA schedule, LISA ages —
+- [x] 2.4 `AgeRules`: SPA from DOB (banded), NMPA schedule, LISA ages —
   *boundary tests either side of every band edge, the 2028-04-06 step, and
   the §4.1 access-gate / pro-rated-income convention.*
-- [ ] 2.5 Future-year extension policy — *`policy.tax.future_years` drives
+- [x] 2.5 Future-year extension policy — *`policy.tax.future_years` drives
   extrapolation past the last data file (§5.3).*
 
 ### Phase 3 — Wrappers and accumulation
 
-- [ ] 3.1 Wrapper model (DC/SIPP/ISA) + region `WrapperRuleset` — *tax
+- [x] 3.1 Wrapper model (DC/SIPP/ISA) + region `WrapperRuleset` — *tax
   treatment in/during/out resolved per wrapper kind.*
-- [ ] 3.2 Contribution schedules: employee/employer, relief at source vs net
+- [x] 3.2 Contribution schedules: employee/employer, relief at source vs net
   pay — *mechanics match gov.uk worked examples; higher-rate relief via tax
   assessment.*
-- [ ] 3.3 Annual allowance + taper + MPAA — *taper arithmetic golden-tested;
+- [x] 3.3 Annual allowance + taper + MPAA — *taper arithmetic golden-tested;
   AA measures pension input amounts (incl. employer/DB) separately from the
   member relief limit (§6); MPAA flips on first flexible access, persists,
   and leaves the alternative allowance for DB accrual (§9).*
-- [ ] 3.4 Fees and growth application — *applied per §5.2 operation order.*
-- [ ] 3.5 Glide-path / life-stage allocation — *allocation interpolates the
+- [x] 3.4 Fees and growth application — *applied per §5.2 operation order.*
+- [x] 3.5 Glide-path / life-stage allocation — *allocation interpolates the
   years-to-retirement table; stage derived, not stored.*
 
 ### Phase 4 — Deterministic projection (first end-to-end result)
 
-- [ ] 4.1 Engine step loop with specified operation order + `PeriodSnapshot`
+- [x] 4.1 Engine step loop with specified operation order + `PeriodSnapshot`
   / `ProjectionResult` incl. provenance — *order-of-operations test fixes
   the spec; net-need withdrawals gross up against the tax system (§5.2
   step 4); provenance lists every assumption read.*
-- [ ] 4.2 DB pension: revaluation in deferment, NPA, early/late factors,
+- [x] 4.2 DB pension: revaluation in deferment, NPA, early/late factors,
   commutation — *scheme facts drive results; commutation trades pension for
   lump sum at the stated factor.*
-- [ ] 4.3 State pension: forecast-as-fact, qualifying-years derivation, SPA,
+- [x] 4.3 State pension: forecast-as-fact, qualifying-years derivation, SPA,
   deferral, uprating assumption — *forecast wins; the derivation refuses
   pre-2016 NI records (forecast required, §5.1); protected payments uprate
   by CPI only.*
-- [ ] 4.4 Real/nominal reporting layer — *real default; nominal available;
+- [x] 4.4 Real/nominal reporting layer — *real default; nominal available;
   one CPI path per run.*
-- [ ] 4.5 End-to-end golden scenario — *"35-year-old, DC + ISA, retires at
+- [x] 4.5 End-to-end golden scenario — *"35-year-old, DC + ISA, retires at
   60" produces a reviewed, checked-in expected output.* Land after 4.6 so
   the golden output is written once against corrected partial-period
   behaviour.
-- [ ] 4.6 Partial first/last period pro-rating — *a mid-period `today`
+- [x] 4.6 Partial first/last period pro-rating — *a mid-period `today`
   pro-rates flows (income, contributions, spending need) by whole months
   per §4.1; the growth/fee partial-period convention is decided and
   recorded in §5.2; the run never models time before `today`.*
 
 ### Phase 5 — Decumulation
 
-- [ ] 5.1 `WithdrawalStrategy` protocol + fixed-real + fixed-% —
+- [x] 5.1 `WithdrawalStrategy` protocol + fixed-real + fixed-% —
   *strategies respect access ages and wrapper ordering.*
-- [ ] 5.2 Tax-free cash strategy: PCLS vs UFPLS vs FAD + LSA tracking —
+- [x] 5.2 Tax-free cash strategy: PCLS vs UFPLS vs FAD + LSA tracking —
   *25%/LSA cap enforced; UFPLS payments split 25/75; MPAA triggers fire;
   starting `lsa_used` / `mpaa_triggered_on` / `crystallised_balance` facts
   respected (§5.1).*
-- [ ] 5.3 Guardrails + natural-yield strategies — *band crossings adjust
+- [x] 5.3 Guardrails + natural-yield strategies — *band crossings adjust
   spending per configured rules.*
-- [ ] 5.4 One-off planned outflows — *outflows hit the chosen period,
+- [x] 5.4 One-off planned outflows — *outflows hit the chosen period,
   tax-aware.*
-- [ ] 5.5 Annuity purchase — *level/escalating/inflation-linked,
+- [x] 5.5 Annuity purchase — *level/escalating/inflation-linked,
   single/joint, partial annuitisation mid-drawdown priced from the
   annuity-rate assumption table.*
 
 ### Phase 6 — Scenarios and persistence
 
-- [ ] 6.1 `Scenario`/`Override` model + resolution — *base ⊕ overrides with
+- [x] 6.1 `Scenario`/`Override` model + resolution — *base ⊕ overrides with
   `SCENARIO_OVERRIDE` provenance; entity-id targeting; orphaned targets
   flag the scenario invalid without breaking file load (§4.3).*
-- [ ] 6.2 `.glidepath.json` schema v1 + canonical reader/writer —
+- [x] 6.2 `.glidepath.json` schema v1 + canonical reader/writer —
   *round-trip property tests; deterministic byte-identical output (§4.5).*
-- [ ] 6.3 Scenario comparison report — *per-period metric diffs across
+- [x] 6.3 Scenario comparison report — *per-period metric diffs across
   scenarios.*
-- [ ] 6.4 Schema migration harness — *versioned upgraders; v1→v1 no-op
+- [x] 6.4 Schema migration harness — *versioned upgraders; v1→v1 no-op
   wired.*
 
 ### Phase 7 — Monte Carlo
 
-- [ ] 7.1 `RandomSource` protocol + seeded impl — *reproducibility property
+- [x] 7.1 `RandomSource` protocol + seeded impl — *reproducibility property
   test: same inputs + seed → identical result (§4.6).*
-- [ ] 7.2 Stochastic `ReturnModel`: lognormal + correlations (Decimal
+- [x] 7.2 Stochastic `ReturnModel`: lognormal + correlations (Decimal
   Cholesky) — *includes a performance measurement task with recorded
   numbers.*
-- [ ] 7.3 Path runner + success metrics — *probability of ruin, sustainable
+- [x] 7.3 Path runner + success metrics — *probability of ruin, sustainable
   income, ending-pot percentiles over paths.*
-- [ ] 7.4 Sequence-of-returns fixtures — *same returns, different order →
+- [x] 7.4 Sequence-of-returns fixtures — *same returns, different order →
   demonstrably different outcome.*
 
 ### Phase 8 — GUI (PySide6 shell over the app layer)
@@ -1438,15 +1438,15 @@ All Phase 8 work follows §4.7: view models, copy, and formatting live in
 the UI-agnostic `glidepath.app` layer (guard-tested Qt-free); PySide6
 widgets in `glidepath.gui` stay thin so a web shell can be added later.
 
-- [ ] 8.1 `make deps` PySide6; app shell + **disclaimer screen** —
+- [x] 8.1 `make deps` PySide6; app shell + **disclaimer screen** —
   *disclaimer on first run (§1); §4.7 layering in place with the
   Qt-import guard test.*
-- [ ] 8.2 Facts entry forms — *every fact in §5.1 enterable with `as_of`
+- [x] 8.2 Facts entry forms — *every fact in §5.1 enterable with `as_of`
   dates.*
-- [ ] 8.3 Assumptions inspector — *the "stated vs assumed" surface rendered
+- [x] 8.3 Assumptions inspector — *the "stated vs assumed" surface rendered
   from `ProjectionResult.provenance`; defaults overridable in place.*
-- [ ] 8.4 Projection charts — *real-terms default, nominal toggle.*
-- [ ] 8.5 Scenario manager + diff view — *scenarios as override lists;
+- [x] 8.4 Projection charts — *real-terms default, nominal toggle.*
+- [x] 8.5 Scenario manager + diff view — *scenarios as override lists;
   comparison report visualised.*
 
 ### Phase 9 — Extensions

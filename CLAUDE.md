@@ -2,15 +2,18 @@
 
 Desktop retirement/investment planner in Python. UK-first: all UK-specific
 logic (tax rules, ISA/SIPP wrappers, state pension) lives in isolated region
-modules (e.g. `glidepath/regions/uk.py`) so the core engine stays
-region-agnostic and other regions can be added later. GUI will be PySide6
-(verified 2026-08-01: PySide6 6.11.1 supports Python 3.14, `<3.15`).
+modules (under `glidepath/regions/uk/`) so the core engine stays
+region-agnostic and other regions can be added later. The GUI is a thin
+PySide6 shell (`glidepath/gui/`) over the UI-agnostic app layer
+(`glidepath/app/`, planning §4.7); launch it with `uv run glidepath`.
 
 ## Canonical commands
 
+- `make sync` — install the locked dependencies into the platform venv.
 - `make check` — all merge gates: ruff check, ruff format --check,
   mypy --strict, pytest with coverage (fail under 90%), dependency age check.
 - `make fix` — ruff auto-fix + format.
+- `make test` — tests with coverage.
 - `make deps` — the ONLY sanctioned way to add or upgrade dependencies.
 - `make audit` — pip-audit the lockfile for known CVEs.
 - `make sonar` — tests + local SonarQube scan.
