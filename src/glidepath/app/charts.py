@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
-from glidepath.app.display import format_wrapper_kind
+from glidepath.app.display import format_money, format_wrapper_kind
 from glidepath.core import Money, ReportBasis, build_report
 
 if TYPE_CHECKING:
@@ -162,6 +162,16 @@ def basis_options() -> tuple[ChartBasisOption, ...]:
 def basis_suffix(basis: ReportBasis) -> str:
     """The axis-label suffix naming ``basis`` (e.g. ``today's money``)."""
     return _BASIS_SUFFIXES[_KEY_BY_BASIS[basis]]
+
+
+def bar_tooltip(category: str, series_label: str, value: Decimal) -> str:
+    """The hover copy for one bar segment (planning §4.7).
+
+    Shells bind this to their plotting widget's hover affordance, so
+    the copy — series, period, and the amount in pounds and pence —
+    stays app-layer like every other label on the chart.
+    """
+    return f"{series_label}\n{category}: {format_money(Money(value))}"
 
 
 def build_charts_view_model(

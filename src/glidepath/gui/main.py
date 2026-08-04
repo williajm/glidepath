@@ -28,7 +28,8 @@ def run(argv: list[str] | None = None) -> int:
         apply_theme(app)
     view_model = build_shell_view_model()
     state_path = default_state_path()
-    if should_show_disclaimer(load_state(state_path)):
+    first_run = load_state(state_path)
+    if should_show_disclaimer(first_run):
         if not widgets.prompt_disclaimer(view_model.disclaimer):
             return 0
         # The acknowledgement file only skips future prompts; an unwritable
@@ -36,7 +37,11 @@ def run(argv: list[str] | None = None) -> int:
         # (worst case the next launch asks again).
         with contextlib.suppress(OSError):
             record_disclaimer_acknowledged(state_path, datetime.now(tz=UTC).date())
-    window = widgets.MainWindow(view_model)
+    window = widgets.MainWindow(view_model, settings_path=state_path)
+    # Reopen the last saved or opened plan; if it fails to load, the
+    # launch example stays on screen and the status bar explains.
+    if first_run.last_plan_path is not None:
+        window.open_plan(first_run.last_plan_path)
     window.show()
     return app.exec()
 

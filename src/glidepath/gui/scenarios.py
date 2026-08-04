@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCharts import (
     QBarCategoryAxis,
     QBarSeries,
-    QBarSet,
     QChart,
     QChartView,
     QValueAxis,
@@ -35,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from glidepath.gui.charts import tooltip_bar_set
 from glidepath.gui.tableview import fill_table, read_only_table
 
 if TYPE_CHECKING:
@@ -373,10 +373,7 @@ class ScenariosPane(QWidget):
         """One grouped bar chart bound to a chart spec — runs side by side."""
         series = QBarSeries()
         for entry in chart.series:
-            bar_set = QBarSet(entry.label)
-            for value in entry.values:
-                bar_set.append(float(value))
-            series.append(bar_set)
+            series.append(tooltip_bar_set(entry, categories))
 
         qchart = QChart()
         qchart.addSeries(series)

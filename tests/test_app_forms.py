@@ -13,6 +13,8 @@ import pytest
 from glidepath.app import (
     FactsFormData,
     build_facts_form_view_model,
+    example_facts_form_data,
+    facts_form_data_from_household,
     format_form_errors,
     parse_facts_form,
 )
@@ -932,3 +934,108 @@ class TestEntityIdReuse:
         first = parse(self.submission())
         second = parse(self.submission())
         assert second.persons[0].id != first.persons[0].id
+
+
+def _maximal_submission() -> FactsFormData:
+    """A submission exercising every optional field the form offers."""
+    return FactsFormData(
+        person=person_values(
+            date_of_birth_as_of="2026-07-01",
+            sex_for_longevity="male",
+            sex_as_of="2026-06-15",
+            employment_income="52000",
+            employment_income_as_of="2026-04-06",
+            mpaa_triggered_on="2024-01-15",
+            mpaa_as_of="2024-01-20",
+            lsa_used="1250.50",
+            lsa_as_of="2025-03-31",
+        ),
+        spending={
+            "annual_spending_real": "28000",
+            "annual_spending_real_as_of": "2026-07-15",
+        },
+        state_pension={
+            "forecast_weekly_amount": "230.25",
+            "protected_payment": "12.40",
+            "forecast_as_of": "2026-05-01",
+            "ni_record_start": "2016-04-06",
+            "qualifying_years": "18",
+            "ni_as_of": "2026-04-06",
+            "planned_extra_years": "5",
+            "deferral_years": "1.25",
+        },
+        wrappers=(
+            {
+                "kind": str(WORKPLACE_DC_KIND),
+                "balance": "45000",
+                "crystallised_balance": "1500",
+                "balances_as_of": "2026-07-31",
+                "employee_contribution": "6000",
+                "employer_contribution": "2500",
+                "contributions_as_of": "2026-07-01",
+                "relief_mechanic": "relief_at_source",
+                "escalation": "earnings",
+            },
+            {"kind": str(WORKPLACE_DC_KIND), "balance": "20000"},
+        ),
+        db_pensions=(
+            {
+                "accrued_annual_pension": "8500",
+                "statement_date": "2026-05-01",
+                "normal_pension_age": "65",
+                "revaluation_reference": "cpi",
+                "revaluation_cap": "0.05",
+                "early_late_factors": "60:0.75, 67:1.1",
+                "commutation_factor": "12",
+                "taken_at_age": "60",
+                "commuted_fraction": "0.25",
+                "accrual_rate": "0.0166667",
+                "pensionable_salary": "48000",
+                "active_until_age": "58",
+            },
+        ),
+    )
+
+
+class TestFormDataFromHousehold:
+    """The inverse mapping repopulates the form from a loaded plan."""
+
+    def test_round_trips_a_maximal_household(self) -> None:
+        """Render → reparse reproduces the household exactly, ids included.
+
+        The reparse passes the original as ``previous`` — exactly how
+        the shell resubmits after a plan load — so entity ids are
+        stable and the two households compare equal field for field.
+        """
+        household = parse(_maximal_submission())
+        rendered = facts_form_data_from_household(household)
+        result = parse_facts_form(
+            rendered, recorded_on=RECORDED, today=TODAY, previous=household
+        )
+        assert result.errors == ()
+        assert result.household == household
+
+    def test_round_trips_the_launch_example(self) -> None:
+        """The launch example survives the same render → reparse cycle."""
+        first = parse_facts_form(
+            example_facts_form_data(), recorded_on=RECORDED, today=TODAY
+        )
+        household = first.household
+        assert household is not None
+        rendered = facts_form_data_from_household(household)
+        result = parse_facts_form(
+            rendered, recorded_on=RECORDED, today=TODAY, previous=household
+        )
+        assert result.errors == ()
+        assert result.household == household
+
+    def test_blank_optionals_render_blank(self) -> None:
+        """A minimal household renders empty strings, not literal Nones."""
+        household = parse(FactsFormData(person=person_values()))
+        rendered = facts_form_data_from_household(household)
+        assert rendered.person["employment_income"] == ""
+        assert rendered.person["sex_for_longevity"] == ""
+        assert rendered.spending == {}
+        assert rendered.state_pension == {}
+        assert rendered.wrappers == ()
+        assert rendered.db_pensions == ()

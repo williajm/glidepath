@@ -212,6 +212,17 @@ _REVALUATION_REFERENCES: Mapping[str, RevaluationReference] = {
     "none": RevaluationReference.NONE,
 }
 
+_SEX_KEYS: Mapping[Sex, str] = {value: key for key, value in _SEXES.items()}
+_RELIEF_KEYS: Mapping[ReliefMechanic, str] = {
+    value: key for key, value in _RELIEF_MECHANICS.items()
+}
+_ESCALATION_KEYS: Mapping[AssumptionKey, str] = {
+    value: key for key, value in _ESCALATIONS.items()
+}
+_REVALUATION_KEYS: Mapping[RevaluationReference, str] = {
+    value: key for key, value in _REVALUATION_REFERENCES.items()
+}
+
 
 @dataclass
 class _FormContext:
@@ -723,6 +734,163 @@ def parse_facts_form(
             household=None, errors=(FormError("person", None, "", str(exc)),)
         )
     return FactsFormResult(household=household, errors=())
+
+
+def _person_values(person: Person) -> dict[str, str]:
+    """The person section's raw text for ``person``."""
+    sex = person.sex_for_longevity
+    employment = person.employment_income
+    mpaa = person.mpaa_triggered_on
+    lsa = person.lsa_used
+    return {
+        "date_of_birth": person.date_of_birth.value.isoformat(),
+        "date_of_birth_as_of": person.date_of_birth.as_of.isoformat(),
+        "sex_for_longevity": "" if sex is None else _SEX_KEYS[sex.value],
+        "sex_as_of": "" if sex is None else sex.as_of.isoformat(),
+        "tax_residency": str(person.tax_residency),
+        "employment_income": (
+            "" if employment is None else str(employment.value.amount)
+        ),
+        "employment_income_as_of": (
+            "" if employment is None else employment.as_of.isoformat()
+        ),
+        "target_retirement_age": str(person.target_retirement_age.value),
+        "mpaa_triggered_on": "" if mpaa is None else mpaa.value.isoformat(),
+        "mpaa_as_of": "" if mpaa is None else mpaa.as_of.isoformat(),
+        "lsa_used": "" if lsa is None else str(lsa.value.amount),
+        "lsa_as_of": "" if lsa is None else lsa.as_of.isoformat(),
+    }
+
+
+def _spending_values(spending: SpendingPlan | None) -> dict[str, str]:
+    """The spending section's raw text, empty when spending is unmodelled."""
+    if spending is None:
+        return {}
+    fact = spending.annual_spending_real
+    return {
+        "annual_spending_real": str(fact.value.amount),
+        "annual_spending_real_as_of": fact.as_of.isoformat(),
+    }
+
+
+def _state_pension_values(record: StatePensionRecord | None) -> dict[str, str]:
+    """The state pension section's raw text, empty when skipped."""
+    if record is None:
+        return {}
+    forecast = record.forecast_weekly_amount
+    protected = record.protected_payment
+    ni_start = record.ni_record_start
+    qualifying = record.qualifying_years
+    # The form dates the forecast pair and the NI pair each from one
+    # shared as_of field, so either member of a pair can carry it back.
+    forecast_dated = forecast if forecast is not None else protected
+    ni_dated = ni_start if ni_start is not None else qualifying
+    return {
+        "forecast_weekly_amount": (
+            "" if forecast is None else str(forecast.value.amount)
+        ),
+        "protected_payment": "" if protected is None else str(protected.value.amount),
+        "forecast_as_of": (
+            "" if forecast_dated is None else forecast_dated.as_of.isoformat()
+        ),
+        "ni_record_start": "" if ni_start is None else ni_start.value.isoformat(),
+        "qualifying_years": "" if qualifying is None else str(qualifying.value),
+        "ni_as_of": "" if ni_dated is None else ni_dated.as_of.isoformat(),
+        "planned_extra_years": str(record.planned_extra_years.value),
+        "deferral_years": str(record.deferral_years.value),
+    }
+
+
+def _wrapper_values(wrapper: Wrapper) -> dict[str, str]:
+    """One wrapper section instance's raw text."""
+    crystallised = wrapper.crystallised_balance
+    values = {
+        "kind": str(wrapper.kind),
+        "balance": str(wrapper.balance.value.amount),
+        "crystallised_balance": (
+            "" if crystallised is None else str(crystallised.value.amount)
+        ),
+        "balances_as_of": wrapper.balance.as_of.isoformat(),
+        "employee_contribution": "",
+        "employer_contribution": "",
+        "contributions_as_of": "",
+        "relief_mechanic": "",
+        "escalation": "",
+    }
+    contributions = wrapper.contributions
+    if contributions is not None:
+        employer = contributions.employer_amount
+        relief = contributions.relief_mechanic
+        escalation = contributions.escalation
+        values["employee_contribution"] = str(
+            contributions.employee_amount.value.amount
+        )
+        values["employer_contribution"] = (
+            "" if employer is None else str(employer.value.amount)
+        )
+        values["contributions_as_of"] = (
+            "" if employer is None else employer.as_of.isoformat()
+        )
+        values["relief_mechanic"] = "" if relief is None else _RELIEF_KEYS[relief]
+        values["escalation"] = (
+            "" if escalation is None else _ESCALATION_KEYS[escalation]
+        )
+    return values
+
+
+def _factor_table_text(table: FactorTable) -> str:
+    """The factor table as the form's ``age:factor`` pair syntax."""
+    return ", ".join(f"{age}:{factor}" for age, factor in sorted(table.factors.items()))
+
+
+def _db_pension_values(pension: DBPension) -> dict[str, str]:
+    """One DB pension section instance's raw text."""
+    basis = pension.revaluation_basis
+    commutation = pension.commutation_factor
+    taken = pension.taken_at_age
+    values = {
+        "accrued_annual_pension": str(pension.accrued_annual_pension.value.amount),
+        "statement_date": pension.statement_date.isoformat(),
+        "normal_pension_age": str(pension.normal_pension_age.value),
+        "revaluation_reference": _REVALUATION_KEYS[basis.reference],
+        "revaluation_cap": "" if basis.cap is None else str(basis.cap.value),
+        "revaluation_fixed_rate": (
+            "" if basis.fixed_rate is None else str(basis.fixed_rate.value)
+        ),
+        "early_late_factors": _factor_table_text(pension.early_late_factors),
+        "commutation_factor": "" if commutation is None else str(commutation.value),
+        "taken_at_age": "" if taken is None else str(taken.value),
+        "commuted_fraction": str(pension.commuted_fraction.value),
+        "accrual_rate": "",
+        "pensionable_salary": "",
+        "active_until_age": "",
+    }
+    membership = pension.active_membership
+    if membership is not None:
+        until = membership.active_until_age
+        values["accrual_rate"] = str(membership.accrual_rate.value)
+        values["pensionable_salary"] = str(membership.pensionable_salary.value.amount)
+        values["active_until_age"] = "" if until is None else str(until.value)
+    return values
+
+
+def facts_form_data_from_household(household: Household) -> FactsFormData:
+    """The household re-rendered as raw form text (plan load, §4.7).
+
+    The inverse of :func:`parse_facts_form`, used to repopulate the
+    facts form from a loaded plan. Every fact's ``as_of`` date is
+    emitted explicitly so a later resubmission re-dates nothing
+    silently; provenance timestamps are not carried — a resubmission
+    re-records its facts at submission time, exactly like any edit.
+    """
+    person = household.persons[0]
+    return FactsFormData(
+        person=_person_values(person),
+        spending=_spending_values(household.spending),
+        state_pension=_state_pension_values(person.state_pension),
+        wrappers=tuple(_wrapper_values(entry) for entry in person.wrappers),
+        db_pensions=tuple(_db_pension_values(entry) for entry in person.db_pensions),
+    )
 
 
 def format_form_errors(form: FactsFormViewModel, errors: Sequence[FormError]) -> str:

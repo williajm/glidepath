@@ -20,6 +20,7 @@ from glidepath.app import (
     build_shell_view_model,
     load_state,
     record_disclaimer_acknowledged,
+    record_last_plan_path,
 )
 from glidepath.gui import main as main_module
 from glidepath.gui import widgets
@@ -88,7 +89,10 @@ class TestMainWindow:
             view_model.inspector_tab_label,
         ]
         menu_titles = [action.text() for action in window.menuBar().actions()]
-        assert menu_titles == [f"&{view_model.help_menu_label}"]
+        assert menu_titles == [
+            f"&{view_model.file_menu.menu_label}",
+            f"&{view_model.help_menu_label}",
+        ]
 
     def test_about_shows_view_model_copy(self) -> None:
         """About shows the about view model — which repeats the disclaimer."""
@@ -169,3 +173,39 @@ class TestRun:
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 0
+
+    def test_launch_reopens_the_last_plan(
+        self, state_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A remembered plan path is opened as the shell comes up."""
+        record_disclaimer_acknowledged(state_path, date(2026, 8, 3))
+        plan = tmp_path / "my-plan.glidepath.json"
+        record_last_plan_path(state_path, plan)
+        opened: list[Path] = []
+
+        def spy_open(_self: MainWindow, path: Path) -> bool:
+            opened.append(path)
+            return True
+
+        monkeypatch.setattr(widgets.MainWindow, "open_plan", spy_open)
+        app = QApplication.instance()
+        assert app is not None
+        QTimer.singleShot(0, app.quit)
+        assert run([]) == 0
+        assert opened == [plan]
+
+    def test_launch_without_a_remembered_plan_opens_nothing(
+        self, state_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No remembered path — the launch example stays untouched."""
+        record_disclaimer_acknowledged(state_path, date(2026, 8, 3))
+
+        def unexpected(_self: MainWindow, _path: Path) -> bool:
+            msg = "no plan should be opened at launch"
+            raise AssertionError(msg)
+
+        monkeypatch.setattr(widgets.MainWindow, "open_plan", unexpected)
+        app = QApplication.instance()
+        assert app is not None
+        QTimer.singleShot(0, app.quit)
+        assert run([]) == 0

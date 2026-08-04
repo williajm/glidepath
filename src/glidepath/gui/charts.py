@@ -18,23 +18,54 @@ from PySide6.QtCharts import (
     QValueAxis,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QCursor, QPainter
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QRadioButton,
     QTabWidget,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
+from glidepath.app import bar_tooltip
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from glidepath.app import ChartSpec, ChartsViewModel
+    from glidepath.app import ChartSeries, ChartSpec, ChartsViewModel
 
 _CATEGORY_LABEL_ANGLE = -90
+
+
+def _bar_hovered(
+    entry: ChartSeries, categories: tuple[str, ...], index: int, *, hovering: bool
+) -> None:
+    """Show or hide one bar segment's tooltip at the pointer."""
+    if hovering and 0 <= index < min(len(entry.values), len(categories)):
+        QToolTip.showText(
+            QCursor.pos(),
+            bar_tooltip(categories[index], entry.label, entry.values[index]),
+        )
+    else:
+        QToolTip.hideText()
+
+
+def tooltip_bar_set(entry: ChartSeries, categories: tuple[str, ...]) -> QBarSet:
+    """One series as a bar set with hover tooltips bound (§4.7).
+
+    The tooltip copy comes from the app layer's exact ``Decimal``
+    amounts, not the float plot coordinates.
+    """
+    bar_set = QBarSet(entry.label)
+    for value in entry.values:
+        bar_set.append(float(value))
+    bar_set.hovered.connect(
+        lambda status, index: _bar_hovered(entry, categories, index, hovering=status)
+    )
+    return bar_set
 
 
 class ChartsPane(QWidget):
@@ -105,10 +136,7 @@ class ChartsPane(QWidget):
         """One stacked bar chart bound to a chart spec."""
         series = QStackedBarSeries()
         for entry in chart.series:
-            bar_set = QBarSet(entry.label)
-            for value in entry.values:
-                bar_set.append(float(value))
-            series.append(bar_set)
+            series.append(tooltip_bar_set(entry, categories))
 
         qchart = QChart()
         qchart.addSeries(series)
@@ -133,4 +161,5 @@ class ChartsPane(QWidget):
 
 __all__ = [
     "ChartsPane",
+    "tooltip_bar_set",
 ]

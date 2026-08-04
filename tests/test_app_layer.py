@@ -14,6 +14,7 @@ from glidepath.app import (
     default_state_path,
     load_state,
     record_disclaimer_acknowledged,
+    record_last_plan_path,
     should_show_disclaimer,
 )
 
@@ -68,6 +69,69 @@ class TestFirstRunState:
         path = tmp_path / "settings.json"
         path.write_text(content, encoding="utf-8")
         assert load_state(path).disclaimer_acknowledged_on is None
+
+
+class TestLastPlanPath:
+    """The last plan path round-trips beside the acknowledgement."""
+
+    def test_missing_file_means_no_last_plan(self, tmp_path: Path) -> None:
+        """No state file yet — nothing to reopen."""
+        assert load_state(tmp_path / "settings.json").last_plan_path is None
+
+    def test_round_trip(self, tmp_path: Path) -> None:
+        """Recording a plan path reads back identically."""
+        path = tmp_path / "nested" / "settings.json"
+        plan = tmp_path / "my-plan.glidepath.json"
+        record_last_plan_path(path, plan)
+        assert load_state(path).last_plan_path == plan
+
+    def test_recording_the_plan_keeps_the_acknowledgement(self, tmp_path: Path) -> None:
+        """Each record call preserves the other field's value."""
+        path = tmp_path / "settings.json"
+        acknowledged_on = date(2026, 8, 3)
+        plan = tmp_path / "my-plan.glidepath.json"
+        record_disclaimer_acknowledged(path, acknowledged_on)
+        record_last_plan_path(path, plan)
+        state = load_state(path)
+        assert state.disclaimer_acknowledged_on == acknowledged_on
+        assert state.last_plan_path == plan
+
+    def test_recording_the_acknowledgement_keeps_the_plan(self, tmp_path: Path) -> None:
+        """The disclaimer record never discards the remembered plan."""
+        path = tmp_path / "settings.json"
+        plan = tmp_path / "my-plan.glidepath.json"
+        record_last_plan_path(path, plan)
+        record_disclaimer_acknowledged(path, date(2026, 8, 3))
+        assert load_state(path).last_plan_path == plan
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            '{"schema": 1, "last_plan_path": 42}',
+            '{"schema": 1, "last_plan_path": ""}',
+            '{"schema": 1}',
+            '{"schema": 2, "last_plan_path": "plan.glidepath.json"}',
+        ],
+    )
+    def test_defective_last_plan_degrades_to_none(
+        self, tmp_path: Path, content: str
+    ) -> None:
+        """A defective or unrecognised plan path record reopens nothing."""
+        path = tmp_path / "settings.json"
+        path.write_text(content, encoding="utf-8")
+        assert load_state(path).last_plan_path is None
+
+    def test_defective_date_keeps_a_readable_plan_path(self, tmp_path: Path) -> None:
+        """Each field degrades independently of the other."""
+        path = tmp_path / "settings.json"
+        path.write_text(
+            '{"schema": 1, "disclaimer_acknowledged_on": "not-a-date",'
+            ' "last_plan_path": "plan.glidepath.json"}',
+            encoding="utf-8",
+        )
+        state = load_state(path)
+        assert state.disclaimer_acknowledged_on is None
+        assert state.last_plan_path == Path("plan.glidepath.json")
 
 
 class TestDefaultStatePath:

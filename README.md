@@ -60,7 +60,9 @@ uv run glidepath
 ```
 
 Launches the desktop app: accept the disclaimer, enter your plan's
-facts, and project. Plans are saved as `.glidepath.json` files you own.
+facts, and project. Save your plan from the File menu as a
+`.glidepath.json` file you own, stored wherever you choose; the next
+launch reopens your last plan automatically.
 
 ## Everyday commands
 
