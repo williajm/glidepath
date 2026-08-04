@@ -206,7 +206,7 @@ if TYPE_CHECKING:
     from glidepath.core.returns import PeriodReturns, ReturnModel, ReturnModelFactory
     from glidepath.core.state_pension import StatePensionEntitlement
     from glidepath.core.withdrawals import GrossWithdrawalPlan, WithdrawalStrategy
-    from glidepath.core.wrappers import Wrapper, WrapperTaxTreatment
+    from glidepath.core.wrappers import ContributionCap, Wrapper, WrapperTaxTreatment
 
 _ZERO = Money(Decimal(0))
 _ONE = Decimal(1)
@@ -1303,18 +1303,12 @@ class _Projection:
             employer = _ZERO
             if schedule.employer_amount is not None:
                 employer = schedule.employer_amount.value * scale
-            employee = employee_intended
-            if terms.caps:
-                headroom = min(
-                    max(cap.limit - used_by_group.get(cap.group, _ZERO), _ZERO)
-                    for cap in terms.caps
-                )
-                employer = min(employer, headroom)
-                employee = min(employee, max(headroom - employer, _ZERO))
-                for cap in terms.caps:
-                    used_by_group[cap.group] = (
-                        used_by_group.get(cap.group, _ZERO) + employer + employee
-                    )
+            employee, employer = _apply_contribution_caps(
+                terms.caps,
+                used_by_group,
+                employee=employee_intended,
+                employer=employer,
+            )
             outcome = self.region.contributions.member_contribution(
                 MemberContributionRequest(
                     gross=employee,
@@ -2000,6 +1994,36 @@ class _Projection:
             growth_tax=growth_tax.quantized(),
             banked_in=ledger.banked_in.quantized(),
         )
+
+
+def _apply_contribution_caps(
+    caps: tuple[ContributionCap, ...],
+    used_by_group: dict[str, Money],
+    *,
+    employee: Money,
+    employer: Money,
+) -> tuple[Money, Money]:
+    """Clip a contribution to its allowance groups' shared headroom.
+
+    The binding headroom is the tightest of the caps' remaining
+    budgets; employer amounts (employment terms, outside the member's
+    control) consume it first and the employee amount fills what
+    remains. What fits is recorded against every listed group, so a
+    sub-capped kind (a LISA) consumes the overall allowance too
+    (planning §5.2). Returns the clipped ``(employee, employer)``.
+    """
+    if not caps:
+        return employee, employer
+    headroom = min(
+        max(cap.limit - used_by_group.get(cap.group, _ZERO), _ZERO) for cap in caps
+    )
+    employer = min(employer, headroom)
+    employee = min(employee, max(headroom - employer, _ZERO))
+    for cap in caps:
+        used_by_group[cap.group] = (
+            used_by_group.get(cap.group, _ZERO) + employer + employee
+        )
+    return employee, employer
 
 
 def _plan_source(
