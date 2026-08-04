@@ -190,6 +190,8 @@ class PensionRules:
     tax_free_lump_sum_fraction: Rate
     lump_sum_allowance: Money
     lump_sum_death_benefit_allowance: Money
+    db_valuation_factor: int
+    """DB pension input amounts are ``factor x annual pension`` (FA 2004 s234)."""
 
     def __post_init__(self) -> None:
         """Require a positive relief age limit and a sensible carry window."""
@@ -197,6 +199,8 @@ class PensionRules:
             _fail("PensionRules", "member_relief_max_age must be positive")
         if self.aa_carry_forward_years < 0:
             _fail("PensionRules", "aa_carry_forward_years must be non-negative")
+        if self.db_valuation_factor <= 0:
+            _fail("PensionRules", "db_valuation_factor must be positive")
 
 
 @dataclass(frozen=True, slots=True)

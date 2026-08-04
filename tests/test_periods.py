@@ -20,6 +20,7 @@ from glidepath.core.periods import (
     is_age_attained_by_period_start,
     period_active_fraction,
     prorata_fraction,
+    service_active_fraction,
     whole_months_between,
 )
 
@@ -271,6 +272,59 @@ def test_entitlement_fraction_rejects_a_sub_month_period() -> None:
     window_start, window_end = date(2026, 1, 1), date(2026, 1, 10)
     with pytest.raises(ValueError, match="shorter than one whole month"):
         entitlement_active_fraction(start, period, window_start, window_end)
+
+
+def test_service_fraction_is_one_while_service_covers_the_period() -> None:
+    """Service running past the period end needs no pro-rating."""
+    period = Period(date(2026, 4, 6), date(2027, 4, 5))
+    window = (date(2020, 1, 1), date(2040, 1, 1))
+    assert service_active_fraction(date(2030, 1, 1), period, *window) == 1
+
+
+def test_service_fraction_counts_whole_months_before_the_end_date() -> None:
+    """Service ending mid-period earns whole months up to the birthday."""
+    period = Period(date(2026, 4, 6), date(2027, 4, 5))
+    window = (date(2020, 1, 1), date(2040, 1, 1))
+    fraction = service_active_fraction(date(2026, 10, 6), period, *window)
+    assert fraction == Decimal(6) / Decimal(12)
+
+
+def test_service_fraction_end_date_is_exclusive() -> None:
+    """The birthday itself does not count as a day of service."""
+    period = Period(date(2026, 4, 6), date(2027, 4, 5))
+    window = (date(2020, 1, 1), date(2040, 1, 1))
+    fraction = service_active_fraction(date(2026, 10, 5), period, *window)
+    assert fraction == Decimal(5) / Decimal(12)
+
+
+def test_service_fraction_is_zero_once_service_has_ended() -> None:
+    """A period wholly after the service end accrues nothing."""
+    period = Period(date(2026, 4, 6), date(2027, 4, 5))
+    window = (date(2020, 1, 1), date(2040, 1, 1))
+    assert service_active_fraction(date(2026, 4, 6), period, *window) == 0
+    assert service_active_fraction(date(2020, 1, 1), period, *window) == 0
+
+
+def test_service_fraction_respects_the_run_window() -> None:
+    """A mid-period ``today`` bounds the months like other §5.2 flows.
+
+    The window opens in month four and service ends after month nine of
+    a twelve-month period: five whole months accrue.
+    """
+    period = Period(date(2026, 1, 1), date(2026, 12, 31))
+    fraction = service_active_fraction(
+        date(2026, 9, 1), period, date(2026, 4, 1), date(2040, 1, 1)
+    )
+    assert fraction == Decimal(5) / Decimal(12)
+
+
+def test_service_fraction_rejects_a_backwards_window() -> None:
+    """A window ending before it starts is invalid."""
+    period = Period(date(2026, 1, 1), date(2026, 12, 31))
+    service_end = date(2026, 6, 1)
+    window_start, window_end = date(2026, 6, 1), date(2026, 1, 1)
+    with pytest.raises(ValueError, match="precedes window start"):
+        service_active_fraction(service_end, period, window_start, window_end)
 
 
 def test_active_fraction_is_one_for_a_period_wholly_inside_the_window() -> None:

@@ -340,6 +340,7 @@ def _indexed_pension(pension: PensionRules, factor: Decimal) -> PensionRules:
         lump_sum_death_benefit_allowance=_indexed_money(
             pension.lump_sum_death_benefit_allowance, factor
         ),
+        db_valuation_factor=pension.db_valuation_factor,
     )
 
 

@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from glidepath.core import (
         AnnuityPurchase,
         AssetAllocation,
+        DBActiveMembership,
         Decision,
         EntityId,
         Fact,
@@ -230,7 +231,7 @@ def _fee_schedule(fees: FeeSchedule) -> dict[str, object]:
 
 
 def _db_pension(pension: DBPension) -> dict[str, object]:
-    """One deferred DB entitlement's scheme facts and choices."""
+    """One DB entitlement's scheme facts and choices."""
     return {
         "id": _entity_id(pension.id),
         "accrued_annual_pension": _fact(pension.accrued_annual_pension, _money_value),
@@ -243,6 +244,16 @@ def _db_pension(pension: DBPension) -> dict[str, object]:
             pension.commutation_factor, _decimal_value
         ),
         "taken_at_age": _optional_decision(pension.taken_at_age, _int_value),
+        "active_membership": _optional(pension.active_membership, _active_membership),
+    }
+
+
+def _active_membership(membership: DBActiveMembership) -> dict[str, object]:
+    """Active CARE-style accrual on a DB entitlement (roadmap 9.6)."""
+    return {
+        "accrual_rate": _fact(membership.accrual_rate, _decimal_value),
+        "pensionable_salary": _fact(membership.pensionable_salary, _money_value),
+        "active_until_age": _optional_decision(membership.active_until_age, _int_value),
     }
 
 

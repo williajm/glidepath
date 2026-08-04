@@ -123,6 +123,25 @@
               "recorded_on": "2026-08-01T12:00:00+00:00",
               "value": "8000"
             },
+            "active_membership": {
+              "accrual_rate": {
+                "as_of": "2026-08-01",
+                "note": null,
+                "recorded_on": "2026-08-01T12:00:00+00:00",
+                "value": "0.0166667"
+              },
+              "active_until_age": {
+                "note": "stepping back early",
+                "recorded_on": "2026-08-01T12:00:00+00:00",
+                "value": 60
+              },
+              "pensionable_salary": {
+                "as_of": "2026-08-01",
+                "note": null,
+                "recorded_on": "2026-08-01T12:00:00+00:00",
+                "value": "42000"
+              }
+            },
             "commutation_factor": {
               "as_of": "2026-08-01",
               "note": null,
@@ -164,6 +183,7 @@
               "recorded_on": "2026-08-01T12:00:00+00:00",
               "value": "2500"
             },
+            "active_membership": null,
             "commutation_factor": null,
             "commuted_fraction": {
               "note": null,
@@ -193,6 +213,7 @@
               "recorded_on": "2026-08-01T12:00:00+00:00",
               "value": "1200"
             },
+            "active_membership": null,
             "commutation_factor": null,
             "commuted_fraction": {
               "note": null,
@@ -529,5 +550,5 @@
       "overrides": []
     }
   ],
-  "schema_version": 1
+  "schema_version": 2
 }

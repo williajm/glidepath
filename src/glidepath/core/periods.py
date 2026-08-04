@@ -269,6 +269,47 @@ def entitlement_active_fraction(
     return Decimal(months_payable) / Decimal(months_in_period)
 
 
+def service_active_fraction(
+    service_end: date,
+    period: Period,
+    window_start: date,
+    window_end: date,
+) -> Decimal:
+    """Fraction of ``period`` inside the window before ``service_end``.
+
+    The mirror of :func:`entitlement_active_fraction` for a span that
+    *ends* on an exact date — active DB service stopping at the
+    leave-and-defer age or the benefits start (roadmap 9.6, planning
+    §5.1). ``service_end`` is exclusive: service through the day before
+    the birthday counts, the birthday itself does not.
+
+    Returns:
+        ``1`` if service covers the whole period inside the window,
+        ``0`` if the overlap is under one whole month, otherwise the
+        exact ``Decimal`` month ratio.
+
+    Raises:
+        ValueError: If ``window_end`` precedes ``window_start``, or the
+            period is shorter than one whole month.
+    """
+    if window_end < window_start:
+        msg = f"window end {window_end} precedes window start {window_start}"
+        raise ValueError(msg)
+    active_start = max(window_start, period.start)
+    active_end_exclusive = min(
+        service_end, min(window_end, period.end) + timedelta(days=1)
+    )
+    if active_end_exclusive <= active_start:
+        return Decimal(0)
+    if active_start == period.start and active_end_exclusive == period.end + timedelta(
+        days=1
+    ):
+        return Decimal(1)
+    months_in_period = _whole_months_in(period)
+    months_active = whole_months_between(active_start, active_end_exclusive)
+    return Decimal(months_active) / Decimal(months_in_period)
+
+
 def period_active_fraction(
     period: Period, window_start: date, window_end: date
 ) -> Decimal:

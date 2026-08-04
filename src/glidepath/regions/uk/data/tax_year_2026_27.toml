@@ -1,8 +1,8 @@
 # UK tax year 2026/27 policy figures (docs/planning.md §5.3, §6).
 # Income tax, pension, ISA and state pension figures verified
-# 2026-08-01/02; savings, dividend and AA carry-forward figures
-# 2026-08-04 — all from the primary sources below; never edit a figure
-# without re-verifying and updating [meta].
+# 2026-08-01/02; savings, dividend, AA carry-forward and DB valuation
+# figures 2026-08-04 — all from the primary sources below; never edit a
+# figure without re-verifying and updating [meta].
 
 schema_version = 1
 
@@ -21,6 +21,8 @@ sources = [
   "https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm044100",
   "https://www.gov.uk/guidance/check-if-you-have-unused-annual-allowances-on-your-pension-savings",
   "https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm056510",
+  "https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm053301",
+  "https://www.legislation.gov.uk/ukpga/2004/12/section/234",
   "https://www.gov.uk/individual-savings-accounts",
   "https://www.gov.uk/lifetime-isa",
   "https://www.gov.uk/tax-on-dividends",
@@ -68,6 +70,7 @@ relief_at_source_rate      = "0.20"
 tax_free_lump_sum_fraction = "0.25"
 lump_sum_allowance         = "268275"
 lump_sum_death_benefit_allowance = "1073100"
+db_valuation_factor        = 16  # FA 2004 s234 relevant valuation factor (PIA = 16 x pension)
 
 [isa]
 annual_allowance = "20000"

@@ -95,6 +95,7 @@ def test_pension_allowances() -> None:
     assert pension.tax_free_lump_sum_fraction == Rate(Decimal("0.25"))
     assert pension.lump_sum_allowance == Money(Decimal(268275))
     assert pension.lump_sum_death_benefit_allowance == Money(Decimal(1073100))
+    assert pension.db_valuation_factor == 16
 
 
 def test_isa_allowances() -> None:

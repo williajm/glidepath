@@ -6,8 +6,7 @@ upgrader, not a file-format fork. Upgraders are keyed by the schema
 version they *read* and each returns the document exactly one version
 higher; loading applies them in sequence from the file's version up to
 :data:`~glidepath.persistence.document.SCHEMA_VERSION`. A file already
-at the current version passes through untouched — the wired v1→v1
-no-op while version 1 is both floor and current.
+at the current version passes through untouched.
 """
 
 from types import MappingProxyType
@@ -24,12 +23,29 @@ type RawDocument = dict[str, Any]
 type Upgrader = Callable[[RawDocument], RawDocument]
 """One registered migration: reads version *n*, returns version *n + 1*."""
 
-UPGRADERS: Mapping[int, Upgrader] = MappingProxyType({})
-"""The registered upgraders, keyed by the version each reads.
 
-Empty while schema version 1 is both the floor and the current version:
-a v1 file needs no upgrading, and no earlier version ever existed.
-"""
+def _upgrade_v1_to_v2(raw: RawDocument) -> RawDocument:
+    """v2 adds ``active_membership`` to every DB pension (roadmap 9.6).
+
+    A v1 file predates active DB accrual, so every pension it holds is
+    deferred — the new key decodes as ``null``. The document is
+    upgraded in place at the parsed-JSON layer; a malformed document
+    passes through shape-checked, for the strict decoder to reject
+    with a proper path-carrying error.
+    """
+    household = raw.get("household")
+    persons = household.get("persons") if isinstance(household, dict) else []
+    for person in persons if isinstance(persons, list) else []:
+        pensions = person.get("db_pensions") if isinstance(person, dict) else []
+        for pension in pensions if isinstance(pensions, list) else []:
+            if isinstance(pension, dict):
+                pension["active_membership"] = None
+    raw[_VERSION_KEY] = 2
+    return raw
+
+
+UPGRADERS: Mapping[int, Upgrader] = MappingProxyType({1: _upgrade_v1_to_v2})
+"""The registered upgraders, keyed by the version each reads."""
 
 _VERSION_KEY = "schema_version"
 _FLOOR_VERSION = 1

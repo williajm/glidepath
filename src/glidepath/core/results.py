@@ -373,6 +373,16 @@ def collect_plan_facts(household: Household) -> tuple[LabelledFact, ...]:
             )
             note(f"{pension_prefix}.normal_pension_age", pension.normal_pension_age)
             note(f"{pension_prefix}.commutation_factor", pension.commutation_factor)
+            if pension.active_membership is not None:
+                membership_prefix = f"{pension_prefix}.active_membership"
+                note(
+                    f"{membership_prefix}.accrual_rate",
+                    pension.active_membership.accrual_rate,
+                )
+                note(
+                    f"{membership_prefix}.pensionable_salary",
+                    pension.active_membership.pensionable_salary,
+                )
         if person.state_pension is not None:
             record = person.state_pension
             record_prefix = f"{prefix}.state_pension"
@@ -432,6 +442,16 @@ def collect_plan_decisions(household: Household) -> tuple[LabelledDecision, ...]
                     decision=pension.commuted_fraction,
                 )
             )
+            if (
+                pension.active_membership is not None
+                and pension.active_membership.active_until_age is not None
+            ):
+                decisions.append(
+                    LabelledDecision(
+                        label=f"{pension_prefix}.active_membership.active_until_age",
+                        decision=pension.active_membership.active_until_age,
+                    )
+                )
         for purchase in person.annuity_purchases:
             purchase_prefix = f"annuity_purchase[{purchase.id}]"
             decisions.append(

@@ -142,6 +142,7 @@ from glidepath.core.investments import FeeSchedule, period_fee
 from glidepath.core.money import Money, Rate
 from glidepath.core.pensions import (
     db_early_late_factor,
+    db_service_end_date,
     db_start_date,
     revaluation_factor_for_months,
 )
@@ -150,6 +151,7 @@ from glidepath.core.periods import (
     date_age_attained,
     entitlement_active_fraction,
     period_active_fraction,
+    service_active_fraction,
     whole_months_between,
 )
 from glidepath.core.provenance import (
@@ -200,7 +202,7 @@ if TYPE_CHECKING:
     from glidepath.core.entities import Household, Person, SpendingPlan
     from glidepath.core.glide import GlidePathConfig, LifeStage
     from glidepath.core.investments import AssetAllocation
-    from glidepath.core.pensions import RevaluationBasis
+    from glidepath.core.pensions import DBPension, RevaluationBasis
     from glidepath.core.periods import Period
     from glidepath.core.provenance import AssumptionSet, Fact
     from glidepath.core.region import Region
@@ -212,6 +214,7 @@ if TYPE_CHECKING:
 _ZERO = Money(Decimal(0))
 _ONE = Decimal(1)
 _MINUS_ONE = Decimal(-1)
+_MONTHS_PER_YEAR = Decimal(12)
 _GROSS_UP_ITERATION_CAP = 48
 """Fixed-point iteration cap for the net-need gross-up (§5.2 step 4)."""
 _NET_TOLERANCE = Money(Decimal("0.005"))
@@ -368,25 +371,60 @@ class _NominalFactors:
 
 
 @dataclass(slots=True)
-class _DbStream:
-    """One DB pension's income stream through the run (roadmap 4.2).
+class _DbAccrual:
+    """Active CARE-style accrual on a DB stream (roadmap 9.6).
 
-    ``base_annual`` and ``lump_sum_base`` are revalued to the run start
-    (statement date to ``today`` at the assumed CPI), with the early or
-    late factor and commutation already applied; ``factor`` carries the
-    within-run revaluation forward per period, both in deferment and in
-    payment (the single-basis v1 convention, planning §5.1).
+    ``rate`` and ``salary`` are the scheme's accrual rate and stated
+    annual pensionable salary; the salary escalates with the
+    earnings-growth assumption at credit time like employment income.
+    ``service_end`` is the exclusive date service stops (leave-and-defer
+    age, else the benefits start); the retirement gate may stop accrual
+    earlier (planning §5.1).
+    """
+
+    rate: Decimal
+    salary: Money
+    service_end: date
+
+
+@dataclass(slots=True)
+class _DbStream:
+    """One DB pension's income stream through the run (roadmap 4.2, 9.6).
+
+    ``accrued_annual`` is the entitlement revalued to the period open —
+    statement date to ``today`` folded in at the assumed CPI pre-run —
+    *before* the early/late factor and commutation; ``advance`` carries
+    the within-run revaluation forward per period, both in deferment
+    and in payment (the single-basis convention, planning §5.1), and an
+    active stream's credits join it at each period's open. The payout
+    and lump-sum factors apply the early/late factor and the
+    commutation split when income or the one-shot lump sum is read.
     """
 
     basis: RevaluationBasis
     start: date
-    base_annual: Money
-    lump_sum_base: Money
-    factor: Decimal = _ONE
+    accrued_annual: Money
+    payout_factor: Decimal
+    lump_sum_factor: Decimal
+    accrual: _DbAccrual | None = None
 
     def advance(self, cpi: Decimal, fraction: Decimal) -> None:
         """Compound one completed period's revaluation (§5.2 linear scaling)."""
-        self.factor *= _ONE + self.basis.annual_rate(cpi) * fraction
+        self.accrued_annual = self.accrued_annual * (
+            _ONE + self.basis.annual_rate(cpi) * fraction
+        )
+
+    def credit(self, amount: Money) -> None:
+        """Join one period's accrual at the period open (planning §5.1)."""
+        self.accrued_annual = self.accrued_annual + amount
+
+    def income_annual(self) -> Money:
+        """The annual pension in payment, factors applied."""
+        return self.accrued_annual * self.payout_factor
+
+    def lump_sum(self) -> Money:
+        """The commutation lump sum as of the benefits start."""
+        return self.accrued_annual * self.lump_sum_factor
 
 
 @dataclass(slots=True)
@@ -782,24 +820,7 @@ class _Projection:
                     f" {pension.statement_date} is after today {today}"
                 )
                 raise EngineError(msg)
-            months = whole_months_between(pension.statement_date, today)
-            annual_rate = pension.revaluation_basis.annual_rate(cpi)
-            revalued = pension.accrued_annual_pension.value * (
-                revaluation_factor_for_months(annual_rate, months)
-                * db_early_late_factor(pension)
-            )
-            commuted = pension.commuted_fraction.value
-            lump_sum = _ZERO
-            if commuted > Decimal(0) and pension.commutation_factor is not None:
-                lump_sum = revalued * (commuted * pension.commutation_factor.value)
-            self._db_streams.append(
-                _DbStream(
-                    basis=pension.revaluation_basis,
-                    start=db_start_date(pension, person.date_of_birth.value),
-                    base_annual=revalued * (_ONE - commuted),
-                    lump_sum_base=lump_sum,
-                )
-            )
+            self._db_streams.append(self._db_stream(pension, cpi))
         if person.state_pension is None:
             return
         entitlement = self.region.state_pension.entitlement(
@@ -815,6 +836,56 @@ class _Projection:
         )
         self._sp_stream = _StatePensionStream(
             entitlement=entitlement, uprating=uprating
+        )
+
+    def _db_stream(self, pension: DBPension, cpi: Decimal) -> _DbStream:
+        """Seed one DB pension's stream at ``today`` (planning §5.1).
+
+        The accrued entitlement revalues from the statement date to
+        ``today`` (whole-month convention, §4.6). An active membership
+        additionally credits the statement→today span's service at the
+        stated salary, un-revalued (§5.1), clamped at the service end;
+        service still to run carries the accrual parameters into the
+        period loop. Service already over just leaves the pension
+        deferred — tolerant, like a benefits start already past.
+        """
+        today = self.config.today
+        person = self.person
+        months = whole_months_between(pension.statement_date, today)
+        annual_rate = pension.revaluation_basis.annual_rate(cpi)
+        accrued = pension.accrued_annual_pension.value * revaluation_factor_for_months(
+            annual_rate, months
+        )
+        accrual = None
+        membership = pension.active_membership
+        if membership is not None:
+            service_end = db_service_end_date(pension, person.date_of_birth.value)
+            span_end = min(today, service_end)
+            if span_end > pension.statement_date:
+                service_months = whole_months_between(pension.statement_date, span_end)
+                accrued = accrued + membership.pensionable_salary.value * (
+                    membership.accrual_rate.value
+                    * Decimal(service_months)
+                    / _MONTHS_PER_YEAR
+                )
+            if service_end > today:
+                accrual = _DbAccrual(
+                    rate=membership.accrual_rate.value,
+                    salary=membership.pensionable_salary.value,
+                    service_end=service_end,
+                )
+        factor = db_early_late_factor(pension)
+        commuted = pension.commuted_fraction.value
+        lump_sum_factor = Decimal(0)
+        if commuted > Decimal(0) and pension.commutation_factor is not None:
+            lump_sum_factor = factor * commuted * pension.commutation_factor.value
+        return _DbStream(
+            basis=pension.revaluation_basis,
+            start=db_start_date(pension, person.date_of_birth.value),
+            accrued_annual=accrued,
+            payout_factor=factor * (_ONE - commuted),
+            lump_sum_factor=lump_sum_factor,
+            accrual=accrual,
         )
 
     def _horizon_end(self) -> date:
@@ -836,7 +907,9 @@ class _Projection:
     def _escalation_keys(self) -> set[AssumptionKey]:
         """The real-growth assumption keys this plan escalates by."""
         keys: set[AssumptionKey] = set()
-        if self.person.employment_income is not None:
+        if self.person.employment_income is not None or any(
+            pension.active_membership is not None for pension in self.person.db_pensions
+        ):
             keys.add(AssumptionKey.EARNINGS_GROWTH_REAL)
         keys.update(
             wrapper.contributions.escalation
@@ -899,7 +972,10 @@ class _Projection:
             self._open_ledger(wrapper, period, glide, ytr)
             for wrapper in person.wrappers
         ]
-        # Step 2 — income.
+        # Step 2 — income. Active DB accrual credits at the period open,
+        # gated by retirement like employment income (planning §5.1).
+        if not retired:
+            self._accrue_db_step(period, factors)
         employment = _ZERO
         if not retired and person.employment_income is not None:
             employment = (
@@ -1019,6 +1095,30 @@ class _Projection:
             year_fraction=fraction,
         )
 
+    def _accrue_db_step(self, period: Period, factors: _NominalFactors) -> None:
+        """Credit each active DB stream's accrual for ``period`` (§5.1).
+
+        The credit is ``accrual rate x escalated pensionable salary``
+        scaled by the whole months of service inside the period and the
+        run window; it joins the entitlement at the period open and
+        revalues with it from this period on. The retirement gate is
+        the caller's (the §5.2 period-open convention shared with
+        employment income).
+        """
+        today = self.config.today
+        horizon_end = self._horizon_end()
+        for stream in self._db_streams:
+            accrual = stream.accrual
+            if accrual is None:
+                continue
+            share = service_active_fraction(
+                accrual.service_end, period, today, horizon_end
+            )
+            if share <= Decimal(0):
+                continue
+            salary = accrual.salary * factors.factor(AssumptionKey.EARNINGS_GROWTH_REAL)
+            stream.credit(salary * (accrual.rate * share))
+
     def _db_amounts(self, period: Period) -> tuple[Money, Money]:
         """Step 2: DB income in payment plus any commutation lump sum.
 
@@ -1037,9 +1137,9 @@ class _Projection:
                 stream.start, period, today, horizon_end
             )
             if share > Decimal(0):
-                income = income + stream.base_annual * (stream.factor * share)
+                income = income + stream.income_annual() * share
             if period.contains(stream.start) and today <= stream.start <= horizon_end:
-                lump_sum = lump_sum + stream.lump_sum_base * stream.factor
+                lump_sum = lump_sum + stream.lump_sum()
         return income, lump_sum
 
     def _state_pension_amount(self, period: Period) -> Money:

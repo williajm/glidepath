@@ -35,6 +35,7 @@ from glidepath.core import (
     AssumptionSet,
     AssumptionTarget,
     ContributionSchedule,
+    DBActiveMembership,
     DBPension,
     Decision,
     DecisionTarget,
@@ -64,6 +65,7 @@ from glidepath.core import (
     WrapperKindId,
 )
 from glidepath.persistence import (
+    SCHEMA_VERSION,
     AssumptionOverride,
     PersistenceError,
     PlanDocument,
@@ -142,7 +144,11 @@ def full_wrapper(balance: str = "100000.00", fee: str = "0.0035") -> Wrapper:
 
 
 def db_pensions() -> tuple[DBPension, ...]:
-    """Three DB entitlements covering every revaluation reference."""
+    """Three DB entitlements covering every revaluation reference.
+
+    The CPI-capped one is an active membership with every optional
+    field populated (roadmap 9.6); the other two are deferred.
+    """
     factors = FactorTable(factors={62: Decimal("0.85"), 64: Decimal("0.95")})
     cpi_capped = DBPension(
         id=DB_CPI_ID,
@@ -156,6 +162,11 @@ def db_pensions() -> tuple[DBPension, ...]:
         commuted_fraction=decision(Decimal("0.25")),
         commutation_factor=fact(Decimal(12)),
         taken_at_age=decision(62, note="what if I go early"),
+        active_membership=DBActiveMembership(
+            accrual_rate=fact(Decimal("0.0166667")),
+            pensionable_salary=money_fact("42000"),
+            active_until_age=decision(60, note="stepping back early"),
+        ),
     )
     fixed = DBPension(
         id=DB_FIXED_ID,
@@ -538,6 +549,22 @@ class TestRoundTrip:
         text = dumps_plan(kitchen_sink_document())
         assert dumps_plan(loads_plan(text)) == text
 
+    def test_v1_file_loads_with_every_pension_deferred(self) -> None:
+        """The 9.6 migration upgrades a v1 file on load (§4.5)."""
+        payload = payload_of(kitchen_sink_document())
+        for person in payload["household"]["persons"]:
+            for pension in person["db_pensions"]:
+                del pension["active_membership"]
+        payload["schema_version"] = 1
+        loaded = loads_plan(json.dumps(payload))
+        pensions = [
+            pension
+            for person in loaded.household.persons
+            for pension in person.db_pensions
+        ]
+        assert len(pensions) == 3
+        assert all(pension.active_membership is None for pension in pensions)
+
     @given(
         balance=st.decimals(
             min_value=0,
@@ -882,7 +909,7 @@ class TestDecodeErrors:
         """Floats never enter the plan (planning §4.6)."""
         payload = payload_of(minimal_document())
         text = json.dumps(payload).replace(
-            '"schema_version": 1', '"schema_version": 1.5'
+            f'"schema_version": {SCHEMA_VERSION}', '"schema_version": 1.5'
         )
         with pytest.raises(PersistenceError, match="floats are not permitted"):
             loads_plan(text)

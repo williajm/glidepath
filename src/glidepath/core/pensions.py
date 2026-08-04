@@ -1,18 +1,19 @@
-"""Defined-benefit pension entitlements (roadmap 4.2; planning §5.1).
+"""Defined-benefit pension entitlements (roadmap 4.2, 9.6; planning §5.1).
 
-v1 models **deferred/accrued** DB entitlements only — no active accrual
-(roadmap 9.6). Every scheme parameter (accrued pension, normal pension
-age, revaluation basis, early/late factors, commutation factor) is a
-user-entered fact: schemes vary too much to ship as data (planning
-§5.1), so scheme facts drive results and nothing here is ever guessed —
-taking benefits at an age the factor table does not cover is a
-construction-time error, not a default.
+Models deferred/accrued DB entitlements plus CARE-style active
+membership (:class:`DBActiveMembership`, roadmap 9.6). Every scheme
+parameter (accrued pension, normal pension age, revaluation basis,
+early/late factors, commutation factor, accrual rate, pensionable
+salary) is a user-entered fact: schemes vary too much to ship as data
+(planning §5.1), so scheme facts drive results and nothing here is ever
+guessed — taking benefits at an age the factor table does not cover is
+a construction-time error, not a default.
 
 Modelling conventions (documented in planning §5.1/§5.2):
 
 - The scheme's one :class:`RevaluationBasis` applies both to
   revaluation in deferment and to increases in payment; splitting the
-  two bases is a 9.6 extension.
+  two bases is a deferred extension (planning §2).
 - Revaluation compounds per engine period from the statement date; the
   span before the run's ``today`` is not modelled period-by-period, so
   the engine folds it into a starting factor via
@@ -21,6 +22,11 @@ Modelling conventions (documented in planning §5.1/§5.2):
   rate linearly, both exact ``Decimal`` arithmetic (planning §4.6).
 - Commutation trades pension for a lump sum at the stated factor, at
   the moment benefits start.
+- Active accrual credits ``accrual_rate x pensionable_salary`` per year
+  of service on top of the revalued entitlement, service ending at the
+  earliest of the leave-and-defer age, the benefits start, and the
+  engine's retirement gate (planning §5.1); final-salary linkage and
+  member DB contributions are not modelled (planning §2).
 """
 
 from dataclasses import dataclass
@@ -126,13 +132,45 @@ class FactorTable:
 
 
 @dataclass(frozen=True, slots=True)
+class DBActiveMembership:
+    """CARE-style active membership of a DB scheme (planning §5.1, 9.6).
+
+    ``accrual_rate`` is the fraction of pensionable salary earned as
+    annual pension per year of service (a 1/60th scheme enters e.g.
+    ``0.0166667``); ``pensionable_salary`` is the annual pensionable
+    salary — often below total pay — escalated by the earnings-growth
+    assumption within the run like employment income.
+    """
+
+    accrual_rate: Fact[Decimal]
+    pensionable_salary: Fact[Money]
+    active_until_age: Decision[int] | None = None
+    """The age service ends with the pension left deferred; ``None``
+    means service continues until benefits start (module docstring —
+    the engine's retirement gate applies either way)."""
+
+    def __post_init__(self) -> None:
+        """Reject impossible scheme facts and choices."""
+        if not _ZERO < self.accrual_rate.value <= _ONE:
+            msg = "DBActiveMembership.accrual_rate must lie in (0, 1]"
+            raise ValueError(msg)
+        if self.pensionable_salary.value < _ZERO_MONEY:
+            msg = "DBActiveMembership.pensionable_salary must be non-negative"
+            raise ValueError(msg)
+        if self.active_until_age is not None and self.active_until_age.value <= 0:
+            msg = "DBActiveMembership.active_until_age must be positive"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
 class DBPension:
-    """One deferred DB entitlement (planning §5.1; v1: no active accrual).
+    """One DB entitlement — deferred, or active via ``active_membership``.
 
     ``accrued_annual_pension`` is the annual pension at the statement
     (or leaving) date; ``commuted_fraction`` is the user's decision to
     trade that fraction of the pension for a lump sum of
-    ``pension given up x commutation_factor`` when benefits start.
+    ``pension given up x commutation_factor`` when benefits start
+    (planning §5.1).
     """
 
     id: EntityId
@@ -146,6 +184,8 @@ class DBPension:
     """Pounds of lump sum per pound of annual pension given up."""
     taken_at_age: Decision[int] | None = None
     """The age benefits start; ``None`` means the normal pension age."""
+    active_membership: DBActiveMembership | None = None
+    """Active CARE-style accrual; ``None`` means deferred (roadmap 9.6)."""
 
     def __post_init__(self) -> None:
         """Reject inconsistent scheme facts and choices loudly.
@@ -183,6 +223,17 @@ class DBPension:
                 " scheme facts drive results (planning §5.1)"
             )
             raise ValueError(msg)
+        membership = self.active_membership
+        if (
+            membership is not None
+            and membership.active_until_age is not None
+            and membership.active_until_age.value > taken
+        ):
+            msg = (
+                "DBPension.active_membership.active_until_age must not"
+                " exceed the age benefits are taken (planning §5.1)"
+            )
+            raise ValueError(msg)
 
 
 def db_taken_age(pension: DBPension) -> int:
@@ -195,6 +246,20 @@ def db_taken_age(pension: DBPension) -> int:
 def db_start_date(pension: DBPension, date_of_birth: date) -> date:
     """The exact date benefits start (an income entitlement, §4.1)."""
     return date_age_attained(date_of_birth, db_taken_age(pension))
+
+
+def db_service_end_date(pension: DBPension, date_of_birth: date) -> date:
+    """The date active service ends: leave-and-defer age, else benefits.
+
+    Meaningful only for a pension with an ``active_membership``; the
+    engine's retirement gate (planning §5.1) may stop accrual earlier
+    still. The construction-time invariant keeps this at or before
+    :func:`db_start_date`.
+    """
+    membership = pension.active_membership
+    if membership is not None and membership.active_until_age is not None:
+        return date_age_attained(date_of_birth, membership.active_until_age.value)
+    return db_start_date(pension, date_of_birth)
 
 
 def db_early_late_factor(pension: DBPension) -> Decimal:

@@ -97,7 +97,7 @@ class Person:
     """
     wrappers: tuple[Wrapper, ...] = ()
     db_pensions: tuple[DBPension, ...] = ()
-    """Deferred DB entitlements (roadmap 4.2; v1: no active accrual)."""
+    """DB entitlements — deferred or actively accruing (roadmap 4.2, 9.6)."""
     annuity_purchases: tuple[AnnuityPurchase, ...] = ()
     """Planned annuity purchases — decision records (roadmap 5.5)."""
     state_pension: StatePensionRecord | None = None

@@ -41,8 +41,8 @@ decumulation — under explicit, inspectable inputs.
 
 | | Contents |
 | --- | --- |
-| **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions (deferred/accrued entitlements only). State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
-| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; DB active accrual (accrual rate, pensionable salary, service); couples activation; announced future rules (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs). |
+| **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions: deferred/accrued entitlements, plus active membership with CARE-style accrual (accrual rate, pensionable salary, service projection — 9.6). State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
+| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; couples activation; announced future rules (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs); final-salary linkage and split deferment/in-payment revaluation bases for DB schemes (9.6 ships CARE-style accrual on the single basis). |
 | **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy); capital gains tax — the GIA models dividend and savings *income* only (9.2), never disposals. |
 
 ## 3. Architecture
@@ -448,7 +448,14 @@ class ContributionSchedule:
 
 
 @dataclass(frozen=True)
-class DBPension:  # v1: DEFERRED/ACCRUED entitlements only, no future accrual
+class DBActiveMembership:  # CARE-style active accrual (roadmap 9.6)
+    accrual_rate: Fact[Decimal]  # fraction of pensionable salary per year
+    pensionable_salary: Fact[Money]  # annual; often below total pay
+    active_until_age: Decision[int] | None  # leave/defer; None = until taken
+
+
+@dataclass(frozen=True)
+class DBPension:
     id: EntityId
     accrued_annual_pension: Fact[Money]  # at date of leaving / statement
     statement_date: date
@@ -458,6 +465,7 @@ class DBPension:  # v1: DEFERRED/ACCRUED entitlements only, no future accrual
     commutation_factor: Fact[Decimal] | None  # £ lump sum per £1 pension
     taken_at_age: Decision[int] | None
     commuted_fraction: Decision[Decimal]
+    active_membership: DBActiveMembership | None  # None = deferred (9.6)
 
 
 @dataclass(frozen=True)
@@ -500,7 +508,8 @@ commutation factor) are user-entered **facts** — schemes vary too much to
 ship as data. v1 modelling conventions (roadmap 4.2): the scheme's one
 `RevaluationBasis` (CPI optionally capped, fixed, or none; CPI-linked
 revaluation floored at zero) governs both revaluation in deferment and
-increases in payment — splitting the two bases is a 9.6 extension.
+increases in payment — splitting the two bases stays a deferred
+extension (§2).
 Within the run, revaluation advances with each period's CPI under the
 §5.2 linear whole-month convention; the span from the statement date to
 `today` — which the run never models period-by-period — compounds the
@@ -516,6 +525,42 @@ commutation lump sum meet the net spending need before wrappers are
 drawn; income beyond the need banks into the person's first uncapped
 taxable wrapper (GIA/cash, roadmap 9.2) and is spent only when they
 hold none.
+
+**Active DB membership (roadmap 9.6).** `active_membership` on a
+`DBPension` turns the entitlement from a frozen deferred amount into a
+projected one: CARE-style accrual credits
+`accrual_rate x pensionable_salary` per year of service on top of the
+revalued accrued entitlement, each credit revaluing on the scheme's
+single basis from the period it is earned. Conventions: the span from
+the statement date to `today` credits whole months of service at the
+stated salary, un-revalued (the §4.1/§4.6 linear whole-month
+convention — the revaluation the mid-span credits would earn is below
+annual resolution); within the run, the salary escalates with the
+earnings-growth assumption exactly like employment income, and each
+period's credit joins the entitlement at the period open. Service ends
+at the earliest of `active_until_age` (the leave-and-defer decision;
+`None` means service continues to the benefits start), the benefits
+start itself, and retirement — accrual is gated by the same §5.2
+period-open convention that stops employment income and contributions
+at the target retirement age. The final active period pro-rates its
+credit by whole months of service; an `active_until_age` after the
+taken-at age is a construction error. Final-salary linkage is not
+modelled (§2): a final-salary scheme is approximated by CARE accrual
+at the stated salary. Member DB contributions are likewise not
+modelled — a known v1 limitation: schemes that deduct member
+contributions from pay under net pay reduce taxable income in reality
+but not in the model, so tax is overstated for active members who
+enter their full pay as employment income. For the annual allowance,
+an active arrangement's **pension input amount** is
+`closing value - opening value` per tax year, each value
+`annual pension x pension.db_valuation_factor` (16, shipped as data —
+FA 2004 s234) with the opening value uprated by CPI (s235; the run's
+CPI path stands in for the September-CPI appropriate percentage) and
+the result floored at nil (PTM053301) — a deferred arrangement whose
+revaluation never outruns CPI generates nil by construction, matching
+the deferred-member carve-out. The region function ships with 9.6;
+the engine reads it when the AA charge is wired (§5.2, roadmap 9.5
+note).
 
 State pension: an official forecast, when present, is the fact and wins.
 The qualifying-years derivation (÷35) is valid **only for NI records
@@ -1179,6 +1224,7 @@ the GIA/cash wrappers bring these into the model).
 | Figure | Value | Source |
 | --- | --- | --- |
 | Annual allowance | £60,000 — measures total *pension input amounts* incl. employer contributions and DB accrual; excess charged via the AA charge. Distinct from the member relief limit below | [pension scheme rates](https://www.gov.uk/government/publications/rates-and-allowances-pension-schemes/pension-schemes-rates); [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance) |
+| DB pension input amount | per arrangement per tax year: closing value − opening value, each value = annual pension × **16** (the FA 2004 s234 relevant valuation factor; no separate lump sum is modelled — commutation is not a separate entitlement), opening value uprated by the 12-month CPI increase to the previous September (s235 "appropriate percentage"; the run's CPI path stands in), negative results nil (verified 2026-08-04) | [PTM053301](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm053301); [FA 2004 s234](https://www.legislation.gov.uk/ukpga/2004/12/section/234) |
 | Member relief limit | tax relief on *member* contributions limited to 100% of relevant UK earnings; low/no earners keep the **£3,600 gross (£2,880 net)** basic amount, available via relief at source only. The limit is a per-person aggregate across all schemes and mechanics; contributions from **age 75** are never relievable (FA 2004 s188(3)(a)) (verified 2026-08-02) | [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance); [pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief); [FA 2004 s190](https://www.legislation.gov.uk/ukpga/2004/12/section/190); [PTM044100](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm044100) |
 | AA taper | threshold income £200,000; adjusted income £260,000; −£1 per £2 (reduction rounded down to the whole £, PTM057100); floor £10,000. Adjusted income includes all employer-funded pension input (for DB: input amount net of member contributions). Known v1 limitation: the post-8-July-2015 salary-sacrifice add-back to threshold income is not modelled (no salary-sacrifice concept in v1) | rates page; [tapered AA guidance](https://www.gov.uk/guidance/pension-schemes-work-out-your-tapered-annual-allowance); [PTM057100](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm057100) |
 | MPAA | £10,000; triggered by first FAD income payment, first UFPLS, etc. (not by PCLS-only or standard lifetime annuity); when triggered, DB accrual keeps an *alternative* annual allowance = AA − MPAA (£50,000; computed, not an independent figure — nil at maximum taper; carry-forward may top up the alternative AA but never the MPAA; verified 2026-08-02) | rates page; [PTM056520](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm056520); [HS345 (2026)](https://www.gov.uk/government/publications/pensions-tax-charges-on-any-excess-over-the-lifetime-allowance-annual-allowance-special-annual-allowance-and-on-unauthorised-payments-hs345-self/hs345-pension-savings-tax-charges-2026) |
@@ -1422,8 +1468,17 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   `carry_forward_generated` gates generation on scheme membership;
   `roll_carry_forward` advances the pool, expiring the oldest year.
   Engine wiring lands with the AA charge (§5.2).*
-- [ ] 9.6 DB active accrual — *accrual rate, pensionable salary and service
-  projection for active DB membership (v1 is deferred/accrued only, §2).*
+- [x] 9.6 DB active accrual — *accrual rate, pensionable salary and service
+  projection for active DB membership. Shipped: `DBActiveMembership`
+  (accrual rate, pensionable salary, optional leave-and-defer age) on
+  `DBPension`; CARE-style accrual per §5.1 — statement→today span at the
+  stated salary, in-run credits at the period open escalating with
+  earnings growth, service gated by the retirement/leave/taken
+  boundaries; `pension.db_valuation_factor` (16) in the tax-year data
+  and the region's `db_pension_input_amount` per PTM053301, read by the
+  engine when the AA charge is wired (9.5 note). Final-salary linkage,
+  split revaluation bases and member DB contributions stay out (§2,
+  §5.1).*
 
 ## 9. Open questions
 

@@ -28,6 +28,7 @@ from glidepath.core import (
     ContributionSchedule,
     ContributionTaxTreatment,
     ContributionTerms,
+    DBActiveMembership,
     DBPension,
     Decision,
     EngineError,
@@ -499,8 +500,9 @@ def db_pension_of(
     commuted: str = "0",
     commutation_factor: str | None = None,
     taken_at: int | None = None,
+    membership: DBActiveMembership | None = None,
 ) -> DBPension:
-    """A deferred DB pension; the default basis never revalues."""
+    """A DB pension; the default basis never revalues, deferred by default."""
     return DBPension(
         id=EntityId("db-1"),
         accrued_annual_pension=money_fact(accrued),
@@ -516,6 +518,23 @@ def db_pension_of(
         taken_at_age=None
         if taken_at is None
         else Decision(value=taken_at, recorded_on=RECORDED),
+        active_membership=membership,
+    )
+
+
+def membership_of(
+    *,
+    rate: str = "0.02",
+    salary: str = "50000",
+    until: int | None = None,
+) -> DBActiveMembership:
+    """An active membership accruing ``rate x salary`` per service year."""
+    return DBActiveMembership(
+        accrual_rate=Fact(value=Decimal(rate), as_of=AS_OF, recorded_on=RECORDED),
+        pensionable_salary=money_fact(salary),
+        active_until_age=None
+        if until is None
+        else Decision(value=until, recorded_on=RECORDED),
     )
 
 
@@ -1958,6 +1977,7 @@ class TestPensionIncome:
             factors={63: Decimal("0.85")},
             commuted="0.25",
             commutation_factor="12",
+            membership=membership_of(until=62),
         )
         plan = household_of(
             person_of(
@@ -1979,11 +1999,147 @@ class TestPensionIncome:
         assert "db_pension[db-1].accrued_annual_pension" in fact_labels
         assert "db_pension[db-1].normal_pension_age" in fact_labels
         assert "db_pension[db-1].commutation_factor" in fact_labels
+        assert "db_pension[db-1].active_membership.accrual_rate" in fact_labels
+        assert "db_pension[db-1].active_membership.pensionable_salary" in fact_labels
         assert "person[person-1].state_pension.forecast_weekly_amount" in fact_labels
         assert "db_pension[db-1].taken_at_age" in decision_labels
         assert "db_pension[db-1].commuted_fraction" in decision_labels
+        assert "db_pension[db-1].active_membership.active_until_age" in decision_labels
         assert "person[person-1].state_pension.planned_extra_years" in decision_labels
         assert "person[person-1].state_pension.deferral_years" in decision_labels
+
+
+class TestActiveDBAccrual:
+    """Roadmap 9.6: CARE-style accrual per the §5.1 conventions.
+
+    The shared setup: DOB 1962-01-01, NPA 66 (benefits 2028-01-01), a
+    frozen basis, 8,000 accrued at a statement dated ``today``
+    (2026-01-01), and a membership accruing 2% of a 50,000 salary —
+    1,000 of new pension per full service year.
+    """
+
+    def accruing_plan(
+        self,
+        *,
+        retire_at: int = 66,
+        membership: DBActiveMembership | None = None,
+        date_of_birth: date = date(1962, 1, 1),
+        npa: int = 66,
+        basis: RevaluationBasis | None = None,
+        statement: date = date(2026, 1, 1),
+    ) -> Household:
+        """The class-docstring household, varied per test."""
+        pension = db_pension_of(
+            accrued="8000",
+            statement=statement,
+            npa=npa,
+            basis=basis,
+            membership=membership or membership_of(),
+        )
+        return household_of(
+            person_of(
+                (),
+                date_of_birth=date_of_birth,
+                retire_at=retire_at,
+                db_pensions=(pension,),
+            )
+        )
+
+    def three_period_config(self) -> RunConfig:
+        """Calendar years 2026-2028: two accruing periods, then payment."""
+        return RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 12, 31))
+
+    def test_each_service_year_credits_rate_times_salary(self) -> None:
+        """Two full accruing years lift the pension 8,000 → 10,000."""
+        result = run(
+            self.accruing_plan(),
+            assumptions_with(),
+            stub_region(),
+            self.three_period_config(),
+        )
+        first, second, third = result.snapshots
+        assert first.persons[0].db_income == ZERO
+        assert second.persons[0].db_income == ZERO
+        assert third.persons[0].db_income == Money(Decimal("10000.00"))
+
+    def test_retirement_stops_accrual_like_employment(self) -> None:
+        """Retiring at 65 forfeits 2027's credit: 9,000, not 10,000."""
+        result = run(
+            self.accruing_plan(retire_at=65),
+            assumptions_with(),
+            stub_region(),
+            self.three_period_config(),
+        )
+        third = result.snapshots[2]
+        assert third.persons[0].db_income == Money(Decimal("9000.00"))
+
+    def test_leaving_early_defers_the_pension(self) -> None:
+        """An active-until age of 65 likewise ends accrual after 2026."""
+        result = run(
+            self.accruing_plan(membership=membership_of(until=65)),
+            assumptions_with(),
+            stub_region(),
+            self.three_period_config(),
+        )
+        third = result.snapshots[2]
+        assert third.persons[0].db_income == Money(Decimal("9000.00"))
+
+    def test_statement_to_today_span_accrues_at_the_stated_salary(self) -> None:
+        """Two pre-run service years credit 2,000, un-revalued (§5.1).
+
+        The pension is already at its taken age throughout the run, so
+        the 10,000 pays from the first period.
+        """
+        plan = self.accruing_plan(
+            date_of_birth=date(1960, 1, 1), statement=date(2024, 1, 1)
+        )
+        result = run(
+            plan, assumptions_with(), stub_region(), self.three_period_config()
+        )
+        first = result.snapshots[0]
+        assert first.persons[0].db_income == Money(Decimal("10000.00"))
+
+    def test_salary_escalates_with_earnings_growth(self) -> None:
+        """5% earnings growth lifts 2027's credit to 1,050."""
+        result = run(
+            self.accruing_plan(),
+            assumptions_with({"earnings.growth.real": Decimal("0.05")}),
+            stub_region(),
+            self.three_period_config(),
+        )
+        third = result.snapshots[2]
+        assert third.persons[0].db_income == Money(Decimal("10050.00"))
+
+    def test_credits_revalue_with_the_scheme_basis_once_earned(self) -> None:
+        """A fixed 10% basis compounds each credit from its own period.
+
+        2026 opens at 8,000 + 1,000; 2027 revalues to 9,900 and credits
+        1,000 more; 2028 revalues 10,900 to 11,990 and pays it.
+        """
+        basis = RevaluationBasis(
+            reference=RevaluationReference.FIXED, fixed_rate=Rate(Decimal("0.10"))
+        )
+        result = run(
+            self.accruing_plan(basis=basis),
+            assumptions_with(),
+            stub_region(),
+            self.three_period_config(),
+        )
+        third = result.snapshots[2]
+        assert third.persons[0].db_income == Money(Decimal("11990.00"))
+
+    def test_final_period_credit_pro_rates_to_the_service_end(self) -> None:
+        """Service ending mid-period earns whole months only (§5.1).
+
+        A 1 July birthday ends service after six months of 2028: the
+        final credit is 500, and the 10,500 pension pays half a year.
+        """
+        plan = self.accruing_plan(date_of_birth=date(1962, 7, 1), retire_at=70)
+        result = run(
+            plan, assumptions_with(), stub_region(), self.three_period_config()
+        )
+        third = result.snapshots[2]
+        assert third.persons[0].db_income == Money(Decimal("5250.00"))
 
 
 class TestStagesAndAllocation:

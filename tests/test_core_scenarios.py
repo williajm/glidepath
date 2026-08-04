@@ -22,6 +22,7 @@ from glidepath.core import (
     AssumptionSet,
     AssumptionTarget,
     ContributionSchedule,
+    DBActiveMembership,
     DBPension,
     Decision,
     DecisionTarget,
@@ -74,13 +75,22 @@ def decision[T](value: T, note: str | None = None) -> Decision[T]:
     return Decision(value=value, recorded_on=RECORDED, note=note)
 
 
-def db_pension_of(pension_id: EntityId, *, taken_at: int | None) -> DBPension:
-    """A deferred DB pension that never revalues.
+def db_pension_of(
+    pension_id: EntityId, *, taken_at: int | None, active_until: int | None = None
+) -> DBPension:
+    """A DB pension that never revalues; active when ``active_until`` set.
 
     The factor table covers every early age a test takes it at, and the
     commutation factor permits any commuted-fraction what-if.
     """
-    factors = {62: Decimal("0.85"), 64: Decimal("0.95")}
+    factors = {60: Decimal("0.80"), 62: Decimal("0.85"), 64: Decimal("0.95")}
+    membership = None
+    if active_until is not None:
+        membership = DBActiveMembership(
+            accrual_rate=Fact(value=Decimal("0.02"), as_of=AS_OF, recorded_on=RECORDED),
+            pensionable_salary=money_fact("50000"),
+            active_until_age=decision(active_until),
+        )
     return DBPension(
         id=pension_id,
         accrued_annual_pension=money_fact("8000"),
@@ -91,6 +101,7 @@ def db_pension_of(pension_id: EntityId, *, taken_at: int | None) -> DBPension:
         commuted_fraction=Decision(value=Decimal(0), recorded_on=RECORDED),
         commutation_factor=Fact(value=Decimal(12), as_of=AS_OF, recorded_on=RECORDED),
         taken_at_age=None if taken_at is None else decision(taken_at),
+        active_membership=membership,
     )
 
 
@@ -145,7 +156,7 @@ def base_household(*, with_state_pension: bool = True) -> Household:
         tax_residency=RESIDENCY,
         wrappers=wrappers,
         db_pensions=(
-            db_pension_of(DB_ID, taken_at=64),
+            db_pension_of(DB_ID, taken_at=64, active_until=62),
             db_pension_of(UNTAKEN_DB_ID, taken_at=None),
         ),
         annuity_purchases=(purchase,),
@@ -389,6 +400,37 @@ class TestResolution:
         assert untaken.taken_at_age is None
         assert untaken.commuted_fraction.value == Decimal(0)
 
+    def test_db_active_until_override(self) -> None:
+        """The leave-and-defer age replaces inside the membership (9.6)."""
+        scenario = Scenario(
+            name="leave-earlier",
+            overrides=(
+                decision_override(DB_ID, "active_membership.active_until_age", 60),
+            ),
+        )
+        resolution = resolve_scenario(base_household(), base_assumptions(), scenario)
+        active, deferred = resolution.household.persons[0].db_pensions
+        membership = active.active_membership
+        assert membership is not None
+        assert membership.active_until_age is not None
+        assert membership.active_until_age.value == 60
+        assert membership.pensionable_salary.value == Money(Decimal(50000))
+        assert deferred.active_membership is None
+
+    def test_active_until_on_a_deferred_pension_is_an_orphan(self) -> None:
+        """A membership path through a deferred pension cannot be addressed."""
+        scenario = Scenario(
+            name="orphan",
+            overrides=(
+                decision_override(
+                    UNTAKEN_DB_ID, "active_membership.active_until_age", 60
+                ),
+            ),
+        )
+        household = base_household()
+        orphans = scenario_orphans(scenario, household, base_assumptions())
+        assert len(orphans) == 1
+
     def test_annuity_purchase_overrides(self) -> None:
         """Both annuity decisions replace on the purchase record."""
         scenario = Scenario(
@@ -582,13 +624,14 @@ class TestDecisionTargetCatalogue:
             (WRAPPER_ID, "contributions.employee_amount"),
             (DB_ID, "taken_at_age"),
             (DB_ID, "commuted_fraction"),
+            (DB_ID, "active_membership.active_until_age"),
             (UNTAKEN_DB_ID, "commuted_fraction"),
             (ANNUITY_ID, "at_age"),
             (ANNUITY_ID, "fraction_of_pot"),
             (ANNUITY_ID, "annuity_type"),
             (ANNUITY_ID, "basis"),
         }
-        assert len(catalogue) == 12
+        assert len(catalogue) == 13
 
     def test_values_are_bare_with_decisions_unwrapped(self) -> None:
         """Each entry carries the current bare value an override replaces."""

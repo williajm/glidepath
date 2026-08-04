@@ -33,7 +33,10 @@ and taxable saving is scheduled on a GIA directly, roadmap 9.2).
 
 **Annual allowance** (planning §5.2 step 3, §6). The AA measures total
 *pension input amounts* — member gross plus employer contributions and
-(from Phase 4) DB accrual — distinct from the member relief limit. High
+DB accrual (:func:`db_pension_input_amount`, roadmap 9.6: closing less
+CPI-uprated opening value at the data file's ``db_valuation_factor``,
+FA 2004 s234 and s235, floored at nil per PTM053301) — distinct from the
+member relief limit. High
 income tapers it: £1 less per £2 of adjusted income over the threshold
 (reduction rounded down to the whole pound, PTM057100), floored. After
 flexible access the MPAA caps money-purchase inputs, leaving the
@@ -80,6 +83,7 @@ if TYPE_CHECKING:
 
 _ZERO = Money(Decimal(0))
 _POUND = Decimal(1)
+_ONE = Decimal(1)
 
 
 class UkContributionError(ValueError):
@@ -247,12 +251,45 @@ def adjusted_income(*, total_income: Money, employer_pension_inputs: Money) -> M
     adds them back to net income). ``employer_pension_inputs`` is every
     employer-funded pension input: DC employer contributions plus, for
     DB arrangements, the pension input amount net of the member's own
-    contributions (PTM057100) — from Phase 4 the DB accrual must be
-    included here, not only in the AA measure itself.
+    contributions (PTM057100) — the whole of
+    :func:`db_pension_input_amount`, since the model has no member DB
+    contributions (planning §5.1). The engine supplies both when the
+    AA charge is wired (planning §5.2).
     """
     _require_non_negative(total_income, "total_income")
     _require_non_negative(employer_pension_inputs, "employer_pension_inputs")
     return total_income + employer_pension_inputs
+
+
+def db_pension_input_amount(
+    pension: PensionRules,
+    *,
+    opening_annual: Money,
+    closing_annual: Money,
+    cpi: Decimal,
+) -> Money:
+    """A DB arrangement's pension input amount for one tax year (§6).
+
+    Closing value less opening value, each value the arrangement's
+    annual pension times ``pension.db_valuation_factor`` (FA 2004
+    s234; the model has no separate lump sum entitlement — commutation
+    is not one, PTM053301). The opening value is uprated by ``cpi``
+    (s235's "appropriate percentage" is the 12-month CPI increase to
+    the September before the tax year; the run's CPI path stands in,
+    planning §5.1/§6), never reduced by deflation, and a negative
+    difference is nil (PTM053301) — so a deferred arrangement whose
+    revaluation never outruns CPI generates nothing. The engine calls
+    this per arrangement when the AA charge is wired (planning §5.2);
+    amounts feed :func:`assess_annual_allowance` ``other_inputs`` and
+    :func:`adjusted_income` ``employer_pension_inputs``.
+    """
+    _require_non_negative(opening_annual, "opening_annual")
+    _require_non_negative(closing_annual, "closing_annual")
+    factor = Decimal(pension.db_valuation_factor)
+    uplift = _ONE + max(cpi, Decimal(0))
+    opening_value = opening_annual * (factor * uplift)
+    closing_value = closing_annual * factor
+    return max(closing_value - opening_value, _ZERO)
 
 
 def tapered_annual_allowance(
@@ -366,8 +403,9 @@ def assess_annual_allowance(
     (:func:`tapered_annual_allowance`); ``money_purchase_inputs`` is
     member gross plus employer DC contributions *made while the MPAA
     applies*; ``other_inputs`` is everything else measured by the AA —
-    DB accrual (zero until Phase 4/9.6) and, in the MPAA trigger
-    period, any money-purchase inputs made before the trigger (HS345;
+    DB pension input amounts (:func:`db_pension_input_amount`) and, in
+    the MPAA trigger period, any money-purchase inputs made before the
+    trigger (HS345;
     see :func:`is_mpaa_active`). Unused prior-year allowance is set
     against the assessed excess separately
     (:func:`apply_carry_forward`).
