@@ -88,6 +88,7 @@ def test_pension_allowances() -> None:
     assert pension.aa_taper_rate == Rate(Decimal("0.5"))
     assert pension.aa_taper_floor == Money(Decimal(10000))
     assert pension.mpaa == Money(Decimal(10000))
+    assert pension.aa_carry_forward_years == 3
     assert pension.member_relief_basic_amount == Money(Decimal(3600))
     assert pension.member_relief_max_age == 75
     assert pension.relief_at_source_rate == Rate(Decimal("0.20"))

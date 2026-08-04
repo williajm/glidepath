@@ -107,8 +107,9 @@ v1 engine conventions, superseded as later phases land:
   non-zero adjustment reported in the run's provenance; a balance
   dated after ``today`` is an engine error (the DB statement-date
   convention). Annual-allowance measurement joins the loop when the
-  AA charge is modelled (roadmap 5.x/9.5) — the in-run MPAA trigger
-  is recorded now, ready for it.
+  AA charge is modelled — the in-run MPAA trigger is recorded now,
+  and the region's assessment and carry-forward machinery (roadmap
+  9.5) is ready for it.
 - Partial first and last periods (roadmap 4.6, planning §5.2): the run
   models only the window from ``config.today`` through the horizon end.
   A period partly outside that window has its flows (employment income,

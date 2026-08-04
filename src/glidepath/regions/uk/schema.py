@@ -180,6 +180,8 @@ class PensionRules:
     aa_taper_rate: Rate
     aa_taper_floor: Money
     mpaa: Money
+    aa_carry_forward_years: int
+    """How many previous tax years' unused AA may carry forward (FA 2004 s228A)."""
     member_relief_basic_amount: Money
     """Relief floor for low/no earners, available via relief at source only."""
     member_relief_max_age: int
@@ -190,9 +192,11 @@ class PensionRules:
     lump_sum_death_benefit_allowance: Money
 
     def __post_init__(self) -> None:
-        """Require a positive relief age limit."""
+        """Require a positive relief age limit and a sensible carry window."""
         if self.member_relief_max_age <= 0:
             _fail("PensionRules", "member_relief_max_age must be positive")
+        if self.aa_carry_forward_years < 0:
+            _fail("PensionRules", "aa_carry_forward_years must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)

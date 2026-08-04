@@ -301,6 +301,7 @@ def test_first_indexed_year_figures(
     assert pension.aa_taper_adjusted_income == Money(Decimal(265200))
     assert pension.aa_taper_floor == Money(Decimal(10200))
     assert pension.mpaa == Money(Decimal(10200))
+    assert pension.aa_carry_forward_years == 3  # counts never index
     assert pension.member_relief_basic_amount == Money(Decimal(3672))
     assert pension.member_relief_max_age == 75  # ages never index
     # 273,640.50 is a tie: half-even rounds to the even pound.

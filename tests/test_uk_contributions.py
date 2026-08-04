@@ -1,4 +1,4 @@
-"""Golden tests for UK relief mechanics and pension allowances (3.2, 3.3).
+"""Golden tests for UK relief mechanics and pension allowances (3.2, 3.3, 9.5).
 
 Relief mechanics hand-worked from the gov.uk worked examples (pension
 tax relief: relief at source grosses up net contributions by 20%; net
@@ -6,9 +6,13 @@ pay deducts before tax; no/low earners keep the £3,600-gross basic
 amount via relief at source only). Allowance figures from planning §6:
 AA £60,000; taper threshold £200,000 / adjusted £260,000, -£1 per £2
 rounded down to the pound, floor £10,000; MPAA £10,000; alternative
-annual allowance = AA - MPAA = £50,000 (HS345).
+annual allowance = AA - MPAA = £50,000 (HS345). Carry-forward per the
+gov.uk guidance (verified 2026-08-04): unused AA from the previous 3
+tax years, drawn earliest first, only from scheme-membership years,
+never topping up the MPAA.
 """
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -27,9 +31,12 @@ from glidepath.regions.uk import (
     UkContributionError,
     UkContributionRuleset,
     adjusted_income,
+    apply_carry_forward,
     assess_annual_allowance,
+    carry_forward_generated,
     is_mpaa_active,
     load_tax_year,
+    roll_carry_forward,
     tapered_annual_allowance,
     threshold_income,
 )
@@ -499,6 +506,8 @@ def test_assessment_requires_alternative_exactly_when_mpaa_active() -> None:
     with pytest.raises(UkContributionError, match="alternative_annual_allowance"):
         AnnualAllowanceAssessment(
             annual_allowance=allowance,
+            money_purchase_inputs=zero,
+            other_inputs=zero,
             mpaa_active=True,
             money_purchase_excess=zero,
             alternative_annual_allowance=None,
@@ -518,3 +527,181 @@ def test_assessment_rejects_negative_inputs(pension: PensionRules) -> None:
             other_inputs=zero,
             mpaa_active=False,
         )
+
+
+# --- AA carry-forward (issue 9.5) -------------------------------------------
+
+
+def assessed(
+    pension: PensionRules,
+    money_purchase: str,
+    other: str = "0",
+    *,
+    mpaa_active: bool = False,
+    annual_allowance: Money | None = None,
+) -> AnnualAllowanceAssessment:
+    """Assess one year against the (possibly overridden) allowance."""
+    allowance = (
+        annual_allowance if annual_allowance is not None else pension.annual_allowance
+    )
+    return assess_annual_allowance(
+        pension,
+        annual_allowance=allowance,
+        money_purchase_inputs=money(money_purchase),
+        other_inputs=money(other),
+        mpaa_active=mpaa_active,
+    )
+
+
+def test_carry_forward_covers_the_excess(pension: PensionRules) -> None:
+    """£70,000 of inputs against £60,000 draws £10,000 from the pool."""
+    assessment = assessed(pension, "70000")
+    pool = (money("5000"), money("5000"), money("5000"))
+    outcome = apply_carry_forward(pension, assessment, pool)
+    assert outcome.chargeable_excess == money("0")
+    assert outcome.used == (money("5000"), money("5000"), money("0"))
+    assert outcome.remaining == (money("0"), money("0"), money("5000"))
+
+
+def test_carry_forward_draws_earliest_years_first(pension: PensionRules) -> None:
+    """A £5,000 excess takes all of year one, then part of year two."""
+    assessment = assessed(pension, "65000")
+    outcome = apply_carry_forward(pension, assessment, (money("4000"), money("3000")))
+    assert outcome.chargeable_excess == money("0")
+    assert outcome.used == (money("4000"), money("1000"))
+    assert outcome.remaining == (money("0"), money("2000"))
+
+
+def test_insufficient_carry_forward_leaves_a_charge(pension: PensionRules) -> None:
+    """Whatever the pool cannot cover stays chargeable."""
+    assessment = assessed(pension, "70000")
+    outcome = apply_carry_forward(pension, assessment, (money("4000"),))
+    assert outcome.chargeable_excess == money("6000")
+    assert outcome.remaining == (money("0"),)
+
+
+def test_no_excess_leaves_the_pool_untouched(pension: PensionRules) -> None:
+    """Carry-forward is drawn only to the extent an excess needs it."""
+    assessment = assessed(pension, "30000")
+    outcome = apply_carry_forward(pension, assessment, (money("10000"),))
+    assert outcome.chargeable_excess == money("0")
+    assert outcome.used == (money("0"),)
+    assert outcome.remaining == (money("10000"),)
+
+
+def test_carry_forward_never_offsets_the_mpaa_excess(pension: PensionRules) -> None:
+    """The money-purchase excess is a floor no pool can reach (HS345)."""
+    assessment = assessed(pension, "25000", mpaa_active=True)
+    outcome = apply_carry_forward(pension, assessment, (money("20000"),))
+    assert outcome.chargeable_excess == money("15000")
+    assert outcome.used == (money("0"),)
+
+
+def test_carry_forward_tops_up_the_alternative_allowance(
+    pension: PensionRules,
+) -> None:
+    """DB input over the alternative AA is offsettable; the MP excess is not."""
+    assessment = assessed(pension, "15000", "55000", mpaa_active=True)
+    # Before: alternative 5,000 + 5,000 ties default 70,000 - 60,000.
+    # The pool lifts both computations down to the 5,000 MP floor.
+    outcome = apply_carry_forward(pension, assessment, (money("10000"),))
+    assert outcome.chargeable_excess == money("5000")
+    assert outcome.used == (money("5000"),)
+
+
+def test_carry_forward_rejects_a_pool_beyond_the_window(
+    pension: PensionRules,
+) -> None:
+    """More than aa_carry_forward_years entries is an input error."""
+    assessment = assessed(pension, "0")
+    pool = (money("1"), money("1"), money("1"), money("1"))
+    with pytest.raises(UkContributionError, match="previous 3 tax years"):
+        apply_carry_forward(pension, assessment, pool)
+
+
+def test_carry_forward_rejects_negative_entries(pension: PensionRules) -> None:
+    """A negative pool entry is an input error."""
+    assessment = assessed(pension, "0")
+    pool = (money("-1"),)
+    with pytest.raises(UkContributionError, match="carry_forward"):
+        apply_carry_forward(pension, assessment, pool)
+
+
+def test_unused_allowance_survives_for_future_years(pension: PensionRules) -> None:
+    """£20,000 of inputs against £60,000 leaves £40,000 to carry."""
+    assessment = assessed(pension, "20000")
+    assert carry_forward_generated(assessment, scheme_member=True) == money("40000")
+
+
+def test_only_unused_alternative_allowance_carries_after_access(
+    pension: PensionRules,
+) -> None:
+    """Unused MPAA headroom never carries forward (HS345)."""
+    assessment = assessed(pension, "5000", "20000", mpaa_active=True)
+    # 50,000 alternative allowance less 20,000 of DB input; the 5,000
+    # of money-purchase headroom under the MPAA adds nothing.
+    assert carry_forward_generated(assessment, scheme_member=True) == money("30000")
+
+
+def test_a_year_without_scheme_membership_generates_nothing(
+    pension: PensionRules,
+) -> None:
+    """No registered-scheme membership, no carry-forward from that year."""
+    assessment = assessed(pension, "0")
+    assert carry_forward_generated(assessment, scheme_member=False) == money("0")
+
+
+def test_a_tapered_year_carries_its_tapered_headroom(pension: PensionRules) -> None:
+    """Unused allowance from a tapered year is measured off the tapered AA."""
+    tapered = tapered_annual_allowance(
+        pension, threshold=money("210000"), adjusted=money("300000")
+    )
+    assessment = assessed(pension, "10000", annual_allowance=tapered)
+    # The £40,000 tapered allowance less £10,000 of inputs.
+    assert carry_forward_generated(assessment, scheme_member=True) == money("30000")
+
+
+def test_rolling_the_pool_expires_the_oldest_year(pension: PensionRules) -> None:
+    """A full window drops its earliest entry as the new year joins."""
+    remaining = (money("0"), money("2000"), money("5000"))
+    rolled = roll_carry_forward(pension, remaining, money("40000"))
+    assert rolled == (money("2000"), money("5000"), money("40000"))
+
+
+def test_rolling_a_short_pool_keeps_every_year(pension: PensionRules) -> None:
+    """Years still inside the window survive the roll."""
+    rolled = roll_carry_forward(pension, (money("3000"),), money("1000"))
+    assert rolled == (money("3000"), money("1000"))
+
+
+def test_a_zero_year_window_rolls_to_an_empty_pool(pension: PensionRules) -> None:
+    """A regime without carry-forward keeps no pool at all."""
+    no_carry = replace(pension, aa_carry_forward_years=0)
+    rolled = roll_carry_forward(no_carry, (), money("5000"))
+    assert rolled == ()
+
+
+def test_rolling_rejects_a_pool_beyond_the_window(pension: PensionRules) -> None:
+    """The rolled pool is validated like the applied one."""
+    pool = (money("1"), money("1"), money("1"), money("1"))
+    generated = money("0")
+    with pytest.raises(UkContributionError, match="previous 3 tax years"):
+        roll_carry_forward(pension, pool, generated)
+
+
+def test_unused_allowance_expires_after_three_years(pension: PensionRules) -> None:
+    """The gov.uk 3-year rule end-to-end: year-one headroom lapses unused."""
+    opening = assessed(pension, "20000")  # generates 40,000
+    pool = roll_carry_forward(
+        pension, (), carry_forward_generated(opening, scheme_member=True)
+    )
+    for _ in range(3):  # three exactly-full years use none of it
+        assessment = assessed(pension, "60000")
+        outcome = apply_carry_forward(pension, assessment, pool)
+        pool = roll_carry_forward(
+            pension,
+            outcome.remaining,
+            carry_forward_generated(assessment, scheme_member=True),
+        )
+    over = apply_carry_forward(pension, assessed(pension, "70000"), pool)
+    assert over.chargeable_excess == money("10000")

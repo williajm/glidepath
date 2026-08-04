@@ -42,7 +42,7 @@ decumulation — under explicit, inspectable inputs.
 | | Contents |
 | --- | --- |
 | **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions (deferred/accrued entitlements only). State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
-| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; AA carry-forward; DB active accrual (accrual rate, pensionable salary, service); couples activation; announced future rules (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs). |
+| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; DB active accrual (accrual rate, pensionable salary, service); couples activation; announced future rules (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs). |
 | **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy); capital gains tax — the GIA models dividend and savings *income* only (9.2), never disposals. |
 
 ## 3. Architecture
@@ -987,6 +987,7 @@ aa_taper_adjusted_income   = "260000"
 aa_taper_rate              = "0.5"
 aa_taper_floor             = "10000"
 mpaa                       = "10000"
+aa_carry_forward_years     = 3  # unused AA carries from the previous 3 tax years
 member_relief_basic_amount = "3600"  # low/no-earner relief floor, RAS only
 member_relief_max_age      = 75  # no relief on contributions from age 75
 relief_at_source_rate      = "0.20"
@@ -1181,7 +1182,7 @@ the GIA/cash wrappers bring these into the model).
 | Member relief limit | tax relief on *member* contributions limited to 100% of relevant UK earnings; low/no earners keep the **£3,600 gross (£2,880 net)** basic amount, available via relief at source only. The limit is a per-person aggregate across all schemes and mechanics; contributions from **age 75** are never relievable (FA 2004 s188(3)(a)) (verified 2026-08-02) | [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance); [pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief); [FA 2004 s190](https://www.legislation.gov.uk/ukpga/2004/12/section/190); [PTM044100](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm044100) |
 | AA taper | threshold income £200,000; adjusted income £260,000; −£1 per £2 (reduction rounded down to the whole £, PTM057100); floor £10,000. Adjusted income includes all employer-funded pension input (for DB: input amount net of member contributions). Known v1 limitation: the post-8-July-2015 salary-sacrifice add-back to threshold income is not modelled (no salary-sacrifice concept in v1) | rates page; [tapered AA guidance](https://www.gov.uk/guidance/pension-schemes-work-out-your-tapered-annual-allowance); [PTM057100](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm057100) |
 | MPAA | £10,000; triggered by first FAD income payment, first UFPLS, etc. (not by PCLS-only or standard lifetime annuity); when triggered, DB accrual keeps an *alternative* annual allowance = AA − MPAA (£50,000; computed, not an independent figure — nil at maximum taper; carry-forward may top up the alternative AA but never the MPAA; verified 2026-08-02) | rates page; [PTM056520](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm056520); [HS345 (2026)](https://www.gov.uk/government/publications/pensions-tax-charges-on-any-excess-over-the-lifetime-allowance-annual-allowance-special-annual-allowance-and-on-unauthorised-payments-hs345-self/hs345-pension-savings-tax-charges-2026) |
-| AA carry-forward | unused AA from previous 3 tax years (detail re-verify at implementation) | [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance) |
+| AA carry-forward | unused AA from the previous 3 tax years, drawn earliest year first and only to the extent an excess needs it (the rest survives within its window); only tax years with membership of a registered pension scheme (or qualifying overseas scheme) generate it; unused MPAA headroom never carries — after flexible access only unused *alternative* AA does — and carry-forward never tops up the MPAA (verified 2026-08-04) | [check unused annual allowances](https://www.gov.uk/guidance/check-if-you-have-unused-annual-allowances-on-your-pension-savings); [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance); [HS345 (2026)](https://www.gov.uk/government/publications/pensions-tax-charges-on-any-excess-over-the-lifetime-allowance-annual-allowance-special-annual-allowance-and-on-unauthorised-payments-hs345-self/hs345-pension-savings-tax-charges-2026) |
 | Relief at source | provider adds 20% basic-rate relief (25% top-up on net); higher/additional via assessment — the basic rate limit and every limit above it are extended by the gross contribution, never the Scottish starter limit; starter-rate payers keep the 20% top-up (verified 2026-08-04) | [pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief); [SI 2018/459 note](https://www.legislation.gov.uk/uksi/2018/459/note/made) |
 | Net pay | pre-tax deduction; full marginal relief automatic | same |
 | Tax-free lump sum | up to 25%, capped by LSA £268,275 | [lump sum allowance](https://www.gov.uk/tax-on-your-private-pension/lump-sum-allowance); rates page |
@@ -1412,7 +1413,15 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   §5.3.*
 - [ ] 9.4 Couples activation spike — *survivor benefits, marriage allowance,
   joint annuities scoped; new decision record in §4 before any code.*
-- [ ] 9.5 AA carry-forward — *3-year rule per gov.uk guidance.*
+- [x] 9.5 AA carry-forward — *3-year rule per gov.uk guidance. Shipped:
+  `aa_carry_forward_years` (3) in the tax-year data; the assessment
+  records its inputs and exposes the year's carry-forward-able unused
+  allowance; `apply_carry_forward` sets the pool against an assessed
+  excess earliest year first, drawing only what reduces the charge and
+  topping up both s227ZA computations but never the MPAA;
+  `carry_forward_generated` gates generation on scheme membership;
+  `roll_carry_forward` advances the pool, expiring the oldest year.
+  Engine wiring lands with the AA charge (§5.2).*
 - [ ] 9.6 DB active accrual — *accrual rate, pensionable salary and service
   projection for active DB membership (v1 is deferred/accrued only, §2).*
 
@@ -1427,9 +1436,16 @@ Carried from the 2026-08-01 research pass:
 2. **NMPA enacting statute** — 2028 date + protections confirmed on the
    gov.uk policy paper; the statute (likely Finance Act 2022) not confirmed
    on a fetched primary page.
-3. **AA carry-forward mechanics** — 3-year headline verified; ordering and
-   membership rules to re-verify at implementation
-   ([guidance](https://www.gov.uk/guidance/check-if-you-have-unused-annual-allowances-on-your-pension-savings)).
+3. **AA carry-forward mechanics** — *resolved 2026-08-04*: unused
+   allowance is drawn in order of earliest to most recent year; only tax
+   years with membership of a registered pension scheme (or qualifying
+   overseas scheme) generate carry-forward; partial use is allowed, the
+   rest staying available within the 3-year window; unused MPAA never
+   carries forward (after flexible access only unused *alternative* AA
+   does). Verified on the
+   [gov.uk guidance](https://www.gov.uk/guidance/check-if-you-have-unused-annual-allowances-on-your-pension-savings);
+   shipped as `pension.aa_carry_forward_years` plus the 9.5 machinery
+   (§6).
 4. **Third SPA review deadline** (reported March 2029) — secondary sources
    only; no legislated SPA change as of retrieval.
 5. **ONS exact cohort values** — use the 2024-based cohort life tables

@@ -1,8 +1,8 @@
 # UK tax year 2026/27 policy figures (docs/planning.md §5.3, §6).
 # Income tax, pension, ISA and state pension figures verified
-# 2026-08-01/02; savings and dividend figures 2026-08-04 — all from the
-# primary sources below; never edit a figure without re-verifying and
-# updating [meta].
+# 2026-08-01/02; savings, dividend and AA carry-forward figures
+# 2026-08-04 — all from the primary sources below; never edit a figure
+# without re-verifying and updating [meta].
 
 schema_version = 1
 
@@ -19,6 +19,7 @@ sources = [
   "https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief",
   "https://www.legislation.gov.uk/ukpga/2004/12/section/190",
   "https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm044100",
+  "https://www.gov.uk/guidance/check-if-you-have-unused-annual-allowances-on-your-pension-savings",
   "https://www.gov.uk/individual-savings-accounts",
   "https://www.gov.uk/lifetime-isa",
   "https://www.gov.uk/tax-on-dividends",
@@ -59,6 +60,7 @@ aa_taper_adjusted_income   = "260000"
 aa_taper_rate              = "0.5"
 aa_taper_floor             = "10000"
 mpaa                       = "10000"
+aa_carry_forward_years     = 3  # unused AA carries from the previous 3 tax years
 member_relief_basic_amount = "3600"  # low/no-earner relief floor, RAS only
 member_relief_max_age      = 75  # no relief on contributions from age 75 (FA 2004 s188)
 relief_at_source_rate      = "0.20"
