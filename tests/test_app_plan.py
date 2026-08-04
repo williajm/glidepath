@@ -95,20 +95,28 @@ class TestStateWithHousehold:
         assert projected.result.provenance.decisions
         assert projected.result.provenance.assumptions
 
-    def test_run_failure_becomes_a_message(self) -> None:
-        """A Scottish taxpayer fails loudly but safely (roadmap 9.1)."""
+    def test_scottish_household_projects(self) -> None:
+        """A Scottish taxpayer projects under the Scottish schedule (9.1)."""
         state = state_with_household(
             initial_plan_state(), household(SCOTLAND_RESIDENCY), today=TODAY
         )
+        assert state.run_error is None
+        assert state.result is not None
+
+    def test_run_failure_becomes_a_message(self) -> None:
+        """A residency the UK region cannot assess fails loudly but safely."""
+        state = state_with_household(
+            initial_plan_state(), household(TaxResidencyId("uk.mars")), today=TODAY
+        )
         assert state.result is None
         assert state.run_error is not None
-        assert "Scottish" in state.run_error
+        assert "residency" in state.run_error
 
     def test_saved_message_reports_the_outcome(self, projected: PlanState) -> None:
         """The status line distinguishes success from a failed run."""
         assert "projection run" in facts_saved_message(projected)
         failed = state_with_household(
-            initial_plan_state(), household(SCOTLAND_RESIDENCY), today=TODAY
+            initial_plan_state(), household(TaxResidencyId("uk.mars")), today=TODAY
         )
         assert "failed" in facts_saved_message(failed)
 

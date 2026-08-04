@@ -61,7 +61,7 @@ from glidepath.core import (
     TaxResidencyId,
     Wrapper,
 )
-from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY, SCOTLAND_RESIDENCY
+from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
 
 TODAY = date(2026, 8, 2)
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -202,10 +202,10 @@ class TestScenarioAddRemove:
 
     def test_base_run_failure_is_a_message(self) -> None:
         """A failing base run folds into ``scenario_run_error`` (§4.7)."""
-        scottish = state_with_household(
-            initial_plan_state(), household(SCOTLAND_RESIDENCY), today=TODAY
+        unassessable = state_with_household(
+            initial_plan_state(), household(TaxResidencyId("uk.mars")), today=TODAY
         )
-        outcome = state_with_scenario_added(scottish, SCENARIO, today=TODAY)
+        outcome = state_with_scenario_added(unassessable, SCENARIO, today=TODAY)
         assert outcome.error is None
         assert outcome.state.scenario_runs is None
         assert outcome.state.scenario_run_error is not None

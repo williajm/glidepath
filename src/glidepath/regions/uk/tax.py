@@ -3,9 +3,9 @@
 Implements the core :class:`~glidepath.core.TaxSystem` protocol. Every
 figure — personal allowance, taper threshold and rate, the band
 ladder — comes from the tax-year data files (§5.3); nothing is hardcoded
-here (guard-tested). v1 assesses rUK non-savings income only: the
-Scottish schedule ships in data (designed-for) and activates in roadmap
-9.1; savings/dividend taxation needs the GIA wrapper (roadmap 9.2).
+here (guard-tested). Non-savings income is assessed under the rUK or
+Scottish schedule per the taxpayer's residency (roadmap 9.1);
+savings/dividend taxation needs the GIA wrapper (roadmap 9.2).
 
 Rounding follows HMRC's published calculation logic (the Tax Logic
 service guide,
@@ -18,10 +18,12 @@ planning §4.6) is unchanged elsewhere.
 
 Relief-at-source pension contributions (roadmap 3.2) receive their
 higher and additional rates of relief here, by HMRC's own mechanism:
-every bounded band threshold is extended by the gross contribution, and
-adjusted net income — the personal-allowance taper measure — deducts
-it. Net-pay contributions need no assessment adjustment: they leave pay
-before tax, so the caller excludes them from the assessed income.
+the basic rate limit and every rate limit above it are extended by the
+gross contribution (limits below basic — the Scottish starter rate —
+never move), and adjusted net income — the personal-allowance taper
+measure — deducts it. Net-pay contributions need no assessment
+adjustment: they leave pay before tax, so the caller excludes them from
+the assessed income.
 """
 
 from dataclasses import dataclass
@@ -30,7 +32,7 @@ from typing import TYPE_CHECKING
 
 from glidepath.core import Money, TaxInput, TaxLine, TaxResidencyId, TaxResult
 from glidepath.regions.uk.loader import available_tax_years, load_tax_year
-from glidepath.regions.uk.schema import TaxBand
+from glidepath.regions.uk.schema import BASIC_BAND_NAME, TaxBand
 from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
 
 if TYPE_CHECKING:
@@ -42,7 +44,7 @@ RUK_RESIDENCY = TaxResidencyId("uk.ruk")
 """Residency id for England, Wales and Northern Ireland (rUK)."""
 
 SCOTLAND_RESIDENCY = TaxResidencyId("uk.scotland")
-"""Residency id for Scottish taxpayers (activates in roadmap 9.1)."""
+"""Residency id for Scottish taxpayers."""
 
 _ZERO = Money(Decimal(0))
 _POUND = Decimal(1)
@@ -122,8 +124,7 @@ def _schedule_for(year: TaxYearFile, residency: TaxResidencyId) -> IncomeTaxSche
     if residency == RUK_RESIDENCY:
         return year.income_tax_ruk
     if residency == SCOTLAND_RESIDENCY:
-        msg = "Scottish assessment is not yet active (roadmap 9.1)"
-        raise UkTaxError(msg)
+        return year.income_tax_scotland
     msg = f"unknown UK tax residency {residency!r}"
     raise UkTaxError(msg)
 
@@ -178,21 +179,24 @@ def _band_lines(bands: tuple[TaxBand, ...], taxable: Money) -> tuple[TaxLine, ..
 def _extended_bands(
     bands: tuple[TaxBand, ...], extension: Money
 ) -> tuple[TaxBand, ...]:
-    """Extend every bounded band threshold by a relief-at-source gross.
+    """Extend the basic and later band thresholds by a relief-at-source gross.
 
-    HMRC's relief-at-source mechanism: the basic (and each later
-    bounded) rate limit grows by the gross contribution, so more income
-    is taxed at the lower rates. The unbounded top band needs no move.
+    HMRC's relief-at-source mechanism: the basic rate limit and every
+    rate limit above it grow by the gross contribution, so more income
+    is taxed at the lower rates. Limits below the basic band — the
+    Scottish starter rate — never move (FA 2004 s192; SI 2018/459 for
+    Scottish taxpayers), and the unbounded top band needs no move.
     """
     if extension <= _ZERO:
         return bands
+    basic_index = next(
+        index for index, band in enumerate(bands) if band.name == BASIC_BAND_NAME
+    )
     return tuple(
-        TaxBand(
-            name=band.name,
-            rate=band.rate,
-            upper=None if band.upper is None else band.upper + extension,
-        )
-        for band in bands
+        TaxBand(name=band.name, rate=band.rate, upper=band.upper + extension)
+        if index >= basic_index and band.upper is not None
+        else band
+        for index, band in enumerate(bands)
     )
 
 
