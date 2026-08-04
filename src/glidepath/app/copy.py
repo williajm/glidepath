@@ -28,6 +28,8 @@ HELP_MENU_LABEL: Final = "Help"
 
 HELP_GUIDE_TITLE: Final = f"How to use {APP_NAME}"
 
+DATE_PICKER_TOOLTIP: Final = "Pick a date from the calendar"
+
 HELP_GUIDE_INTRO: Final = (
     "Glidepath projects a retirement plan from facts you state, choices "
     "you make, and assumptions you can always inspect and override. Each "

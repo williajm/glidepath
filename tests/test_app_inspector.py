@@ -19,6 +19,7 @@ from glidepath.app import (
     state_with_household,
     state_with_override,
 )
+from glidepath.app.display import ASSUMPTION_NAMES
 from glidepath.app.tables import parse_table_text
 from glidepath.core import (
     AnnuityPurchase,
@@ -109,6 +110,7 @@ class TestEmptySession:
         assert view_model.facts == ()
         assert view_model.decisions == ()
         assert "No projection yet" in view_model.summary
+        assert view_model.summary_detail == ""
 
     def test_full_catalogue_is_shown_and_marked_unread(self) -> None:
         """Every shipped default is a row, so it is overridable now."""
@@ -117,6 +119,7 @@ class TestEmptySession:
         assert len(view_model.assumptions) == len(state.assumptions.keys)
         assert all(row.usage == "No projection yet" for row in view_model.assumptions)
         assert all(row.status == "Shipped default" for row in view_model.assumptions)
+        assert all(row.default_value == "—" for row in view_model.assumptions)
 
     def test_structured_rows_carry_round_trippable_edit_text(self) -> None:
         """Table rows edit as text that parses back exactly (issue #71)."""
@@ -183,7 +186,7 @@ class TestProjectedSession:
         leading = [row.key for row in view_model.assumptions[: len(read)]]
         assert leading == read
         first = view_model.assumptions[0]
-        assert first.usage == "Used in this projection"
+        assert first.usage == "Used"
         assert first.status == "Shipped default"
         assert first.source
         assert first.recorded
@@ -204,14 +207,34 @@ class TestProjectedSession:
         """Policy tables read at region build say so, not "not used"."""
         by_key = {row.key: row for row in view_model.assumptions}
         for key in ("policy.tax.future_years", "policy.state_pension.uprating"):
-            assert by_key[key].usage == "Applied at region build (see the run manifest)"
+            assert by_key[key].usage == "Applied at region build"
 
-    def test_summary_carries_the_run_manifest(
+    def test_summary_is_human_with_the_manifest_as_detail(
         self, view_model: InspectorViewModel
     ) -> None:
-        """The manifest line names the region data version and seed."""
-        assert "Run manifest" in view_model.summary
-        assert "seed: none (deterministic)" in view_model.summary
+        """The summary reads for humans; the exact manifest rides as detail."""
+        assert "sha256" not in view_model.summary
+        assert "deterministic run" in view_model.summary
+        assert "Projected" in view_model.summary
+        assert "Run manifest" in view_model.summary_detail
+        assert "seed: none (deterministic)" in view_model.summary_detail
+
+    def test_every_assumption_key_has_a_display_name(self) -> None:
+        """The human-name catalogue covers the whole shipped key set."""
+        assert set(ASSUMPTION_NAMES) == {key.value for key in AssumptionKey}
+
+    def test_rows_carry_human_labels_beside_their_keys(
+        self, view_model: InspectorViewModel
+    ) -> None:
+        """Every row pairs the dotted id with a human display name."""
+        by_key = {row.key: row for row in view_model.assumptions}
+        assert by_key["inflation.cpi"].label == "Inflation (CPI)"
+        assert by_key["earnings.growth.real"].label == (
+            "Earnings growth (above inflation)"
+        )
+        assert all(
+            row.label == ASSUMPTION_NAMES[row.key] for row in view_model.assumptions
+        )
 
     def test_override_shows_as_your_override_with_date(
         self, projected: PlanState
@@ -376,7 +399,7 @@ class TestPlanStructure:
         assert rows["You", "Tax residency"] == (
             "UK (England, Wales, or Northern Ireland)"
         )
-        assert "glidepath.default_shape" in rows["You", "Glide path"]
+        assert rows["You", "Glide path"] == "Default glide path shape assumption"
 
     def test_wrapper_rows_show_kind_relief_allocation_and_fees(self) -> None:
         """Wrapper kind, relief mechanics, allocation, and fees surface."""
@@ -384,7 +407,7 @@ class TestPlanStructure:
         assert rows["Wrapper 1 (SIPP)", "Wrapper kind"] == "SIPP"
         assert rows["Wrapper 1 (SIPP)", "Contribution relief"] == "Relief at source"
         assert rows["Wrapper 1 (SIPP)", "Contribution escalation"] == (
-            "earnings.growth.real"
+            "Grows with earnings"
         )
         assert rows["Wrapper 1 (SIPP)", "Asset allocation"] == (
             "Equity 0.6 / bonds 0.4 / cash 0"
@@ -395,7 +418,9 @@ class TestPlanStructure:
             "None (fixed amounts)"
         )
         assert rows["Wrapper 2 (ISA)", "Asset allocation"] == "From the glide path"
-        assert "fees.platform" in rows["Wrapper 2 (ISA)", "Fees"]
+        assert rows["Wrapper 2 (ISA)", "Fees"] == (
+            "Shipped platform and fund fee assumptions"
+        )
 
     def test_db_rows_show_scheme_structure(self) -> None:
         """Statement date, revaluation basis, and factors surface per scheme."""

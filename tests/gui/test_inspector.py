@@ -24,11 +24,12 @@ if TYPE_CHECKING:
 
 SCALAR_ROW = AssumptionRow(
     key="inflation.cpi",
+    label="Inflation (CPI)",
     description="Shipped UK default for 'inflation.cpi'",
     value="0.02",
     default_value="0.02",
     status="Shipped default",
-    usage="Used in this projection",
+    usage="Used",
     source="OBR EFO",
     recorded="2026-08-01",
     structured=False,
@@ -37,11 +38,12 @@ SCALAR_ROW = AssumptionRow(
 
 STRUCTURED_ROW = AssumptionRow(
     key="glidepath.default_shape",
+    label="Default glide path shape",
     description="Shipped UK default for 'glidepath.default_shape'",
     value="equity_start=0.80; derisk_years_before_retirement=15",
     default_value="equity_start=0.80; derisk_years_before_retirement=15",
     status="Shipped default",
-    usage="Not used by this projection",
+    usage="Not used",
     source="Typical UK shape",
     recorded="2026-08-01",
     structured=True,
@@ -100,6 +102,7 @@ def view_model(
             ),
         ),
         summary="summary line",
+        summary_detail="manifest detail",
         override_title="Override assumption",
         override_prompt="New value:",
         table_override_prompt="One 'key = value' line per figure:",
@@ -170,11 +173,18 @@ class TestRendering:
         assert item is not None
         assert item.text() == "You — date of birth"
         assert pane.assumptions_table.rowCount() == 2
+        label_item = pane.assumptions_table.item(0, 0)
+        assert label_item is not None
+        assert label_item.text() == "Inflation (CPI)"
+        assert label_item.toolTip() == (
+            "Shipped UK default for 'inflation.cpi' (inflation.cpi)"
+        )
         status_item = pane.assumptions_table.item(0, 3)
         assert status_item is not None
         assert status_item.text() == "Shipped default"
         assert pane.decisions_table.rowCount() == 1
         assert pane.summary_label.text() == "summary line"
+        assert pane.summary_label.toolTip() == "manifest detail"
 
     def test_roll_forwards_table_hides_without_rows(self) -> None:
         """No stale balances → the roll-forward section stays hidden."""
@@ -245,7 +255,7 @@ class TestOverridePrompt:
         assert pane.status_label.text() == ""
         [(title, label, prefill)] = fake_dialog.calls
         assert title == "Override assumption"
-        assert "inflation.cpi" in label
+        assert "Inflation (CPI)" in label
         assert prefill == "0.02"
 
     def test_rejected_input_shows_the_error(
@@ -288,6 +298,6 @@ class TestOverridePrompt:
         assert received == [("glidepath.default_shape", "equity_start = 0.70")]
         [(title, label, prefill)] = fake_dialog.multiline_calls
         assert title == "Override assumption"
-        assert "glidepath.default_shape" in label
+        assert "Default glide path shape" in label
         assert prefill == STRUCTURED_ROW.edit_text
         assert fake_dialog.calls == []

@@ -32,6 +32,49 @@ def format_wrapper_kind(kind: object) -> str:
     return WRAPPER_KIND_NAMES.get(text, text)
 
 
+ASSUMPTION_NAMES: Final[Mapping[str, str]] = {
+    "inflation.cpi": "Inflation (CPI)",
+    "earnings.growth.real": "Earnings growth (above inflation)",
+    "returns.equity.real": "Equity return (above inflation)",
+    "returns.bonds.real": "Bond return (above inflation)",
+    "returns.cash.real": "Cash return (above inflation)",
+    "volatility.equity": "Equity volatility",
+    "volatility.bonds": "Bond volatility",
+    "volatility.cash": "Cash volatility",
+    "correlation.equity_bonds": "Equity-bond correlation",
+    "correlation.equity_cash": "Equity-cash correlation",
+    "correlation.bonds_cash": "Bond-cash correlation",
+    "fees.platform": "Platform fee",
+    "fees.fund": "Fund fee",
+    "yield.equity": "Equity yield",
+    "yield.bonds": "Bond yield",
+    "yield.cash": "Cash yield",
+    "horizon.planning_age": "Planning horizon age",
+    "glidepath.default_shape": "Default glide path shape",
+    "policy.state_pension.uprating": "State pension uprating policy",
+    "policy.tax.future_years": "Future tax years policy",
+    "annuity.level.single.65": "Annuity rate (level, single life, age 65)",
+    "annuity.escalating3.single.65": (
+        "Annuity rate (3% escalating, single life, age 65)"
+    ),
+    "annuity.inflation_linked.single.65": (
+        "Annuity rate (inflation-linked, single life, age 65)"
+    ),
+    "annuity.age_adjustment": "Annuity rate age adjustment",
+}
+"""Human display names for the shipped assumption keys (roadmap 8.3).
+
+Screens show these instead of the raw dotted ids; the id stays
+available (tooltips, override targeting) because it is what scenario
+overrides and persisted plans address."""
+
+
+def format_assumption_key(key: object) -> str:
+    """An assumption key as its display name, falling back to the id."""
+    text = str(key)
+    return ASSUMPTION_NAMES.get(text, text)
+
+
 def _format_mapping(value: Mapping[object, object]) -> str:
     """A structured table as compact ``key=value`` pairs, truncated."""
     rendered = "; ".join(f"{key}={format_value(entry)}" for key, entry in value.items())

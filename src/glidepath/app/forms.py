@@ -66,6 +66,11 @@ class FieldKind(Enum):
     """A free-text entry; parsing happens in the app layer."""
     CHOICE = auto()
     """A pick-one list of :class:`ChoiceOption` entries."""
+    DATE = auto()
+    """A date entry. The raw value stays ISO text (``YYYY-MM-DD``) and
+    blank keeps its meaning (today for ``as_of`` fields, none for
+    optional facts), so shells must keep typing and blankness first-
+    class — a calendar is an assist, never the only input."""
 
 
 @dataclass(frozen=True)
@@ -381,13 +386,23 @@ class _SectionReader:
             self.error(field_key, str(exc))
             return None
 
-    def fact_of[T](self, value: T | None, as_of_field: str) -> Fact[T] | None:
-        """Wrap a parsed value as a fact dated by ``as_of_field``."""
+    def fact_of[T](
+        self, value: T | None, as_of_field: str | None = None
+    ) -> Fact[T] | None:
+        """Wrap a parsed value as a fact dated by ``as_of_field``.
+
+        Only statement-dated facts (balances, the DWP forecast, the NI
+        record) offer an ``as_of`` field; every other fact passes no
+        field and is dated the day it was entered.
+        """
         if value is None:
             return None
-        return Fact(
-            value=value, as_of=self.as_of(as_of_field), recorded_on=self.recorded_on
+        as_of = (
+            self._context.default_as_of
+            if as_of_field is None
+            else self.as_of(as_of_field)
         )
+        return Fact(value=value, as_of=as_of, recorded_on=self.recorded_on)
 
     def decision_of[T](self, value: T | None) -> Decision[T] | None:
         """Wrap a parsed value as a decision recorded at submission time."""
@@ -398,9 +413,7 @@ class _SectionReader:
 
 def _spending_from(reader: _SectionReader) -> SpendingPlan | None:
     """The spending plan, or ``None`` when the section is blank."""
-    spending_fact = reader.fact_of(
-        reader.money("annual_spending_real"), "annual_spending_real_as_of"
-    )
+    spending_fact = reader.fact_of(reader.money("annual_spending_real"))
     if spending_fact is None:
         return None
     try:
@@ -445,9 +458,7 @@ def _state_pension_from(reader: _SectionReader) -> StatePensionRecord | None:
 def _contributions_from(reader: _SectionReader) -> ContributionSchedule | None:
     """A wrapper's contribution schedule, or ``None`` when untouched."""
     employee = reader.money("employee_contribution")
-    employer = reader.fact_of(
-        reader.money("employer_contribution"), "contributions_as_of"
-    )
+    employer = reader.fact_of(reader.money("employer_contribution"))
     relief = reader.choice("relief_mechanic", _RELIEF_MECHANICS)
     escalation = reader.choice("escalation", _ESCALATIONS)
     if employee is None:
@@ -605,19 +616,15 @@ def _person_from(
     entity_id: EntityId,
 ) -> Person | None:
     """The (v1 single) person from the person section plus sub-entities."""
-    dob = reader.fact_of(
-        reader.date_value("date_of_birth", required=True), "date_of_birth_as_of"
-    )
+    dob = reader.fact_of(reader.date_value("date_of_birth", required=True))
     sex_value = reader.choice("sex_for_longevity", _SEXES)
     residency = reader.choice("tax_residency", _RESIDENCIES)
     if residency is None:
         reader.error("tax_residency", _REQUIRED_MESSAGE)
     target = reader.int_value("target_retirement_age", required=True)
-    employment = reader.fact_of(
-        reader.money("employment_income"), "employment_income_as_of"
-    )
-    mpaa = reader.fact_of(reader.date_value("mpaa_triggered_on"), "mpaa_as_of")
-    lsa = reader.fact_of(reader.money("lsa_used"), "lsa_as_of")
+    employment = reader.fact_of(reader.money("employment_income"))
+    mpaa = reader.fact_of(reader.date_value("mpaa_triggered_on"))
+    lsa = reader.fact_of(reader.money("lsa_used"))
     if dob is None or target is None or residency is None or not reader.ok:
         return None
     try:
@@ -628,15 +635,7 @@ def _person_from(
                 value=target, recorded_on=reader.recorded_on
             ),
             tax_residency=residency,
-            sex_for_longevity=(
-                None
-                if sex_value is None
-                else Fact(
-                    value=sex_value,
-                    as_of=reader.as_of("sex_as_of"),
-                    recorded_on=reader.recorded_on,
-                )
-            ),
+            sex_for_longevity=reader.fact_of(sex_value),
             employment_income=employment,
             mpaa_triggered_on=mpaa,
             lsa_used=lsa,
@@ -665,8 +664,9 @@ def parse_facts_form(
 ) -> FactsFormResult:
     """Parse a submission into a v1 household, or the errors preventing one.
 
-    Every fact is stamped with the submission's ``recorded_on`` and the
-    ``as_of`` date the user entered (defaulting to ``today``), so
+    Every fact is stamped with the submission's ``recorded_on`` and an
+    ``as_of`` date — the one the user entered for statement-dated
+    facts, ``today`` otherwise (and when left blank) — so
     provenance is complete at entry time (planning §1). ``today`` is
     the caller's civil date — the same one the projection will run
     with, never derived from the UTC ``recorded_on`` timestamp: around
@@ -745,21 +745,14 @@ def _person_values(person: Person) -> dict[str, str]:
     lsa = person.lsa_used
     return {
         "date_of_birth": person.date_of_birth.value.isoformat(),
-        "date_of_birth_as_of": person.date_of_birth.as_of.isoformat(),
         "sex_for_longevity": "" if sex is None else _SEX_KEYS[sex.value],
-        "sex_as_of": "" if sex is None else sex.as_of.isoformat(),
         "tax_residency": str(person.tax_residency),
         "employment_income": (
             "" if employment is None else str(employment.value.amount)
         ),
-        "employment_income_as_of": (
-            "" if employment is None else employment.as_of.isoformat()
-        ),
         "target_retirement_age": str(person.target_retirement_age.value),
         "mpaa_triggered_on": "" if mpaa is None else mpaa.value.isoformat(),
-        "mpaa_as_of": "" if mpaa is None else mpaa.as_of.isoformat(),
         "lsa_used": "" if lsa is None else str(lsa.value.amount),
-        "lsa_as_of": "" if lsa is None else lsa.as_of.isoformat(),
     }
 
 
@@ -768,10 +761,7 @@ def _spending_values(spending: SpendingPlan | None) -> dict[str, str]:
     if spending is None:
         return {}
     fact = spending.annual_spending_real
-    return {
-        "annual_spending_real": str(fact.value.amount),
-        "annual_spending_real_as_of": fact.as_of.isoformat(),
-    }
+    return {"annual_spending_real": str(fact.value.amount)}
 
 
 def _state_pension_values(record: StatePensionRecord | None) -> dict[str, str]:
@@ -814,7 +804,6 @@ def _wrapper_values(wrapper: Wrapper) -> dict[str, str]:
         "balances_as_of": wrapper.balance.as_of.isoformat(),
         "employee_contribution": "",
         "employer_contribution": "",
-        "contributions_as_of": "",
         "relief_mechanic": "",
         "escalation": "",
     }
@@ -828,9 +817,6 @@ def _wrapper_values(wrapper: Wrapper) -> dict[str, str]:
         )
         values["employer_contribution"] = (
             "" if employer is None else str(employer.value.amount)
-        )
-        values["contributions_as_of"] = (
-            "" if employer is None else employer.as_of.isoformat()
         )
         values["relief_mechanic"] = "" if relief is None else _RELIEF_KEYS[relief]
         values["escalation"] = (
@@ -975,10 +961,14 @@ def facts_form_data_from_household(household: Household) -> FactsFormData:
     """The household re-rendered as raw form text (plan load, §4.7).
 
     The inverse of :func:`parse_facts_form`, used to repopulate the
-    facts form from a loaded plan. Every fact's ``as_of`` date is
-    emitted explicitly so a later resubmission re-dates nothing
-    silently; provenance timestamps are not carried — a resubmission
-    re-records its facts at submission time, exactly like any edit.
+    facts form from a loaded plan. Statement-dated facts (wrapper
+    balances, the DWP forecast, the NI record, DB scheme facts) emit
+    their ``as_of`` date explicitly so a resubmission re-dates none of
+    them silently; the other facts offer no ``as_of`` field — their
+    dates carry no modelling meaning, so a resubmission re-dating them
+    to its own day loses nothing. Provenance timestamps are not
+    carried — a resubmission re-records its facts at submission time,
+    exactly like any edit.
     """
     person = household.persons[0]
     return FactsFormData(
@@ -1013,7 +1003,7 @@ def format_form_errors(form: FactsFormViewModel, errors: Sequence[FormError]) ->
 
 def _as_of_field(key: str, label: str) -> FieldSpec:
     """A standard ``as_of`` companion field."""
-    return FieldSpec(key=key, label=label, hint=_AS_OF_HINT)
+    return FieldSpec(key=key, label=label, kind=FieldKind.DATE, hint=_AS_OF_HINT)
 
 
 def _person_section() -> SectionSpec:
@@ -1029,10 +1019,10 @@ def _person_section() -> SectionSpec:
             FieldSpec(
                 key="date_of_birth",
                 label="Date of birth",
+                kind=FieldKind.DATE,
                 hint="YYYY-MM-DD, e.g. 1980-04-12",
                 required=True,
             ),
-            _as_of_field("date_of_birth_as_of", "Date of birth stated as of"),
             FieldSpec(
                 key="sex_for_longevity",
                 label="Sex (longevity default only)",
@@ -1043,7 +1033,6 @@ def _person_section() -> SectionSpec:
                     ChoiceOption(value="male", label="Male"),
                 ),
             ),
-            _as_of_field("sex_as_of", "Sex stated as of"),
             FieldSpec(
                 key="tax_residency",
                 label="Tax residency",
@@ -1066,7 +1055,6 @@ def _person_section() -> SectionSpec:
                 label="Employment income (gross, per year)",
                 hint="e.g. 52000",
             ),
-            _as_of_field("employment_income_as_of", "Income as of"),
             FieldSpec(
                 key="target_retirement_age",
                 label="Target retirement age (your choice)",
@@ -1076,15 +1064,14 @@ def _person_section() -> SectionSpec:
             FieldSpec(
                 key="mpaa_triggered_on",
                 label="MPAA triggered on",
+                kind=FieldKind.DATE,
                 hint="YYYY-MM-DD; blank if you have never flexibly accessed a pension",
             ),
-            _as_of_field("mpaa_as_of", "MPAA fact as of"),
             FieldSpec(
                 key="lsa_used",
                 label="Lump sum allowance already used",
                 hint="blank if none",
             ),
-            _as_of_field("lsa_as_of", "LSA fact as of"),
         ),
     )
 
@@ -1104,7 +1091,6 @@ def _spending_section() -> SectionSpec:
                 label="Annual spending (today's money, net)",
                 hint="e.g. 28000",
             ),
-            _as_of_field("annual_spending_real_as_of", "Spending as of"),
         ),
     )
 
@@ -1136,6 +1122,7 @@ def _state_pension_section() -> SectionSpec:
             FieldSpec(
                 key="ni_record_start",
                 label="NI record started",
+                kind=FieldKind.DATE,
                 hint="YYYY-MM-DD",
             ),
             FieldSpec(
@@ -1216,7 +1203,6 @@ def _wrapper_section() -> SectionSpec:
                 label="Employer contribution (per year)",
                 hint="from your employment terms; blank if none",
             ),
-            _as_of_field("contributions_as_of", "Contributions as of"),
             FieldSpec(
                 key="relief_mechanic",
                 label="Tax relief mechanic",
@@ -1268,6 +1254,7 @@ def _db_pension_section() -> SectionSpec:
             FieldSpec(
                 key="statement_date",
                 label="Statement date (dates the scheme facts)",
+                kind=FieldKind.DATE,
                 hint="YYYY-MM-DD",
                 required=True,
             ),
