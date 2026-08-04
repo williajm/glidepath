@@ -246,6 +246,7 @@ class FactsEntryPane(QWidget):
         self.state_pension_form = SectionForm(view_model.state_pension)
         self.wrappers = RepeatableSection(view_model.wrapper)
         self.db_pensions = RepeatableSection(view_model.db_pension)
+        self.annuity_purchases = RepeatableSection(view_model.annuity_purchase)
         self.submit_button = QPushButton(view_model.submit_label, self)
         self.submit_button.setObjectName("primaryButton")
         self.submit_button.clicked.connect(self.submit)
@@ -262,6 +263,7 @@ class FactsEntryPane(QWidget):
         content_layout.addWidget(self.state_pension_form)
         content_layout.addWidget(self.wrappers)
         content_layout.addWidget(self.db_pensions)
+        content_layout.addWidget(self.annuity_purchases)
         content_layout.addStretch()
 
         scroll = QScrollArea(self)
@@ -288,6 +290,7 @@ class FactsEntryPane(QWidget):
             state_pension=self.state_pension_form.values(),
             wrappers=self.wrappers.values_list(),
             db_pensions=self.db_pensions.values_list(),
+            annuity_purchases=self.annuity_purchases.values_list(),
         )
 
     def set_form_data(self, data: FactsFormData) -> None:
@@ -300,6 +303,7 @@ class FactsEntryPane(QWidget):
         self.state_pension_form.set_values(data.state_pension)
         self.wrappers.set_values_list(data.wrappers)
         self.db_pensions.set_values_list(data.db_pensions)
+        self.annuity_purchases.set_values_list(data.annuity_purchases)
 
     def submit(self) -> None:
         """Forward the submission and show the returned status text."""

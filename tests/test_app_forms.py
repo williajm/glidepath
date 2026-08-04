@@ -23,7 +23,8 @@ from glidepath.app import (
     parse_facts_form,
 )
 from glidepath.core import (
-    AnnuityPurchase,
+    AnnuityBasis,
+    AnnuityType,
     AssetAllocation,
     AssumptionKey,
     Decision,
@@ -116,6 +117,12 @@ class TestFormSpec:
             "active_until_age",
         }
 
+    def test_annuity_section_covers_the_purchase_decisions(self) -> None:
+        """Age, pot fraction, and product type are present — all choices."""
+        form = build_facts_form_view_model()
+        keys = {spec.key for spec in form.annuity_purchase.fields}
+        assert keys == {"at_age", "fraction_of_pot", "annuity_type"}
+
     def test_state_pension_section_covers_forecast_and_ni_record(self) -> None:
         """Forecast, protected payment, and the NI record are present."""
         keys = {spec.key for spec in build_facts_form_view_model().state_pension.fields}
@@ -158,10 +165,11 @@ class TestFormSpec:
                     assert spec.choices[0].value == ""
 
     def test_repeatable_sections_are_marked(self) -> None:
-        """Wrappers and DB pensions repeat; the others do not."""
+        """Wrappers, DB pensions, and annuity purchases repeat; others do not."""
         form = build_facts_form_view_model()
         assert form.wrapper.repeatable
         assert form.db_pension.repeatable
+        assert form.annuity_purchase.repeatable
         assert not form.person.repeatable
         assert not form.spending.repeatable
         assert not form.state_pension.repeatable
@@ -582,6 +590,111 @@ class TestDBPensionParsing:
         assert any(error.field_key == "early_late_factors" for error in result.errors)
 
 
+class TestAnnuityPurchaseParsing:
+    """Annuity purchases round-trip as wholly-decision records (§5.1)."""
+
+    def test_purchase_parses_into_decisions(self) -> None:
+        """Age and fraction are decisions; the form writes single-life."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                annuity_purchases=(
+                    {
+                        "at_age": "68",
+                        "fraction_of_pot": "0.5",
+                        "annuity_type": "level",
+                    },
+                ),
+            )
+        )
+        [purchase] = household.persons[0].annuity_purchases
+        assert purchase.at_age.value == 68
+        assert purchase.at_age.recorded_on == RECORDED
+        assert purchase.fraction_of_pot.value == Decimal("0.5")
+        assert purchase.annuity_type is AnnuityType.LEVEL
+        assert purchase.basis is AnnuityBasis.SINGLE
+
+    @pytest.mark.parametrize(
+        ("key", "annuity_type"),
+        [
+            ("escalating", AnnuityType.ESCALATING),
+            ("inflation_linked", AnnuityType.INFLATION_LINKED),
+        ],
+    )
+    def test_every_product_type_is_enterable(
+        self, key: str, annuity_type: AnnuityType
+    ) -> None:
+        """The escalating and inflation-linked products parse too."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                annuity_purchases=(
+                    {"at_age": "68", "fraction_of_pot": "1", "annuity_type": key},
+                ),
+            )
+        )
+        [purchase] = household.persons[0].annuity_purchases
+        assert purchase.annuity_type is annuity_type
+
+    def test_blank_instance_reports_its_required_fields(self) -> None:
+        """An added-but-untouched purchase is field-addressed."""
+        result = parse_facts_form(
+            FactsFormData(person=person_values(), annuity_purchases=({},)),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        missing = {
+            error.field_key
+            for error in result.errors
+            if error.section == "annuity_purchase"
+        }
+        assert missing == {"at_age", "fraction_of_pot", "annuity_type"}
+
+    def test_out_of_range_fraction_surfaces_the_core_message(self) -> None:
+        """The (0, 1] fraction rule lands as a section-level error."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                annuity_purchases=(
+                    {
+                        "at_age": "68",
+                        "fraction_of_pot": "1.5",
+                        "annuity_type": "level",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "annuity_purchase"
+        assert error.field_key == ""
+        assert "fraction_of_pot" in error.message
+
+    def test_unknown_product_type_is_rejected(self) -> None:
+        """A type value outside the option list is rejected on its field."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                annuity_purchases=(
+                    {
+                        "at_age": "68",
+                        "fraction_of_pot": "0.5",
+                        "annuity_type": "with_profits",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "annuity_purchase"
+        assert error.field_key == "annuity_type"
+
+
 class TestStatePensionParsing:
     """The state pension section is optional as a whole."""
 
@@ -757,6 +870,7 @@ class TestValidationMessages:
                 person=person_values(),
                 wrappers=({},),
                 db_pensions=({},),
+                annuity_purchases=({},),
             ),
             recorded_on=RECORDED,
             today=TODAY,
@@ -773,6 +887,12 @@ class TestValidationMessages:
         assert "statement_date" in db_fields
         assert "normal_pension_age" in db_fields
         assert "revaluation_reference" in db_fields
+        annuity_fields = {
+            error.field_key
+            for error in result.errors
+            if error.section == "annuity_purchase"
+        }
+        assert annuity_fields == {"at_age", "fraction_of_pot", "annuity_type"}
 
     def test_negative_spending_surfaces_the_core_message(self) -> None:
         """The spending plan's own validation lands on its section."""
@@ -950,6 +1070,18 @@ class TestEntityIdReuse:
         wrapper_ids = {wrapper.id for wrapper in second.persons[0].wrappers}
         assert len(wrapper_ids) == 2
 
+    def test_resubmission_reuses_prior_annuity_purchase_ids(self) -> None:
+        """Purchases keep their position's prior id, like wrappers."""
+        first = parse(_maximal_submission())
+        result = parse_facts_form(
+            _maximal_submission(), recorded_on=RECORDED, today=TODAY, previous=first
+        )
+        second = result.household
+        assert second is not None
+        assert [purchase.id for purchase in second.persons[0].annuity_purchases] == [
+            purchase.id for purchase in first.persons[0].annuity_purchases
+        ]
+
     def test_without_previous_every_id_is_fresh(self) -> None:
         """Two independent parses share no entity ids."""
         first = parse(self.submission())
@@ -1006,6 +1138,9 @@ def _maximal_submission() -> FactsFormData:
                 "active_until_age": "58",
             },
         ),
+        annuity_purchases=(
+            {"at_age": "68", "fraction_of_pot": "0.5", "annuity_type": "level"},
+        ),
     )
 
 
@@ -1053,6 +1188,7 @@ class TestFormCannotRepresent:
             id=EntityId("forms-second-person"),
             wrappers=(),
             db_pensions=(),
+            annuity_purchases=(),
             state_pension=None,
         )
         household = _altered(base, persons=(person, second))
@@ -1069,15 +1205,12 @@ class TestFormCannotRepresent:
         household = _altered(base, planned_outflows=(outflow,))
         assert form_cannot_represent(household) == "planned outflows"
 
-    def test_annuity_purchases_are_flagged(self, base: Household) -> None:
-        """Annuity purchases have no form section yet."""
-        purchase = AnnuityPurchase(
-            id=EntityId("forms-annuity"),
-            at_age=Decision(value=65, recorded_on=RECORDED),
-            fraction_of_pot=Decision(value=Decimal("0.5"), recorded_on=RECORDED),
-        )
-        household = _with_person(base, annuity_purchases=(purchase,))
-        assert form_cannot_represent(household) == "annuity purchases"
+    def test_joint_life_annuity_purchase_is_flagged(self, base: Household) -> None:
+        """The single-person form offers no basis choice (9.4 spike)."""
+        [purchase] = base.persons[0].annuity_purchases
+        joint = _altered(purchase, basis=AnnuityBasis.JOINT)
+        household = _with_person(base, annuity_purchases=(joint,))
+        assert form_cannot_represent(household) == "a joint-life annuity purchase"
 
     def test_personal_glide_path_is_flagged(self, base: Household) -> None:
         """A per-person glide path has no form field yet."""
@@ -1308,3 +1441,4 @@ class TestFormDataFromHousehold:
         assert rendered.state_pension == {}
         assert rendered.wrappers == ()
         assert rendered.db_pensions == ()
+        assert rendered.annuity_purchases == ()

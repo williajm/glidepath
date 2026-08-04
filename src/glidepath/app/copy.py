@@ -56,8 +56,10 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "tax residency, planned retirement age, household spending, "
             "your state pension record, each savings wrapper (workplace "
             "pension, SIPP, ISA, LISA, general account, or cash) with its "
-            "balance and contributions, and any defined benefit pension. "
-            'Add one wrapper or DB section per account; "as of" dates '
+            "balance and contributions, any defined benefit pension, and "
+            "any planned annuity purchase — converting part of your "
+            "pension pot into lifetime income at an age you choose. "
+            'Add one wrapper, DB, or annuity section per item; "as of" dates '
             'left blank default to today. Press "Save facts and project" to run the '
             "projection — if anything cannot be read, the message under "
             "the buttons says which field to fix and nothing is saved "
