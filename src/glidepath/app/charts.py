@@ -21,6 +21,10 @@ from glidepath.app.montecarlo import (
     MonteCarloPanelViewModel,
     build_monte_carlo_panel,
 )
+from glidepath.app.retirement import (
+    RetirementPanelViewModel,
+    build_retirement_panel,
+)
 from glidepath.core import Money, ReportBasis, RunMode, build_report
 
 if TYPE_CHECKING:
@@ -154,6 +158,7 @@ class ChartsViewModel:
     charts: tuple[ChartSpec, ...]
     message: str
     monte_carlo: MonteCarloPanelViewModel
+    retirement: RetirementPanelViewModel
 
 
 def basis_from_key(key: str) -> ReportBasis:
@@ -229,6 +234,7 @@ def build_charts_view_model(
             monte_carlo=build_monte_carlo_panel(
                 state, mode, ending_pot_deflator=None, basis_suffix=suffix
             ),
+            retirement=build_retirement_panel(state, mode),
         )
     grouped = _rows_by_period(build_report(state.result, basis))
     bands = (
@@ -256,6 +262,7 @@ def build_charts_view_model(
             ending_pot_deflator=final_rows[0].balance_deflator,
             basis_suffix=suffix,
         ),
+        retirement=build_retirement_panel(state, mode),
     )
 
 

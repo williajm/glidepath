@@ -1605,11 +1605,35 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   never show against a changed plan. CPI is deterministic across paths
   (§5.2), so the bands and ending pots deflate to today's money by the
   deterministic report's own deflators.*
-- [ ] 9.14 "When can I retire?" solver — *earliest target retirement age
+- [x] 9.14 "When can I retire?" solver — *earliest target retirement age
   meeting a replacement-rate target (default 66% of current employment
   income, user-adjustable), mirroring the roadmap 7.3
-  `sustainable_income` search over runs; deterministic first, "≥ N%
-  Monte Carlo success" once 9.13 lands.*
+  `sustainable_income` search over runs. `earliest_retirement_age`
+  probes candidate ages in ascending order — the age domain is a few
+  dozen whole years, so the scan returns the exact earliest success
+  even where success is not monotone in age, cheaper and more robust
+  than the spending search's scan-plus-bisection over a continuum.
+  Each probe replaces the retirement-age decision and the spending
+  plan (with the target income: the whole-percent rate times stated
+  employment income, treated as the net spending need in today's
+  money) and reuses one config — common random numbers, reproducible
+  from the seed (§4.6). Deterministic success is "no period's need
+  unmet" (the §5.2 ruin signal); under the charts screen's Monte Carlo
+  mode the same solver reads "success rate ≥ target" over the panel's
+  seed and path count. The charts-screen card asks for the rate
+  (default 66%) plus a success target (default 90%, Monte Carlo mode
+  only), searches from the person's current age to the planning age
+  minus one, runs on the worker thread with the 9.13 staleness and
+  re-anchoring rules, and reports the earliest age — or that none in
+  range meets — with the target income and the basis it was computed
+  on. A candidate with no retired period inside the projected horizon
+  never tests the income and fails rather than succeeding vacuously; a
+  Monte Carlo search is additionally bounded to 20,000
+  path-projections across its candidate ages (the per-run path cap
+  alone would let an unsuccessful search multiply to hundreds of
+  thousands); and the Monte Carlo run and the search share one
+  in-flight guard, since a second slow run launched mid-flight could
+  only ever be discarded as stale.*
 
 ## 9. Open questions
 
