@@ -14,7 +14,7 @@ so this module never touches Qt or a display.
 import json
 import os
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -93,10 +93,22 @@ def _write_state(path: Path, state: FirstRunState) -> None:
 def record_disclaimer_acknowledged(path: Path, acknowledged_on: date) -> None:
     """Persist the acknowledgement so later runs skip the first-run screen."""
     state = load_state(path)
-    _write_state(path, replace(state, disclaimer_acknowledged_on=acknowledged_on))
+    _write_state(
+        path,
+        FirstRunState(
+            disclaimer_acknowledged_on=acknowledged_on,
+            last_plan_path=state.last_plan_path,
+        ),
+    )
 
 
 def record_last_plan_path(path: Path, plan_path: Path) -> None:
     """Persist the plan file just saved or opened, for the next launch."""
     state = load_state(path)
-    _write_state(path, replace(state, last_plan_path=plan_path))
+    _write_state(
+        path,
+        FirstRunState(
+            disclaimer_acknowledged_on=state.disclaimer_acknowledged_on,
+            last_plan_path=plan_path,
+        ),
+    )
