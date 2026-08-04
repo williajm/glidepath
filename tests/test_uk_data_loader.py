@@ -66,6 +66,7 @@ aa_taper_adjusted_income = "260000"
 aa_taper_rate = "0.5"
 aa_taper_floor = "10000"
 mpaa = "10000"
+aa_carry_forward_years = 3
 member_relief_basic_amount = "3600"
 member_relief_max_age = 75
 relief_at_source_rate = "0.20"
@@ -270,6 +271,15 @@ def test_unknown_band_key_is_an_error() -> None:
         '{ name = "basic", rate = "0.20", upper = "37700", extra = "1" }',
     )
     with pytest.raises(DataFileError, match="unknown keys: extra"):
+        parse_tax_year(broken)
+
+
+def test_negative_carry_forward_window_is_an_error() -> None:
+    """The carry-forward window cannot be negative."""
+    broken = _mutated(
+        VALID_TAX_YEAR, "aa_carry_forward_years = 3", "aa_carry_forward_years = -1"
+    )
+    with pytest.raises(DataFileError, match="aa_carry_forward_years: must be at least"):
         parse_tax_year(broken)
 
 

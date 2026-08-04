@@ -39,8 +39,22 @@ income tapers it: £1 less per £2 of adjusted income over the threshold
 flexible access the MPAA caps money-purchase inputs, leaving the
 *alternative* annual allowance — the (possibly tapered) AA minus the
 MPAA — for other accrual; the chargeable excess is the greater of the
-default and alternative computations (FA 2004 s227ZA). Carry-forward of
-unused allowance is roadmap 9.5.
+default and alternative computations (FA 2004 s227ZA).
+
+**Carry-forward** (roadmap 9.5; rules verified 2026-08-04 against the
+gov.uk guidance). Unused allowance from the previous
+``pension.aa_carry_forward_years`` tax years (three, shipped as data)
+raises the year's allowance before the excess is charged (FA 2004
+s228A). :func:`apply_carry_forward` sets the pool against an assessed
+excess, consuming years earliest-first and only to the extent that
+reduces the charge; the MPAA is never topped up, so the money-purchase
+excess is a floor no carry-forward can offset (HS345).
+:func:`carry_forward_generated` is what a year adds to the pool — only
+the unused *alternative* allowance once money-purchase inputs exceed
+the MPAA (PTM056510), and nothing from a year without
+registered-scheme membership.
+:func:`roll_carry_forward` advances the pool one tax year, expiring the
+oldest entry.
 """
 
 from dataclasses import dataclass
@@ -57,6 +71,7 @@ from glidepath.regions.uk.loader import available_tax_years, load_tax_year
 from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import date
 
     from glidepath.core import MemberContributionRequest, Period
@@ -286,18 +301,21 @@ class AnnualAllowanceAssessment:
     """One person's annual-allowance position for a period (§5.2 step 3).
 
     ``annual_allowance`` is the (possibly tapered) allowance measured
-    against total pension input amounts. When the MPAA is active,
-    ``alternative_annual_allowance`` — the allowance minus the MPAA —
-    is what remains for non-money-purchase accrual, and
+    against the recorded pension input amounts. When the MPAA is
+    active, ``alternative_annual_allowance`` — the allowance minus the
+    MPAA — is what remains for non-money-purchase accrual, and
     ``money_purchase_excess`` is the money-purchase input over the
     MPAA. ``chargeable_excess`` is the amount subject to the AA charge
     (the greater of the default and alternative computations, FA 2004
-    s227ZA); taxing it is a later concern, as is carry-forward
-    (roadmap 9.5), which can top up every allowance here except the
-    MPAA itself.
+    s227ZA) before any carry-forward; taxing it is a later concern.
+    Carry-forward (:func:`apply_carry_forward`) can top up every
+    allowance here except the MPAA itself, and :attr:`unused_allowance`
+    is what the year offers future pools.
     """
 
     annual_allowance: Money
+    money_purchase_inputs: Money
+    other_inputs: Money
     mpaa_active: bool
     money_purchase_excess: Money
     alternative_annual_allowance: Money | None
@@ -311,6 +329,27 @@ class AnnualAllowanceAssessment:
                 " the MPAA is active"
             )
             raise UkContributionError(msg)
+
+    @property
+    def unused_allowance(self) -> Money:
+        """The year's unused allowance for carry-forward purposes.
+
+        In a year whose money-purchase inputs *exceed* the MPAA only
+        the unused *alternative* allowance carries forward — unused
+        MPAA headroom never does (HS345). Otherwise — including a
+        flexibly-accessed year whose money-purchase inputs stay within
+        the MPAA — the full allowance less total pension inputs
+        carries (PTM056510). Whether the year in fact generates
+        carry-forward also depends on scheme membership
+        (:func:`carry_forward_generated`).
+        """
+        if (
+            self.alternative_annual_allowance is not None
+            and self.money_purchase_excess > _ZERO
+        ):
+            return max(self.alternative_annual_allowance - self.other_inputs, _ZERO)
+        total = self.money_purchase_inputs + self.other_inputs
+        return max(self.annual_allowance - total, _ZERO)
 
 
 def assess_annual_allowance(
@@ -329,7 +368,9 @@ def assess_annual_allowance(
     applies*; ``other_inputs`` is everything else measured by the AA —
     DB accrual (zero until Phase 4/9.6) and, in the MPAA trigger
     period, any money-purchase inputs made before the trigger (HS345;
-    see :func:`is_mpaa_active`).
+    see :func:`is_mpaa_active`). Unused prior-year allowance is set
+    against the assessed excess separately
+    (:func:`apply_carry_forward`).
     """
     _require_non_negative(annual_allowance, "annual_allowance")
     _require_non_negative(money_purchase_inputs, "money_purchase_inputs")
@@ -339,6 +380,8 @@ def assess_annual_allowance(
     if not mpaa_active:
         return AnnualAllowanceAssessment(
             annual_allowance=annual_allowance,
+            money_purchase_inputs=money_purchase_inputs,
+            other_inputs=other_inputs,
             mpaa_active=False,
             money_purchase_excess=_ZERO,
             alternative_annual_allowance=None,
@@ -354,8 +397,159 @@ def assess_annual_allowance(
         chargeable = max(default_excess, alternative_excess)
     return AnnualAllowanceAssessment(
         annual_allowance=annual_allowance,
+        money_purchase_inputs=money_purchase_inputs,
+        other_inputs=other_inputs,
         mpaa_active=True,
         money_purchase_excess=money_purchase_excess,
         alternative_annual_allowance=alternative_allowance,
         chargeable_excess=chargeable,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CarryForwardOutcome:
+    """Carry-forward set against one year's annual-allowance excess.
+
+    ``used`` and ``remaining`` align entry-by-entry with the supplied
+    pool, earliest year first; ``chargeable_excess`` is the
+    assessment's excess after the set-off.
+    """
+
+    chargeable_excess: Money
+    used: tuple[Money, ...]
+    remaining: tuple[Money, ...]
+
+
+def _validated_pool(
+    pension: PensionRules, pool: Sequence[Money], name: str
+) -> tuple[Money, ...]:
+    """Reject a pool longer than the statutory window or with negatives."""
+    years = tuple(pool)
+    if len(years) > pension.aa_carry_forward_years:
+        msg = (
+            f"{name} covers at most the previous"
+            f" {pension.aa_carry_forward_years} tax years"
+        )
+        raise UkContributionError(msg)
+    for amount in years:
+        _require_non_negative(amount, name)
+    return years
+
+
+def _default_excess(assessment: AnnualAllowanceAssessment) -> Money:
+    """The default computation's excess: total inputs over the allowance."""
+    total = assessment.money_purchase_inputs + assessment.other_inputs
+    return max(total - assessment.annual_allowance, _ZERO)
+
+
+def _set_off_needed(assessment: AnnualAllowanceAssessment) -> Money:
+    """The smallest set-off that minimises the chargeable excess.
+
+    Without a money-purchase excess the whole excess is offsettable.
+    With one, carry-forward tops up the allowance in both s227ZA
+    computations but never the MPAA, so the set-off is worth applying
+    only until the default computation falls to the money-purchase
+    excess and the other inputs fit the topped-up alternative
+    allowance — beyond that the charge cannot fall further.
+    """
+    alternative = assessment.alternative_annual_allowance
+    if alternative is None or assessment.money_purchase_excess == _ZERO:
+        return assessment.chargeable_excess
+    other_needed = max(assessment.other_inputs - alternative, _ZERO)
+    default_needed = max(
+        _default_excess(assessment) - assessment.money_purchase_excess, _ZERO
+    )
+    return max(other_needed, default_needed)
+
+
+def _chargeable_after_set_off(
+    assessment: AnnualAllowanceAssessment, set_off: Money
+) -> Money:
+    """Re-run the s227ZA comparison with the allowances topped up."""
+    default_after = max(_default_excess(assessment) - set_off, _ZERO)
+    alternative = assessment.alternative_annual_allowance
+    if alternative is None or assessment.money_purchase_excess == _ZERO:
+        return default_after
+    alternative_after = assessment.money_purchase_excess + max(
+        assessment.other_inputs - alternative - set_off, _ZERO
+    )
+    return max(default_after, alternative_after)
+
+
+def _consumed_earliest_first(
+    years: tuple[Money, ...], needed: Money
+) -> tuple[tuple[Money, ...], tuple[Money, ...], Money]:
+    """Draw ``needed`` across ``years`` in order: used, remaining, total."""
+    used: list[Money] = []
+    left = needed
+    for available in years:
+        take = min(available, left)
+        used.append(take)
+        left = left - take
+    remaining = tuple(
+        available - taken for available, taken in zip(years, used, strict=True)
+    )
+    return tuple(used), remaining, needed - left
+
+
+def apply_carry_forward(
+    pension: PensionRules,
+    assessment: AnnualAllowanceAssessment,
+    carry_forward: Sequence[Money],
+) -> CarryForwardOutcome:
+    """Set unused prior-year allowance against an assessed excess.
+
+    ``carry_forward`` holds the unused allowance of the previous tax
+    years, earliest first — at most ``pension.aa_carry_forward_years``
+    of them (the statutory window). Unused years are drawn in order of
+    earliest to most recent and only to the extent that reduces the
+    charge (gov.uk guidance, verified 2026-08-04), so what survives
+    stays available — within its window — for later years
+    (:func:`roll_carry_forward`). Carry-forward raises the annual
+    allowance in both s227ZA computations but never the MPAA: the
+    money-purchase excess is a floor the set-off cannot reach (HS345).
+    """
+    years = _validated_pool(pension, carry_forward, "carry_forward")
+    needed = _set_off_needed(assessment)
+    used, remaining, set_off = _consumed_earliest_first(years, needed)
+    return CarryForwardOutcome(
+        chargeable_excess=_chargeable_after_set_off(assessment, set_off),
+        used=used,
+        remaining=remaining,
+    )
+
+
+def carry_forward_generated(
+    assessment: AnnualAllowanceAssessment, *, scheme_member: bool
+) -> Money:
+    """The unused allowance a year adds to the carry-forward pool.
+
+    A tax year in which the person was not a member of at least one
+    registered pension scheme (or qualifying overseas scheme)
+    generates nothing, whatever allowance went unused (gov.uk
+    guidance, verified 2026-08-04).
+    """
+    return assessment.unused_allowance if scheme_member else _ZERO
+
+
+def roll_carry_forward(
+    pension: PensionRules,
+    remaining: Sequence[Money],
+    generated: Money,
+) -> tuple[Money, ...]:
+    """Advance the carry-forward pool one tax year.
+
+    ``remaining`` is what :func:`apply_carry_forward` left of the
+    previous years' pool — earliest first, consecutive tax years
+    ending with the immediately preceding one; ``generated`` is the
+    assessed year's own contribution
+    (:func:`carry_forward_generated`). The oldest entry expires as it
+    leaves the ``aa_carry_forward_years`` window.
+    """
+    _require_non_negative(generated, "generated")
+    years = _validated_pool(pension, remaining, "remaining")
+    width = pension.aa_carry_forward_years
+    if width == 0:
+        return ()
+    kept = years[max(len(years) - (width - 1), 0) :]
+    return (*kept, generated)
