@@ -35,6 +35,8 @@ if TYPE_CHECKING:
     from datetime import date
     from pathlib import Path
 
+    from glidepath.core import AssumptionKey
+
 PLAN_REGION: Final = "uk"
 
 PLAN_FILE_SUFFIX: Final = ".glidepath.json"
@@ -130,6 +132,17 @@ def save_plan_state(state: PlanState, path: Path) -> SaveOutcome:
     return SaveOutcome(saved=True, message=f"Plan saved to {path}.")
 
 
+def _table_error(key: AssumptionKey, value: object) -> str | None:
+    """The policy parser's objection to a stored table value, if any."""
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        check_table_override(key, value)
+    except ValueError as exc:
+        return f"override on {key.value!r}: {exc}"
+    return None
+
+
 def _table_override_error(document: PlanDocument) -> str | None:
     """The first stored table override its policy parser rejects.
 
@@ -140,24 +153,17 @@ def _table_override_error(document: PlanDocument) -> str | None:
     #71), for the base overrides and every scenario's alike.
     """
     for override in document.assumption_overrides:
-        if isinstance(override.value, Mapping):
-            try:
-                check_table_override(override.key, override.value)
-            except ValueError as exc:
-                return f"override on {override.key.value!r}: {exc}"
+        error = _table_error(override.key, override.value)
+        if error is not None:
+            return error
     for scenario in document.scenarios:
         for entry in scenario.overrides:
             target = entry.target
-            if isinstance(target, AssumptionTarget) and isinstance(
-                entry.value, Mapping
-            ):
-                try:
-                    check_table_override(target.key, entry.value)
-                except ValueError as exc:
-                    return (
-                        f"scenario {scenario.name!r} override on"
-                        f" {target.key.value!r}: {exc}"
-                    )
+            if not isinstance(target, AssumptionTarget):
+                continue
+            error = _table_error(target.key, entry.value)
+            if error is not None:
+                return f"scenario {scenario.name!r} {error}"
     return None
 
 
