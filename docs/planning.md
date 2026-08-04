@@ -1539,9 +1539,10 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   example. Data-safety guarantees: saves are atomic (sibling temp file
   + rename, so a mid-write failure never truncates the last saved
   plan); a plan the v1 form cannot faithfully edit
-  (`form_cannot_represent` — extra persons, planned outflows, annuity
-  purchases, personal glide paths, stage multipliers, wrapper
-  allocations/fees, independently dated fact pairs) is refused at open
+  (`form_cannot_represent` — extra persons, planned outflows, joint-life
+  annuity purchases (since 9.12), personal glide paths, stage
+  multipliers, wrapper allocations/fees, independently dated fact
+  pairs) is refused at open
   rather than silently reduced on the next save; stored table
   overrides (base and per-scenario) are vetted by their policy parsers
   at load so a defective table fails the open, never a run mid-flight;
@@ -1563,11 +1564,15 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 - [ ] 9.11 Age on chart axes — *chart categories and bar tooltips carry
   the person's age at period start alongside the year (§4.7);
   single-person labelling until couples activate (9.4).*
-- [ ] 9.12 Annuity purchase entry in the facts form — *purchase age,
-  amount, level vs inflation-linked enterable in the shell; lift the
-  `form_cannot_represent` refusal for annuity purchases and round-trip
-  them through `facts_form_data_from_household`, so the income chart's
-  existing annuity series becomes reachable.*
+- [x] 9.12 Annuity purchase entry in the facts form — *purchase age, pot
+  fraction, and product type (level / escalating / inflation-linked)
+  enterable in a repeatable form section; every field a decision (§5.1),
+  ids reused on resubmission so scenario overrides survive (§4.3);
+  round-tripped through `facts_form_data_from_household`, so the income
+  chart's existing annuity series is now reachable from the shell. The
+  single-person form writes single-life purchases only:
+  `form_cannot_represent` now refuses just joint-life purchases
+  (couples, 9.4) rather than all annuity purchases.*
 - [ ] 9.13 Monte Carlo in the GUI — *the Phase 7 core surfaced per §4.7:
   run-mode control (deterministic | Monte Carlo with paths + seed),
   success-metrics readout (success rate, probability of ruin, ending-pot

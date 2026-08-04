@@ -4,7 +4,8 @@ The form a shell renders to capture every §5.1 fact — DOB, balances
 with ``as_of`` dates, contributions, DB scheme parameters, the NI
 record / state pension forecast, and the pre-existing access facts —
 plus the decisions a projectable plan needs (retirement age,
-contribution and commutation choices). The shell binds
+contribution and commutation choices, planned annuity purchases). The
+shell binds
 :class:`FactsFormViewModel` to widgets and returns raw text via
 :class:`FactsFormData`; parsing back into `Fact`/`Decision`-wrapped
 domain objects happens here, so validation and messages stay
@@ -19,6 +20,9 @@ from itertools import chain
 from typing import TYPE_CHECKING, Any
 
 from glidepath.core import (
+    AnnuityBasis,
+    AnnuityPurchase,
+    AnnuityType,
     AssetAllocation,
     AssumptionKey,
     ContributionSchedule,
@@ -117,6 +121,7 @@ class FactsFormViewModel:
     state_pension: SectionSpec
     wrapper: SectionSpec
     db_pension: SectionSpec
+    annuity_purchase: SectionSpec
     submit_label: str
     clear_label: str
     """The button that empties the whole form (planning §4.9)."""
@@ -134,6 +139,7 @@ class FactsFormViewModel:
             self.state_pension,
             self.wrapper,
             self.db_pension,
+            self.annuity_purchase,
         )
 
 
@@ -146,6 +152,7 @@ class FactsFormData:
     state_pension: Mapping[str, str] = field(default_factory=dict)
     wrappers: tuple[Mapping[str, str], ...] = ()
     db_pensions: tuple[Mapping[str, str], ...] = ()
+    annuity_purchases: tuple[Mapping[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -217,6 +224,11 @@ _REVALUATION_REFERENCES: Mapping[str, RevaluationReference] = {
     "fixed": RevaluationReference.FIXED,
     "none": RevaluationReference.NONE,
 }
+_ANNUITY_TYPES: Mapping[str, AnnuityType] = {
+    "level": AnnuityType.LEVEL,
+    "escalating": AnnuityType.ESCALATING,
+    "inflation_linked": AnnuityType.INFLATION_LINKED,
+}
 
 _SEX_KEYS: Mapping[Sex, str] = {value: key for key, value in _SEXES.items()}
 _RELIEF_KEYS: Mapping[ReliefMechanic, str] = {
@@ -227,6 +239,9 @@ _ESCALATION_KEYS: Mapping[AssumptionKey, str] = {
 }
 _REVALUATION_KEYS: Mapping[RevaluationReference, str] = {
     value: key for key, value in _REVALUATION_REFERENCES.items()
+}
+_ANNUITY_TYPE_KEYS: Mapping[AnnuityType, str] = {
+    value: key for key, value in _ANNUITY_TYPES.items()
 }
 
 
@@ -608,12 +623,50 @@ def _db_pension_from(reader: _SectionReader, entity_id: EntityId) -> DBPension |
         return None
 
 
+def _annuity_purchase_from(
+    reader: _SectionReader, entity_id: EntityId
+) -> AnnuityPurchase | None:
+    """One planned annuity purchase from its section values.
+
+    The record is wholly a decision (planning §5.1): the age, pot
+    fraction, and product type are all choices, priced from the
+    annuity-rate assumptions at run time. The v1 form is single-person
+    (§4.4), so every purchase it writes is single-life — joint-life
+    annuities wait for the couples spike (roadmap 9.4).
+    """
+    at_age = reader.int_value("at_age", required=True)
+    fraction = reader.decimal_value("fraction_of_pot", required=True)
+    annuity_type = reader.choice("annuity_type", _ANNUITY_TYPES)
+    if annuity_type is None and not reader.raw("annuity_type"):
+        reader.error("annuity_type", _REQUIRED_MESSAGE)
+    if at_age is None or fraction is None or annuity_type is None or not reader.ok:
+        return None
+    recorded = reader.recorded_on
+    try:
+        return AnnuityPurchase(
+            id=entity_id,
+            at_age=Decision(value=at_age, recorded_on=recorded),
+            fraction_of_pot=Decision(value=fraction, recorded_on=recorded),
+            annuity_type=annuity_type,
+            basis=AnnuityBasis.SINGLE,
+        )
+    except ValueError as exc:
+        reader.error("", str(exc))
+        return None
+
+
+@dataclass(frozen=True)
+class _PersonParts:
+    """The parsed sub-entities the person section assembles around."""
+
+    wrappers: tuple[Wrapper, ...]
+    db_pensions: tuple[DBPension, ...]
+    annuity_purchases: tuple[AnnuityPurchase, ...]
+    state_pension: StatePensionRecord | None
+
+
 def _person_from(
-    reader: _SectionReader,
-    wrappers: tuple[Wrapper, ...],
-    db_pensions: tuple[DBPension, ...],
-    state_pension: StatePensionRecord | None,
-    entity_id: EntityId,
+    reader: _SectionReader, parts: _PersonParts, entity_id: EntityId
 ) -> Person | None:
     """The (v1 single) person from the person section plus sub-entities."""
     dob = reader.fact_of(reader.date_value("date_of_birth", required=True))
@@ -639,9 +692,10 @@ def _person_from(
             employment_income=employment,
             mpaa_triggered_on=mpaa,
             lsa_used=lsa,
-            wrappers=wrappers,
-            db_pensions=db_pensions,
-            state_pension=state_pension,
+            wrappers=parts.wrappers,
+            db_pensions=parts.db_pensions,
+            annuity_purchases=parts.annuity_purchases,
+            state_pension=parts.state_pension,
         )
     except ValueError as exc:
         reader.error("", str(exc))
@@ -675,10 +729,10 @@ def parse_facts_form(
     ``today``, which §4.8 rejects as future-dated.
 
     ``previous`` is the household a re-submission replaces: the person
-    and each wrapper and DB pension reuse the prior id at their form
-    position, so scenario overrides targeting them by stable id (§4.3)
-    survive a facts edit instead of orphaning. Sections beyond the
-    prior plan's count mint fresh ids.
+    and each wrapper, DB pension, and annuity purchase reuse the prior
+    id at their form position, so scenario overrides targeting them by
+    stable id (§4.3) survive a facts edit instead of orphaning.
+    Sections beyond the prior plan's count mint fresh ids.
     """
     context = _FormContext(
         recorded_on=recorded_on,
@@ -691,6 +745,10 @@ def parse_facts_form(
     )
     prior_pension_ids = tuple(
         pension.id for pension in (prior.db_pensions if prior is not None else ())
+    )
+    prior_purchase_ids = tuple(
+        purchase.id
+        for purchase in (prior.annuity_purchases if prior is not None else ())
     )
     spending = _spending_from(_SectionReader(context, "spending", data.spending))
     state_pension = _state_pension_from(
@@ -718,11 +776,25 @@ def parse_facts_form(
         )
         is not None
     )
+    annuity_purchases = tuple(
+        purchase
+        for index, values in enumerate(data.annuity_purchases)
+        if (
+            purchase := _annuity_purchase_from(
+                _SectionReader(context, "annuity_purchase", values, index=index),
+                _kept_id(prior_purchase_ids, index),
+            )
+        )
+        is not None
+    )
     person = _person_from(
         _SectionReader(context, "person", data.person),
-        wrappers,
-        db_pensions,
-        state_pension,
+        _PersonParts(
+            wrappers=wrappers,
+            db_pensions=db_pensions,
+            annuity_purchases=annuity_purchases,
+            state_pension=state_pension,
+        ),
         prior.id if prior is not None else new_entity_id(),
     )
     if context.errors or person is None:
@@ -943,6 +1015,15 @@ def _db_pension_values(pension: DBPension) -> dict[str, str]:
     return values
 
 
+def _annuity_purchase_values(purchase: AnnuityPurchase) -> dict[str, str]:
+    """One annuity purchase section instance's raw text."""
+    return {
+        "at_age": str(purchase.at_age.value),
+        "fraction_of_pot": str(purchase.fraction_of_pot.value),
+        "annuity_type": _ANNUITY_TYPE_KEYS[purchase.annuity_type],
+    }
+
+
 def _wrapper_cannot_represent(wrapper: Wrapper) -> str | None:
     """Why the form cannot faithfully edit ``wrapper``; ``None`` if it can."""
     if str(wrapper.kind) not in _WRAPPER_KINDS:
@@ -1002,10 +1083,19 @@ def _db_pension_cannot_represent(pension: DBPension) -> str | None:
     return None
 
 
+def _annuity_purchase_cannot_represent(purchase: AnnuityPurchase) -> str | None:
+    """Why the form cannot faithfully edit ``purchase``; ``None`` if it can.
+
+    The v1 form is single-person, so it offers no basis choice: a
+    joint-life purchase would silently become single-life on resave.
+    """
+    if purchase.basis is not AnnuityBasis.SINGLE:
+        return "a joint-life annuity purchase"
+    return None
+
+
 def _person_cannot_represent(person: Person) -> str | None:
     """Why the form cannot faithfully edit ``person``; ``None`` if it can."""
-    if person.annuity_purchases:
-        return "annuity purchases"
     if person.glide_path is not None:
         return "a personal glide path"
     if str(person.tax_residency) not in _RESIDENCIES:
@@ -1014,6 +1104,10 @@ def _person_cannot_represent(person: Person) -> str | None:
         (_state_pension_cannot_represent(person.state_pension),),
         (_wrapper_cannot_represent(wrapper) for wrapper in person.wrappers),
         (_db_pension_cannot_represent(pension) for pension in person.db_pensions),
+        (
+            _annuity_purchase_cannot_represent(purchase)
+            for purchase in person.annuity_purchases
+        ),
     )
     return next((reason for reason in reasons if reason is not None), None)
 
@@ -1023,11 +1117,11 @@ def form_cannot_represent(household: Household) -> str | None:
 
     ``None`` when every stored detail lands in a form field. The domain
     model legitimately holds more than the form yet offers (extra
-    persons, planned outflows, annuity purchases, personal glide paths,
-    spending stage multipliers, wrapper allocations and fees,
-    independently dated fact pairs) — resubmitting the populated form
-    would silently rebuild a reduced household, so a shell must refuse
-    to open such a plan rather than lose the data (§4.5).
+    persons, planned outflows, joint-life annuity purchases, personal
+    glide paths, spending stage multipliers, wrapper allocations and
+    fees, independently dated fact pairs) — resubmitting the populated
+    form would silently rebuild a reduced household, so a shell must
+    refuse to open such a plan rather than lose the data (§4.5).
     """
     if len(household.persons) != 1:
         return "more than one person"
@@ -1059,6 +1153,9 @@ def facts_form_data_from_household(household: Household) -> FactsFormData:
         state_pension=_state_pension_values(person.state_pension),
         wrappers=tuple(_wrapper_values(entry) for entry in person.wrappers),
         db_pensions=tuple(_db_pension_values(entry) for entry in person.db_pensions),
+        annuity_purchases=tuple(
+            _annuity_purchase_values(entry) for entry in person.annuity_purchases
+        ),
     )
 
 
@@ -1407,6 +1504,61 @@ def _db_pension_section() -> SectionSpec:
     )
 
 
+def _annuity_purchase_section() -> SectionSpec:
+    """The repeatable annuity-purchase section.
+
+    Every field is a choice (planning §5.1): the record is wholly a
+    decision, priced at run time from the annuity-rate assumptions in
+    the inspector. Single-life only until couples activate (9.4).
+    """
+    return SectionSpec(
+        key="annuity_purchase",
+        title="Annuity purchase",
+        description=(
+            "A plan to convert part of your pension pot into guaranteed "
+            "lifetime income at a chosen age. Everything here is your "
+            "choice; the annuity rates applied are assumptions, shown "
+            "in the stated-vs-assumed view. Single-life products only "
+            "for now."
+        ),
+        repeatable=True,
+        add_label="Add annuity purchase",
+        remove_label="Remove this annuity purchase",
+        fields=(
+            FieldSpec(
+                key="at_age",
+                label="Buy at age (your choice)",
+                hint="e.g. 68",
+                required=True,
+            ),
+            FieldSpec(
+                key="fraction_of_pot",
+                label="Fraction of pension pot (your choice)",
+                hint="over 0 up to 1, e.g. 0.5; 1 annuitises the whole pot",
+                required=True,
+            ),
+            FieldSpec(
+                key="annuity_type",
+                label="Annuity type (your choice)",
+                kind=FieldKind.CHOICE,
+                required=True,
+                choices=(
+                    _SELECT_OPTION,
+                    ChoiceOption(value="level", label="Level (constant income)"),
+                    ChoiceOption(
+                        value="escalating",
+                        label="Escalating (fixed annual increases)",
+                    ),
+                    ChoiceOption(
+                        value="inflation_linked",
+                        label="Inflation-linked (tracks CPI)",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 def build_facts_form_view_model() -> FactsFormViewModel:
     """Assemble the facts entry screen (roadmap 8.2).
 
@@ -1427,6 +1579,7 @@ def build_facts_form_view_model() -> FactsFormViewModel:
         state_pension=_state_pension_section(),
         wrapper=_wrapper_section(),
         db_pension=_db_pension_section(),
+        annuity_purchase=_annuity_purchase_section(),
         submit_label="Save facts and project",
         clear_label="Clear the form",
         example_note=(

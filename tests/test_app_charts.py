@@ -24,6 +24,7 @@ from glidepath.app import (
     state_with_household,
 )
 from glidepath.core import (
+    AnnuityPurchase,
     Decision,
     EntityId,
     Fact,
@@ -61,7 +62,11 @@ def _series_values(
     return series.values
 
 
-def household(wrappers: tuple[Wrapper, ...], employment: str | None) -> Household:
+def household(
+    wrappers: tuple[Wrapper, ...],
+    employment: str | None,
+    annuity_purchases: tuple[AnnuityPurchase, ...] = (),
+) -> Household:
     """A projectable household: one saver retiring at 60."""
     person = Person(
         id=EntityId("charts-person"),
@@ -70,6 +75,7 @@ def household(wrappers: tuple[Wrapper, ...], employment: str | None) -> Househol
         tax_residency=RUK_RESIDENCY,
         employment_income=None if employment is None else money_fact(employment),
         wrappers=wrappers,
+        annuity_purchases=annuity_purchases,
     )
     return Household(
         persons=(person,),
@@ -210,6 +216,23 @@ class TestProjectedCharts:
         assert "Withdrawals (gross)" in labels
         assert "Annuity income" not in labels
         assert "DB pension" not in labels
+
+    def test_annuity_purchase_charts_its_income_series(self) -> None:
+        """A planned purchase surfaces as the annuity income series (9.12)."""
+        purchase = AnnuityPurchase(
+            id=EntityId("charts-annuity"),
+            at_age=Decision(value=65, recorded_on=RECORDED),
+            fraction_of_pot=Decision(value=Decimal("0.5"), recorded_on=RECORDED),
+        )
+        plan = household(
+            (wrapper("charts-annuity-sipp", SIPP_KIND, "40000"),),
+            employment="42000",
+            annuity_purchases=(purchase,),
+        )
+        state = state_with_household(initial_plan_state(), plan, today=TODAY)
+        view_model = build_charts_view_model(state)
+        values = _series_values(view_model, "Income composition", "Annuity income")
+        assert any(value > 0 for value in values)
 
     def test_income_sources_never_overlap(self, view_model: ChartsViewModel) -> None:
         """The stack draws only from non-overlapping income sources.

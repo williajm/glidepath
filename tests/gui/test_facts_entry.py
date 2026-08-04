@@ -223,11 +223,14 @@ class TestFactsEntryPane:
         pane.person_form.set_value("date_of_birth", "1984-05-20")
         wrapper_form = pane.wrappers.add_entry()
         wrapper_form.set_value("balance", "25000")
+        annuity_form = pane.annuity_purchases.add_entry()
+        annuity_form.set_value("at_age", "68")
         pane.submit_button.click()
         [data] = received
         assert data.person["date_of_birth"] == "1984-05-20"
         assert data.wrappers[0]["balance"] == "25000"
         assert data.db_pensions == ()
+        assert data.annuity_purchases[0]["at_age"] == "68"
         assert pane.status_label.text() == "status text"
 
     def test_set_form_data_populates_every_section(self) -> None:
@@ -238,12 +241,14 @@ class TestFactsEntryPane:
                 person={"date_of_birth": "1991-06-15"},
                 spending={"annual_spending_real": "28000"},
                 wrappers=({"balance": "48000"}, {"balance": "16500"}),
+                annuity_purchases=({"at_age": "68", "fraction_of_pot": "0.5"},),
             )
         )
         data = pane.form_data()
         assert data.person["date_of_birth"] == "1991-06-15"
         assert data.spending["annual_spending_real"] == "28000"
         assert [values["balance"] for values in data.wrappers] == ["48000", "16500"]
+        assert data.annuity_purchases[0]["fraction_of_pot"] == "0.5"
 
     def test_set_form_data_replaces_previous_contents(self) -> None:
         """Setting new data never merges with what was on screen."""
