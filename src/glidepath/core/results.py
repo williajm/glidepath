@@ -21,12 +21,14 @@ from typing import TYPE_CHECKING, Any
 from glidepath.core.money import Money
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import date
 
     from glidepath.core.config import RunConfig
     from glidepath.core.entities import EntityId, Household
     from glidepath.core.glide import LifeStage
     from glidepath.core.investments import AssetAllocation
+    from glidepath.core.pensions import DBPension
     from glidepath.core.periods import Period
     from glidepath.core.provenance import Assumption, Decision, Fact
     from glidepath.core.returns import PeriodReturns
@@ -340,6 +342,23 @@ class ProjectionResult:
     config: RunConfig
 
 
+def _note_db_pension_facts(
+    pension: DBPension, note: Callable[[str, Fact[Any] | None], None]
+) -> None:
+    """One DB pension's facts under its stable entity-id prefix (§5.1)."""
+    prefix = f"db_pension[{pension.id}]"
+    note(f"{prefix}.accrued_annual_pension", pension.accrued_annual_pension)
+    note(f"{prefix}.normal_pension_age", pension.normal_pension_age)
+    note(f"{prefix}.commutation_factor", pension.commutation_factor)
+    membership = pension.active_membership
+    if membership is not None:
+        note(f"{prefix}.active_membership.accrual_rate", membership.accrual_rate)
+        note(
+            f"{prefix}.active_membership.pensionable_salary",
+            membership.pensionable_salary,
+        )
+
+
 def collect_plan_facts(household: Household) -> tuple[LabelledFact, ...]:
     """Every user-stated fact in the plan, at stable entity-id paths.
 
@@ -366,23 +385,7 @@ def collect_plan_facts(household: Household) -> tuple[LabelledFact, ...]:
         note(f"{prefix}.mpaa_triggered_on", person.mpaa_triggered_on)
         note(f"{prefix}.lsa_used", person.lsa_used)
         for pension in person.db_pensions:
-            pension_prefix = f"db_pension[{pension.id}]"
-            note(
-                f"{pension_prefix}.accrued_annual_pension",
-                pension.accrued_annual_pension,
-            )
-            note(f"{pension_prefix}.normal_pension_age", pension.normal_pension_age)
-            note(f"{pension_prefix}.commutation_factor", pension.commutation_factor)
-            if pension.active_membership is not None:
-                membership_prefix = f"{pension_prefix}.active_membership"
-                note(
-                    f"{membership_prefix}.accrual_rate",
-                    pension.active_membership.accrual_rate,
-                )
-                note(
-                    f"{membership_prefix}.pensionable_salary",
-                    pension.active_membership.pensionable_salary,
-                )
+            _note_db_pension_facts(pension, note)
         if person.state_pension is not None:
             record = person.state_pension
             record_prefix = f"{prefix}.state_pension"
