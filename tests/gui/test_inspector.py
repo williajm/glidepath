@@ -179,6 +179,12 @@ class TestRendering:
         assert label_item.toolTip() == (
             "Shipped UK default for 'inflation.cpi' (inflation.cpi)"
         )
+        short_value = pane.assumptions_table.item(0, 1)
+        assert short_value is not None
+        assert short_value.toolTip() == ""
+        long_value = pane.assumptions_table.item(1, 1)
+        assert long_value is not None
+        assert long_value.toolTip() == STRUCTURED_ROW.value
         status_item = pane.assumptions_table.item(0, 3)
         assert status_item is not None
         assert status_item.text() == "Shipped default"

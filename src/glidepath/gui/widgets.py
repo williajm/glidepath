@@ -9,7 +9,7 @@ import contextlib
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QStandardPaths, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -265,11 +265,23 @@ class MainWindow(QMainWindow):
             return
         self._write_plan(self._plan_path)
 
+    def _dialog_dir(self) -> str:
+        """Where file dialogs open (never the app's install directory).
+
+        Beside the session's plan file when there is one, else the
+        user's documents folder.
+        """
+        if self._plan_path is not None:
+            return str(self._plan_path.parent)
+        return QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+
     def open_plan_dialog(self) -> None:
         """Ask for a plan file and load it."""
         menu = self._view_model.file_menu
         filename, _selected = QFileDialog.getOpenFileName(
-            self, menu.open_dialog_title, "", menu.file_filter
+            self, menu.open_dialog_title, self._dialog_dir(), menu.file_filter
         )
         if filename:
             self.open_plan(Path(filename))
@@ -278,7 +290,7 @@ class MainWindow(QMainWindow):
         """Ask where to save the plan and write it there."""
         menu = self._view_model.file_menu
         filename, _selected = QFileDialog.getSaveFileName(
-            self, menu.save_dialog_title, "", menu.file_filter
+            self, menu.save_dialog_title, self._dialog_dir(), menu.file_filter
         )
         if not filename:
             return

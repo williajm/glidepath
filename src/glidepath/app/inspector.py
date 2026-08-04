@@ -179,17 +179,19 @@ def _assumption_row(assumption: Assumption[Any], usage: str) -> AssumptionRow:
 
     The default column repeats the value verbatim whenever nothing is
     overridden (the status column already says "Shipped default"), so
-    it renders as a dash unless the two differ.
+    it renders as a dash unless the two differ — compared on the
+    underlying values, since long table values format to a truncated
+    text that can collide.
     """
     structured = isinstance(assumption.value, Mapping)
     value_text = format_value(assumption.value)
-    default_text = format_value(assumption.default_value)
+    overridden = assumption.value != assumption.default_value
     return AssumptionRow(
         key=str(assumption.key.value),
         label=format_assumption_key(assumption.key.value),
         description=assumption.description,
         value=value_text,
-        default_value="—" if default_text == value_text else default_text,
+        default_value=format_value(assumption.default_value) if overridden else "—",
         status=_STATUS_LABELS[assumption.provenance],
         usage=usage,
         source=assumption.source,
@@ -405,8 +407,9 @@ def _summary_lines(state: PlanState) -> tuple[str, str]:
     years = len(state.result.snapshots)
     start = format_date(state.result.config.today)
     summary = (
-        f"Projected {years} years from {start} ({run_kind}). Hover for the "
-        "run manifest — the exact rule data and policies behind these numbers."
+        f"Projected across {years} tax years from {start} ({run_kind}) — the "
+        "first and last may be partial. Hover for the run manifest: the "
+        "exact rule data and policies behind these numbers."
     )
     version = state.result.provenance.region_data_version
     return summary, f"Run manifest — {version}; seed: {seed_text}"

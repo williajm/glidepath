@@ -9,6 +9,8 @@ remembers the plan for the next launch.
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QStandardPaths
+
 from glidepath.app import (
     build_shell_view_model,
     example_facts_form_data,
@@ -74,6 +76,49 @@ class TestSaveFlow:
         )
         window.save_plan_as_dialog()
         assert list(tmp_path.iterdir()) == []
+
+    def test_dialogs_start_in_a_user_directory_never_the_install_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """First dialog opens on Documents; later ones beside the plan."""
+        window = _window_with_example()
+        directories: list[str] = []
+
+        def fake_save(
+            _parent: object, _title: str, directory: str, _filter: str
+        ) -> tuple[str, str]:
+            directories.append(directory)
+            return "", ""
+
+        monkeypatch.setattr(
+            widgets, "QFileDialog", SimpleNamespace(getSaveFileName=fake_save)
+        )
+        window.save_plan_as_dialog()
+        documents = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        assert directories == [documents]
+
+        plan = tmp_path / "my-plan.glidepath.json"
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(plan), "")),
+        )
+        window.save_plan_as_dialog()
+        directories.clear()
+
+        def fake_open(
+            _parent: object, _title: str, directory: str, _filter: str
+        ) -> tuple[str, str]:
+            directories.append(directory)
+            return "", ""
+
+        monkeypatch.setattr(
+            widgets, "QFileDialog", SimpleNamespace(getOpenFileName=fake_open)
+        )
+        window.open_plan_dialog()
+        assert directories == [str(tmp_path)]
 
     def test_save_reuses_the_sessions_path_without_asking(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

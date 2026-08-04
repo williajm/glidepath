@@ -15,15 +15,18 @@ from glidepath.app import (
     InspectorViewModel,
     PlanState,
     build_inspector_view_model,
+    format_value,
     initial_plan_state,
     state_with_household,
     state_with_override,
 )
 from glidepath.app.display import ASSUMPTION_NAMES
+from glidepath.app.inspector import _assumption_row
 from glidepath.app.tables import parse_table_text
 from glidepath.core import (
     AnnuityPurchase,
     AssetAllocation,
+    Assumption,
     AssumptionKey,
     ContributionSchedule,
     DBActiveMembership,
@@ -40,6 +43,7 @@ from glidepath.core import (
     Money,
     Person,
     PlannedOutflow,
+    Provenance,
     Rate,
     ReliefMechanic,
     RevaluationBasis,
@@ -235,6 +239,26 @@ class TestProjectedSession:
         assert all(
             row.label == ASSUMPTION_NAMES[row.key] for row in view_model.assumptions
         )
+
+    def test_default_column_compares_values_not_rendered_text(self) -> None:
+        """A late-field table override shows its default despite truncation."""
+        default = {f"key_{index:02d}": Decimal(1) for index in range(20)}
+        overridden = {**default, "key_19": Decimal(2)}
+        rendered_override = format_value(overridden)
+        rendered_default = format_value(default)
+        assert rendered_override == rendered_default  # truncation collides
+        assumption = Assumption(
+            key=AssumptionKey.ANNUITY_AGE_ADJUSTMENT,
+            value=overridden,
+            default_value=default,
+            provenance=Provenance.USER_OVERRIDE,
+            source="test",
+            recorded_on=RECORDED,
+            description="test",
+        )
+        row = _assumption_row(assumption, "Used")
+        assert row.default_value != "—"
+        assert row.default_value == rendered_default
 
     def test_override_shows_as_your_override_with_date(
         self, projected: PlanState

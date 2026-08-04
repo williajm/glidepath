@@ -11,12 +11,12 @@ domain objects happens here, so validation and messages stay
 UI-agnostic.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum, auto
 from itertools import chain
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from glidepath.core import (
     AssetAllocation,
@@ -734,7 +734,89 @@ def parse_facts_form(
         return FactsFormResult(
             household=None, errors=(FormError("person", None, "", str(exc)),)
         )
-    return FactsFormResult(household=household, errors=())
+    return FactsFormResult(
+        household=_with_carried_dates(household, previous), errors=()
+    )
+
+
+def _fact_dated_from[T](fact: Fact[T] | None, prior: Fact[T] | None) -> Fact[T] | None:
+    """The fact re-dated from its prior statement when its value is unchanged."""
+    if fact is None or prior is None or fact.value != prior.value:
+        return fact
+    if fact.as_of == prior.as_of:
+        return fact
+    return Fact(
+        value=fact.value,
+        as_of=prior.as_of,
+        recorded_on=fact.recorded_on,
+        note=fact.note,
+    )
+
+
+def _person_with_carried_dates(person: Person, prior: Person) -> Person:
+    """The person with unchanged undated facts re-dated from ``prior``."""
+    changes: dict[str, Any] = {}
+    fact_pairs: dict[str, tuple[Fact[Any] | None, Fact[Any] | None]] = {
+        "date_of_birth": (person.date_of_birth, prior.date_of_birth),
+        "sex_for_longevity": (person.sex_for_longevity, prior.sex_for_longevity),
+        "employment_income": (person.employment_income, prior.employment_income),
+        "mpaa_triggered_on": (person.mpaa_triggered_on, prior.mpaa_triggered_on),
+        "lsa_used": (person.lsa_used, prior.lsa_used),
+    }
+    for name, (fact, prior_fact) in fact_pairs.items():
+        carried = _fact_dated_from(fact, prior_fact)
+        if carried is not fact:
+            changes[name] = carried
+    return replace(person, **changes) if changes else person
+
+
+def _wrapper_with_carried_dates(wrapper: Wrapper, prior: Wrapper | None) -> Wrapper:
+    """The wrapper with an unchanged employer fact re-dated from ``prior``."""
+    contributions = wrapper.contributions
+    prior_contributions = prior.contributions if prior is not None else None
+    changes: dict[str, Any] = {}
+    if contributions is not None and prior_contributions is not None:
+        employer = _fact_dated_from(
+            contributions.employer_amount, prior_contributions.employer_amount
+        )
+        if employer is not contributions.employer_amount:
+            changes["contributions"] = replace(contributions, employer_amount=employer)
+    return replace(wrapper, **changes) if changes else wrapper
+
+
+def _with_carried_dates(household: Household, previous: Household | None) -> Household:
+    """Unchanged undated facts keep the replaced plan's ``as_of`` (§4.5).
+
+    The form offers no ``as_of`` input for facts that are not
+    statement-dated, so a bare reparse dates them the submission day.
+    When the submission replaces a loaded plan (``previous``) and the
+    value is unchanged, that would silently rewrite persisted
+    provenance — the prior date carries forward instead. An edited
+    value is a fresh statement and keeps the submission day. Wrappers
+    pair up by form position, exactly like the §4.3 id reuse.
+    """
+    if previous is None or not previous.persons or not household.persons:
+        return household
+    prior = previous.persons[0]
+    prior_by_id = {wrapper.id: wrapper for wrapper in prior.wrappers}
+    person = _person_with_carried_dates(household.persons[0], prior)
+    wrappers = tuple(
+        _wrapper_with_carried_dates(wrapper, prior_by_id.get(wrapper.id))
+        for wrapper in person.wrappers
+    )
+    if wrappers != person.wrappers:
+        person = replace(person, wrappers=wrappers)
+    changes: dict[str, Any] = {}
+    if person is not household.persons[0]:
+        changes["persons"] = (person,)
+    spending = household.spending
+    if spending is not None and previous.spending is not None:
+        carried = _fact_dated_from(
+            spending.annual_spending_real, previous.spending.annual_spending_real
+        )
+        if carried is not None and carried is not spending.annual_spending_real:
+            changes["spending"] = replace(spending, annual_spending_real=carried)
+    return replace(household, **changes) if changes else household
 
 
 def _person_values(person: Person) -> dict[str, str]:
@@ -963,12 +1045,12 @@ def facts_form_data_from_household(household: Household) -> FactsFormData:
     The inverse of :func:`parse_facts_form`, used to repopulate the
     facts form from a loaded plan. Statement-dated facts (wrapper
     balances, the DWP forecast, the NI record, DB scheme facts) emit
-    their ``as_of`` date explicitly so a resubmission re-dates none of
-    them silently; the other facts offer no ``as_of`` field — their
-    dates carry no modelling meaning, so a resubmission re-dating them
-    to its own day loses nothing. Provenance timestamps are not
-    carried — a resubmission re-records its facts at submission time,
-    exactly like any edit.
+    their ``as_of`` date explicitly; the other facts offer no ``as_of``
+    field, and on resubmission :func:`parse_facts_form` carries their
+    stored dates forward from ``previous`` wherever the value is
+    unchanged — so a plan-load round trip re-dates nothing silently
+    either way. Provenance timestamps are not carried — a resubmission
+    re-records its facts at submission time, exactly like any edit.
     """
     person = household.persons[0]
     return FactsFormData(

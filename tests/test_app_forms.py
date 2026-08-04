@@ -1192,6 +1192,43 @@ class TestFormCannotRepresent:
         )
 
 
+def _plan_with_historical_dates() -> Household:
+    """A "loaded plan" whose undated facts carry historical ``as_of`` dates."""
+    base = parse(_maximal_submission())
+    person = base.persons[0]
+    wrapper = person.wrappers[0]
+    contributions = wrapper.contributions
+    assert contributions is not None
+    assert contributions.employer_amount is not None
+    assert person.employment_income is not None
+    dated_wrapper = _altered(
+        wrapper,
+        contributions=_altered(
+            contributions,
+            employer_amount=_altered(
+                contributions.employer_amount, as_of=date(2026, 7, 1)
+            ),
+        ),
+    )
+    household = _with_person(
+        base,
+        date_of_birth=_altered(person.date_of_birth, as_of=date(2020, 1, 15)),
+        employment_income=_altered(person.employment_income, as_of=date(2026, 4, 6)),
+        wrappers=(dated_wrapper, *person.wrappers[1:]),
+    )
+    spending = household.spending
+    assert spending is not None
+    return _altered(
+        household,
+        spending=_altered(
+            spending,
+            annual_spending_real=_altered(
+                spending.annual_spending_real, as_of=date(2026, 5, 1)
+            ),
+        ),
+    )
+
+
 class TestFormDataFromHousehold:
     """The inverse mapping repopulates the form from a loaded plan."""
 
@@ -1223,6 +1260,43 @@ class TestFormDataFromHousehold:
         )
         assert result.errors == ()
         assert result.household == household
+
+    def test_unchanged_values_keep_their_stored_as_of_dates(self) -> None:
+        """A load → resubmit round trip re-dates no undated fact (§4.5).
+
+        The form offers no ``as_of`` input for these facts, so the
+        parse carries the stored dates forward from ``previous`` —
+        full household equality proves nothing was silently re-dated.
+        """
+        stored = _plan_with_historical_dates()
+        rendered = facts_form_data_from_household(stored)
+        result = parse_facts_form(
+            rendered, recorded_on=RECORDED, today=TODAY, previous=stored
+        )
+        assert result.errors == ()
+        assert result.household == stored
+
+    def test_an_edited_value_is_re_dated_to_the_submission_day(self) -> None:
+        """A changed fact is a fresh statement; the rest keep their dates."""
+        stored = _plan_with_historical_dates()
+        rendered = facts_form_data_from_household(stored)
+        edited = FactsFormData(
+            person={**rendered.person, "employment_income": "60000"},
+            spending=rendered.spending,
+            state_pension=rendered.state_pension,
+            wrappers=rendered.wrappers,
+            db_pensions=rendered.db_pensions,
+        )
+        result = parse_facts_form(
+            edited, recorded_on=RECORDED, today=TODAY, previous=stored
+        )
+        assert result.errors == ()
+        assert result.household is not None
+        person = result.household.persons[0]
+        assert person.employment_income is not None
+        assert person.employment_income.value == Money(Decimal(60000))
+        assert person.employment_income.as_of == TODAY
+        assert person.date_of_birth.as_of == date(2020, 1, 15)
 
     def test_blank_optionals_render_blank(self) -> None:
         """A minimal household renders empty strings, not literal Nones."""

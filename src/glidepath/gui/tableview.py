@@ -39,6 +39,9 @@ def fill_table(
     """Replace a table's contents with pre-formatted cells.
 
     Columns size to their content up to a cap; longer cells elide.
+    ``tooltips`` are per-row descriptions shown on the first (label)
+    column only, so an elided cell elsewhere always hovers to its own
+    full text, never to the row description.
     """
     table.setColumnCount(len(columns))
     table.setHorizontalHeaderLabels(list(columns))
@@ -46,7 +49,7 @@ def fill_table(
     for row_index, row in enumerate(rows):
         for column_index, text in enumerate(row):
             item = QTableWidgetItem(text)
-            if tooltips is not None:
+            if tooltips is not None and column_index == 0:
                 item.setToolTip(tooltips[row_index])
             elif len(text) > _TOOLTIP_LENGTH:
                 item.setToolTip(text)

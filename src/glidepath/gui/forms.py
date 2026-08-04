@@ -75,6 +75,10 @@ class DateEntry(QLineEdit):
         self.calendar = QCalendarWidget(self)
         self.calendar.setWindowFlags(Qt.WindowType.Popup)
         self.calendar.clicked.connect(self._day_picked)
+        # clicked covers the mouse; activated (Enter/Return) covers the
+        # keyboard — without it the popup can be navigated but never
+        # committed by keyboard users.
+        self.calendar.activated.connect(self._day_picked)
         self.pick_action = self.addAction(
             self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown),
             QLineEdit.ActionPosition.TrailingPosition,

@@ -1466,7 +1466,10 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   DWP forecast, the NI record, the DB statement date) — every other
   fact is dated the day it is entered, since its `as_of` carries no
   modelling meaning and the extra date inputs only cluttered the form
-  (originally every fact had one). Date-valued fields are marked
+  (originally every fact had one). On resubmission the parse carries
+  those facts' stored dates forward from the plan being replaced
+  wherever the value is unchanged, so a load → edit → save cycle never
+  silently rewrites persisted `as_of` provenance. Date-valued fields are marked
   `FieldKind.DATE`: the raw value stays ISO text and blank keeps its
   meaning (today / none), so shells render typed entry first-class with
   a calendar as an assist — never a spinner-style date widget that

@@ -157,6 +157,14 @@ class TestDateEntry:
         assert entry.text() == "1991-06-15"
         assert not entry.calendar.isVisible()
 
+    def test_keyboard_activation_also_commits(self) -> None:
+        """Enter/Return in the calendar commits like a mouse click."""
+        _form, entry = self.date_of_birth_entry()
+        entry.pick_action.trigger()
+        entry.calendar.activated.emit(QDate(1993, 2, 3))
+        assert entry.text() == "1993-02-03"
+        assert not entry.calendar.isVisible()
+
 
 class TestRepeatableSection:
     """Wrappers and DB pensions are lists of section instances."""
