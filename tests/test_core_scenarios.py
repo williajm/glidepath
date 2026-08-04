@@ -44,6 +44,7 @@ from glidepath.core import (
     TaxResidencyId,
     Wrapper,
     WrapperKindId,
+    decision_target_catalogue,
     is_scenario_valid,
     resolve_scenario,
     scenario_orphans,
@@ -564,3 +565,64 @@ class TestTypeEnforcement:
         assumptions = base_assumptions()
         with pytest.raises(ValueError, match="must be non-negative"):
             resolve_scenario(household, assumptions, scenario)
+
+
+class TestDecisionTargetCatalogue:
+    """The public catalogue mirrors the whitelist with labels and values."""
+
+    def test_catalogue_covers_the_whitelist(self) -> None:
+        """Every addressable target appears exactly once, nothing more."""
+        catalogue = decision_target_catalogue(base_household())
+        keyed = {(info.target.entity_id, info.target.field_path) for info in catalogue}
+        assert keyed == {
+            (OUTFLOW_ID, "amount_real"),
+            (PERSON_ID, "target_retirement_age"),
+            (PERSON_ID, "state_pension.planned_extra_years"),
+            (PERSON_ID, "state_pension.deferral_years"),
+            (WRAPPER_ID, "contributions.employee_amount"),
+            (DB_ID, "taken_at_age"),
+            (DB_ID, "commuted_fraction"),
+            (UNTAKEN_DB_ID, "commuted_fraction"),
+            (ANNUITY_ID, "at_age"),
+            (ANNUITY_ID, "fraction_of_pot"),
+            (ANNUITY_ID, "annuity_type"),
+            (ANNUITY_ID, "basis"),
+        }
+        assert len(catalogue) == 12
+
+    def test_values_are_bare_with_decisions_unwrapped(self) -> None:
+        """Each entry carries the current bare value an override replaces."""
+        catalogue = decision_target_catalogue(base_household())
+        values = {
+            (info.target.entity_id, info.target.field_path): info.value
+            for info in catalogue
+        }
+        assert values[(PERSON_ID, "target_retirement_age")] == 65
+        assert values[(DB_ID, "taken_at_age")] == 64
+        assert values[(WRAPPER_ID, "contributions.employee_amount")] == Money(
+            Decimal(5000)
+        )
+        assert values[(PERSON_ID, "state_pension.deferral_years")] == Decimal(0)
+        assert values[(ANNUITY_ID, "annuity_type")] is AnnuityType.LEVEL
+        assert values[(ANNUITY_ID, "basis")] is AnnuityBasis.SINGLE
+
+    def test_labels_use_the_provenance_grammar(self) -> None:
+        """Labels match the stable resolution/provenance label grammar."""
+        catalogue = decision_target_catalogue(base_household())
+        labels = {
+            (info.target.entity_id, info.target.field_path): info.label
+            for info in catalogue
+        }
+        assert labels[(PERSON_ID, "target_retirement_age")] == (
+            f"person[{PERSON_ID}].target_retirement_age"
+        )
+        assert labels[(OUTFLOW_ID, "amount_real")] == (
+            f"planned_outflow[{OUTFLOW_ID}].amount_real"
+        )
+
+    def test_absent_optional_records_are_not_addressable(self) -> None:
+        """Paths through absent optional records never appear (§4.3)."""
+        catalogue = decision_target_catalogue(base_household(with_state_pension=False))
+        paths = {info.target.field_path for info in catalogue}
+        assert "state_pension.planned_extra_years" not in paths
+        assert "state_pension.deferral_years" not in paths

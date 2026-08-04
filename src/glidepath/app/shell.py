@@ -49,6 +49,7 @@ class ShellViewModel:
     help_menu_label: str
     facts_tab_label: str
     charts_tab_label: str
+    scenarios_tab_label: str
     inspector_tab_label: str
     disclaimer: DisclaimerViewModel
     about: AboutViewModel
@@ -70,6 +71,7 @@ def build_shell_view_model() -> ShellViewModel:
         help_menu_label=HELP_MENU_LABEL,
         facts_tab_label="Facts",
         charts_tab_label="Charts",
+        scenarios_tab_label="Scenarios",
         inspector_tab_label="Stated vs assumed",
         disclaimer=DisclaimerViewModel(
             title=DISCLAIMER_TITLE,

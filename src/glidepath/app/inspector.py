@@ -11,7 +11,6 @@ read by a run. A fourth, entity-level section surfaces the plan's
 rows (planning §5.1, issue #70).
 """
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -23,6 +22,7 @@ from glidepath.app.display import (
     format_value,
     format_wrapper_kind,
 )
+from glidepath.app.labels import display_label, entity_names
 from glidepath.app.tables import table_edit_text
 from glidepath.core import (
     Assumption,
@@ -48,8 +48,6 @@ if TYPE_CHECKING:
         RevaluationBasis,
         Wrapper,
     )
-
-_LABEL_PATTERN = re.compile(r"^(?P<kind>[a-z_]+)\[(?P<id>[^\]]+)\]\.(?P<path>.+)$")
 
 _STATUS_LABELS: Mapping[Provenance, str] = {
     Provenance.DEFAULT_ASSUMPTION: "Shipped default",
@@ -169,44 +167,6 @@ class InspectorViewModel:
     override_title: str
     override_prompt: str
     table_override_prompt: str
-
-
-def _capitalised(text: str) -> str:
-    """The text with just its first letter upper-cased."""
-    return text[:1].upper() + text[1:]
-
-
-def _pretty_path(path: str) -> str:
-    """A dotted field path as display text."""
-    return " / ".join(segment.replace("_", " ") for segment in path.split("."))
-
-
-def _entity_names(household: Household | None) -> dict[str, str]:
-    """Friendly names for the entity ids provenance labels address."""
-    if household is None:
-        return {}
-    names: dict[str, str] = {}
-    for person in household.persons:
-        names[str(person.id)] = "You"
-        for number, wrapper in enumerate(person.wrappers, start=1):
-            kind = format_wrapper_kind(wrapper.kind)
-            names[str(wrapper.id)] = f"Wrapper {number} ({kind})"
-        for number, pension in enumerate(person.db_pensions, start=1):
-            names[str(pension.id)] = f"DB pension {number}"
-        for number, purchase in enumerate(person.annuity_purchases, start=1):
-            names[str(purchase.id)] = f"Annuity purchase {number}"
-    for outflow in household.planned_outflows:
-        names[str(outflow.id)] = outflow.label
-    return names
-
-
-def _display_label(label: str, names: Mapping[str, str]) -> str:
-    """A provenance label as display text, entity ids named for humans."""
-    match = _LABEL_PATTERN.match(label)
-    if match is None:
-        return _capitalised(_pretty_path(label))
-    name = names.get(match["id"], _capitalised(match["kind"].replace("_", " ")))
-    return f"{name} — {_pretty_path(match['path'])}"
 
 
 def _assumption_row(assumption: Assumption[Any], usage: str) -> AssumptionRow:
@@ -352,7 +312,7 @@ def _structure_rows(household: Household | None) -> tuple[StructureRow, ...]:
     """
     if household is None:
         return ()
-    names = _entity_names(household)
+    names = entity_names(household)
     rows: list[StructureRow] = []
     for person in household.persons:
         rows.extend(_person_structure(person, names[str(person.id)]))
@@ -422,11 +382,11 @@ def build_inspector_view_model(state: PlanState) -> InspectorViewModel:
     assumptions column carries value, source, date recorded, and
     default-vs-overridden status for every row (planning §1).
     """
-    names = _entity_names(state.household)
+    names = entity_names(state.household)
     provenance = state.result.provenance if state.result is not None else None
     facts = tuple(
         FactRow(
-            label=_display_label(labelled.label, names),
+            label=display_label(labelled.label, names),
             value=format_value(labelled.fact.value),
             as_of=format_date(labelled.fact.as_of),
             recorded=format_recorded(labelled.fact.recorded_on),
@@ -436,7 +396,7 @@ def build_inspector_view_model(state: PlanState) -> InspectorViewModel:
     )
     decisions = tuple(
         DecisionRow(
-            label=_display_label(labelled.label, names),
+            label=display_label(labelled.label, names),
             value=format_value(labelled.decision.value),
             recorded=format_recorded(labelled.decision.recorded_on),
             note=labelled.decision.note or "",
@@ -445,7 +405,7 @@ def build_inspector_view_model(state: PlanState) -> InspectorViewModel:
     )
     roll_forwards = tuple(
         RollForwardRow(
-            label=_display_label(entry.label, names),
+            label=display_label(entry.label, names),
             stated=format_money(entry.stated),
             as_of=format_date(entry.as_of),
             months=str(entry.months),
