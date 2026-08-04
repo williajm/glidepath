@@ -131,7 +131,9 @@ class MainWindow(QMainWindow):
         # defaults blank as_of dates from the same local day the run
         # uses, so a defaulted balance date is never future-dated (§4.8).
         today = now.astimezone().date()
-        result = parse_facts_form(data, recorded_on=now, today=today)
+        result = parse_facts_form(
+            data, recorded_on=now, today=today, previous=self._state.household
+        )
         if result.household is None:
             return format_form_errors(self._view_model.facts_form, result.errors)
         self._state = state_with_household(self._state, result.household, today=today)

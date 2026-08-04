@@ -50,10 +50,12 @@ from glidepath.core import (
     Fact,
     Household,
     Money,
+    Override,
     PeriodMetrics,
     Person,
     PlannedOutflow,
     ReportBasis,
+    Scenario,
     ScenarioPeriodEntry,
     SpendingPlan,
     TaxResidencyId,
@@ -67,9 +69,11 @@ AS_OF = date(2026, 8, 1)
 
 PERSON_ID = EntityId("scen-person")
 OUTFLOW_ID = EntityId("scen-outflow")
+OUTFLOW_2_ID = EntityId("scen-outflow-2")
 
 RETIREMENT_KEY = f"{PERSON_ID}:target_retirement_age"
 OUTFLOW_KEY = f"{OUTFLOW_ID}:amount_real"
+OUTFLOW_2_KEY = f"{OUTFLOW_2_ID}:amount_real"
 CPI_KEY = AssumptionKey.INFLATION_CPI.value
 
 SCENARIO = "Retire at 58"
@@ -80,10 +84,23 @@ def money_fact(amount: str) -> Fact[Money]:
     return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
+def outflow(outflow_id: EntityId, age: int) -> PlannedOutflow:
+    """One planned outflow; every fixture outflow shares the same label."""
+    return PlannedOutflow(
+        id=outflow_id,
+        label="New roof",
+        amount_real=Decision(value=Money(Decimal(10000)), recorded_on=RECORDED),
+        at_age_of=(PERSON_ID, age),
+    )
+
+
 def household(
-    tax_residency: TaxResidencyId = RUK_RESIDENCY, *, with_outflow: bool = True
+    tax_residency: TaxResidencyId = RUK_RESIDENCY,
+    *,
+    with_outflow: bool = True,
+    with_second_outflow: bool = False,
 ) -> Household:
-    """An ISA saver retiring at 60, with an optional planned outflow."""
+    """An ISA saver retiring at 60, with optional planned outflows."""
     isa = Wrapper(id=EntityId("scen-isa"), kind=ISA_KIND, balance=money_fact("25000"))
     person = Person(
         id=PERSON_ID,
@@ -95,14 +112,9 @@ def household(
     )
     outflows: tuple[PlannedOutflow, ...] = ()
     if with_outflow:
-        outflows = (
-            PlannedOutflow(
-                id=OUTFLOW_ID,
-                label="New roof",
-                amount_real=Decision(value=Money(Decimal(10000)), recorded_on=RECORDED),
-                at_age_of=(PERSON_ID, 62),
-            ),
-        )
+        outflows = (outflow(OUTFLOW_ID, 62),)
+    if with_second_outflow:
+        outflows = (*outflows, outflow(OUTFLOW_2_ID, 63))
     return Household(
         persons=(person,),
         spending=SpendingPlan(annual_spending_real=money_fact("18000")),
@@ -205,6 +217,21 @@ class TestScenarioAddRemove:
         state = state_with_scenarios(initial_plan_state(), (), today=TODAY)
         assert state.scenario_runs is None
         assert state.scenario_run_error is None
+
+    def test_scenario_edits_recompute_the_base_run_too(
+        self, with_scenario: PlanState
+    ) -> None:
+        """The comparison's base and the displayed projection share a date.
+
+        A scenario edit re-runs the base under the caller's ``today``,
+        so a session left open across a date boundary can never show a
+        comparison base that diverges from the charts and inspector.
+        """
+        refreshed = state_with_scenarios(
+            with_scenario, with_scenario.scenarios, today=TODAY
+        )
+        assert refreshed.result is not None
+        assert refreshed.result is not with_scenario.result
 
 
 class TestScenarioOverrides:
@@ -348,6 +375,41 @@ class TestScenarioOverrides:
         assert reshaped.scenario_runs is None
         assert reshaped.scenario_run_error is None
 
+    def test_an_orphan_does_not_disable_validation_elsewhere(self) -> None:
+        """Addressable targets keep their invariant checks amid orphans."""
+        base = state_with_household(
+            initial_plan_state(), household(with_second_outflow=True), today=TODAY
+        )
+        state = state_with_scenario_added(base, SCENARIO, today=TODAY).state
+        state = state_with_scenario_override(
+            state, SCENARIO, OUTFLOW_2_KEY, "25000", today=TODAY
+        ).state
+        reshaped = state_with_household(state, household(), today=TODAY)
+        outcome = state_with_scenario_override(
+            reshaped, SCENARIO, OUTFLOW_KEY, "-5000", today=TODAY
+        )
+        assert outcome.error is not None
+        assert "non-negative" in outcome.error
+        assert outcome.state is reshaped
+
+    def test_value_edit_preserves_a_persisted_note(self, projected: PlanState) -> None:
+        """Replacing an override's value keeps its explanation (§4.3)."""
+        target = AssumptionTarget(key=AssumptionKey.INFLATION_CPI)
+        noted = Scenario(
+            name=SCENARIO,
+            overrides=(
+                Override(target=target, value=Decimal("0.03"), note="hot inflation"),
+            ),
+        )
+        state = state_with_scenarios(projected, (noted,), today=TODAY)
+        outcome = state_with_scenario_override(
+            state, SCENARIO, CPI_KEY, "0.04", today=TODAY
+        )
+        assert outcome.error is None
+        override = outcome.state.scenarios[0].overrides[0]
+        assert override.value == Decimal("0.04")
+        assert override.note == "hot inflation"
+
 
 class TestTargetOptions:
     """The target picker offers exactly the §4.3 whitelist."""
@@ -378,6 +440,18 @@ class TestTargetOptions:
         shape = by_key[AssumptionKey.GLIDEPATH_DEFAULT_SHAPE.value]
         assert shape.structured is True
         assert "=" in shape.edit_text
+
+    def test_duplicate_labels_are_numbered_apart(self) -> None:
+        """Same-named outflows stay distinguishable in a text picker."""
+        state = state_with_household(
+            initial_plan_state(), household(with_second_outflow=True), today=TODAY
+        )
+        options = scenario_target_options(state)
+        by_key = {option.key: option for option in options}
+        assert by_key[OUTFLOW_KEY].label == "New roof — amount real (1)"
+        assert by_key[OUTFLOW_2_KEY].label == "New roof — amount real (2)"
+        labels = [option.label for option in options]
+        assert len(labels) == len(set(labels))
 
 
 class TestScenariosViewModel:
@@ -500,6 +574,32 @@ class TestScenariosViewModel:
         """The builder validates the shell's stored metric key."""
         with pytest.raises(ValueError, match="unknown comparison metric"):
             build_scenarios_view_model(projected, metric_key="nope")
+
+    def test_chart_clamps_to_periods_every_run_modelled(
+        self, with_scenario: PlanState
+    ) -> None:
+        """A shorter-horizon scenario charts no fabricated zeros.
+
+        The table keeps the union of periods (blank cells for the
+        missing run); the chart covers only periods every run
+        modelled, since a zero bar would read as the metric collapsing.
+        """
+        state = state_with_scenario_override(
+            with_scenario,
+            SCENARIO,
+            AssumptionKey.HORIZON_PLANNING_AGE.value,
+            "80",
+            today=TODAY,
+        ).state
+        view_model = build_scenarios_view_model(state)
+        chart = view_model.chart
+        assert chart is not None
+        assert len(view_model.chart_categories) < len(view_model.comparison_rows)
+        assert all(
+            len(series.values) == len(view_model.chart_categories)
+            for series in chart.series
+        )
+        assert any(row[2] == "" for row in view_model.comparison_rows)
 
 
 class TestValueParsingHelpers:

@@ -22,7 +22,7 @@ from glidepath.app import (
     state_with_scenario_added,
     state_with_scenario_override,
 )
-from glidepath.app.scenarios import NO_SCENARIOS_MESSAGE
+from glidepath.app.scenarios import NO_SCENARIOS_MESSAGE, VALID_STATUS
 from glidepath.core import (
     Decision,
     EntityId,
@@ -325,3 +325,17 @@ class TestMainWindowScenariosFlow:
         pane.remove_scenario_button.click()
         assert pane.scenario_list.count() == 0
         assert pane.message_label.text() == NO_SCENARIOS_MESSAGE
+
+    def test_resaving_facts_keeps_decision_overrides_valid(
+        self, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Entity ids survive a facts re-save, so overrides never orphan."""
+        pane = window.scenarios_pane
+        patch_text_dialog(monkeypatch, SCENARIO)
+        pane.add_scenario_button.click()
+        patch_item_dialog(monkeypatch, RETIREMENT_LABEL)
+        patch_text_dialog(monkeypatch, "58")
+        pane.add_override_button.click()
+        window.facts_pane.submit_button.click()
+        assert pane.scenario_status_label.text() == VALID_STATUS
+        assert cell_text(pane.overrides_table, 0, 3) == ""

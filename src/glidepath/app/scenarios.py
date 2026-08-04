@@ -14,6 +14,7 @@ overridable), and every rejection comes back as a message on an
 shell (§4.7).
 """
 
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from glidepath.core import (
+        AssumptionSet,
         DecisionTargetInfo,
         Household,
         OverrideTarget,
@@ -315,6 +317,8 @@ def scenario_target_options(state: PlanState) -> tuple[TargetOption, ...]:
 
     Exactly the §4.3 whitelist — the option list has no way to name a
     fact, so nothing user-stated can be offered for replacement.
+    Labels are guaranteed unique (duplicates are numbered), so a shell
+    resolving the user's pick by label cannot hit the wrong target.
     """
     if state.household is None:
         return ()
@@ -339,7 +343,34 @@ def scenario_target_options(state: PlanState) -> tuple[TargetOption, ...]:
                 structured=isinstance(value, Mapping),
             )
         )
-    return tuple(options)
+    return _uniquely_labelled(options)
+
+
+def _uniquely_labelled(options: list[TargetOption]) -> tuple[TargetOption, ...]:
+    """The options with duplicate labels numbered in order.
+
+    Planned-outflow labels are free user text with no uniqueness rule,
+    so two outflows named alike would otherwise be indistinguishable
+    in a picker that returns display text.
+    """
+    counts = Counter(option.label for option in options)
+    numbered: Counter[str] = Counter()
+    unique = []
+    for option in options:
+        if counts[option.label] == 1:
+            unique.append(option)
+            continue
+        numbered[option.label] += 1
+        unique.append(
+            TargetOption(
+                key=option.key,
+                label=f"{option.label} ({numbered[option.label]})",
+                edit_text=option.edit_text,
+                structured=option.structured,
+                choices=option.choices,
+            )
+        )
+    return tuple(unique)
 
 
 def state_with_scenario_added(
@@ -401,11 +432,11 @@ def state_with_scenario_override(
     except ValueError as exc:
         return OverrideOutcome(state=state, error=str(exc))
     candidate = _scenario_with_override(scenario, override)
-    if not scenario_orphans(candidate, state.household, state.assumptions):
-        try:
-            resolve_scenario(state.household, state.assumptions, candidate)
-        except ValueError as exc:
-            return OverrideOutcome(state=state, error=str(exc))
+    checkable = _without_orphans(candidate, state.household, state.assumptions)
+    try:
+        resolve_scenario(state.household, state.assumptions, checkable)
+    except ValueError as exc:
+        return OverrideOutcome(state=state, error=str(exc))
     scenarios = tuple(
         candidate if s.name == scenario_name else s for s in state.scenarios
     )
@@ -441,19 +472,48 @@ def _scenario_named(state: PlanState, name: str) -> Scenario | None:
     return None
 
 
+def _without_orphans(
+    scenario: Scenario, household: Household, assumptions: AssumptionSet
+) -> Scenario:
+    """The scenario with its orphaned overrides stripped, for validation.
+
+    An orphaned override cannot resolve, but its presence must not
+    exempt the *addressable* overrides from the entity invariants a
+    resolution enforces — otherwise a scenario with one deleted target
+    would silently accept invalid values everywhere else.
+    """
+    orphans = scenario_orphans(scenario, household, assumptions)
+    if not orphans:
+        return scenario
+    overrides = tuple(
+        override for override in scenario.overrides if override not in orphans
+    )
+    return Scenario(name=scenario.name, overrides=overrides, note=scenario.note)
+
+
 def _scenario_with_override(scenario: Scenario, override: Override) -> Scenario:
     """The scenario with ``override`` replacing its target's entry, in place.
 
     An override on a new target appends; one on an existing target
-    keeps its position, so the diff view stays stable under edits.
+    keeps its position — and its note, when the replacement carries
+    none — so the diff view stays stable under value edits.
     """
-    if any(entry.target == override.target for entry in scenario.overrides):
+    existing = next(
+        (entry for entry in scenario.overrides if entry.target == override.target),
+        None,
+    )
+    if existing is None:
+        overrides = (*scenario.overrides, override)
+    else:
+        merged = Override(
+            target=override.target,
+            value=override.value,
+            note=override.note if override.note is not None else existing.note,
+        )
         overrides = tuple(
-            override if entry.target == override.target else entry
+            merged if entry.target == override.target else entry
             for entry in scenario.overrides
         )
-    else:
-        overrides = (*scenario.overrides, override)
     return Scenario(name=scenario.name, overrides=overrides, note=scenario.note)
 
 
@@ -679,7 +739,13 @@ def _comparison(
     tuple[str, ...],
     ChartSpec | None,
 ]:
-    """The comparison table and chart for the selected metric and basis."""
+    """The comparison table and chart for the selected metric and basis.
+
+    The table covers the union of the runs' periods (blank cells where
+    a run never modelled one); the chart clamps to periods every run
+    modelled — a run with a shorter horizon has *no data* there, and a
+    zero-height bar would falsely read as the metric falling to zero.
+    """
     if state.scenario_runs is None:
         return (), (), (), None
     comparison = compare_scenario_results(state.scenario_runs, basis)
@@ -692,7 +758,6 @@ def _comparison(
     values: dict[str, list[Decimal]] = {name: [] for name in comparison.run_names}
     for row in comparison.rows:
         period_label = str(row.period.start.year)
-        categories.append(period_label)
         entries = {entry.run_name: entry for entry in row.entries}
         cells = [period_label, _metric_text(entries.get(base_name), metric_key)]
         for name in comparison.run_names[1:]:
@@ -700,14 +765,10 @@ def _comparison(
             cells.append(_metric_text(entry, metric_key))
             cells.append(_delta_text(entry, metric_key))
         rows.append(tuple(cells))
-        for name in comparison.run_names:
-            entry = entries.get(name)
-            amount = (
-                getattr(entry.metrics, metric_key).amount
-                if entry is not None
-                else Decimal(0)
-            )
-            values[name].append(amount)
+        if len(entries) == len(comparison.run_names):
+            categories.append(period_label)
+            for name in comparison.run_names:
+                values[name].append(getattr(entries[name].metrics, metric_key).amount)
     metric_label = _METRIC_LABELS[metric_key]
     series = tuple(
         ChartSeries(

@@ -181,19 +181,12 @@ def state_with_scenarios(
 ) -> PlanState:
     """The state after replacing the scenario list and re-running the diffs.
 
-    Scenarios never mutate the base plan (§4.3), so the base
-    projection is untouched; only the scenario runs recompute.
+    Scenarios never mutate the base plan (§4.3), but the base run is
+    recomputed alongside the scenario runs so both always share one
+    ``today`` — in a session left open across a date boundary, the
+    comparison's base and the displayed projection must not diverge.
     """
-    runs, error = _scenario_runs(state.household, state.assumptions, scenarios, today)
-    return PlanState(
-        assumptions=state.assumptions,
-        household=state.household,
-        result=state.result,
-        run_error=state.run_error,
-        scenarios=scenarios,
-        scenario_runs=runs,
-        scenario_run_error=error,
-    )
+    return replanned_state(state.assumptions, state.household, scenarios, today=today)
 
 
 def _parsed_override_value(
