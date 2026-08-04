@@ -1461,10 +1461,26 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 - [x] 8.1 `make deps` PySide6; app shell + **disclaimer screen** —
   *disclaimer on first run (§1); §4.7 layering in place with the
   Qt-import guard test.*
-- [x] 8.2 Facts entry forms — *every fact in §5.1 enterable with `as_of`
-  dates.*
+- [x] 8.2 Facts entry forms — *every fact in §5.1 enterable; `as_of`
+  fields offered only for statement-dated facts (wrapper balances, the
+  DWP forecast, the NI record, the DB statement date) — every other
+  fact is dated the day it is entered, since its `as_of` carries no
+  modelling meaning and the extra date inputs only cluttered the form
+  (originally every fact had one). On resubmission the parse carries
+  those facts' stored dates forward from the plan being replaced
+  wherever the value is unchanged, so a load → edit → save cycle never
+  silently rewrites persisted `as_of` provenance. Date-valued fields are marked
+  `FieldKind.DATE`: the raw value stays ISO text and blank keeps its
+  meaning (today / none), so shells render typed entry first-class with
+  a calendar as an assist — never a spinner-style date widget that
+  cannot be blank.*
 - [x] 8.3 Assumptions inspector — *the "stated vs assumed" surface rendered
-  from `ProjectionResult.provenance`; defaults overridable in place.*
+  from `ProjectionResult.provenance`; defaults overridable in place. The
+  surface reads for humans: assumption ids show as display names (the
+  dotted id stays in tooltips and override targeting), the shipped
+  default renders only when an override makes it differ, and the run
+  manifest (digests, policy parameters) sits behind a human summary
+  line as its tooltip rather than on the page.*
 - [x] 8.4 Projection charts — *real-terms default, nominal toggle.*
 - [x] 8.5 Scenario manager + diff view — *scenarios as override lists;
   comparison report visualised.*
@@ -1537,6 +1553,13 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   About box rebuilt as a dialog with the wordmark above full-width
   wrapped copy, replacing the `QMessageBox` that squeezed the
   disclaimer into a narrow column beside the wordmark.*
+- [x] 9.10 Facts & inspector readability — *the facts form keeps `as_of`
+  inputs only for statement-dated facts and renders every date field as
+  a typed-first date entry with a calendar assist (`FieldKind.DATE`);
+  the stated-vs-assumed surface restacks so no table is squeezed into a
+  horizontal scrollbar and reads for humans — assumption display names,
+  manifest behind a summary tooltip, defaults shown only when they
+  differ (details under roadmap 8.2/8.3).*
 
 ## 9. Open questions
 

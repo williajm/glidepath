@@ -7,12 +7,13 @@ specs, and repeatable sections add and remove instances.
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QDate, QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
 
 from glidepath.app import FactsFormData, FieldKind, build_facts_form_view_model
 from glidepath.gui.forms import (
+    DateEntry,
     FactsEntryPane,
     RepeatableSection,
     ScrollSafeComboBox,
@@ -43,7 +44,7 @@ class TestSectionForm:
     """One section renders one editor per field spec."""
 
     def test_every_field_gets_the_right_editor(self) -> None:
-        """Choices become combos; everything else is a line edit."""
+        """Choices become combos, dates date entries, the rest line edits."""
         spec = build_facts_form_view_model().person
         form = SectionForm(spec)
         for field in spec.fields:
@@ -52,6 +53,7 @@ class TestSectionForm:
                 assert isinstance(editor, QComboBox)
             else:
                 assert isinstance(editor, QLineEdit)
+                assert isinstance(editor, DateEntry) == (field.kind is FieldKind.DATE)
                 assert editor.placeholderText() == field.hint
 
     def test_values_default_to_blank_text_and_first_choice(self) -> None:
@@ -111,6 +113,57 @@ class TestScrollSafeComboBox:
         combo.setCurrentIndex(0)
         QApplication.sendEvent(combo, _wheel_tick(combo))
         assert combo.currentIndex() == 1
+
+
+class TestDateEntry:
+    """Date fields type like line edits, with a calendar assist."""
+
+    @staticmethod
+    def date_of_birth_entry() -> tuple[SectionForm, DateEntry]:
+        """The person form's date-of-birth editor, with its form kept alive."""
+        form = SectionForm(build_facts_form_view_model().person)
+        editor = form.editor("date_of_birth")
+        assert isinstance(editor, DateEntry)
+        return form, editor
+
+    def test_blank_and_typed_text_round_trip(self) -> None:
+        """The entry is a plain line edit for text: blank stays blank."""
+        _form, entry = self.date_of_birth_entry()
+        assert entry.text() == ""
+        entry.setText("1984-05-20")
+        assert entry.text() == "1984-05-20"
+
+    def test_pick_action_opens_the_calendar_on_the_typed_date(self) -> None:
+        """The calendar pops seeded from parseable text."""
+        _form, entry = self.date_of_birth_entry()
+        entry.setText("1984-05-20")
+        assert not entry.calendar.isVisible()
+        entry.pick_action.trigger()
+        assert entry.calendar.isVisible()
+        assert entry.calendar.selectedDate() == QDate(1984, 5, 20)
+
+    def test_unparseable_text_still_opens_the_calendar(self) -> None:
+        """Garbage text cannot block the assist; the popup still opens."""
+        _form, entry = self.date_of_birth_entry()
+        entry.setText("20/05/1984")
+        entry.pick_action.trigger()
+        assert entry.calendar.isVisible()
+
+    def test_picking_a_day_writes_iso_text_and_closes(self) -> None:
+        """A calendar click lands as ISO text, exactly as if typed."""
+        _form, entry = self.date_of_birth_entry()
+        entry.pick_action.trigger()
+        entry.calendar.clicked.emit(QDate(1991, 6, 15))
+        assert entry.text() == "1991-06-15"
+        assert not entry.calendar.isVisible()
+
+    def test_keyboard_activation_also_commits(self) -> None:
+        """Enter/Return in the calendar commits like a mouse click."""
+        _form, entry = self.date_of_birth_entry()
+        entry.pick_action.trigger()
+        entry.calendar.activated.emit(QDate(1993, 2, 3))
+        assert entry.text() == "1993-02-03"
+        assert not entry.calendar.isVisible()
 
 
 class TestRepeatableSection:

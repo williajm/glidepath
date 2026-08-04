@@ -22,6 +22,7 @@ from glidepath.app.charts import (
 from glidepath.app.copy import (
     ABOUT_TITLE,
     APP_NAME,
+    DATE_PICKER_TOOLTIP,
     DISCLAIMER_ACCEPT_LABEL,
     DISCLAIMER_BODY,
     DISCLAIMER_DECLINE_LABEL,
@@ -117,6 +118,7 @@ from glidepath.core import ReportBasis
 __all__ = [
     "ABOUT_TITLE",
     "APP_NAME",
+    "DATE_PICKER_TOOLTIP",
     "DEFAULT_CHART_BASIS",
     "DEFAULT_COMPARISON_METRIC_KEY",
     "DISCLAIMER_ACCEPT_LABEL",

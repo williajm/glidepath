@@ -81,7 +81,8 @@ class TestFactsToInspectorFlow:
         assert "projection run" in window.facts_pane.status_label.text()
         assert window.inspector_pane.facts_table.rowCount() > 0
         assert window.inspector_pane.decisions_table.rowCount() > 0
-        assert "Run manifest" in window.inspector_pane.summary_label.text()
+        assert "Projected" in window.inspector_pane.summary_label.text()
+        assert "Run manifest" in window.inspector_pane.summary_label.toolTip()
 
     def test_invalid_submission_reports_field_errors(self) -> None:
         """An empty submission lists the missing required fields."""

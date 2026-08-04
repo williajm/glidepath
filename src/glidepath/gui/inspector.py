@@ -35,7 +35,12 @@ class InspectorPane(QWidget):
         on_override: Callable[[str, str], str | None],
         parent: QWidget | None = None,
     ) -> None:
-        """Build the three-column surface and wire the override callback."""
+        """Build the stacked surface and wire the override callback.
+
+        Facts and choices share the top row; every other table gets the
+        full width, so no section is squeezed into a horizontal
+        scrollbar.
+        """
         super().__init__(parent)
         self._on_override = on_override
         self._view_model: InspectorViewModel | None = None
@@ -71,18 +76,15 @@ class InspectorPane(QWidget):
         self.status_label = QLabel("", self)
         self.status_label.setWordWrap(True)
 
-        stated_column = QVBoxLayout()
-        stated_column.addWidget(self._facts_box, 2)
-        stated_column.addWidget(self._roll_forwards_box, 1)
-
-        columns = QHBoxLayout()
-        columns.addLayout(stated_column, 1)
-        columns.addWidget(self._assumptions_box, 2)
-        columns.addWidget(self._decisions_box, 1)
+        stated_row = QHBoxLayout()
+        stated_row.addWidget(self._facts_box, 4)
+        stated_row.addWidget(self._decisions_box, 3)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(columns, 2)
-        layout.addWidget(self._structure_box, 1)
+        layout.addLayout(stated_row, 2)
+        layout.addWidget(self._roll_forwards_box, 1)
+        layout.addWidget(self._assumptions_box, 3)
+        layout.addWidget(self._structure_box, 2)
         layout.addWidget(self.summary_label)
         layout.addWidget(self.status_label)
 
@@ -105,7 +107,7 @@ class InspectorPane(QWidget):
             view_model.assumptions_columns,
             [
                 (
-                    row.key,
+                    row.label,
                     row.value,
                     row.default_value,
                     row.status,
@@ -115,7 +117,11 @@ class InspectorPane(QWidget):
                 )
                 for row in view_model.assumptions
             ],
-            tooltips=[row.description for row in view_model.assumptions],
+            # Joining id to description is layout, not copy — both
+            # strings come from the app layer (§4.7).
+            tooltips=[
+                f"{row.description} ({row.key})" for row in view_model.assumptions
+            ],
         )
         fill_table(
             self.decisions_table,
@@ -139,6 +145,7 @@ class InspectorPane(QWidget):
             [(row.entity, row.setting, row.value) for row in view_model.structure],
         )
         self.summary_label.setText(view_model.summary)
+        self.summary_label.setToolTip(view_model.summary_detail)
 
     def assumption_row(self, row_index: int) -> AssumptionRow:
         """The assumption row behind a table row (refresh must have run)."""
@@ -152,20 +159,20 @@ class InspectorPane(QWidget):
         if self._view_model is None:  # pragma: no cover - tables imply a model
             return
         row = self.assumption_row(row_index)
-        # Joining the row's key to the prompt is layout, not copy — both
-        # strings come from the app layer (§4.7).
+        # Joining the row's label to the prompt is layout, not copy —
+        # both strings come from the app layer (§4.7).
         if row.structured:
             text, accepted = QInputDialog.getMultiLineText(
                 self,
                 self._view_model.override_title,
-                f"{row.key} — {self._view_model.table_override_prompt}",
+                f"{row.label} — {self._view_model.table_override_prompt}",
                 row.edit_text,
             )
         else:
             text, accepted = QInputDialog.getText(
                 self,
                 self._view_model.override_title,
-                f"{row.key} — {self._view_model.override_prompt}",
+                f"{row.label} — {self._view_model.override_prompt}",
                 text=row.edit_text,
             )
         if not accepted:

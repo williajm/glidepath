@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from glidepath.app.display import (
+    format_assumption_key,
     format_date,
     format_money,
     format_recorded,
@@ -60,10 +61,10 @@ _RESIDENCY_NAMES: Mapping[str, str] = {
     "uk.scotland": "UK (Scotland)",
 }
 
-_USED_LABEL = "Used in this projection"
-_UNUSED_LABEL = "Not used by this projection"
+_USED_LABEL = "Used"
+_UNUSED_LABEL = "Not used"
 _NO_RUN_LABEL = "No projection yet"
-_REGION_BUILD_LABEL = "Applied at region build (see the run manifest)"
+_REGION_BUILD_LABEL = "Applied at region build"
 
 _REGION_BUILD_KEYS = frozenset(
     {
@@ -117,12 +118,15 @@ class DecisionRow:
 class AssumptionRow:
     """One assumption with its full §1 provenance payload.
 
-    ``structured`` marks a table-valued row; its ``edit_text`` is the
-    round-trippable multi-line text form, while a scalar's is simply
-    its value (issue #71).
+    ``key`` is the stable dotted id (what overrides target); ``label``
+    is its human display name and is what screens show. ``structured``
+    marks a table-valued row; its ``edit_text`` is the round-trippable
+    multi-line text form, while a scalar's is simply its value
+    (issue #71).
     """
 
     key: str
+    label: str
     description: str
     value: str
     default_value: str
@@ -164,36 +168,43 @@ class InspectorViewModel:
     structure_columns: tuple[str, ...]
     structure: tuple[StructureRow, ...]
     summary: str
+    summary_detail: str
     override_title: str
     override_prompt: str
     table_override_prompt: str
 
 
 def _assumption_row(assumption: Assumption[Any], usage: str) -> AssumptionRow:
-    """One assumption as its display row."""
+    """One assumption as its display row.
+
+    The default column repeats the value verbatim whenever nothing is
+    overridden (the status column already says "Shipped default"), so
+    it renders as a dash unless the two differ — compared on the
+    underlying values, since long table values format to a truncated
+    text that can collide.
+    """
     structured = isinstance(assumption.value, Mapping)
+    value_text = format_value(assumption.value)
+    overridden = assumption.value != assumption.default_value
     return AssumptionRow(
         key=str(assumption.key.value),
+        label=format_assumption_key(assumption.key.value),
         description=assumption.description,
-        value=format_value(assumption.value),
-        default_value=format_value(assumption.default_value),
+        value=value_text,
+        default_value=format_value(assumption.default_value) if overridden else "—",
         status=_STATUS_LABELS[assumption.provenance],
         usage=usage,
         source=assumption.source,
         recorded=format_recorded(assumption.recorded_on),
         structured=structured,
-        edit_text=(
-            table_edit_text(assumption.value)
-            if structured
-            else format_value(assumption.value)
-        ),
+        edit_text=table_edit_text(assumption.value) if structured else value_text,
     )
 
 
 def _glide_path_text(config: GlidePathConfig | None) -> str:
     """A person's glide-path source as display text, knots included."""
     if config is None:
-        return "Default shape assumption (glidepath.default_shape)"
+        return "Default glide path shape assumption"
     knots = "; ".join(
         f"{point.years_to_retirement}y out: {_allocation_text(point.allocation)}"
         for point in config.points
@@ -211,10 +222,19 @@ def _allocation_text(allocation: AssetAllocation | None) -> str:
     )
 
 
+def _escalation_text(escalation: AssumptionKey | None) -> str:
+    """A contribution schedule's escalation as display text."""
+    if escalation is None:
+        return "None (fixed amounts)"
+    if escalation is AssumptionKey.EARNINGS_GROWTH_REAL:
+        return "Grows with earnings"
+    return f"Grows with the {format_assumption_key(escalation.value)} assumption"
+
+
 def _fees_text(fees: FeeSchedule | None) -> str:
     """A wrapper's fee source as display text."""
     if fees is None:
-        return "Shipped fee assumptions (fees.platform, fees.fund)"
+        return "Shipped platform and fund fee assumptions"
     return f"Platform {fees.platform.value} / fund {fees.fund.value}"
 
 
@@ -270,12 +290,11 @@ def _wrapper_structure(wrapper: Wrapper, name: str) -> list[StructureRow]:
             else "No tax relief"
         )
         rows.append(StructureRow(name, "Contribution relief", relief))
-        escalation = (
-            str(schedule.escalation.value)
-            if schedule.escalation is not None
-            else "None (fixed amounts)"
+        rows.append(
+            StructureRow(
+                name, "Contribution escalation", _escalation_text(schedule.escalation)
+            )
         )
-        rows.append(StructureRow(name, "Contribution escalation", escalation))
     rows.append(
         StructureRow(name, "Asset allocation", _allocation_text(wrapper.allocation))
     )
@@ -367,19 +386,33 @@ def _assumption_rows(state: PlanState) -> tuple[AssumptionRow, ...]:
     return tuple(rows)
 
 
-def _summary(state: PlanState) -> str:
-    """The run-manifest line, the failure, or the getting-started hint."""
+def _summary_lines(state: PlanState) -> tuple[str, str]:
+    """The human summary line plus the full run-manifest detail.
+
+    The manifest string (data-file digests, policy parameters, seed) is
+    load-bearing §4.6 provenance but not reading matter, so the summary
+    stays human and the exact manifest rides along as ``summary_detail``
+    for the shell to reveal on demand (a tooltip in the Qt shell).
+    """
     if state.run_error is not None:
-        return f"The projection failed: {state.run_error}"
-    if state.result is not None:
-        seed = state.result.provenance.seed
-        seed_text = "none (deterministic)" if seed is None else str(seed)
-        version = state.result.provenance.region_data_version
-        return f"Run manifest — {version}; seed: {seed_text}"
-    return (
-        "No projection yet: enter your facts and save them. The shipped "
-        "default assumptions below apply until you override them."
+        return f"The projection failed: {state.run_error}", ""
+    if state.result is None:
+        return (
+            "No projection yet: enter your facts and save them. The shipped "
+            "default assumptions below apply until you override them."
+        ), ""
+    seed = state.result.provenance.seed
+    seed_text = "none (deterministic)" if seed is None else str(seed)
+    run_kind = "deterministic run" if seed is None else f"Monte Carlo run, seed {seed}"
+    years = len(state.result.snapshots)
+    start = format_date(state.result.config.today)
+    summary = (
+        f"Projected across {years} tax years from {start} ({run_kind}) — the "
+        "first and last may be partial. Hover for the run manifest: the "
+        "exact rule data and policies behind these numbers."
     )
+    version = state.result.provenance.region_data_version
+    return summary, f"Run manifest — {version}; seed: {seed_text}"
 
 
 def build_inspector_view_model(state: PlanState) -> InspectorViewModel:
@@ -423,6 +456,7 @@ def build_inspector_view_model(state: PlanState) -> InspectorViewModel:
             provenance.balance_roll_forwards if provenance is not None else ()
         )
     )
+    summary, summary_detail = _summary_lines(state)
     return InspectorViewModel(
         title="Stated vs assumed",
         facts_heading="Facts you stated",
@@ -448,7 +482,8 @@ def build_inspector_view_model(state: PlanState) -> InspectorViewModel:
         structure_heading="Plan structure",
         structure_columns=("Entity", "Setting", "Value"),
         structure=_structure_rows(state.household),
-        summary=_summary(state),
+        summary=summary,
+        summary_detail=summary_detail,
         override_title="Override assumption",
         override_prompt="New value (blank restores the shipped default):",
         table_override_prompt=(

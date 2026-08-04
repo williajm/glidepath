@@ -14,6 +14,7 @@ import pytest
 
 from glidepath.app import (
     FactsFormData,
+    FieldKind,
     build_facts_form_view_model,
     example_facts_form_data,
     facts_form_data_from_household,
@@ -67,24 +68,19 @@ def parse(data: FactsFormData) -> Household:
 
 
 class TestFormSpec:
-    """Every §5.1 fact is enterable, with its ``as_of`` date (8.2)."""
+    """Every §5.1 fact is enterable; only statement-dated facts offer as_of."""
 
     def test_person_section_covers_the_person_facts(self) -> None:
         """DOB, sex, income, and the pre-existing access facts are present."""
         keys = {spec.key for spec in build_facts_form_view_model().person.fields}
         assert keys == {
             "date_of_birth",
-            "date_of_birth_as_of",
             "sex_for_longevity",
-            "sex_as_of",
             "tax_residency",
             "employment_income",
-            "employment_income_as_of",
             "target_retirement_age",
             "mpaa_triggered_on",
-            "mpaa_as_of",
             "lsa_used",
-            "lsa_as_of",
         }
 
     def test_wrapper_section_covers_balances_and_contributions(self) -> None:
@@ -97,7 +93,6 @@ class TestFormSpec:
             "balances_as_of",
             "employee_contribution",
             "employer_contribution",
-            "contributions_as_of",
             "relief_mechanic",
             "escalation",
         }
@@ -133,6 +128,25 @@ class TestFormSpec:
             "ni_as_of",
             "planned_extra_years",
             "deferral_years",
+        }
+
+    def test_date_fields_are_marked_for_date_entry(self) -> None:
+        """Exactly the date-valued fields carry ``FieldKind.DATE``."""
+        form = build_facts_form_view_model()
+        marked = {
+            spec.key
+            for section in form.sections
+            for spec in section.fields
+            if spec.kind is FieldKind.DATE
+        }
+        assert marked == {
+            "date_of_birth",
+            "mpaa_triggered_on",
+            "balances_as_of",
+            "forecast_as_of",
+            "ni_as_of",
+            "ni_record_start",
+            "statement_date",
         }
 
     def test_required_choices_start_blank(self) -> None:
@@ -171,36 +185,31 @@ class TestPersonParsing:
         assert household.spending is None
 
     def test_full_person_facts(self) -> None:
-        """Optional person facts parse with their own as_of dates."""
+        """Optional person facts parse, dated the day they were entered."""
         household = parse(
             FactsFormData(
                 person=person_values(
-                    date_of_birth_as_of="2026-07-01",
                     sex_for_longevity="female",
-                    sex_as_of="2026-06-15",
                     employment_income="£52,000",
-                    employment_income_as_of="2026-04-06",
                     mpaa_triggered_on="2024-01-15",
-                    mpaa_as_of="2024-01-20",
                     lsa_used="1250.50",
-                    lsa_as_of="2025-03-31",
                 )
             )
         )
         [person] = household.persons
-        assert person.date_of_birth.as_of == date(2026, 7, 1)
+        assert person.date_of_birth.as_of == TODAY
         assert person.sex_for_longevity is not None
         assert person.sex_for_longevity.value is Sex.FEMALE
-        assert person.sex_for_longevity.as_of == date(2026, 6, 15)
+        assert person.sex_for_longevity.as_of == TODAY
         assert person.employment_income is not None
         assert person.employment_income.value == Money(Decimal(52000))
-        assert person.employment_income.as_of == date(2026, 4, 6)
+        assert person.employment_income.as_of == TODAY
         assert person.mpaa_triggered_on is not None
         assert person.mpaa_triggered_on.value == date(2024, 1, 15)
-        assert person.mpaa_triggered_on.as_of == date(2024, 1, 20)
+        assert person.mpaa_triggered_on.as_of == TODAY
         assert person.lsa_used is not None
         assert person.lsa_used.value == Money(Decimal("1250.50"))
-        assert person.lsa_used.as_of == date(2025, 3, 31)
+        assert person.lsa_used.as_of == TODAY
 
     def test_scottish_residency_is_enterable(self) -> None:
         """Scotland parses into the Scottish residency id."""
@@ -634,20 +643,17 @@ class TestSpendingParsing:
     """Household spending is a fact in today's money."""
 
     def test_spending_round_trips(self) -> None:
-        """The spending need parses with its as_of date."""
+        """The spending need parses, dated the day it was entered."""
         household = parse(
             FactsFormData(
                 person=person_values(),
-                spending={
-                    "annual_spending_real": "28000",
-                    "annual_spending_real_as_of": "2026-05-01",
-                },
+                spending={"annual_spending_real": "28000"},
             )
         )
         assert household.spending is not None
         fact = household.spending.annual_spending_real
         assert fact.value == Money(Decimal(28000))
-        assert fact.as_of == date(2026, 5, 1)
+        assert fact.as_of == TODAY
 
 
 class TestValidationMessages:
@@ -955,20 +961,12 @@ def _maximal_submission() -> FactsFormData:
     """A submission exercising every optional field the form offers."""
     return FactsFormData(
         person=person_values(
-            date_of_birth_as_of="2026-07-01",
             sex_for_longevity="male",
-            sex_as_of="2026-06-15",
             employment_income="52000",
-            employment_income_as_of="2026-04-06",
             mpaa_triggered_on="2024-01-15",
-            mpaa_as_of="2024-01-20",
             lsa_used="1250.50",
-            lsa_as_of="2025-03-31",
         ),
-        spending={
-            "annual_spending_real": "28000",
-            "annual_spending_real_as_of": "2026-07-15",
-        },
+        spending={"annual_spending_real": "28000"},
         state_pension={
             "forecast_weekly_amount": "230.25",
             "protected_payment": "12.40",
@@ -987,7 +985,6 @@ def _maximal_submission() -> FactsFormData:
                 "balances_as_of": "2026-07-31",
                 "employee_contribution": "6000",
                 "employer_contribution": "2500",
-                "contributions_as_of": "2026-07-01",
                 "relief_mechanic": "relief_at_source",
                 "escalation": "earnings",
             },
@@ -1195,6 +1192,43 @@ class TestFormCannotRepresent:
         )
 
 
+def _plan_with_historical_dates() -> Household:
+    """A "loaded plan" whose undated facts carry historical ``as_of`` dates."""
+    base = parse(_maximal_submission())
+    person = base.persons[0]
+    wrapper = person.wrappers[0]
+    contributions = wrapper.contributions
+    assert contributions is not None
+    assert contributions.employer_amount is not None
+    assert person.employment_income is not None
+    dated_wrapper = _altered(
+        wrapper,
+        contributions=_altered(
+            contributions,
+            employer_amount=_altered(
+                contributions.employer_amount, as_of=date(2026, 7, 1)
+            ),
+        ),
+    )
+    household = _with_person(
+        base,
+        date_of_birth=_altered(person.date_of_birth, as_of=date(2020, 1, 15)),
+        employment_income=_altered(person.employment_income, as_of=date(2026, 4, 6)),
+        wrappers=(dated_wrapper, *person.wrappers[1:]),
+    )
+    spending = household.spending
+    assert spending is not None
+    return _altered(
+        household,
+        spending=_altered(
+            spending,
+            annual_spending_real=_altered(
+                spending.annual_spending_real, as_of=date(2026, 5, 1)
+            ),
+        ),
+    )
+
+
 class TestFormDataFromHousehold:
     """The inverse mapping repopulates the form from a loaded plan."""
 
@@ -1226,6 +1260,43 @@ class TestFormDataFromHousehold:
         )
         assert result.errors == ()
         assert result.household == household
+
+    def test_unchanged_values_keep_their_stored_as_of_dates(self) -> None:
+        """A load → resubmit round trip re-dates no undated fact (§4.5).
+
+        The form offers no ``as_of`` input for these facts, so the
+        parse carries the stored dates forward from ``previous`` —
+        full household equality proves nothing was silently re-dated.
+        """
+        stored = _plan_with_historical_dates()
+        rendered = facts_form_data_from_household(stored)
+        result = parse_facts_form(
+            rendered, recorded_on=RECORDED, today=TODAY, previous=stored
+        )
+        assert result.errors == ()
+        assert result.household == stored
+
+    def test_an_edited_value_is_re_dated_to_the_submission_day(self) -> None:
+        """A changed fact is a fresh statement; the rest keep their dates."""
+        stored = _plan_with_historical_dates()
+        rendered = facts_form_data_from_household(stored)
+        edited = FactsFormData(
+            person={**rendered.person, "employment_income": "60000"},
+            spending=rendered.spending,
+            state_pension=rendered.state_pension,
+            wrappers=rendered.wrappers,
+            db_pensions=rendered.db_pensions,
+        )
+        result = parse_facts_form(
+            edited, recorded_on=RECORDED, today=TODAY, previous=stored
+        )
+        assert result.errors == ()
+        assert result.household is not None
+        person = result.household.persons[0]
+        assert person.employment_income is not None
+        assert person.employment_income.value == Money(Decimal(60000))
+        assert person.employment_income.as_of == TODAY
+        assert person.date_of_birth.as_of == date(2020, 1, 15)
 
     def test_blank_optionals_render_blank(self) -> None:
         """A minimal household renders empty strings, not literal Nones."""

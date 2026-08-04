@@ -7,8 +7,9 @@ fields, collect raw text back, and forward it to the submit callback.
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
+    QCalendarWidget,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -17,11 +18,18 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
 
-from glidepath.app import FactsFormData, FactsFormViewModel, FieldKind, SectionSpec
+from glidepath.app import (
+    DATE_PICKER_TOOLTIP,
+    FactsFormData,
+    FactsFormViewModel,
+    FieldKind,
+    SectionSpec,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -52,6 +60,46 @@ class ScrollSafeComboBox(QComboBox):
             event.ignore()
 
 
+class DateEntry(QLineEdit):
+    """An ISO date field: typed text first, a calendar popup as assist.
+
+    A plain line edit (so blank stays honestly blank — the app layer's
+    blank-means-today/none semantics survive, `FieldKind.DATE`) with a
+    trailing action that pops a calendar; picking a day writes it back
+    as ``YYYY-MM-DD`` text, exactly as if typed.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the line edit with its calendar action and popup."""
+        super().__init__(parent)
+        self.calendar = QCalendarWidget(self)
+        self.calendar.setWindowFlags(Qt.WindowType.Popup)
+        self.calendar.clicked.connect(self._day_picked)
+        # clicked covers the mouse; activated (Enter/Return) covers the
+        # keyboard — without it the popup can be navigated but never
+        # committed by keyboard users.
+        self.calendar.activated.connect(self._day_picked)
+        self.pick_action = self.addAction(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown),
+            QLineEdit.ActionPosition.TrailingPosition,
+        )
+        self.pick_action.setToolTip(DATE_PICKER_TOOLTIP)
+        self.pick_action.triggered.connect(self._open_calendar)
+
+    def _open_calendar(self) -> None:
+        """Pop the calendar under the field, seeded from its text."""
+        current = QDate.fromString(self.text().strip(), Qt.DateFormat.ISODate)
+        if current.isValid():
+            self.calendar.setSelectedDate(current)
+        self.calendar.move(self.mapToGlobal(self.rect().bottomLeft()))
+        self.calendar.show()
+
+    def _day_picked(self, day: QDate) -> None:
+        """Write the picked day back as ISO text and close the popup."""
+        self.setText(day.toString(Qt.DateFormat.ISODate))
+        self.calendar.hide()
+
+
 class SectionForm(QGroupBox):
     """One titled group of fields rendered from a :class:`SectionSpec`."""
 
@@ -72,7 +120,9 @@ class SectionForm(QGroupBox):
                 self._editors[field.key] = combo
                 layout.addRow(field.label, combo)
             else:
-                edit = QLineEdit(self)
+                edit = (
+                    DateEntry(self) if field.kind is FieldKind.DATE else QLineEdit(self)
+                )
                 edit.setPlaceholderText(field.hint)
                 self._editors[field.key] = edit
                 layout.addRow(field.label, edit)
@@ -262,6 +312,7 @@ class FactsEntryPane(QWidget):
 
 
 __all__ = [
+    "DateEntry",
     "FactsEntryPane",
     "RepeatableSection",
     "ScrollSafeComboBox",
