@@ -7,11 +7,18 @@ specs, and repeatable sections add and remove instances.
 
 from typing import TYPE_CHECKING
 
+import pytest
 from PySide6.QtCore import QDate, QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
 
-from glidepath.app import FactsFormData, FieldKind, build_facts_form_view_model
+from glidepath.app import (
+    ENTITY_ID_KEY,
+    FactsFormData,
+    FieldKind,
+    PlanEntityIds,
+    build_facts_form_view_model,
+)
 from glidepath.gui.forms import (
     DateEntry,
     FactsEntryPane,
@@ -199,6 +206,60 @@ class TestRepeatableSection:
         [(remaining)] = section.values_list()
         assert remaining["balance"] == "2222"
 
+    def test_rows_carry_their_entity_ids_opaquely(self) -> None:
+        """Seeded ids collect back per row without becoming editors."""
+        section = RepeatableSection(build_facts_form_view_model().wrapper)
+        section.set_values_list(
+            (
+                {ENTITY_ID_KEY: "id-a", "balance": "1111"},
+                {ENTITY_ID_KEY: "id-b", "balance": "2222"},
+            )
+        )
+        values = section.values_list()
+        assert [entry[ENTITY_ID_KEY] for entry in values] == ["id-a", "id-b"]
+        [first, _second] = section.forms
+        assert first.values().get(ENTITY_ID_KEY) is None
+        with pytest.raises(KeyError):
+            first.editor(ENTITY_ID_KEY)
+
+    def test_removing_a_row_removes_its_id(self) -> None:
+        """The id travels with its row, never with its position (§4.3)."""
+        spec = build_facts_form_view_model().wrapper
+        section = RepeatableSection(spec)
+        section.set_values_list(
+            (
+                {ENTITY_ID_KEY: "id-a", "balance": "1111"},
+                {ENTITY_ID_KEY: "id-b", "balance": "2222"},
+            )
+        )
+        remove_buttons = [
+            button
+            for button in section.findChildren(QPushButton)
+            if button.text() == spec.remove_label
+        ]
+        remove_buttons[0].click()
+        [remaining] = section.values_list()
+        assert remaining[ENTITY_ID_KEY] == "id-b"
+        assert remaining["balance"] == "2222"
+
+    def test_added_rows_start_blank_until_reseeded(self) -> None:
+        """A user-added row is a new entity until a save mints its id."""
+        section = RepeatableSection(build_facts_form_view_model().wrapper)
+        section.add_button.click()
+        [values] = section.values_list()
+        assert values[ENTITY_ID_KEY] == ""
+        section.set_entity_ids(("id-minted",))
+        [reseeded] = section.values_list()
+        assert reseeded[ENTITY_ID_KEY] == "id-minted"
+
+    def test_set_entity_ids_requires_one_id_per_row(self) -> None:
+        """A count mismatch is a programming error, not a silent skew."""
+        section = RepeatableSection(build_facts_form_view_model().wrapper)
+        section.add_entry()
+        entity_ids = ("id-a", "id-b")
+        with pytest.raises(ValueError, match="one entity id per section instance"):
+            section.set_entity_ids(entity_ids)
+
 
 def _pane(
     on_submit: Callable[[FactsFormData], str] = lambda _data: "",
@@ -259,6 +320,19 @@ class TestFactsEntryPane:
         data = pane.form_data()
         assert data.person["employment_income"] == ""
         assert data.wrappers == ()
+
+    def test_set_entity_ids_seeds_every_repeatable_section(self) -> None:
+        """The saved plan's minted ids land on each repeatable section."""
+        pane = _pane()
+        pane.wrappers.add_entry()
+        pane.annuity_purchases.add_entry()
+        pane.set_entity_ids(
+            PlanEntityIds(wrappers=("id-w",), annuity_purchases=("id-a",))
+        )
+        data = pane.form_data()
+        assert data.wrappers[0][ENTITY_ID_KEY] == "id-w"
+        assert data.annuity_purchases[0][ENTITY_ID_KEY] == "id-a"
+        assert data.db_pensions == ()
 
     def test_clear_button_empties_the_form_and_shows_the_status(self) -> None:
         """The clear callback's status appears once the form is blank."""

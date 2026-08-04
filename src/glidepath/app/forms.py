@@ -12,12 +12,12 @@ domain objects happens here, so validation and messages stay
 UI-agnostic.
 """
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum, auto
 from itertools import chain
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from glidepath.core import (
     AnnuityBasis,
@@ -145,7 +145,11 @@ class FactsFormViewModel:
 
 @dataclass(frozen=True)
 class FactsFormData:
-    """Raw text captured by a shell, keyed exactly like the specs."""
+    """Raw text captured by a shell, keyed exactly like the specs.
+
+    Each repeatable-section row may additionally carry its entity id
+    under :data:`ENTITY_ID_KEY`, opaque to the rendered fields.
+    """
 
     person: Mapping[str, str] = field(default_factory=dict)
     spending: Mapping[str, str] = field(default_factory=dict)
@@ -153,6 +157,17 @@ class FactsFormData:
     wrappers: tuple[Mapping[str, str], ...] = ()
     db_pensions: tuple[Mapping[str, str], ...] = ()
     annuity_purchases: tuple[Mapping[str, str], ...] = ()
+
+
+ENTITY_ID_KEY: Final = "entity_id"
+"""Reserved key of a repeatable-section row's entity id (§4.3).
+
+Never a rendered field: shells carry it opaquely per section instance
+so wrappers, DB pensions, and annuity purchases keep their stable ids
+— and with them any scenario overrides targeting them — through
+edits, reordering, and row deletion alike. Empty or absent means a
+new entity; any other value is the id, verbatim — ids only ever
+originate from a parsed household."""
 
 
 @dataclass(frozen=True)
@@ -702,11 +717,16 @@ def _person_from(
         return None
 
 
-def _kept_id(ids: tuple[EntityId, ...], index: int) -> EntityId:
-    """The prior entity id at ``index``, or a fresh one past the end."""
-    if index < len(ids):
-        return ids[index]
-    return new_entity_id()
+def _row_entity_id(values: Mapping[str, str]) -> EntityId:
+    """The row's carried entity id, or a fresh one when empty (§4.3).
+
+    Preserved verbatim: persistence accepts any non-empty id, and
+    scenario overrides target the exact stored string — normalising
+    here (even stripping whitespace) would change the entity's
+    identity and orphan its overrides on resave.
+    """
+    text = values.get(ENTITY_ID_KEY, "")
+    return EntityId(text) if text else new_entity_id()
 
 
 def parse_facts_form(
@@ -728,11 +748,13 @@ def parse_facts_form(
     defaulted to the UTC date could sit a day after the run's
     ``today``, which §4.8 rejects as future-dated.
 
-    ``previous`` is the household a re-submission replaces: the person
-    and each wrapper, DB pension, and annuity purchase reuse the prior
-    id at their form position, so scenario overrides targeting them by
-    stable id (§4.3) survive a facts edit instead of orphaning.
-    Sections beyond the prior plan's count mint fresh ids.
+    Each wrapper, DB pension, and annuity purchase row carries its own
+    entity id under :data:`ENTITY_ID_KEY` (empty means a new entity),
+    so scenario overrides targeting them by stable id (§4.3) survive a
+    facts edit — row deletion and reordering included — instead of
+    orphaning or silently retargeting. ``previous`` is the household a
+    re-submission replaces: the (single) person reuses its id, and
+    unchanged undated facts keep their stored ``as_of`` dates.
     """
     context = _FormContext(
         recorded_on=recorded_on,
@@ -740,16 +762,6 @@ def parse_facts_form(
         errors=[],
     )
     prior = previous.persons[0] if previous is not None and previous.persons else None
-    prior_wrapper_ids = tuple(
-        wrapper.id for wrapper in (prior.wrappers if prior is not None else ())
-    )
-    prior_pension_ids = tuple(
-        pension.id for pension in (prior.db_pensions if prior is not None else ())
-    )
-    prior_purchase_ids = tuple(
-        purchase.id
-        for purchase in (prior.annuity_purchases if prior is not None else ())
-    )
     spending = _spending_from(_SectionReader(context, "spending", data.spending))
     state_pension = _state_pension_from(
         _SectionReader(context, "state_pension", data.state_pension)
@@ -760,7 +772,7 @@ def parse_facts_form(
         if (
             wrapper := _wrapper_from(
                 _SectionReader(context, "wrapper", values, index=index),
-                _kept_id(prior_wrapper_ids, index),
+                _row_entity_id(values),
             )
         )
         is not None
@@ -771,7 +783,7 @@ def parse_facts_form(
         if (
             pension := _db_pension_from(
                 _SectionReader(context, "db_pension", values, index=index),
-                _kept_id(prior_pension_ids, index),
+                _row_entity_id(values),
             )
         )
         is not None
@@ -782,7 +794,7 @@ def parse_facts_form(
         if (
             purchase := _annuity_purchase_from(
                 _SectionReader(context, "annuity_purchase", values, index=index),
-                _kept_id(prior_purchase_ids, index),
+                _row_entity_id(values),
             )
         )
         is not None
@@ -950,6 +962,7 @@ def _wrapper_values(wrapper: Wrapper) -> dict[str, str]:
     """One wrapper section instance's raw text."""
     crystallised = wrapper.crystallised_balance
     values = {
+        ENTITY_ID_KEY: str(wrapper.id),
         "kind": str(wrapper.kind),
         "balance": str(wrapper.balance.value.amount),
         "crystallised_balance": (
@@ -990,6 +1003,7 @@ def _db_pension_values(pension: DBPension) -> dict[str, str]:
     commutation = pension.commutation_factor
     taken = pension.taken_at_age
     values = {
+        ENTITY_ID_KEY: str(pension.id),
         "accrued_annual_pension": str(pension.accrued_annual_pension.value.amount),
         "statement_date": pension.statement_date.isoformat(),
         "normal_pension_age": str(pension.normal_pension_age.value),
@@ -1018,6 +1032,7 @@ def _db_pension_values(pension: DBPension) -> dict[str, str]:
 def _annuity_purchase_values(purchase: AnnuityPurchase) -> dict[str, str]:
     """One annuity purchase section instance's raw text."""
     return {
+        ENTITY_ID_KEY: str(purchase.id),
         "at_age": str(purchase.at_age.value),
         "fraction_of_pot": str(purchase.fraction_of_pot.value),
         "annuity_type": _ANNUITY_TYPE_KEYS[purchase.annuity_type],
@@ -1094,6 +1109,22 @@ def _annuity_purchase_cannot_represent(purchase: AnnuityPurchase) -> str | None:
     return None
 
 
+def _carries_note(value: object) -> bool:
+    """Whether any fact or decision inside ``value`` carries a note.
+
+    A structural walk (dataclass fields and tuples) rather than a
+    field-by-field enumeration, so a note on a fact the model grows
+    tomorrow is still caught without this function changing.
+    """
+    if isinstance(value, Fact | Decision):
+        return value.note is not None
+    if isinstance(value, tuple):
+        return any(_carries_note(item) for item in value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return any(_carries_note(getattr(value, spec.name)) for spec in fields(value))
+    return False
+
+
 def _person_cannot_represent(person: Person) -> str | None:
     """Why the form cannot faithfully edit ``person``; ``None`` if it can."""
     if person.glide_path is not None:
@@ -1119,9 +1150,10 @@ def form_cannot_represent(household: Household) -> str | None:
     model legitimately holds more than the form yet offers (extra
     persons, planned outflows, joint-life annuity purchases, personal
     glide paths, spending stage multipliers, wrapper allocations and
-    fees, independently dated fact pairs) — resubmitting the populated
-    form would silently rebuild a reduced household, so a shell must
-    refuse to open such a plan rather than lose the data (§4.5).
+    fees, independently dated fact pairs, fact and decision notes) —
+    resubmitting the populated form would silently rebuild a reduced
+    household, so a shell must refuse to open such a plan rather than
+    lose the data (§4.5).
     """
     if len(household.persons) != 1:
         return "more than one person"
@@ -1130,6 +1162,8 @@ def form_cannot_represent(household: Household) -> str | None:
     spending = household.spending
     if spending is not None and spending.stage_multipliers is not None:
         return "spending stage multipliers"
+    if _carries_note(household):
+        return "notes on facts or decisions"
     return _person_cannot_represent(household.persons[0])
 
 
@@ -1145,6 +1179,8 @@ def facts_form_data_from_household(household: Household) -> FactsFormData:
     unchanged — so a plan-load round trip re-dates nothing silently
     either way. Provenance timestamps are not carried — a resubmission
     re-records its facts at submission time, exactly like any edit.
+    Every repeatable row carries its entity id (:data:`ENTITY_ID_KEY`),
+    so identity survives edits, reordering, and row deletion (§4.3).
     """
     person = household.persons[0]
     return FactsFormData(
@@ -1156,6 +1192,32 @@ def facts_form_data_from_household(household: Household) -> FactsFormData:
         annuity_purchases=tuple(
             _annuity_purchase_values(entry) for entry in person.annuity_purchases
         ),
+    )
+
+
+@dataclass(frozen=True)
+class PlanEntityIds:
+    """The plan's repeatable-entity ids, one per form row, in order."""
+
+    wrappers: tuple[str, ...] = ()
+    db_pensions: tuple[str, ...] = ()
+    annuity_purchases: tuple[str, ...] = ()
+
+
+def plan_entity_ids(household: Household) -> PlanEntityIds:
+    """The ids a shell seeds back into the form after a successful save.
+
+    A hand-typed row carries no id, so its entity is minted fresh at
+    parse time; without this write-back the *next* submission would
+    mint again, orphaning any scenario override created in between.
+    On success the parsed household holds exactly one entity per form
+    row, in row order, so the ids line up positionally.
+    """
+    person = household.persons[0]
+    return PlanEntityIds(
+        wrappers=tuple(str(entry.id) for entry in person.wrappers),
+        db_pensions=tuple(str(entry.id) for entry in person.db_pensions),
+        annuity_purchases=tuple(str(entry.id) for entry in person.annuity_purchases),
     )
 
 

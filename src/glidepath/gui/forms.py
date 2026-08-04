@@ -25,9 +25,11 @@ from PySide6.QtWidgets import (
 
 from glidepath.app import (
     DATE_PICKER_TOOLTIP,
+    ENTITY_ID_KEY,
     FactsFormData,
     FactsFormViewModel,
     FieldKind,
+    PlanEntityIds,
     SectionSpec,
 )
 
@@ -164,7 +166,13 @@ class SectionForm(QGroupBox):
 
 
 class RepeatableSection(QWidget):
-    """A list of :class:`SectionForm` instances with add/remove controls."""
+    """A list of :class:`SectionForm` instances with add/remove controls.
+
+    Each instance carries its entity id opaquely (blank for a row the
+    user added), so deleting or reordering rows keeps every surviving
+    entity's identity — the id travels with its row, never with its
+    position (§4.3).
+    """
 
     def __init__(self, spec: SectionSpec, parent: QWidget | None = None) -> None:
         """Render the empty list with its add button."""
@@ -172,6 +180,7 @@ class RepeatableSection(QWidget):
         self._spec = spec
         self._entries: list[QWidget] = []
         self._forms: list[SectionForm] = []
+        self._entity_ids: list[str] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._list_layout = QVBoxLayout()
@@ -180,7 +189,7 @@ class RepeatableSection(QWidget):
         self.add_button.clicked.connect(self.add_entry)
         layout.addWidget(self.add_button)
 
-    def add_entry(self) -> SectionForm:
+    def add_entry(self, *, entity_id: str = "") -> SectionForm:
         """Append one more section instance and return its form."""
         container = QWidget(self)
         container_layout = QVBoxLayout(container)
@@ -193,13 +202,15 @@ class RepeatableSection(QWidget):
         self._list_layout.addWidget(container)
         self._entries.append(container)
         self._forms.append(form)
+        self._entity_ids.append(entity_id)
         return form
 
     def _remove_entry(self, container: QWidget) -> None:
-        """Drop one section instance from the list."""
+        """Drop one section instance — and its entity id — from the list."""
         index = self._entries.index(container)
         del self._entries[index]
         del self._forms[index]
+        del self._entity_ids[index]
         self._list_layout.removeWidget(container)
         container.deleteLater()
 
@@ -209,14 +220,27 @@ class RepeatableSection(QWidget):
         return tuple(self._forms)
 
     def values_list(self) -> tuple[dict[str, str], ...]:
-        """Raw text for every instance, in display order."""
-        return tuple(form.values() for form in self._forms)
+        """Raw text for every instance, its entity id included, in order."""
+        return tuple(
+            {ENTITY_ID_KEY: entity_id, **form.values()}
+            for entity_id, form in zip(self._entity_ids, self._forms, strict=True)
+        )
 
     def set_values_list(self, values_list: Sequence[Mapping[str, str]]) -> None:
         """Replace every instance with one per entry of ``values_list``."""
         self.clear()
         for values in values_list:
-            self.add_entry().set_values(values)
+            form = self.add_entry(entity_id=values.get(ENTITY_ID_KEY, ""))
+            form.set_values(
+                {key: value for key, value in values.items() if key != ENTITY_ID_KEY}
+            )
+
+    def set_entity_ids(self, entity_ids: Sequence[str]) -> None:
+        """Re-seed every row's entity id, e.g. after a successful save."""
+        if len(entity_ids) != len(self._forms):
+            msg = "one entity id per section instance required"
+            raise ValueError(msg)
+        self._entity_ids = list(entity_ids)
 
     def clear(self) -> None:
         """Drop every section instance."""
@@ -304,6 +328,17 @@ class FactsEntryPane(QWidget):
         self.wrappers.set_values_list(data.wrappers)
         self.db_pensions.set_values_list(data.db_pensions)
         self.annuity_purchases.set_values_list(data.annuity_purchases)
+
+    def set_entity_ids(self, ids: PlanEntityIds) -> None:
+        """Seed every repeatable row's entity id from the saved plan.
+
+        Called after a successful save so rows the user typed fresh
+        adopt their minted ids — the next resubmission then edits the
+        same entities instead of minting again (§4.3).
+        """
+        self.wrappers.set_entity_ids(ids.wrappers)
+        self.db_pensions.set_entity_ids(ids.db_pensions)
+        self.annuity_purchases.set_entity_ids(ids.annuity_purchases)
 
     def submit(self) -> None:
         """Forward the submission and show the returned status text."""

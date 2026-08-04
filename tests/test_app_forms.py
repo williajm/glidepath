@@ -13,6 +13,7 @@ from typing import Any, cast
 import pytest
 
 from glidepath.app import (
+    ENTITY_ID_KEY,
     FactsFormData,
     FieldKind,
     build_facts_form_view_model,
@@ -27,7 +28,9 @@ from glidepath.core import (
     AnnuityType,
     AssetAllocation,
     AssumptionKey,
+    AssumptionSet,
     Decision,
+    DecisionTarget,
     EntityId,
     FeeSchedule,
     GlidePathConfig,
@@ -35,13 +38,16 @@ from glidepath.core import (
     Household,
     LifeStage,
     Money,
+    Override,
     PlannedOutflow,
     Rate,
     ReliefMechanic,
     RevaluationReference,
+    Scenario,
     Sex,
     TaxResidencyId,
     WrapperKindId,
+    scenario_orphans,
 )
 from glidepath.regions.uk import RUK_RESIDENCY, SCOTLAND_RESIDENCY, WORKPLACE_DC_KIND
 
@@ -1032,7 +1038,7 @@ class TestValidationMessages:
 
 
 class TestEntityIdReuse:
-    """Re-submissions keep entity ids, so scenario overrides survive (§4.3)."""
+    """Entity ids ride their form rows, so scenario overrides survive (§4.3)."""
 
     @staticmethod
     def submission() -> FactsFormData:
@@ -1045,8 +1051,61 @@ class TestEntityIdReuse:
             ),
         )
 
-    def test_resubmission_reuses_prior_ids(self) -> None:
-        """The person and each wrapper keep their position's prior id."""
+    def test_rendered_rows_carry_their_entity_ids(self) -> None:
+        """Rendering a household writes each entity's id into its row."""
+        household = parse(self.submission())
+        rendered = facts_form_data_from_household(household)
+        assert [values[ENTITY_ID_KEY] for values in rendered.wrappers] == [
+            str(wrapper.id) for wrapper in household.persons[0].wrappers
+        ]
+
+    def test_rows_carrying_ids_keep_them_in_every_section(self) -> None:
+        """A row's carried id becomes the parsed entity's id.
+
+        No ``previous`` is passed: identity rides the row itself.
+        """
+        first = parse(_maximal_submission())
+        result = parse_facts_form(
+            facts_form_data_from_household(first), recorded_on=RECORDED, today=TODAY
+        )
+        second = result.household
+        assert second is not None
+        person, prior = second.persons[0], first.persons[0]
+        assert [w.id for w in person.wrappers] == [w.id for w in prior.wrappers]
+        assert [p.id for p in person.db_pensions] == [p.id for p in prior.db_pensions]
+        assert [a.id for a in person.annuity_purchases] == [
+            a.id for a in prior.annuity_purchases
+        ]
+
+    def test_carried_ids_are_preserved_verbatim(self) -> None:
+        """No normalisation: persistence allows any non-empty id string.
+
+        Scenario overrides target the exact stored id, so even
+        stripping whitespace would change identity and orphan them.
+        """
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {
+                        ENTITY_ID_KEY: " wrapper-a ",
+                        "kind": str(WORKPLACE_DC_KIND),
+                        "balance": "45000",
+                    },
+                    {
+                        ENTITY_ID_KEY: " ",
+                        "kind": str(WORKPLACE_DC_KIND),
+                        "balance": "12000",
+                    },
+                ),
+            )
+        )
+        padded, whitespace_only = household.persons[0].wrappers
+        assert padded.id == EntityId(" wrapper-a ")
+        assert whitespace_only.id == EntityId(" ")
+
+    def test_person_reuses_the_prior_plans_id(self) -> None:
+        """The (single) person still pairs with the plan being replaced."""
         first = parse(self.submission())
         result = parse_facts_form(
             self.submission(), recorded_on=RECORDED, today=TODAY, previous=first
@@ -1054,33 +1113,78 @@ class TestEntityIdReuse:
         second = result.household
         assert second is not None
         assert second.persons[0].id == first.persons[0].id
-        assert [wrapper.id for wrapper in second.persons[0].wrappers] == [
-            wrapper.id for wrapper in first.persons[0].wrappers
+
+    def test_deleting_a_row_keeps_the_survivors_id(self) -> None:
+        """Dropping row one leaves row two's entity — and its id — intact."""
+        first = parse(self.submission())
+        rendered = facts_form_data_from_household(first)
+        result = parse_facts_form(
+            FactsFormData(person=rendered.person, wrappers=rendered.wrappers[1:]),
+            recorded_on=RECORDED,
+            today=TODAY,
+            previous=first,
+        )
+        second = result.household
+        assert second is not None
+        [survivor] = second.persons[0].wrappers
+        assert survivor.id == first.persons[0].wrappers[1].id
+
+    def test_deleting_a_row_orphans_only_its_override(self) -> None:
+        """Scenario targeting: the survivor's override stays addressable."""
+        first = parse(
+            FactsFormData(
+                person=person_values(),
+                wrappers=({"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},),
+                annuity_purchases=(
+                    {"at_age": "68", "fraction_of_pot": "0.5", "annuity_type": "level"},
+                    {
+                        "at_age": "70",
+                        "fraction_of_pot": "0.25",
+                        "annuity_type": "level",
+                    },
+                ),
+            )
+        )
+        deleted, _survivor = first.persons[0].annuity_purchases
+        scenario = Scenario(
+            name="buy later",
+            overrides=tuple(
+                Override(
+                    target=DecisionTarget(entity_id=purchase.id, field_path="at_age"),
+                    value=72,
+                )
+                for purchase in first.persons[0].annuity_purchases
+            ),
+        )
+        rendered = facts_form_data_from_household(first)
+        result = parse_facts_form(
+            FactsFormData(
+                person=rendered.person,
+                wrappers=rendered.wrappers,
+                annuity_purchases=rendered.annuity_purchases[1:],
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+            previous=first,
+        )
+        second = result.household
+        assert second is not None
+        orphans = scenario_orphans(scenario, second, AssumptionSet(()))
+        assert [override.target for override in orphans] == [
+            DecisionTarget(entity_id=deleted.id, field_path="at_age")
         ]
 
-    def test_sections_beyond_the_prior_plan_mint_fresh_ids(self) -> None:
-        """A newly added wrapper gets a new id; existing ones keep theirs."""
-        first = parse(FactsFormData(person=person_values()))
+    def test_rows_without_ids_mint_fresh_ids(self) -> None:
+        """A hand-typed row is a new entity even when a prior plan exists."""
+        first = parse(self.submission())
         result = parse_facts_form(
             self.submission(), recorded_on=RECORDED, today=TODAY, previous=first
         )
         second = result.household
         assert second is not None
-        assert second.persons[0].id == first.persons[0].id
-        wrapper_ids = {wrapper.id for wrapper in second.persons[0].wrappers}
-        assert len(wrapper_ids) == 2
-
-    def test_resubmission_reuses_prior_annuity_purchase_ids(self) -> None:
-        """Purchases keep their position's prior id, like wrappers."""
-        first = parse(_maximal_submission())
-        result = parse_facts_form(
-            _maximal_submission(), recorded_on=RECORDED, today=TODAY, previous=first
-        )
-        second = result.household
-        assert second is not None
-        assert [purchase.id for purchase in second.persons[0].annuity_purchases] == [
-            purchase.id for purchase in first.persons[0].annuity_purchases
-        ]
+        prior_ids = {wrapper.id for wrapper in first.persons[0].wrappers}
+        minted_ids = {wrapper.id for wrapper in second.persons[0].wrappers}
+        assert prior_ids.isdisjoint(minted_ids)
 
     def test_without_previous_every_id_is_fresh(self) -> None:
         """Two independent parses share no entity ids."""
@@ -1323,6 +1427,37 @@ class TestFormCannotRepresent:
             form_cannot_represent(household)
             == "DB scheme facts dated off the statement date"
         )
+
+    def test_noted_fact_is_flagged(self, base: Household) -> None:
+        """A note on a fact has no form field, so a resave would drop it."""
+        person = base.persons[0]
+        noted = _altered(person.date_of_birth, note="from my passport")
+        household = _with_person(base, date_of_birth=noted)
+        assert form_cannot_represent(household) == "notes on facts or decisions"
+
+    def test_noted_decision_is_flagged(self, base: Household) -> None:
+        """A note on a decision is refused exactly like one on a fact."""
+        person = base.persons[0]
+        noted = _altered(person.target_retirement_age, note="union deal")
+        household = _with_person(base, target_retirement_age=noted)
+        assert form_cannot_represent(household) == "notes on facts or decisions"
+
+    def test_deeply_nested_note_is_flagged(self, base: Household) -> None:
+        """The scan reaches facts inside optional sub-records too."""
+        pension = base.persons[0].db_pensions[0]
+        membership = pension.active_membership
+        assert membership is not None
+        noted = _altered(membership.accrual_rate, note="scheme booklet")
+        household = _with_person(
+            base,
+            db_pensions=(
+                _altered(
+                    pension,
+                    active_membership=_altered(membership, accrual_rate=noted),
+                ),
+            ),
+        )
+        assert form_cannot_represent(household) == "notes on facts or decisions"
 
 
 def _plan_with_historical_dates() -> Household:
