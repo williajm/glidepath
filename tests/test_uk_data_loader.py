@@ -73,6 +73,7 @@ relief_at_source_rate = "0.20"
 tax_free_lump_sum_fraction = "0.25"
 lump_sum_allowance = "268275"
 lump_sum_death_benefit_allowance = "1073100"
+db_valuation_factor = 16
 """
 TAX_ISA = """
 [isa]

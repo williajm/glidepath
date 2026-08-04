@@ -34,6 +34,7 @@ from glidepath.regions.uk import (
     apply_carry_forward,
     assess_annual_allowance,
     carry_forward_generated,
+    db_pension_input_amount,
     is_mpaa_active,
     load_tax_year,
     roll_carry_forward,
@@ -713,3 +714,95 @@ def test_unused_allowance_expires_after_three_years(pension: PensionRules) -> No
         )
     over = apply_carry_forward(pension, assessed(pension, "70000"), pool)
     assert over.chargeable_excess == money("10000")
+
+
+# --- DB pension input amount (issue 9.6) ------------------------------------
+
+
+def test_db_input_is_sixteen_times_the_pension_growth(
+    pension: PensionRules,
+) -> None:
+    """PTM053301: £1,000 of new pension with flat CPI is a £16,000 input."""
+    amount = db_pension_input_amount(
+        pension,
+        opening_annual=money("10000"),
+        closing_annual=money("11000"),
+        cpi=Decimal(0),
+    )
+    assert amount == money("16000")
+
+
+def test_db_input_uprates_the_opening_value_by_cpi(pension: PensionRules) -> None:
+    """s235: only growth beyond CPI counts.
+
+    Opening £10,000 uprated by 3% is £10,300; closing £11,000 leaves
+    £700 x 16 = £11,200.
+    """
+    amount = db_pension_input_amount(
+        pension,
+        opening_annual=money("10000"),
+        closing_annual=money("11000"),
+        cpi=Decimal("0.03"),
+    )
+    assert amount == money("11200")
+
+
+def test_db_input_is_nil_when_revaluation_stays_within_cpi(
+    pension: PensionRules,
+) -> None:
+    """A deferred arrangement tracking CPI generates no input amount."""
+    amount = db_pension_input_amount(
+        pension,
+        opening_annual=money("10000"),
+        closing_annual=money("10300"),
+        cpi=Decimal("0.03"),
+    )
+    assert amount == money("0")
+
+
+def test_db_input_negative_difference_is_nil(pension: PensionRules) -> None:
+    """PTM053301: a shrinking value is nil, never negative."""
+    amount = db_pension_input_amount(
+        pension,
+        opening_annual=money("10000"),
+        closing_annual=money("9000"),
+        cpi=Decimal(0),
+    )
+    assert amount == money("0")
+
+
+def test_db_input_deflation_never_shrinks_the_opening_value(
+    pension: PensionRules,
+) -> None:
+    """Deflation leaves the opening value alone: the s235 uplift is a floor."""
+    amount = db_pension_input_amount(
+        pension,
+        opening_annual=money("10000"),
+        closing_annual=money("10500"),
+        cpi=Decimal("-0.02"),
+    )
+    assert amount == money("8000")
+
+
+def test_db_input_first_year_measures_the_whole_pension(
+    pension: PensionRules,
+) -> None:
+    """PTM053301: a nil opening value makes the whole closing value count."""
+    amount = db_pension_input_amount(
+        pension,
+        opening_annual=money("0"),
+        closing_annual=money("700"),
+        cpi=Decimal("0.03"),
+    )
+    assert amount == money("11200")
+
+
+def test_db_input_rejects_negative_amounts(pension: PensionRules) -> None:
+    """Negative pension amounts are caller errors."""
+    opening = money("-1")
+    closing = money("0")
+    cpi = Decimal(0)
+    with pytest.raises(UkContributionError, match="opening_annual"):
+        db_pension_input_amount(
+            pension, opening_annual=opening, closing_annual=closing, cpi=cpi
+        )

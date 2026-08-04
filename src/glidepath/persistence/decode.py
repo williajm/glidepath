@@ -16,6 +16,7 @@ from glidepath.core import (
     AssumptionKey,
     AssumptionTarget,
     ContributionSchedule,
+    DBActiveMembership,
     DBPension,
     Decision,
     DecisionTarget,
@@ -498,7 +499,7 @@ def _fee_schedule(raw: object, path: str) -> FeeSchedule:
 
 
 def _db_pension(raw: object, path: str) -> DBPension:
-    """Decode one deferred DB entitlement."""
+    """Decode one DB entitlement."""
     reader = _Reader(raw, path)
     pension_id = _entity_id(reader.take("id"), reader.at("id"))
     accrued = _fact(
@@ -537,6 +538,11 @@ def _db_pension(raw: object, path: str) -> DBPension:
         if taken_raw is None
         else _decision(taken_raw, reader.at("taken_at_age"), parse_int)
     )
+    membership = _optional(
+        reader.take("active_membership"),
+        reader.at("active_membership"),
+        _active_membership,
+    )
     reader.finish()
     return _built(
         lambda: DBPension(
@@ -549,6 +555,35 @@ def _db_pension(raw: object, path: str) -> DBPension:
             commuted_fraction=commuted,
             commutation_factor=commutation,
             taken_at_age=taken,
+            active_membership=membership,
+        ),
+        path,
+    )
+
+
+def _active_membership(raw: object, path: str) -> DBActiveMembership:
+    """Decode active CARE-style accrual on a DB entitlement (9.6)."""
+    reader = _Reader(raw, path)
+    accrual_rate = _fact(
+        reader.take("accrual_rate"), reader.at("accrual_rate"), parse_decimal
+    )
+    salary = _fact(
+        reader.take("pensionable_salary"),
+        reader.at("pensionable_salary"),
+        parse_money,
+    )
+    until_raw = reader.take("active_until_age")
+    until = (
+        None
+        if until_raw is None
+        else _decision(until_raw, reader.at("active_until_age"), parse_int)
+    )
+    reader.finish()
+    return _built(
+        lambda: DBActiveMembership(
+            accrual_rate=accrual_rate,
+            pensionable_salary=salary,
+            active_until_age=until,
         ),
         path,
     )

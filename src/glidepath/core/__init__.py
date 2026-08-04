@@ -65,11 +65,13 @@ from glidepath.core.montecarlo import (
     sustainable_income,
 )
 from glidepath.core.pensions import (
+    DBActiveMembership,
     DBPension,
     FactorTable,
     RevaluationBasis,
     RevaluationReference,
     db_early_late_factor,
+    db_service_end_date,
     db_start_date,
     db_taken_age,
     revaluation_factor_for_months,
@@ -87,6 +89,7 @@ from glidepath.core.periods import (
     is_age_attained_by_period_start,
     period_active_fraction,
     prorata_fraction,
+    service_active_fraction,
     whole_months_between,
 )
 from glidepath.core.provenance import (
@@ -212,6 +215,7 @@ __all__ = [
     "ContributionSchedule",
     "ContributionTaxTreatment",
     "ContributionTerms",
+    "DBActiveMembership",
     "DBPension",
     "Decision",
     "DecisionTarget",
@@ -315,6 +319,7 @@ __all__ = [
     "compare_scenario_results",
     "date_age_attained",
     "db_early_late_factor",
+    "db_service_end_date",
     "db_start_date",
     "db_taken_age",
     "decimal_assumption_value",
@@ -338,6 +343,7 @@ __all__ = [
     "run_paths",
     "run_scenarios",
     "scenario_orphans",
+    "service_active_fraction",
     "sustainable_income",
     "tax_aware_order",
     "validate_household_v1",

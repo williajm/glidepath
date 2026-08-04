@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 
 from glidepath.core import (
+    DBActiveMembership,
     DBPension,
     Decision,
     EntityId,
@@ -16,6 +17,7 @@ from glidepath.core import (
     RevaluationBasis,
     RevaluationReference,
     db_early_late_factor,
+    db_service_end_date,
     db_start_date,
     db_taken_age,
     revaluation_factor_for_months,
@@ -30,6 +32,24 @@ CPI_CAPPED_5 = RevaluationBasis(
 NO_REVALUATION = RevaluationBasis(reference=RevaluationReference.NONE)
 
 
+def membership_of(
+    *,
+    rate: str = "0.0166667",
+    salary: str = "42000",
+    until: int | None = None,
+) -> DBActiveMembership:
+    """An active membership built from compact test parameters."""
+    return DBActiveMembership(
+        accrual_rate=Fact(value=Decimal(rate), as_of=AS_OF, recorded_on=RECORDED),
+        pensionable_salary=Fact(
+            value=Money(Decimal(salary)), as_of=AS_OF, recorded_on=RECORDED
+        ),
+        active_until_age=None
+        if until is None
+        else Decision(value=until, recorded_on=RECORDED),
+    )
+
+
 def pension_of(
     *,
     accrued: str = "8000",
@@ -39,8 +59,9 @@ def pension_of(
     commuted: str = "0",
     commutation_factor: str | None = None,
     taken_at: int | None = None,
+    membership: DBActiveMembership | None = None,
 ) -> DBPension:
-    """A deferred DB pension built from compact test parameters."""
+    """A DB pension built from compact test parameters."""
     return DBPension(
         id=EntityId("db-1"),
         accrued_annual_pension=Fact(
@@ -57,6 +78,7 @@ def pension_of(
         taken_at_age=None
         if taken_at is None
         else Decision(value=taken_at, recorded_on=RECORDED),
+        active_membership=membership,
     )
 
 
@@ -201,6 +223,60 @@ class TestDBHelpers:
         """Schemes may state a factor even at NPA; the table wins."""
         pension = pension_of(npa=65, factors={65: Decimal("1.05")})
         assert db_early_late_factor(pension) == Decimal("1.05")
+
+
+class TestActiveMembership:
+    """CARE-style active accrual on a DB pension (roadmap 9.6, §5.1)."""
+
+    def test_zero_accrual_rate_is_rejected(self) -> None:
+        """A zero rate accrues nothing — a data error, not a membership."""
+        with pytest.raises(ValueError, match="accrual_rate"):
+            membership_of(rate="0")
+
+    def test_accrual_rate_beyond_one_is_rejected(self) -> None:
+        """No scheme accrues more than the whole salary per year."""
+        with pytest.raises(ValueError, match="accrual_rate"):
+            membership_of(rate="1.5")
+
+    def test_negative_pensionable_salary_is_rejected(self) -> None:
+        """Pensionable salary is a non-negative fact."""
+        with pytest.raises(ValueError, match="pensionable_salary"):
+            membership_of(salary="-1")
+
+    def test_non_positive_active_until_age_is_rejected(self) -> None:
+        """An active-until age of zero is a data error."""
+        with pytest.raises(ValueError, match="active_until_age"):
+            membership_of(until=0)
+
+    def test_active_until_beyond_the_taken_age_is_rejected(self) -> None:
+        """Service cannot outlast the benefits start (planning §5.1)."""
+        membership = membership_of(until=66)
+        with pytest.raises(ValueError, match="active_until_age"):
+            pension_of(npa=65, membership=membership)
+
+    def test_active_until_the_taken_age_is_accepted(self) -> None:
+        """Working right up to the benefits start is the boundary case."""
+        pension = pension_of(npa=65, membership=membership_of(until=65))
+        assert db_service_end_age_matches(pension, date(1970, 6, 15), 65)
+
+    def test_service_ends_at_the_active_until_birthday(self) -> None:
+        """The leave-and-defer decision dates the service end exactly."""
+        pension = pension_of(npa=65, membership=membership_of(until=60))
+        assert db_service_end_date(pension, date(1970, 6, 15)) == date(2030, 6, 15)
+
+    def test_service_defaults_to_the_benefits_start(self) -> None:
+        """No leave decision means service runs to the taken-at date."""
+        pension = pension_of(npa=65, membership=membership_of())
+        start = db_start_date(pension, date(1970, 6, 15))
+        assert db_service_end_date(pension, date(1970, 6, 15)) == start
+
+
+def db_service_end_age_matches(
+    pension: DBPension, date_of_birth: date, age: int
+) -> bool:
+    """Whether service ends on the birthday ``age`` is attained."""
+    expected = date(date_of_birth.year + age, date_of_birth.month, date_of_birth.day)
+    return db_service_end_date(pension, date_of_birth) == expected
 
 
 class TestRevaluationFactorForMonths:

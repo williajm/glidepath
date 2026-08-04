@@ -1,10 +1,9 @@
 """Tests for the schema migration harness (issue 6.4, planning §4.5).
 
-The harness ships before any real schema change exists, so these tests
-exercise it two ways: the real registry (empty — a v1 document passes
-through untouched, the wired v1→v1 no-op) and synthetic upgrader
-registries that prove sequencing, missing-step detection, and the
-one-version-per-upgrader rule ahead of the first real migration.
+These tests exercise it three ways: the real registry (the 9.6 v1→v2
+upgrader adding ``active_membership`` to DB pensions), synthetic
+upgrader registries that prove sequencing, missing-step detection, and
+the one-version-per-upgrader rule, and end-to-end loads of a v1 file.
 """
 
 import pytest
@@ -20,8 +19,13 @@ from glidepath.persistence import (
 
 
 def v1_document() -> RawDocument:
-    """A raw document already at the current schema version."""
+    """A raw document at schema version 1."""
     return {"schema_version": 1, "marker": "untouched"}
+
+
+def current_document() -> RawDocument:
+    """A raw document already at the current schema version."""
+    return {"schema_version": SCHEMA_VERSION, "marker": "untouched"}
 
 
 def _bump_to(version: int, note: str) -> RawDocument:
@@ -58,18 +62,53 @@ class TestSchemaVersion:
 
 
 class TestNoOpPath:
-    """The wired v1→v1 no-op (issue 6.4's acceptance)."""
+    """A file at the current version passes through untouched."""
 
     def test_current_version_passes_through_untouched(self) -> None:
-        """A v1 document is returned as-is — the same object, unchanged."""
-        raw = v1_document()
+        """A current document is returned as-is — same object, unchanged."""
+        raw = current_document()
         migrated = apply_migrations(raw)
         assert migrated is raw
-        assert migrated == {"schema_version": 1, "marker": "untouched"}
+        assert migrated == {"schema_version": SCHEMA_VERSION, "marker": "untouched"}
 
-    def test_current_schema_version_is_one(self) -> None:
-        """While this holds, the shipped upgrade registry stays empty."""
-        assert SCHEMA_VERSION == 1
+
+class TestV1ToV2:
+    """The 9.6 migration: DB pensions gain ``active_membership`` (§4.5)."""
+
+    def test_db_pensions_gain_a_null_active_membership(self) -> None:
+        """Every DB pension in a v1 file decodes as deferred."""
+        raw: RawDocument = {
+            "schema_version": 1,
+            "household": {
+                "persons": [
+                    {"db_pensions": [{"id": "a"}, {"id": "b"}]},
+                    {"db_pensions": []},
+                ]
+            },
+        }
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        pensions = migrated["household"]["persons"][0]["db_pensions"]
+        assert pensions == [
+            {"id": "a", "active_membership": None},
+            {"id": "b", "active_membership": None},
+        ]
+
+    def test_a_document_without_pensions_just_bumps_the_version(self) -> None:
+        """Nothing to upgrade still steps the version."""
+        raw = v1_document()
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        assert migrated["marker"] == "untouched"
+
+    def test_malformed_shapes_pass_through_for_the_strict_decoder(self) -> None:
+        """The upgrader never crashes on shapes the decoder will reject."""
+        raw: RawDocument = {
+            "schema_version": 1,
+            "household": {"persons": [{"db_pensions": "not-a-list"}, "not-a-dict"]},
+        }
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
 
 
 class TestUpgradeSequencing:

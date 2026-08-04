@@ -99,6 +99,9 @@ class TestFormSpec:
             "commutation_factor",
             "taken_at_age",
             "commuted_fraction",
+            "accrual_rate",
+            "pensionable_salary",
+            "active_until_age",
         }
 
     def test_state_pension_section_covers_forecast_and_ni_record(self) -> None:
@@ -414,6 +417,122 @@ class TestDBPensionParsing:
         assert result.household is None
         [error] = result.errors
         assert error.section == "db_pension"
+
+    def test_active_membership_parses_with_statement_dated_facts(self) -> None:
+        """The accrual rate and salary become facts dated by the statement."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                db_pensions=(
+                    {
+                        "accrued_annual_pension": "8500",
+                        "statement_date": "2025-11-30",
+                        "normal_pension_age": "65",
+                        "revaluation_reference": "cpi",
+                        "accrual_rate": "0.0166667",
+                        "pensionable_salary": "42000",
+                        "active_until_age": "60",
+                    },
+                ),
+            )
+        )
+        [pension] = household.persons[0].db_pensions
+        membership = pension.active_membership
+        assert membership is not None
+        statement = date(2025, 11, 30)
+        assert membership.accrual_rate.value == Decimal("0.0166667")
+        assert membership.accrual_rate.as_of == statement
+        assert membership.pensionable_salary.value == Money(Decimal(42000))
+        assert membership.pensionable_salary.as_of == statement
+        assert membership.active_until_age is not None
+        assert membership.active_until_age.value == 60
+
+    def test_blank_membership_fields_mean_deferred(self) -> None:
+        """Leaving the accrual block empty keeps the pension deferred."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                db_pensions=(
+                    {
+                        "accrued_annual_pension": "8500",
+                        "statement_date": "2025-11-30",
+                        "normal_pension_age": "65",
+                        "revaluation_reference": "none",
+                    },
+                ),
+            )
+        )
+        [pension] = household.persons[0].db_pensions
+        assert pension.active_membership is None
+
+    def test_salary_without_a_rate_is_rejected(self) -> None:
+        """A filled sibling with no accrual rate is an error, not a guess."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                db_pensions=(
+                    {
+                        "accrued_annual_pension": "8500",
+                        "statement_date": "2025-11-30",
+                        "normal_pension_age": "65",
+                        "revaluation_reference": "none",
+                        "pensionable_salary": "42000",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.field_key == "accrual_rate"
+
+    def test_a_rate_without_a_salary_is_rejected(self) -> None:
+        """Active membership needs both scheme facts."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                db_pensions=(
+                    {
+                        "accrued_annual_pension": "8500",
+                        "statement_date": "2025-11-30",
+                        "normal_pension_age": "65",
+                        "revaluation_reference": "none",
+                        "accrual_rate": "0.02",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.field_key == "pensionable_salary"
+
+    def test_active_until_beyond_the_taken_age_is_rejected(self) -> None:
+        """The core cross-field rule surfaces as a section-level error."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                db_pensions=(
+                    {
+                        "accrued_annual_pension": "8500",
+                        "statement_date": "2025-11-30",
+                        "normal_pension_age": "65",
+                        "revaluation_reference": "none",
+                        "accrual_rate": "0.02",
+                        "pensionable_salary": "42000",
+                        "active_until_age": "70",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "db_pension"
+        assert "active_until_age" in error.message
 
     def test_garbled_factor_table_is_rejected(self) -> None:
         """Factor pairs must be age:factor."""

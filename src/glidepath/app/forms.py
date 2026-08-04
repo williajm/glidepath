@@ -21,6 +21,7 @@ from glidepath.core import (
     AssetAllocation,
     AssumptionKey,
     ContributionSchedule,
+    DBActiveMembership,
     DBPension,
     Decision,
     EntityId,
@@ -163,6 +164,10 @@ _FACTORS_MESSAGE = "enter age:factor pairs separated by commas, e.g. 60:0.75, 65
 _CONTRIBUTIONS_NEED_EMPLOYEE = (
     "enter the employee contribution (0 is fine) to record contributions"
 )
+_MEMBERSHIP_NEEDS_RATE = (
+    "enter the accrual rate to record active membership; blank means deferred"
+)
+_MEMBERSHIP_NEEDS_SALARY = "active membership needs the pensionable salary"
 
 _AS_OF_HINT = "YYYY-MM-DD; blank means today"
 
@@ -482,8 +487,43 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
         return None
 
 
+def _active_membership_from(
+    reader: _SectionReader, statement: date | None
+) -> DBActiveMembership | None:
+    """A DB pension's active membership, or ``None`` when untouched.
+
+    The accrual rate anchors the block (like the employee contribution
+    anchors a contribution schedule): blank means deferred, and filling
+    a sibling without it is an error rather than a silent guess.
+    """
+    rate = reader.decimal_value("accrual_rate")
+    salary = reader.money("pensionable_salary")
+    until = reader.int_value("active_until_age")
+    if rate is None:
+        if salary is not None or until is not None:
+            reader.error("accrual_rate", _MEMBERSHIP_NEEDS_RATE)
+        return None
+    if salary is None:
+        reader.error("pensionable_salary", _MEMBERSHIP_NEEDS_SALARY)
+        return None
+    if statement is None:
+        return None
+    recorded = reader.recorded_on
+    try:
+        return DBActiveMembership(
+            accrual_rate=Fact(value=rate, as_of=statement, recorded_on=recorded),
+            pensionable_salary=Fact(
+                value=salary, as_of=statement, recorded_on=recorded
+            ),
+            active_until_age=reader.decision_of(until),
+        )
+    except ValueError as exc:
+        reader.error("", str(exc))
+        return None
+
+
 def _db_pension_from(reader: _SectionReader, entity_id: EntityId) -> DBPension | None:
-    """One deferred DB entitlement from its section values.
+    """One DB entitlement from its section values.
 
     The statement date doubles as the ``as_of`` for the scheme facts it
     dates (planning §5.1: accrued pension is "at date of leaving /
@@ -499,6 +539,7 @@ def _db_pension_from(reader: _SectionReader, entity_id: EntityId) -> DBPension |
     commutation = reader.decimal_value("commutation_factor")
     taken_at = reader.int_value("taken_at_age")
     fraction = reader.decimal_value("commuted_fraction")
+    membership = _active_membership_from(reader, statement)
     if reference is None:
         reader.error("revaluation_reference", _REQUIRED_MESSAGE)
         return None
@@ -531,6 +572,7 @@ def _db_pension_from(reader: _SectionReader, entity_id: EntityId) -> DBPension |
                 else Fact(value=commutation, as_of=statement, recorded_on=recorded)
             ),
             taken_at_age=reader.decision_of(taken_at),
+            active_membership=membership,
         )
     except ValueError as exc:
         reader.error("", str(exc))
@@ -931,14 +973,16 @@ def _wrapper_section() -> SectionSpec:
 
 
 def _db_pension_section() -> SectionSpec:
-    """The repeatable deferred-DB-pension section."""
+    """The repeatable DB-pension section."""
     return SectionSpec(
         key="db_pension",
-        title="Defined benefit pension (deferred)",
+        title="Defined benefit pension",
         description=(
-            "Scheme parameters are facts from your deferred benefit "
-            "statement — schemes vary too much to guess. The statement "
-            "date dates every scheme fact."
+            "Scheme parameters are facts from your benefit statement — "
+            "schemes vary too much to guess. The statement date dates "
+            "every scheme fact. Still accruing? Enter the accrual rate "
+            "and pensionable salary; leave them blank for a deferred "
+            "pension."
         ),
         repeatable=True,
         add_label="Add DB pension",
@@ -1003,6 +1047,21 @@ def _db_pension_section() -> SectionSpec:
                 key="commuted_fraction",
                 label="Fraction commuted to lump sum (your choice)",
                 hint="0 to 1, e.g. 0.25; blank means none",
+            ),
+            FieldSpec(
+                key="accrual_rate",
+                label="Accrual rate (fraction of salary per year of service)",
+                hint="e.g. 0.0166667 for a 1/60th scheme; blank if deferred",
+            ),
+            FieldSpec(
+                key="pensionable_salary",
+                label="Pensionable salary (annual)",
+                hint="active members only; often below total pay",
+            ),
+            FieldSpec(
+                key="active_until_age",
+                label="Active until age (your choice)",
+                hint="blank means until benefits start",
             ),
         ),
     )

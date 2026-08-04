@@ -68,7 +68,8 @@ class DecisionTarget:
       ``state_pension.planned_extra_years``,
       ``state_pension.deferral_years``
     - wrapper: ``contributions.employee_amount``
-    - DB pension: ``taken_at_age``, ``commuted_fraction``
+    - DB pension: ``taken_at_age``, ``commuted_fraction``,
+      ``active_membership.active_until_age``
     - annuity purchase: ``at_age``, ``fraction_of_pot``,
       ``annuity_type``, ``basis``
     - planned outflow: ``amount_real``
@@ -343,6 +344,13 @@ def _person_decision_target_labels(person: Person) -> dict[tuple[EntityId, str],
         labels[(pension.id, "commuted_fraction")] = (
             f"db_pension[{pension.id}].commuted_fraction"
         )
+        if (
+            pension.active_membership is not None
+            and pension.active_membership.active_until_age is not None
+        ):
+            labels[(pension.id, "active_membership.active_until_age")] = (
+                f"db_pension[{pension.id}].active_membership.active_until_age"
+            )
     for purchase in person.annuity_purchases:
         for field in ("at_age", "fraction_of_pot", "annuity_type", "basis"):
             labels[(purchase.id, field)] = f"annuity_purchase[{purchase.id}].{field}"
@@ -527,6 +535,21 @@ def _apply_to_db_pension(
             pension.commuted_fraction,
             override,
             f"db_pension[{pension.id}].commuted_fraction",
+        )
+    override = picks.get((pension.id, "active_membership.active_until_age"))
+    membership = pension.active_membership
+    if (
+        override is not None
+        and membership is not None
+        and membership.active_until_age is not None
+    ):
+        changes["active_membership"] = replace(
+            membership,
+            active_until_age=_resolved_decision(
+                membership.active_until_age,
+                override,
+                f"db_pension[{pension.id}].active_membership.active_until_age",
+            ),
         )
     return replace(pension, **changes) if changes else pension
 

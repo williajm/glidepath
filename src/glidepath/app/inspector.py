@@ -284,8 +284,16 @@ def _wrapper_structure(wrapper: Wrapper, name: str) -> list[StructureRow]:
 
 
 def _db_structure(pension: DBPension, name: str) -> list[StructureRow]:
-    """One DB pension's scheme structure as display rows (issue #70)."""
+    """One DB pension's scheme structure as display rows (issue #70).
+
+    Membership is structural — active accrual's rate and salary are
+    ``Fact``-wrapped and appear as provenance rows instead (9.6).
+    """
+    membership = (
+        "Deferred" if pension.active_membership is None else "Active (accruing)"
+    )
     return [
+        StructureRow(name, "Membership", membership),
         StructureRow(name, "Statement date", format_date(pension.statement_date)),
         StructureRow(name, "Revaluation", _revaluation_text(pension.revaluation_basis)),
         StructureRow(

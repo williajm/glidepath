@@ -312,6 +312,11 @@ def _parse_pension(raw: object, context: str) -> PensionRules:
             table.take("lump_sum_death_benefit_allowance"),
             f"{context}.lump_sum_death_benefit_allowance",
         ),
+        db_valuation_factor=_integer(
+            table.take("db_valuation_factor"),
+            f"{context}.db_valuation_factor",
+            minimum=1,
+        ),
     )
     table.finish()
     return rules

@@ -25,6 +25,7 @@ from glidepath.core import (
     AssetAllocation,
     AssumptionKey,
     ContributionSchedule,
+    DBActiveMembership,
     DBPension,
     Decision,
     EntityId,
@@ -285,6 +286,12 @@ def structural_household() -> Household:
         ),
         early_late_factors=FactorTable(factors={58: Decimal("0.80")}),
         commuted_fraction=Decision(value=Decimal(0), recorded_on=RECORDED),
+        active_membership=DBActiveMembership(
+            accrual_rate=Fact(
+                value=Decimal("0.0166667"), as_of=AS_OF, recorded_on=RECORDED
+            ),
+            pensionable_salary=money_fact("42000"),
+        ),
     )
     frozen = DBPension(
         id=EntityId("structure-db-frozen"),
@@ -393,9 +400,11 @@ class TestPlanStructure:
     def test_db_rows_show_scheme_structure(self) -> None:
         """Statement date, revaluation basis, and factors surface per scheme."""
         rows = self.structure_values(structural_household())
+        assert rows["DB pension 1", "Membership"] == "Active (accruing)"
         assert rows["DB pension 1", "Statement date"] == "2025-04-06"
         assert rows["DB pension 1", "Revaluation"] == "CPI, capped at 0.05"
         assert rows["DB pension 1", "Early/late factors"] == "58: 0.80"
+        assert rows["DB pension 2", "Membership"] == "Deferred"
         assert rows["DB pension 2", "Revaluation"] == "None (frozen in nominal terms)"
         assert rows["DB pension 2", "Early/late factors"] == (
             "None (taken at the normal pension age)"

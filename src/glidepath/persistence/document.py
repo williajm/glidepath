@@ -17,8 +17,12 @@ if TYPE_CHECKING:
 
     from glidepath.core import AssumptionKey, Household, Scenario
 
-SCHEMA_VERSION = 1
-"""The schema version this build reads and writes (planning §4.5)."""
+SCHEMA_VERSION = 2
+"""The schema version this build reads and writes (planning §4.5).
+
+v2 (roadmap 9.6): every DB pension carries an ``active_membership``
+key — ``null`` for a deferred entitlement.
+"""
 
 
 class PersistenceError(ValueError):
