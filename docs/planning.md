@@ -1560,6 +1560,24 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   horizontal scrollbar and reads for humans — assumption display names,
   manifest behind a summary tooltip, defaults shown only when they
   differ (details under roadmap 8.2/8.3).*
+- [ ] 9.11 Age on chart axes — *chart categories and bar tooltips carry
+  the person's age at period start alongside the year (§4.7);
+  single-person labelling until couples activate (9.4).*
+- [ ] 9.12 Annuity purchase entry in the facts form — *purchase age,
+  amount, level vs inflation-linked enterable in the shell; lift the
+  `form_cannot_represent` refusal for annuity purchases and round-trip
+  them through `facts_form_data_from_household`, so the income chart's
+  existing annuity series becomes reachable.*
+- [ ] 9.13 Monte Carlo in the GUI — *the Phase 7 core surfaced per §4.7:
+  run-mode control (deterministic | Monte Carlo with paths + seed),
+  success-metrics readout (success rate, probability of ruin, ending-pot
+  percentiles), percentile bands on the balances chart in either basis;
+  same seed + inputs reproduce identical results (§4.6).*
+- [ ] 9.14 "When can I retire?" solver — *earliest target retirement age
+  meeting a replacement-rate target (default 66% of current employment
+  income, user-adjustable), mirroring the roadmap 7.3
+  `sustainable_income` search over runs; deterministic first, "≥ N%
+  Monte Carlo success" once 9.13 lands.*
 
 ## 9. Open questions
 
