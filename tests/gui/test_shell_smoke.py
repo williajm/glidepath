@@ -72,7 +72,7 @@ class TestDisclaimerDialog:
 
 
 class TestMainWindow:
-    """The window binds the shell view model and exposes About."""
+    """The window binds the shell view model and exposes the Help menu."""
 
     def test_binds_view_model_copy(self) -> None:
         """Window title and tab labels come from the view model."""
@@ -94,12 +94,57 @@ class TestMainWindow:
             f"&{view_model.help_menu_label}",
         ]
 
+    def test_help_menu_offers_guide_and_about(self) -> None:
+        """The Help menu's actions carry the view-model titles."""
+        view_model = build_shell_view_model()
+        window = MainWindow(view_model)
+        assert window.help_guide_action.text() == view_model.help_guide.title
+        assert window.about_action.text() == view_model.about.title
+
     def test_about_shows_view_model_copy(self) -> None:
         """About shows the about view model — which repeats the disclaimer."""
         view_model = build_shell_view_model()
-        box = MainWindow(view_model).about_box()
-        assert box.windowTitle() == view_model.about.title
-        assert box.text() == view_model.about.body
+        dialog = MainWindow(view_model).about_dialog()
+        assert dialog.windowTitle() == view_model.about.title
+        assert dialog.body_label.text() == view_model.about.body
+
+    def test_help_guide_shows_every_section(self) -> None:
+        """The guide dialog renders one card per view-model section."""
+        view_model = build_shell_view_model()
+        dialog = MainWindow(view_model).help_guide_dialog()
+        assert dialog.windowTitle() == view_model.help_guide.title
+        assert dialog.intro_label.text() == view_model.help_guide.intro
+        headings = [card.title() for card in dialog.section_cards]
+        expected = [section.heading for section in view_model.help_guide.sections]
+        assert headings == expected
+
+    def test_show_about_runs_the_dialog_modally(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The About menu handler executes the dialog."""
+        executed: list[str] = []
+
+        def fake_exec(_self: widgets.AboutDialog) -> int:
+            executed.append("about")
+            return 0
+
+        monkeypatch.setattr(widgets.AboutDialog, "exec", fake_exec, raising=True)
+        MainWindow(build_shell_view_model()).show_about()
+        assert executed == ["about"]
+
+    def test_show_help_guide_runs_the_dialog_modally(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The guide menu handler executes the dialog."""
+        executed: list[str] = []
+
+        def fake_exec(_self: widgets.HelpGuideDialog) -> int:
+            executed.append("guide")
+            return 0
+
+        monkeypatch.setattr(widgets.HelpGuideDialog, "exec", fake_exec, raising=True)
+        MainWindow(build_shell_view_model()).show_help_guide()
+        assert executed == ["guide"]
 
 
 class TestRun:

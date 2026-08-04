@@ -206,3 +206,35 @@ class TestShellViewModel:
         assert not should_show_disclaimer(
             FirstRunState(disclaimer_acknowledged_on=date(2026, 8, 3))
         )
+
+
+class TestHelpGuide:
+    """The how-to-use guide explains the shell and repeats the disclaimer."""
+
+    def test_guide_carries_title_and_intro(self) -> None:
+        """The guide opens with a title and an orienting intro."""
+        guide = build_shell_view_model().help_guide
+        assert guide.title
+        assert guide.intro
+
+    def test_guide_covers_every_tab(self) -> None:
+        """Each shell tab has a section whose heading names it."""
+        view_model = build_shell_view_model()
+        headings = [section.heading for section in view_model.help_guide.sections]
+        for tab_label in (
+            view_model.facts_tab_label,
+            view_model.charts_tab_label,
+            view_model.scenarios_tab_label,
+            view_model.inspector_tab_label,
+        ):
+            assert any(tab_label in heading for heading in headings)
+
+    def test_guide_explains_saving(self) -> None:
+        """The guide has a section on saving and reopening plans."""
+        guide = build_shell_view_model().help_guide
+        assert any("Save" in section.heading for section in guide.sections)
+
+    def test_guide_repeats_disclaimer(self) -> None:
+        """The guide ends on the §1 disclaimer (product requirement)."""
+        guide = build_shell_view_model().help_guide
+        assert guide.sections[-1].body == DISCLAIMER_BODY

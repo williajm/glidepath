@@ -1530,6 +1530,13 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   overrides (base and per-scenario) are vetted by their policy parsers
   at load so a defective table fails the open, never a run mid-flight;
   clearing the form detaches the session's plan file so Save re-asks.*
+- [x] 9.9 In-app help + About layout — *Help → "How to use glidepath"
+  guide dialog: copy lives in the app layer per §4.7 (one card per
+  shell surface — example plan, Facts, Charts, Scenarios, stated vs
+  assumed, save/load — closing by repeating the §1 disclaimer); the
+  About box rebuilt as a dialog with the wordmark above full-width
+  wrapped copy, replacing the `QMessageBox` that squeezed the
+  disclaimer into a narrow column beside the wordmark.*
 
 ## 9. Open questions
 
