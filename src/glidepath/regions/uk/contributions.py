@@ -27,8 +27,9 @@ scheme and mechanic (PTM044220), threaded through
 the member's ``member_relief_max_age`` birthday on are never
 relievable, whatever the earnings (FA 2004 s188(3)(a), PTM044100).
 Contributions beyond the relief limit are clipped and reported, not
-contributed unrelieved (planning §5.1 keeps v1 wrappers relief-clean;
-routing excess to a taxable wrapper is roadmap 9.2 territory).
+contributed unrelieved (planning §5.1 keeps wrappers relief-clean;
+they are never rerouted — a schedule states intent for one wrapper,
+and taxable saving is scheduled on a GIA directly, roadmap 9.2).
 
 **Annual allowance** (planning §5.2 step 3, §6). The AA measures total
 *pension input amounts* — member gross plus employer contributions and

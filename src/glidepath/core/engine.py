@@ -46,14 +46,16 @@ v1 engine conventions, superseded as later phases land:
   strategy plans net-defined or gross-defined draws over the drawable
   sub-balances and the engine executes the plan, enforcing the
   region's access gates. The default fixed-real strategy meets the
-  net need in the tax-aware order of planning §5.2 — tax-free
-  wrappers first, then funds already in drawdown (no fresh tax-free
-  cash), then new pension access — with every uncrystallised pot,
-  tax-free kinds included, subject to the region's access gate. In
-  decumulation the net-of-tax DB/state-pension income (and any
-  commutation lump sum) received in the period offsets the net
-  spending need before wrappers are drawn; income beyond the need is
-  not banked — there is no cash/GIA wrapper until roadmap 9.2.
+  net need in the tax-aware order of planning §5.2 — taxable-growth
+  accounts (GIA/cash) first, then tax-free wrappers, then funds
+  already in drawdown (no fresh tax-free cash), then new pension
+  access — with every uncrystallised pot, tax-free kinds included,
+  subject to the region's access gate. In decumulation the net-of-tax
+  DB/state-pension income (and any commutation lump sum) received in
+  the period offsets the net spending need before wrappers are drawn;
+  income and gross draws beyond the need bank into the person's first
+  uncapped taxable wrapper (GIA/cash, roadmap 9.2) and are spent only
+  when they hold none.
 - Planned outflows (roadmap 5.4) land whole in the period containing
   the date their person attains the stated age — inside the run
   window only — inflated from today's money by the period-start
@@ -173,7 +175,7 @@ from glidepath.core.returns import (
     nominal_rate,
 )
 from glidepath.core.state_pension import StatePensionUprating
-from glidepath.core.tax import TaxInput
+from glidepath.core.tax import TaxInput, TaxResult
 from glidepath.core.withdrawals import (
     FixedRealWithdrawalStrategy,
     NetWithdrawalPlan,
@@ -182,7 +184,11 @@ from glidepath.core.withdrawals import (
     WithdrawalSourceId,
     WithdrawalState,
 )
-from glidepath.core.wrappers import WithdrawalTaxTreatment
+from glidepath.core.wrappers import (
+    ContributionTaxTreatment,
+    GrowthTaxTreatment,
+    WithdrawalTaxTreatment,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -200,7 +206,7 @@ if TYPE_CHECKING:
     from glidepath.core.returns import PeriodReturns, ReturnModel, ReturnModelFactory
     from glidepath.core.state_pension import StatePensionEntitlement
     from glidepath.core.withdrawals import GrossWithdrawalPlan, WithdrawalStrategy
-    from glidepath.core.wrappers import Wrapper, WrapperTaxTreatment
+    from glidepath.core.wrappers import ContributionCap, Wrapper, WrapperTaxTreatment
 
 _ZERO = Money(Decimal(0))
 _ONE = Decimal(1)
@@ -237,12 +243,18 @@ class _WrapperLedger:
     employee_in: Money = _ZERO
     employer_in: Money = _ZERO
     provider_relief: Money = _ZERO
+    bonus_in: Money = _ZERO
     contribution_shortfall: Money = _ZERO
     withdrawn_uncrystallised: Money = _ZERO
     withdrawn_crystallised: Money = _ZERO
     withdrawal_tax_free: Money = _ZERO
     withdrawal_taxable: Money = _ZERO
     annuity_purchase: Money = _ZERO
+    taxable_interest: Money = _ZERO
+    taxable_dividends: Money = _ZERO
+    growth_tax: Money = _ZERO
+    growth_tax_unfunded: Money = _ZERO
+    banked_in: Money = _ZERO
 
 
 @dataclass(slots=True)
@@ -283,6 +295,7 @@ class _WithdrawalSource:
             tax_free_fraction=self.tax_free_fraction,
             access_open=self.access_open,
             natural_yield=natural_yield,
+            growth_taxable=(self.ledger.treatment.growth is GrowthTaxTreatment.TAXABLE),
         )
 
     @property
@@ -561,6 +574,8 @@ class _Projection:
     model: ReturnModel
     _balances: dict[str, tuple[Money, Money]] = field(default_factory=dict)
     _taxable_income: Money = _ZERO
+    _savings_income: Money = _ZERO
+    _dividend_income: Money = _ZERO
     _relief_at_source: Money = _ZERO
     _db_streams: list[_DbStream] = field(default_factory=list)
     _sp_stream: _StatePensionStream | None = None
@@ -896,6 +911,7 @@ class _Projection:
         annuity_lump_sum = self._annuity_purchase_step(ledgers, period)
         annuity_income = self._annuity_amount(period)
         state_pension = self._state_pension_amount(period)
+        self._accrue_portfolio_income(ledgers, fraction)
         # Steps 3-4 — contributions, then withdrawals.
         self._taxable_income = (
             employment + db_income + state_pension + db_lump_sum_excess + annuity_income
@@ -908,6 +924,7 @@ class _Projection:
         wrapper_need = _ZERO
         delivered = _ZERO
         pension_lump_sum = _ZERO
+        banked = _ZERO
         if retired:
             if self.plan.spending is not None:
                 need = _spending_need(self.plan.spending, stage, inflation) * fraction
@@ -918,9 +935,12 @@ class _Projection:
             # excess is in the assessment), and any up-front or
             # annuity-purchase tax-free cash meet the net need —
             # spending plus planned outflows — first; only the
-            # remainder is drawn from wrappers (income beyond the
-            # need is not banked — module docstring).
-            income_tax = self.region.tax.assess(period, self._tax_input()).tax_due
+            # remainder is drawn from wrappers. The offset excludes
+            # the portfolio-income layers: their tax is charged to
+            # the taxable wrappers at close, never to the need.
+            income_tax = self.region.tax.assess(
+                period, self._tax_input(include_portfolio=False)
+            ).tax_due
             income_net = (
                 db_income
                 + state_pension
@@ -938,6 +958,13 @@ class _Projection:
                 fraction,
                 self.config.withdrawal_strategy,
             )
+            # Income and gross draws beyond the need bank into the
+            # first uncapped taxable wrapper when one exists (roadmap
+            # 9.2); with none they are spent, the pre-9.2 behaviour.
+            surplus = max(income_net - need - outflows, _ZERO) + max(
+                delivered - wrapper_need, _ZERO
+            )
+            banked = self._bank_surplus(ledgers, surplus)
         elif outflows > _ZERO:
             # An outflow due while still accumulating is a net cash
             # need met in the default tax-aware order — the configured
@@ -946,13 +973,21 @@ class _Projection:
             delivered = self._withdrawal_step(
                 ledgers, period, wrapper_need, fraction, _OUTFLOW_FUNDING
             )
-        # Step 5 — final tax assessment on the full income picture.
+        # Step 5 — final tax assessment on the full income picture,
+        # then the portfolio-income slice charged to its wrappers.
         tax = self.region.tax.assess(period, self._tax_input())
+        self._charge_portfolio_tax(ledgers, period, tax)
         # Steps 6-8 — fees, growth, close.
         wrapper_results = tuple(
             self._close_wrapper(ledger, returns, fraction) for ledger in ledgers
         )
-        shortfall = max(wrapper_need - delivered, _ZERO)
+        # Portfolio-income tax a drained wrapper could not fund is
+        # unmet need: it joins the shortfall so the ledger reconciles
+        # and the roadmap-7.3 ruin signal sees it (planning §5.2).
+        unfunded_tax = _ZERO
+        for ledger in ledgers:
+            unfunded_tax = unfunded_tax + ledger.growth_tax_unfunded
+        shortfall = max(wrapper_need - delivered, _ZERO) + unfunded_tax
         person_result = PersonPeriodResult(
             person_id=person.id,
             age_at_period_start=age,
@@ -973,6 +1008,7 @@ class _Projection:
             pension_lump_sum=pension_lump_sum.quantized(),
             lsa_used=self._lsa_used.quantized(),
             mpaa_triggered_on=self._mpaa_triggered_on,
+            banked=banked.quantized(),
         )
         return PeriodSnapshot(
             period=period,
@@ -1214,8 +1250,27 @@ class _Projection:
     def _open_ledger(
         self, wrapper: Wrapper, period: Period, glide: GlidePathConfig, ytr: int
     ) -> _WrapperLedger:
-        """Step 1 for one wrapper: allocation and opening balances."""
+        """Step 1 for one wrapper: allocation and opening balances.
+
+        A crystallised balance is meaningful only on a partially
+        tax-free (pension) kind — funds already designated to drawdown
+        (planning §5.1). Any other kind carrying one is an engine
+        error: crystallised sub-balances are never re-gated, so
+        accepting one on an age-gated kind (a LISA) would let money
+        bypass its access gate.
+        """
         uncrystallised, crystallised = self._balances[wrapper.id]
+        treatment = self.region.wrappers.tax_treatment(wrapper.kind, period)
+        if (
+            crystallised > _ZERO
+            and treatment.withdrawals is not WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+        ):
+            msg = (
+                f"wrapper {wrapper.id}: kind {wrapper.kind!r} does not take a"
+                " crystallised balance — only partially-tax-free (pension)"
+                " kinds hold funds designated to drawdown"
+            )
+            raise EngineError(msg)
         allocation = (
             wrapper.allocation
             if wrapper.allocation is not None
@@ -1224,7 +1279,7 @@ class _Projection:
         return _WrapperLedger(
             wrapper=wrapper,
             allocation=allocation,
-            treatment=self.region.wrappers.tax_treatment(wrapper.kind, period),
+            treatment=treatment,
             uncrystallised=uncrystallised,
             crystallised=crystallised,
             opening_uncrystallised=uncrystallised,
@@ -1241,39 +1296,51 @@ class _Projection:
     ) -> None:
         """Step 3: scheduled contributions through caps and relief rules.
 
-        Employer amounts (employment terms, outside the member's
-        control) consume any per-kind cap first; the employee amount
-        fills what remains. Amounts a cap or the region's relief limit
-        keeps out of the pot are recorded as the wrapper's contribution
-        shortfall — v1 does not reroute them (roadmap 9.2). Scheduled
-        amounts are scaled by the partial-period ``fraction`` (roadmap
-        4.6); per-kind caps stay whole-year — allowances are annual,
-        and contributions already made this year live in the balance
-        facts, not the model.
+        The region's contribution terms govern each kind (roadmap
+        9.2): scheduled amounts scale by the whole-month share of the
+        period inside the intersection of the run window and the
+        terms' contribution window (a LISA's stops at 50) — one
+        overlap, never the product of separate fractions, so a run
+        starting after the window closes contributes nothing; caps
+        are annual allowances shared
+        across wrappers through their allowance groups (LISA inside
+        the overall ISA allowance), with employer amounts (employment
+        terms, outside the member's control) consuming headroom first;
+        a bonus rate (the LISA's 25%) credits the pot on top of the
+        member's contribution without consuming any cap. Amounts a cap
+        or the region's relief limit keeps out of the pot are recorded
+        as the wrapper's contribution shortfall — never rerouted: a
+        schedule states intent for one wrapper (§5.1). Caps stay
+        whole-year — allowances are annual, and contributions already
+        made this year live in the balance facts, not the model.
         """
-        used_by_kind: dict[str, Money] = {}
+        used_by_group: dict[str, Money] = {}
         relieved_so_far = _ZERO
         for ledger in ledgers:
             schedule = ledger.wrapper.contributions
             if schedule is None:
                 continue
             self._require_permitted_mechanic(ledger.wrapper, schedule)
+            terms = self.region.wrappers.contribution_terms(
+                ledger.wrapper.kind, self.person.date_of_birth.value, period
+            )
             escalation = _ONE
             if schedule.escalation is not None:
                 escalation = factors.factor(schedule.escalation)
-            employee_intended = schedule.employee_amount.value * escalation * fraction
+            flow_fraction = fraction
+            if terms.window is not None:
+                flow_fraction = self._contribution_window_fraction(terms.window, period)
+            scale = escalation * flow_fraction
+            employee_intended = schedule.employee_amount.value * scale
             employer = _ZERO
             if schedule.employer_amount is not None:
-                employer = schedule.employer_amount.value * escalation * fraction
-            kind = ledger.wrapper.kind
-            cap = self.region.wrappers.annual_contribution_limit(kind, period)
-            employee = employee_intended
-            if cap is not None:
-                used = used_by_kind.get(kind, _ZERO)
-                headroom = max(cap - used, _ZERO)
-                employer = min(employer, headroom)
-                employee = min(employee, max(headroom - employer, _ZERO))
-                used_by_kind[kind] = used + employer + employee
+                employer = schedule.employer_amount.value * scale
+            employee, employer = _apply_contribution_caps(
+                terms.caps,
+                used_by_group,
+                employee=employee_intended,
+                employer=employer,
+            )
             outcome = self.region.contributions.member_contribution(
                 MemberContributionRequest(
                     gross=employee,
@@ -1292,15 +1359,36 @@ class _Projection:
             self._relief_at_source = (
                 self._relief_at_source + outcome.assessment_relief_gross
             )
+            bonus = _ZERO
+            if terms.bonus_rate is not None:
+                bonus = terms.bonus_rate.of(outcome.gross_to_pot)
             ledger.employee_in = outcome.gross_to_pot
             ledger.employer_in = employer
             ledger.provider_relief = outcome.provider_relief
+            ledger.bonus_in = bonus
             ledger.contribution_shortfall = (
                 employee_intended - employee
             ) + outcome.unrelieved_excess
             ledger.uncrystallised = (
-                ledger.uncrystallised + outcome.gross_to_pot + employer
+                ledger.uncrystallised + outcome.gross_to_pot + employer + bonus
             )
+
+    def _contribution_window_fraction(self, window: Period, period: Period) -> Decimal:
+        """The period's whole-month share inside run ∩ eligibility window.
+
+        The run models only ``[today, horizon_end]`` (roadmap 4.6) and
+        the region's contribution window is an exact date span (§4.1),
+        so the contributable share of the period is the whole months
+        of the *single* three-way overlap over the whole months of the
+        period — never the product of separately measured fractions,
+        which overstates disjoint windows (a run starting the day the
+        window closes must contribute zero).
+        """
+        start = max(self.config.today, window.start)
+        end = min(self._horizon_end(), window.end)
+        if end < start:
+            return Decimal(0)
+        return period_active_fraction(period, start, end)
 
     def _require_permitted_mechanic(
         self, wrapper: Wrapper, schedule: ContributionSchedule
@@ -1754,22 +1842,147 @@ class _Projection:
         Both calls go through the region's one ``assess`` function —
         the same one the final step-5 assessment uses — so the gross-up
         and the final tax picture cannot disagree (planning §5.2).
+
+        Draw pricing deliberately excludes the portfolio-income layers
+        (roadmap 9.2): a draw that shifts the taxpayer's band can raise
+        the tax on savings/dividend income sitting above it (a PSA tier
+        drop, dividends pushed up a rate), and that interaction belongs
+        to the wrapper charge — :meth:`_charge_portfolio_tax` measures
+        the portfolio layers' full cost against the final income
+        picture, so pricing it into the gross-up as well would collect
+        it twice. The decomposition is exact: the offset and gross-ups
+        collect the no-portfolio assessment, the wrapper charge the
+        remainder, and together they sum to the final full assessment.
         """
         if taxable <= _ZERO:
             return _ZERO
-        base = self.region.tax.assess(period, self._tax_input())
+        base = self.region.tax.assess(period, self._tax_input(include_portfolio=False))
         with_draw = self.region.tax.assess(
-            period, self._tax_input(extra_income=taxable)
+            period, self._tax_input(extra_income=taxable, include_portfolio=False)
         )
         return with_draw.tax_due - base.tax_due
 
-    def _tax_input(self, extra_income: Money = _ZERO) -> TaxInput:
-        """The person's categorised income picture for assessment."""
+    def _tax_input(
+        self, extra_income: Money = _ZERO, *, include_portfolio: bool = True
+    ) -> TaxInput:
+        """The person's categorised income picture for assessment.
+
+        ``include_portfolio=False`` drops the savings/dividend income
+        of taxable-growth wrappers: the decumulation income offset and
+        the growth-tax attribution both need the picture without those
+        top-of-ladder layers, whose tax is charged to the wrappers
+        (:meth:`_charge_portfolio_tax`), never to the spending need.
+        """
         return TaxInput(
             residency=self.person.tax_residency,
             non_savings_income=self._taxable_income + extra_income,
+            savings_income=self._savings_income if include_portfolio else _ZERO,
+            dividend_income=self._dividend_income if include_portfolio else _ZERO,
             relief_at_source_contributions=self._relief_at_source,
         )
+
+    def _accrue_portfolio_income(
+        self, ledgers: list[_WrapperLedger], fraction: Decimal
+    ) -> None:
+        """Step 2 for taxable-growth wrappers: price the period's income.
+
+        A bare account's holdings throw off dividends (the equity
+        slice) and interest (the bond and cash slices), priced from
+        the per-asset ``yield.*`` assumptions on the opening balance
+        and scaled by the period's active fraction (roadmap 9.2). The
+        income stays invested — the balance path is untouched — but it
+        enters the person's categorised tax picture as the §6 savings
+        and dividend layers, and the tax attributable is charged to
+        the wrapper at close (:meth:`_charge_portfolio_tax`). The
+        yield keys are read only when such a wrapper exists, so other
+        runs' provenance never lists them.
+        """
+        self._savings_income = _ZERO
+        self._dividend_income = _ZERO
+        for ledger in ledgers:
+            if ledger.treatment.growth is not GrowthTaxTreatment.TAXABLE:
+                continue
+            balance = ledger.opening_uncrystallised + ledger.opening_crystallised
+            if balance <= _ZERO:
+                continue
+            allocation = ledger.allocation
+            equity_yield = decimal_assumption_value(
+                self.tracked.get(AssumptionKey.YIELD_EQUITY)
+            )
+            bond_yield = decimal_assumption_value(
+                self.tracked.get(AssumptionKey.YIELD_BONDS)
+            )
+            cash_yield = decimal_assumption_value(
+                self.tracked.get(AssumptionKey.YIELD_CASH)
+            )
+            dividends = balance * (allocation.equity * equity_yield * fraction)
+            interest = balance * (
+                (allocation.bonds * bond_yield + allocation.cash * cash_yield)
+                * fraction
+            )
+            ledger.taxable_dividends = dividends
+            ledger.taxable_interest = interest
+            self._dividend_income = self._dividend_income + dividends
+            self._savings_income = self._savings_income + interest
+
+    def _charge_portfolio_tax(
+        self, ledgers: list[_WrapperLedger], period: Period, tax: TaxResult
+    ) -> None:
+        """Attribute the savings/dividend layers' tax to their wrappers.
+
+        The attributable tax is the final assessment less an
+        assessment of the same picture without the portfolio income —
+        the marginal cost of the top-of-ladder savings and dividend
+        layers, personal-allowance-taper interactions included. It is
+        apportioned across the taxable-growth wrappers pro rata to
+        their income (remainder on the last) and deducted from each
+        balance at close (:meth:`_close_wrapper`) — the real-world
+        drag of paying tax out of taxable savings.
+        """
+        portfolio_income = self._savings_income + self._dividend_income
+        if portfolio_income <= _ZERO:
+            return
+        base = self.region.tax.assess(period, self._tax_input(include_portfolio=False))
+        total_tax = tax.tax_due - base.tax_due
+        if total_tax <= _ZERO:
+            return
+        taxable = [
+            ledger
+            for ledger in ledgers
+            if ledger.taxable_interest + ledger.taxable_dividends > _ZERO
+        ]
+        charged = _ZERO
+        for ledger in taxable[:-1]:
+            income = ledger.taxable_interest + ledger.taxable_dividends
+            share = Money(total_tax.amount * income.amount / portfolio_income.amount)
+            ledger.growth_tax = share
+            charged = charged + share
+        taxable[-1].growth_tax = total_tax - charged
+
+    def _bank_surplus(self, ledgers: list[_WrapperLedger], surplus: Money) -> Money:
+        """Sweep decumulation surplus into the first taxable wrapper.
+
+        Income and gross draws beyond the period's need land in the
+        first wrapper (plan order) whose treatment marks it a bare
+        taxable account — paid from taxed income, growth taxable,
+        withdrawals tax-free (a GIA or cash account) — rather than
+        being spent (roadmap 9.2). Banking is not a contribution: no
+        cap, relief, or bonus machinery applies. With no such wrapper
+        the surplus is spent, the pre-9.2 behaviour (planning §5.2).
+        """
+        if surplus <= _ZERO:
+            return _ZERO
+        for ledger in ledgers:
+            treatment = ledger.treatment
+            if (
+                treatment.contributions is ContributionTaxTreatment.FROM_TAXED_INCOME
+                and treatment.growth is GrowthTaxTreatment.TAXABLE
+                and treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE
+            ):
+                ledger.uncrystallised = ledger.uncrystallised + surplus
+                ledger.banked_in = ledger.banked_in + surplus
+                return surplus
+        return _ZERO
 
     def _close_wrapper(
         self, ledger: _WrapperLedger, returns: PeriodReturns, fraction: Decimal
@@ -1783,7 +1996,11 @@ class _Projection:
         post-flow values. Growth (step 7) applies to each post-fee
         sub-balance; fees before growth per the §5.2 order. In a
         partial first/last period both annual rates are scaled linearly
-        by ``fraction`` (the §5.2 roadmap-4.6 convention).
+        by ``fraction`` (the §5.2 roadmap-4.6 convention). A
+        taxable-growth wrapper's attributed portfolio-income tax
+        (:meth:`_charge_portfolio_tax`) leaves the balance last —
+        settled at the period's close like a real self-assessment
+        payment — capped at what the account then holds.
         """
         fees = self._fees_for(ledger.wrapper)
         opening_total = ledger.opening_uncrystallised + ledger.opening_crystallised
@@ -1802,8 +2019,16 @@ class _Projection:
         post_fee_crystallised = ledger.crystallised - fee_crystallised
         growth_uncrystallised = Money(post_fee_uncrystallised.amount * growth_rate)
         growth_crystallised = Money(post_fee_crystallised.amount * growth_rate)
+        growth_tax = min(
+            ledger.growth_tax,
+            max(post_fee_uncrystallised + growth_uncrystallised, _ZERO),
+        )
+        # A drained account cannot fund its assessed portfolio-income
+        # tax; the remainder joins the person's shortfall rather than
+        # silently disappearing from the ledger (planning §5.2).
+        ledger.growth_tax_unfunded = ledger.growth_tax - growth_tax
         closing_uncrystallised = (
-            post_fee_uncrystallised + growth_uncrystallised
+            post_fee_uncrystallised + growth_uncrystallised - growth_tax
         ).quantized()
         closing_crystallised = (post_fee_crystallised + growth_crystallised).quantized()
         self._balances[ledger.wrapper.id] = (
@@ -1827,7 +2052,42 @@ class _Projection:
             growth=(growth_uncrystallised + growth_crystallised).quantized(),
             closing_uncrystallised=closing_uncrystallised,
             closing_crystallised=closing_crystallised,
+            contribution_bonus=ledger.bonus_in.quantized(),
+            taxable_interest=ledger.taxable_interest.quantized(),
+            taxable_dividends=ledger.taxable_dividends.quantized(),
+            growth_tax=growth_tax.quantized(),
+            banked_in=ledger.banked_in.quantized(),
         )
+
+
+def _apply_contribution_caps(
+    caps: tuple[ContributionCap, ...],
+    used_by_group: dict[str, Money],
+    *,
+    employee: Money,
+    employer: Money,
+) -> tuple[Money, Money]:
+    """Clip a contribution to its allowance groups' shared headroom.
+
+    The binding headroom is the tightest of the caps' remaining
+    budgets; employer amounts (employment terms, outside the member's
+    control) consume it first and the employee amount fills what
+    remains. What fits is recorded against every listed group, so a
+    sub-capped kind (a LISA) consumes the overall allowance too
+    (planning §5.2). Returns the clipped ``(employee, employer)``.
+    """
+    if not caps:
+        return employee, employer
+    headroom = min(
+        max(cap.limit - used_by_group.get(cap.group, _ZERO), _ZERO) for cap in caps
+    )
+    employer = min(employer, headroom)
+    employee = min(employee, max(headroom - employer, _ZERO))
+    for cap in caps:
+        used_by_group[cap.group] = (
+            used_by_group.get(cap.group, _ZERO) + employer + employee
+        )
+    return employee, employer
 
 
 def _plan_source(

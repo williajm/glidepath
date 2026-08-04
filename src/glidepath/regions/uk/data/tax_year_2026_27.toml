@@ -1,6 +1,8 @@
 # UK tax year 2026/27 policy figures (docs/planning.md §5.3, §6).
-# All figures verified 2026-08-01/02 from the primary sources below; never
-# edit a figure without re-verifying and updating [meta].
+# Income tax, pension, ISA and state pension figures verified
+# 2026-08-01/02; savings and dividend figures 2026-08-04 — all from the
+# primary sources below; never edit a figure without re-verifying and
+# updating [meta].
 
 schema_version = 1
 
@@ -8,7 +10,7 @@ schema_version = 1
 tax_year    = "2026/27"
 start_date  = 2026-04-06
 end_date    = 2027-04-05
-verified_on = 2026-08-02
+verified_on = 2026-08-04
 sources = [
   "https://www.gov.uk/income-tax-rates",
   "https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027",
@@ -19,6 +21,9 @@ sources = [
   "https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm044100",
   "https://www.gov.uk/individual-savings-accounts",
   "https://www.gov.uk/lifetime-isa",
+  "https://www.gov.uk/tax-on-dividends",
+  "https://www.gov.uk/apply-tax-free-interest-on-savings",
+  "https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar",
   "https://www.gov.uk/new-state-pension/what-youll-get",
   "https://www.gov.uk/government/publications/benefit-and-pension-rates-2026-to-2027/proposed-benefit-and-pension-rates-2026-to-2027",
 ]
@@ -66,6 +71,24 @@ annual_allowance = "20000"
 lisa_allowance   = "4000"  # counts within the overall ISA allowance
 lisa_bonus_rate  = "0.25"
 lisa_withdrawal_charge = "0.25"
+
+# Nil rates consume band width (§6); savings above them are taxed at the
+# rUK band rates until the separate savings rates land in the 2027/28 file.
+[savings]
+starting_rate_limit = "5000"  # reduced £1 per £1 of non-savings income above the PA
+psa_basic      = "1000"
+psa_higher     = "500"
+psa_additional = "0"
+
+# Rates align positionally with the rUK bands (dividends are UK-wide).
+# 2026/27 figures include the Budget 2025 +2ppt change, in force.
+[dividend]
+allowance = "500"  # a nil rate, not a deduction
+rates = [
+  { name = "ordinary", rate = "0.1075" },
+  { name = "upper", rate = "0.3575" },
+  { name = "additional", rate = "0.3935" },
+]
 
 [state_pension]
 new_full_weekly       = "241.30"

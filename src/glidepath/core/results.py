@@ -47,14 +47,25 @@ class WrapperPeriodResult:
     drawdown (planning §5.1). Non-pension kinds keep the crystallised
     fields at zero. ``employee_contribution`` is the gross amount that
     landed in the pot (of which ``provider_relief`` arrived from the
-    provider's at-source reclaim); ``contribution_shortfall`` is the
-    intended amount that could not be contributed (per-kind caps or the
-    region's relief limits). ``annuity_purchase`` is capital that left
-    the wrapper to buy annuity income this period (roadmap 5.5) — the
-    purchase's tax-free cash element is paid out through
-    ``withdrawal_tax_free`` instead, exactly like an up-front lump
-    sum. ``growth`` may be negative (a down period); every other flow
-    is non-negative.
+    provider's at-source reclaim); ``contribution_bonus`` is a
+    government bonus credited on top of it (the UK LISA's 25%, roadmap
+    9.2); ``contribution_shortfall`` is the intended amount that could
+    not be contributed (per-kind caps or the region's relief limits).
+    ``annuity_purchase`` is capital that left the wrapper to buy
+    annuity income this period (roadmap 5.5) — the purchase's tax-free
+    cash element is paid out through ``withdrawal_tax_free`` instead,
+    exactly like an up-front lump sum.
+
+    Taxable-growth wrappers (roadmap 9.2): ``taxable_interest`` and
+    ``taxable_dividends`` are the period's portfolio income entering
+    the tax assessment's savings and dividend layers; ``growth_tax``
+    is the tax attributable to that income actually charged to the
+    wrapper at period close — capped at what the account then holds,
+    with any unfunded remainder joining the person's shortfall
+    (planning §5.2). ``banked_in`` is decumulation surplus swept into
+    this wrapper — income or gross draws beyond the period's need
+    (planning §5.2). ``growth`` may be negative (a down period); every
+    other flow is non-negative.
     """
 
     wrapper_id: EntityId
@@ -73,6 +84,11 @@ class WrapperPeriodResult:
     closing_uncrystallised: Money
     closing_crystallised: Money
     annuity_purchase: Money = _ZERO
+    contribution_bonus: Money = _ZERO
+    taxable_interest: Money = _ZERO
+    taxable_dividends: Money = _ZERO
+    growth_tax: Money = _ZERO
+    banked_in: Money = _ZERO
 
     def __post_init__(self) -> None:
         """Reject negative amounts in the non-negative fields."""
@@ -89,6 +105,11 @@ class WrapperPeriodResult:
             self.closing_uncrystallised,
             self.closing_crystallised,
             self.annuity_purchase,
+            self.contribution_bonus,
+            self.taxable_interest,
+            self.taxable_dividends,
+            self.growth_tax,
+            self.banked_in,
         )
         if any(amount < _ZERO for amount in non_negative):
             msg = "WrapperPeriodResult amounts (except growth) must be non-negative"
@@ -118,7 +139,9 @@ class PersonPeriodResult:
     nominal money — zero before decumulation; ``net_withdrawn`` is the
     net cash the withdrawal step delivered toward it; ``shortfall`` is
     the need left unmet after the configured withdrawal strategy's plan
-    executed (the ruin signal the success metrics of roadmap 7.3 read).
+    executed, plus any portfolio-income tax a drained taxable wrapper
+    could not fund (roadmap 9.2) — the ruin signal the success metrics
+    of roadmap 7.3 read.
     Under the default net-defined strategy a shortfall means every
     accessible wrapper was exhausted; a gross-defined strategy (e.g.
     fixed-%) may report one with balances still standing, because its
@@ -150,6 +173,11 @@ class PersonPeriodResult:
     ``mpaa_triggered_on`` is the flexible-access trigger date in
     effect at period end — the pre-plan fact or the in-run first
     taxable pension draw — or ``None`` if never triggered.
+
+    ``banked`` is the period's decumulation surplus swept into a
+    taxable wrapper (roadmap 9.2): income and gross draws beyond the
+    net need land in the first uncapped taxable account rather than
+    being spent — zero when the person holds none (planning §5.2).
     """
 
     person_id: EntityId
@@ -171,6 +199,7 @@ class PersonPeriodResult:
     pension_lump_sum: Money = _ZERO
     lsa_used: Money = _ZERO
     mpaa_triggered_on: date | None = None
+    banked: Money = _ZERO
 
     def __post_init__(self) -> None:
         """Reject negative flows."""
@@ -187,6 +216,7 @@ class PersonPeriodResult:
             self.planned_outflows,
             self.pension_lump_sum,
             self.lsa_used,
+            self.banked,
         )
         if any(amount < _ZERO for amount in amounts):
             msg = "PersonPeriodResult amounts must be non-negative"

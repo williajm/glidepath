@@ -177,7 +177,9 @@ from glidepath.core.withdrawals import (
     tax_aware_order,
 )
 from glidepath.core.wrappers import (
+    ContributionCap,
     ContributionTaxTreatment,
+    ContributionTerms,
     GrowthTaxTreatment,
     ReliefMechanic,
     WithdrawalTaxTreatment,
@@ -205,9 +207,11 @@ __all__ = [
     "AssumptionTarget",
     "BalanceRollForward",
     "ComparisonRow",
+    "ContributionCap",
     "ContributionRuleset",
     "ContributionSchedule",
     "ContributionTaxTreatment",
+    "ContributionTerms",
     "DBPension",
     "Decision",
     "DecisionTarget",

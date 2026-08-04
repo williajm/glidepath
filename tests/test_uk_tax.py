@@ -14,7 +14,7 @@ from decimal import Decimal
 
 import pytest
 
-from glidepath.core import Money, Period, TaxInput, TaxResidencyId, TaxSystem
+from glidepath.core import Money, Period, Rate, TaxInput, TaxResidencyId, TaxSystem
 from glidepath.regions.uk import (
     RUK_RESIDENCY,
     SCOTLAND_RESIDENCY,
@@ -153,6 +153,168 @@ def test_ras_restores_the_tapered_allowance(system: UkTaxSystem) -> None:
         Money(Decimal(49730)),
     ]
     assert result.tax_due == Money(Decimal("29432.00"))
+
+
+def categorised_income(
+    residency: TaxResidencyId, non_savings: str, savings: str, dividends: str
+) -> TaxInput:
+    """Categorised gross income for the savings/dividend layers (9.2)."""
+    return TaxInput(
+        residency=residency,
+        non_savings_income=Money(Decimal(non_savings)),
+        savings_income=Money(Decimal(savings)),
+        dividend_income=Money(Decimal(dividends)),
+    )
+
+
+def test_savings_only_breakdown(system: UkTaxSystem) -> None:
+    """£20,000 of interest alone: PA, starting rate, PSA, then 20%.
+
+    Taxable savings 7,430; the starting rate covers 5,000 (nothing
+    eats it), the basic PSA 1,000, and the last 1,430 is charged at
+    the basic rate: £286.00.
+    """
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "0", "20000", "0")
+    )
+    assert result.taxable_income == Money(Decimal(7430))
+    assert [(line.band, line.taxed, line.tax) for line in result.lines] == [
+        ("savings_starting_rate", Money(Decimal(5000)), Money(Decimal(0))),
+        ("savings_nil_rate", Money(Decimal(1000)), Money(Decimal(0))),
+        ("savings_basic", Money(Decimal(1430)), Money(Decimal("286.00"))),
+    ]
+    assert result.tax_due == Money(Decimal("286.00"))
+
+
+def test_earnings_eat_the_starting_rate_for_savings(system: UkTaxSystem) -> None:
+    """£30,000 pay + £3,000 interest: no starting rate, PSA then 20%.
+
+    Non-savings taxable income (17,430) exceeds the £5,000 limit, so
+    the starting rate is gone; the PSA still covers 1,000 and the
+    remaining 2,000 pays 20%: 3,486.00 + 400.00.
+    """
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "30000", "3000", "0")
+    )
+    assert [(line.band, line.tax) for line in result.lines] == [
+        ("basic", Money(Decimal("3486.00"))),
+        ("savings_nil_rate", Money(Decimal(0))),
+        ("savings_basic", Money(Decimal("400.00"))),
+    ]
+    assert result.tax_due == Money(Decimal("3886.00"))
+
+
+def test_higher_rate_halves_the_psa(system: UkTaxSystem) -> None:
+    """£60,000 pay + £1,000 interest: PSA 500, remainder at 40%."""
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "60000", "1000", "0")
+    )
+    assert [(line.band, line.taxed) for line in result.lines[-2:]] == [
+        ("savings_nil_rate", Money(Decimal(500))),
+        ("savings_higher", Money(Decimal(500))),
+    ]
+    assert result.tax_due == Money(Decimal("11632.00"))
+
+
+def test_additional_rate_has_no_psa(system: UkTaxSystem) -> None:
+    """£130,000 pay + £1,000 interest: PSA nil, all interest at 45%."""
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "130000", "1000", "0")
+    )
+    assert result.lines[-1].band == "savings_additional"
+    assert result.lines[-1].taxed == Money(Decimal(1000))
+    assert result.tax_due == Money(Decimal("45153.00"))
+
+
+def test_dividends_stack_above_pay(system: UkTaxSystem) -> None:
+    """£20,000 pay + £5,000 dividends: £500 nil, 10.75% on the rest."""
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "20000", "0", "5000")
+    )
+    assert [(line.band, line.taxed, line.tax) for line in result.lines] == [
+        ("basic", Money(Decimal(7430)), Money(Decimal("1486.00"))),
+        ("dividend_nil_rate", Money(Decimal(500)), Money(Decimal(0))),
+        ("dividend_ordinary", Money(Decimal(4500)), Money(Decimal("483.75"))),
+    ]
+    assert result.tax_due == Money(Decimal("1969.75"))
+
+
+def test_dividend_nil_rate_consumes_band_width(system: UkTaxSystem) -> None:
+    """At the basic-band top, the £500 nil rate pushes the rest to 35.75%.
+
+    Pay of £50,270 fills the basic band exactly. The dividend
+    allowance is a nil rate, not a deduction: it occupies the first
+    £500 above the band, so the remaining £1,500 is charged at the
+    upper dividend rate, never the ordinary one.
+    """
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "50270", "0", "2000")
+    )
+    assert [(line.band, line.taxed, line.tax) for line in result.lines[-2:]] == [
+        ("dividend_nil_rate", Money(Decimal(500)), Money(Decimal(0))),
+        ("dividend_upper", Money(Decimal(1500)), Money(Decimal("536.25"))),
+    ]
+    assert result.tax_due == Money(Decimal("8076.25"))
+
+
+def test_leftover_allowance_covers_savings_then_dividends(
+    system: UkTaxSystem,
+) -> None:
+    """£10,000 pay + £4,000 interest + £2,000 dividends.
+
+    The PA covers all the pay and 2,570 of the interest; the taxable
+    1,430 of interest sits inside the starting rate; dividends keep
+    their 500 nil rate and pay 10.75% on 1,500: £161.25.
+    """
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "10000", "4000", "2000")
+    )
+    assert result.taxable_income == Money(Decimal(3430))
+    assert [(line.band, line.taxed) for line in result.lines] == [
+        ("savings_starting_rate", Money(Decimal(1430))),
+        ("dividend_nil_rate", Money(Decimal(500))),
+        ("dividend_ordinary", Money(Decimal(1500))),
+    ]
+    assert result.tax_due == Money(Decimal("161.25"))
+
+
+def test_savings_and_dividends_feed_the_pa_taper(system: UkTaxSystem) -> None:
+    """£95,000 pay + £10,000 dividends: ANI 105,000 tapers the PA.
+
+    The reduction is 2,500, so the PA is 10,070 and taxable pay is
+    84,930 (26,432.00 of tax); dividends add 500 nil and 9,500 at the
+    upper rate (3,396.25).
+    """
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "95000", "0", "10000")
+    )
+    assert result.tax_free_allowance == Money(Decimal(10070))
+    assert result.tax_due == Money(Decimal("29828.25"))
+
+
+def test_scottish_savings_use_ruk_bands(system: UkTaxSystem) -> None:
+    """Scottish pay uses Scottish bands; interest stacks on rUK bands.
+
+    Pay of £50,000 leaves 37,430 taxable: 19/20/21/42% through the
+    Scottish ladder (8,982.05). The £1,000 of interest keeps a 500
+    higher-tier PSA (total taxable 38,430 crosses the rUK basic
+    limit), and the taxed 500 lands past the rUK basic limit at 40% —
+    never a Scottish rate.
+    """
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(SCOTLAND_RESIDENCY, "50000", "1000", "0")
+    )
+    assert [line.band for line in result.lines] == [
+        "starter",
+        "basic",
+        "intermediate",
+        "higher",
+        "savings_nil_rate",
+        "savings_higher",
+    ]
+    assert result.lines[-1].rate == Rate(Decimal("0.40"))
+    assert result.lines[-1].tax == Money(Decimal("200.00"))
+    assert result.tax_due == Money(Decimal("9182.05"))
 
 
 def test_sub_period_within_tax_year(system: UkTaxSystem) -> None:

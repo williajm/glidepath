@@ -1,25 +1,35 @@
-"""UK wrapper kinds and rules (roadmap 3.1; planning §4.2, §5.1, §6).
+"""UK wrapper kinds and rules (roadmap 3.1, 9.2; planning §4.2, §5.1, §6).
 
 Implements the core :class:`~glidepath.core.WrapperRuleset` protocol for
-the v1 UK wrapper kinds — workplace DC, SIPP, and ISA (LISA, GIA and
-cash extend the set in roadmap 9.2). Every figure — the pension tax-free
-lump-sum fraction, the ISA annual allowance — comes from the tax-year
-data files (§5.3); nothing is hardcoded here (guard-tested). The
-kind-to-rules *structure* (which kinds are pensions, which relief
-mechanics each may operate) is scheme mechanics, not policy figures:
+the UK wrapper kinds — workplace DC, SIPP, ISA, LISA, GIA and cash.
+Every figure — the pension tax-free lump-sum fraction, the ISA and LISA
+allowances, the LISA bonus rate — comes from the tax-year data files
+(§5.3); nothing is hardcoded here (guard-tested). The kind-to-rules
+*structure* (which kinds are pensions, which relief mechanics each may
+operate) is scheme mechanics, not policy figures:
 
 - Workplace DC schemes operate either relief mechanic: relief at source
   or a net pay arrangement, per the employer's scheme.
 - A SIPP is a personal pension, so contributions get relief at source.
-- ISAs attract no contribution relief; growth and withdrawals are
-  tax-free.
+- ISAs and LISAs attract no contribution relief; growth and withdrawals
+  are tax-free. The LISA's 25% government bonus is a contribution
+  bonus, not tax relief (it never extends tax bands), and its
+  contributions are age-windowed (18 to 50, pro-rated by whole months).
+- GIA and cash accounts are bare taxable accounts: paid from taxed
+  income, growth taxable as it arises (dividends and interest feed the
+  §6 savings/dividend layers), withdrawals themselves tax-free.
 - Pension money in is tax-relieved, grows tax-free, and comes out as
   taxable income after the tax-free lump-sum fraction (EET).
 
 Access follows the §4.1 gate convention: pension kinds are gated by the
 NMPA (via :class:`~glidepath.regions.uk.ages.UkAgeRules`, including the
-2028 step-up); ISAs have no access age. Contribution limits: the ISA
-annual allowance is a per-person cap shared across all ISAs; pension
+2028 step-up); LISAs by the charge-free access age of 60 — the engine
+never models a charged early withdrawal, so the 25% withdrawal charge
+ships as data but no draw ever bears it (planning §5.2 gates are
+errors, never silent draws); ISAs, GIAs and cash have no access age.
+Contribution caps: the ISA annual allowance is a per-person cap shared
+across all ISAs and LISAs through the ``uk.isa`` allowance group, and
+the LISA allowance is a sub-cap inside it (its own group); pension
 kinds have no per-kind cap here — the annual allowance is a
 cross-pension measure of pension input amounts and lands in roadmap
 3.3, the member relief limit with contribution schedules in 3.2.
@@ -29,7 +39,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn
 
 from glidepath.core import (
+    ContributionCap,
     ContributionTaxTreatment,
+    ContributionTerms,
     GrowthTaxTreatment,
     ReliefMechanic,
     WithdrawalTaxTreatment,
@@ -57,7 +69,24 @@ SIPP_KIND = WrapperKindId("uk.sipp")
 ISA_KIND = WrapperKindId("uk.isa")
 """A (stocks-and-shares or cash) individual savings account."""
 
+LISA_KIND = WrapperKindId("uk.lisa")
+"""A lifetime ISA: bonus-bearing, age-windowed, gated until 60."""
+
+GIA_KIND = WrapperKindId("uk.gia")
+"""A general investment account: bare, taxable as growth arises."""
+
+CASH_KIND = WrapperKindId("uk.cash")
+"""A cash savings account outside any wrapper: interest is taxable."""
+
+ISA_ALLOWANCE_GROUP = "uk.isa"
+"""Allowance group of the overall ISA annual allowance (ISA + LISA)."""
+
+LISA_ALLOWANCE_GROUP = "uk.lisa"
+"""Allowance group of the LISA sub-allowance inside the overall one."""
+
 _PENSION_KINDS = frozenset({WORKPLACE_DC_KIND, SIPP_KIND})
+_TAX_FREE_SAVINGS_KINDS = frozenset({ISA_KIND, LISA_KIND})
+_TAXABLE_KINDS = frozenset({GIA_KIND, CASH_KIND})
 
 _RELIEF_MECHANICS: Mapping[WrapperKindId, frozenset[ReliefMechanic]] = {
     WORKPLACE_DC_KIND: frozenset(
@@ -65,6 +94,9 @@ _RELIEF_MECHANICS: Mapping[WrapperKindId, frozenset[ReliefMechanic]] = {
     ),
     SIPP_KIND: frozenset({ReliefMechanic.RELIEF_AT_SOURCE}),
     ISA_KIND: frozenset(),
+    LISA_KIND: frozenset(),
+    GIA_KIND: frozenset(),
+    CASH_KIND: frozenset(),
 }
 
 
@@ -119,7 +151,9 @@ class UkWrapperRuleset:
         """The in/during/out treatment of ``kind`` during ``period`` (§4.2).
 
         Pension kinds are EET with the year's tax-free lump-sum
-        fraction on the way out; ISAs are TEE.
+        fraction on the way out; ISAs and LISAs are TEE; GIA and cash
+        accounts are taxed as growth arises, with withdrawals
+        themselves tax-free (module docstring).
         """
         year = self._year_for(period)
         if kind in _PENSION_KINDS:
@@ -129,31 +163,52 @@ class UkWrapperRuleset:
                 withdrawals=WithdrawalTaxTreatment.PARTIALLY_TAX_FREE,
                 tax_free_fraction=year.pension.tax_free_lump_sum_fraction,
             )
-        if kind == ISA_KIND:
+        if kind in _TAX_FREE_SAVINGS_KINDS:
             return WrapperTaxTreatment(
                 contributions=ContributionTaxTreatment.FROM_TAXED_INCOME,
                 growth=GrowthTaxTreatment.TAX_FREE,
                 withdrawals=WithdrawalTaxTreatment.TAX_FREE,
             )
+        if kind in _TAXABLE_KINDS:
+            return WrapperTaxTreatment(
+                contributions=ContributionTaxTreatment.FROM_TAXED_INCOME,
+                growth=GrowthTaxTreatment.TAXABLE,
+                withdrawals=WithdrawalTaxTreatment.TAX_FREE,
+            )
         _unknown_kind(kind)
 
-    def annual_contribution_limit(
-        self, kind: WrapperKindId, period: Period
-    ) -> Money | None:
-        """The per-person contribution cap on ``kind`` for ``period``.
+    def contribution_terms(
+        self, kind: WrapperKindId, date_of_birth: date, period: Period
+    ) -> ContributionTerms:
+        """The contribution terms of ``kind`` for one person and period.
 
         The ISA annual allowance is per person per tax year, shared
-        across all their ISAs (planning §6); apportionment over
-        sub-year periods is the contribution schedule's concern
-        (roadmap 3.2). Pension kinds return ``None``: the annual
-        allowance is a cross-pension measure of pension input amounts
-        (roadmap 3.3), not a per-kind cap.
+        across all their ISAs and LISAs through the ``uk.isa`` group;
+        the LISA allowance is a sub-cap inside it, and LISA
+        contributions carry the year's bonus rate within the exact
+        18-to-50 contribution window (planning §6) — the engine
+        intersects the window with the period and the run window and
+        pro-rates by whole months. Pension, GIA and cash kinds are
+        uncapped
+        here — the pension annual allowance is a cross-pension measure
+        of pension input amounts (roadmap 3.3), not a per-kind cap.
         """
         year = self._year_for(period)
         if kind == ISA_KIND:
-            return year.isa.annual_allowance
-        if kind in _PENSION_KINDS:
-            return None
+            return ContributionTerms(
+                caps=(ContributionCap(ISA_ALLOWANCE_GROUP, year.isa.annual_allowance),)
+            )
+        if kind == LISA_KIND:
+            return ContributionTerms(
+                caps=(
+                    ContributionCap(LISA_ALLOWANCE_GROUP, year.isa.lisa_allowance),
+                    ContributionCap(ISA_ALLOWANCE_GROUP, year.isa.annual_allowance),
+                ),
+                bonus_rate=year.isa.lisa_bonus_rate,
+                window=self.ages.lisa_contribution_window(date_of_birth),
+            )
+        if kind in _PENSION_KINDS or kind in _TAXABLE_KINDS:
+            return ContributionTerms()
         _unknown_kind(kind)
 
     def permitted_relief_mechanics(
@@ -181,15 +236,19 @@ class UkWrapperRuleset:
         """Whether *new* access to ``kind`` may open in ``period``.
 
         Pension kinds follow the NMPA access gate (§4.1), including the
-        2028 step-up; ISAs are always accessible. Only *new* pension
-        access (crystallisation, UFPLS) is gated — funds already
-        crystallised and benefits already in payment are never re-gated
-        (planning §5.1), so someone who crystallised at 55 before the
-        2028 step keeps drawing at 56 even while this gate is shut.
+        2028 step-up; LISAs the charge-free access age of 60 (module
+        docstring); ISAs, GIAs and cash are always accessible. Only
+        *new* pension access (crystallisation, UFPLS) is gated — funds
+        already crystallised and benefits already in payment are never
+        re-gated (planning §5.1), so someone who crystallised at 55
+        before the 2028 step keeps drawing at 56 even while this gate
+        is shut.
         """
         if kind in _PENSION_KINDS:
             return self.ages.is_pension_access_open(date_of_birth, period)
-        if kind == ISA_KIND:
+        if kind == LISA_KIND:
+            return self.ages.is_lisa_access_open(date_of_birth, period)
+        if kind == ISA_KIND or kind in _TAXABLE_KINDS:
             return True
         _unknown_kind(kind)
 

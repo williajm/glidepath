@@ -80,10 +80,13 @@ class PeriodReportRow:
     nominal growth. ``closing_balance`` is the sum of the presented
     ``wrapper_balances``, so the row stays consistent after rounding.
     ``contributions`` totals what landed in the pots (employee gross,
-    including provider relief, plus employer); ``withdrawals_gross``
-    totals the tax-free and taxable draws across wrappers;
-    ``annuity_purchases`` totals the capital that left the wrappers to
-    buy annuity income this period (roadmap 5.5).
+    including provider relief, plus employer and any government bonus,
+    roadmap 9.2); ``withdrawals_gross`` totals the tax-free and
+    taxable draws across wrappers; ``annuity_purchases`` totals the
+    capital that left the wrappers to buy annuity income this period
+    (roadmap 5.5). ``growth_tax`` totals the portfolio-income tax
+    charged to taxable-growth wrappers and ``banked`` is the
+    decumulation surplus swept into one (roadmap 9.2).
     """
 
     period: Period
@@ -109,6 +112,8 @@ class PeriodReportRow:
     contributions: Money
     fees: Money
     growth: Money
+    growth_tax: Money
+    banked: Money
     withdrawals_gross: Money
     closing_balance: Money
     wrapper_balances: tuple[WrapperReportBalance, ...]
@@ -204,12 +209,16 @@ def _person_row(
         shortfall=flow(person.shortfall),
         contributions=flow(
             _total(
-                entry.employee_contribution + entry.employer_contribution
+                entry.employee_contribution
+                + entry.employer_contribution
+                + entry.contribution_bonus
                 for entry in wrappers
             )
         ),
         fees=flow(_total(entry.fee for entry in wrappers)),
         growth=flow(_total(entry.growth for entry in wrappers)),
+        growth_tax=flow(_total(entry.growth_tax for entry in wrappers)),
+        banked=flow(person.banked),
         withdrawals_gross=flow(_total(entry.withdrawal_gross for entry in wrappers)),
         closing_balance=_total(entry.closing_balance for entry in wrapper_balances),
         wrapper_balances=wrapper_balances,

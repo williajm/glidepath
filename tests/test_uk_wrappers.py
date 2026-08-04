@@ -1,8 +1,10 @@
-"""Tests for the UK wrapper ruleset (issue 3.1).
+"""Tests for the UK wrapper ruleset (issues 3.1, 9.2).
 
 Acceptance criterion: tax treatment in/during/out resolved per wrapper
 kind — pensions EET with the data file's tax-free lump-sum fraction,
-ISAs TEE — plus limits, relief mechanics, and NMPA-gated access.
+ISAs/LISAs TEE, GIA/cash taxable as growth arises — plus contribution
+terms (shared allowance groups, the LISA bonus and window), relief
+mechanics, and age-gated access (NMPA; LISA at 60).
 """
 
 from datetime import date
@@ -21,7 +23,12 @@ from glidepath.core import (
     WrapperRuleset,
 )
 from glidepath.regions.uk import (
+    CASH_KIND,
+    GIA_KIND,
+    ISA_ALLOWANCE_GROUP,
     ISA_KIND,
+    LISA_ALLOWANCE_GROUP,
+    LISA_KIND,
     SIPP_KIND,
     WORKPLACE_DC_KIND,
     FutureYearsExtension,
@@ -39,10 +46,14 @@ TAX_YEAR_2030_31 = Period(start=date(2030, 4, 6), end=date(2031, 4, 5))
 
 UNKNOWN_KIND = WrapperKindId("uk.mattress")
 PENSION_KINDS = [WORKPLACE_DC_KIND, SIPP_KIND]
+TAXABLE_KINDS = [GIA_KIND, CASH_KIND]
 
 DOB_OVER_NMPA = date(1970, 1, 1)  # 56 when 2026/27 starts: access open
 DOB_UNDER_NMPA = date(2000, 1, 1)  # 26 when 2026/27 starts: access shut
 DOB_CAUGHT_BY_STEP = date(1972, 6, 1)  # 55 before the 2028 step, 57 in 2029
+DOB_OVER_LISA_ACCESS = date(1965, 1, 1)  # 61 when 2026/27 starts
+DOB_TURNS_50_MID_YEAR = date(1976, 10, 6)  # 50 on 2026-10-06: window halves
+DOB_OVER_50 = date(1970, 1, 1)  # contribution window closed
 
 FROZEN_EXTENSION = FutureYearsExtension(
     policy=FutureYearsPolicy(mode=FutureYearsMode.FROZEN), cpi=Rate(Decimal("0.02"))
@@ -70,26 +81,91 @@ def test_pension_kinds_are_eet_with_the_data_fraction(
     )
 
 
-def test_isa_is_tee(ruleset: UkWrapperRuleset) -> None:
-    """ISA money: taxed in, tax-free growth, tax-free out."""
-    treatment = ruleset.tax_treatment(ISA_KIND, TAX_YEAR_2026_27)
+@pytest.mark.parametrize("kind", [ISA_KIND, LISA_KIND])
+def test_isa_kinds_are_tee(ruleset: UkWrapperRuleset, kind: WrapperKindId) -> None:
+    """ISA/LISA money: taxed in, tax-free growth, tax-free out."""
+    treatment = ruleset.tax_treatment(kind, TAX_YEAR_2026_27)
     assert treatment.contributions is ContributionTaxTreatment.FROM_TAXED_INCOME
     assert treatment.growth is GrowthTaxTreatment.TAX_FREE
     assert treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE
     assert treatment.tax_free_fraction is None
 
 
-def test_isa_contribution_limit_comes_from_data(ruleset: UkWrapperRuleset) -> None:
-    """The ISA cap is the year's annual allowance from the data file."""
-    limit = ruleset.annual_contribution_limit(ISA_KIND, TAX_YEAR_2026_27)
-    assert limit == load_tax_year(2026).isa.annual_allowance
+@pytest.mark.parametrize("kind", TAXABLE_KINDS)
+def test_taxable_kinds_are_taxed_as_growth_arises(
+    ruleset: UkWrapperRuleset, kind: WrapperKindId
+) -> None:
+    """GIA/cash money: taxed in, taxable growth, tax-free out."""
+    treatment = ruleset.tax_treatment(kind, TAX_YEAR_2026_27)
+    assert treatment.contributions is ContributionTaxTreatment.FROM_TAXED_INCOME
+    assert treatment.growth is GrowthTaxTreatment.TAXABLE
+    assert treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE
+    assert treatment.tax_free_fraction is None
 
 
-def test_sub_period_limit_is_the_full_year_figure(ruleset: UkWrapperRuleset) -> None:
+def test_isa_contribution_cap_comes_from_data(ruleset: UkWrapperRuleset) -> None:
+    """The ISA cap is the year's annual allowance under the shared group."""
+    terms = ruleset.contribution_terms(ISA_KIND, DOB_UNDER_NMPA, TAX_YEAR_2026_27)
+    (cap,) = terms.caps
+    assert cap.group == ISA_ALLOWANCE_GROUP
+    assert cap.limit == load_tax_year(2026).isa.annual_allowance
+    assert terms.bonus_rate is None
+    assert terms.window is None
+
+
+def test_lisa_terms_carry_sub_cap_bonus_and_window(
+    ruleset: UkWrapperRuleset,
+) -> None:
+    """A LISA consumes its own allowance and the overall ISA allowance."""
+    terms = ruleset.contribution_terms(LISA_KIND, DOB_UNDER_NMPA, TAX_YEAR_2026_27)
+    year = load_tax_year(2026)
+    assert [(cap.group, cap.limit) for cap in terms.caps] == [
+        (LISA_ALLOWANCE_GROUP, year.isa.lisa_allowance),
+        (ISA_ALLOWANCE_GROUP, year.isa.annual_allowance),
+    ]
+    assert terms.bonus_rate == year.isa.lisa_bonus_rate
+    assert terms.window == ruleset.ages.lisa_contribution_window(DOB_UNDER_NMPA)
+
+
+def test_lisa_window_ends_on_the_eve_of_the_50th_birthday(
+    ruleset: UkWrapperRuleset,
+) -> None:
+    """The terms carry the exact 18-to-50 date span for the engine.
+
+    The engine — not the region — intersects it with the period and
+    the run window, so the terms state dates, never a fraction.
+    """
+    terms = ruleset.contribution_terms(
+        LISA_KIND, DOB_TURNS_50_MID_YEAR, TAX_YEAR_2026_27
+    )
+    assert terms.window is not None
+    assert terms.window.start == date(1994, 10, 6)  # 18th birthday
+    assert terms.window.end == date(2026, 10, 5)  # eve of the 50th
+
+
+def test_lisa_window_is_closed_past_50(ruleset: UkWrapperRuleset) -> None:
+    """The window of an over-50 lies wholly before the tax year."""
+    terms = ruleset.contribution_terms(LISA_KIND, DOB_OVER_50, TAX_YEAR_2026_27)
+    assert terms.window is not None
+    assert terms.window.end < TAX_YEAR_2026_27.start
+
+
+@pytest.mark.parametrize("kind", TAXABLE_KINDS)
+def test_taxable_kinds_are_uncapped(
+    ruleset: UkWrapperRuleset, kind: WrapperKindId
+) -> None:
+    """GIA and cash contributions meet no allowance machinery."""
+    terms = ruleset.contribution_terms(kind, DOB_UNDER_NMPA, TAX_YEAR_2026_27)
+    assert terms.caps == ()
+    assert terms.bonus_rate is None
+    assert terms.window is None
+
+
+def test_sub_period_cap_is_the_full_year_figure(ruleset: UkWrapperRuleset) -> None:
     """Apportionment over part-years is the consumer's concern (3.2)."""
     part = Period(start=date(2026, 4, 6), end=date(2026, 12, 31))
-    full = ruleset.annual_contribution_limit(ISA_KIND, TAX_YEAR_2026_27)
-    assert ruleset.annual_contribution_limit(ISA_KIND, part) == full
+    full = ruleset.contribution_terms(ISA_KIND, DOB_UNDER_NMPA, TAX_YEAR_2026_27)
+    assert ruleset.contribution_terms(ISA_KIND, DOB_UNDER_NMPA, part) == full
 
 
 def test_lump_sum_allowance_comes_from_data(ruleset: UkWrapperRuleset) -> None:
@@ -112,17 +188,19 @@ def test_pension_kinds_have_no_per_kind_cap(
     ruleset: UkWrapperRuleset, kind: WrapperKindId
 ) -> None:
     """The annual allowance is a cross-pension measure (roadmap 3.3)."""
-    assert ruleset.annual_contribution_limit(kind, TAX_YEAR_2026_27) is None
+    terms = ruleset.contribution_terms(kind, DOB_UNDER_NMPA, TAX_YEAR_2026_27)
+    assert terms.caps == ()
 
 
 def test_relief_mechanics_per_kind(ruleset: UkWrapperRuleset) -> None:
-    """Workplace DC may use either mechanic; SIPPs RAS; ISAs none."""
+    """Workplace DC may use either mechanic; SIPPs RAS; savings kinds none."""
     both = frozenset({ReliefMechanic.RELIEF_AT_SOURCE, ReliefMechanic.NET_PAY})
     assert ruleset.permitted_relief_mechanics(WORKPLACE_DC_KIND) == both
     assert ruleset.permitted_relief_mechanics(SIPP_KIND) == frozenset(
         {ReliefMechanic.RELIEF_AT_SOURCE}
     )
-    assert ruleset.permitted_relief_mechanics(ISA_KIND) == frozenset()
+    for kind in (ISA_KIND, LISA_KIND, GIA_KIND, CASH_KIND):
+        assert ruleset.permitted_relief_mechanics(kind) == frozenset()
 
 
 @pytest.mark.parametrize("kind", PENSION_KINDS)
@@ -143,9 +221,18 @@ def test_the_2028_step_catches_the_55_to_57_cohort(
     assert ruleset.is_access_open(SIPP_KIND, dob, TAX_YEAR_2030_31)
 
 
-def test_isa_access_has_no_age_gate(ruleset: UkWrapperRuleset) -> None:
-    """ISAs are accessible at any age."""
-    assert ruleset.is_access_open(ISA_KIND, DOB_UNDER_NMPA, TAX_YEAR_2026_27)
+@pytest.mark.parametrize("kind", [ISA_KIND, GIA_KIND, CASH_KIND])
+def test_ungated_kinds_have_no_age_gate(
+    ruleset: UkWrapperRuleset, kind: WrapperKindId
+) -> None:
+    """ISAs, GIAs and cash are accessible at any age."""
+    assert ruleset.is_access_open(kind, DOB_UNDER_NMPA, TAX_YEAR_2026_27)
+
+
+def test_lisa_access_gates_at_60(ruleset: UkWrapperRuleset) -> None:
+    """Charge-free LISA access opens at 60 (§4.1 gate convention)."""
+    assert ruleset.is_access_open(LISA_KIND, DOB_OVER_LISA_ACCESS, TAX_YEAR_2026_27)
+    assert not ruleset.is_access_open(LISA_KIND, DOB_OVER_NMPA, TAX_YEAR_2026_27)
 
 
 def test_unknown_kind_rejected_by_tax_treatment(ruleset: UkWrapperRuleset) -> None:
@@ -154,12 +241,12 @@ def test_unknown_kind_rejected_by_tax_treatment(ruleset: UkWrapperRuleset) -> No
         ruleset.tax_treatment(UNKNOWN_KIND, TAX_YEAR_2026_27)
 
 
-def test_unknown_kind_rejected_by_contribution_limit(
+def test_unknown_kind_rejected_by_contribution_terms(
     ruleset: UkWrapperRuleset,
 ) -> None:
     """An unknown kind is an error, never an uncapped contribution."""
     with pytest.raises(UkWrapperError, match="unknown UK wrapper kind"):
-        ruleset.annual_contribution_limit(UNKNOWN_KIND, TAX_YEAR_2026_27)
+        ruleset.contribution_terms(UNKNOWN_KIND, DOB_UNDER_NMPA, TAX_YEAR_2026_27)
 
 
 def test_unknown_kind_rejected_by_relief_mechanics(
@@ -188,8 +275,8 @@ def test_figure_queries_fail_outside_data_coverage(
 def test_extension_supplies_future_year_figures() -> None:
     """With a future-years extension, later periods resolve (frozen here)."""
     ruleset = UkWrapperRuleset.from_shipped_data(future_years=FROZEN_EXTENSION)
-    limit = ruleset.annual_contribution_limit(ISA_KIND, TAX_YEAR_2028_29)
-    assert limit == load_tax_year(2026).isa.annual_allowance
+    terms = ruleset.contribution_terms(ISA_KIND, DOB_UNDER_NMPA, TAX_YEAR_2028_29)
+    assert terms.caps[0].limit == load_tax_year(2026).isa.annual_allowance
 
 
 def test_empty_ruleset_is_rejected() -> None:

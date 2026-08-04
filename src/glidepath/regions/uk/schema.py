@@ -206,6 +206,64 @@ class IsaRules:
 
 
 @dataclass(frozen=True, slots=True)
+class SavingsRules:
+    """Savings-income nil rates for one tax year (planning §6, roadmap 9.2).
+
+    ``starting_rate_limit`` is the 0% starting rate for savings band,
+    reduced £1 per £1 of non-savings taxable income above the personal
+    allowance. The ``psa_*`` fields are the personal savings allowance
+    by the band the taxpayer's income reaches — nil *rates*, not
+    deductions: nil-rated income still consumes band width (§6). Savings
+    income above the nil rates is taxed at the rUK band rates until the
+    separate savings rates take effect (2027/28, shipped as data then).
+    """
+
+    starting_rate_limit: Money
+    psa_basic: Money
+    psa_higher: Money
+    psa_additional: Money
+
+    def __post_init__(self) -> None:
+        """Require descending PSA tiers — the statutory shape."""
+        if not self.psa_basic >= self.psa_higher >= self.psa_additional:
+            _fail(
+                "SavingsRules", "PSA tiers must satisfy basic >= higher >= additional"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class DividendRate:
+    """One dividend rate, aligned positionally with the rUK band ladder."""
+
+    name: str
+    rate: Rate
+
+    def __post_init__(self) -> None:
+        """Reject unnamed rates."""
+        if not self.name:
+            _fail("DividendRate", "name must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class DividendRules:
+    """Dividend allowance and rates for one tax year (planning §6).
+
+    The allowance is a nil rate consuming band width (§6). ``rates``
+    map positionally onto the rUK income-tax bands (dividends are
+    UK-wide, never Scottish-banded) — one rate per band, enforced
+    against the rUK ladder by :class:`TaxYearFile`.
+    """
+
+    allowance: Money
+    rates: tuple[DividendRate, ...]
+
+    def __post_init__(self) -> None:
+        """Require at least one rate."""
+        if not self.rates:
+            _fail("DividendRules", "at least one dividend rate is required")
+
+
+@dataclass(frozen=True, slots=True)
 class StatePensionRules:
     """New state pension rate and qualifying-year rules for one tax year."""
 
@@ -229,11 +287,18 @@ class TaxYearFile:
     income_tax_scotland: IncomeTaxSchedule
     pension: PensionRules
     isa: IsaRules
+    savings: SavingsRules
+    dividend: DividendRules
     state_pension: StatePensionRules
 
     def __post_init__(self) -> None:
-        """Reject unsupported schema versions."""
+        """Reject unsupported versions and misaligned dividend rates."""
         _require_schema_version(self.schema_version, "TaxYearFile")
+        if len(self.dividend.rates) != len(self.income_tax_ruk.bands):
+            _fail(
+                "TaxYearFile",
+                "dividend.rates must align one-to-one with the rUK bands",
+            )
 
 
 @dataclass(frozen=True, slots=True)

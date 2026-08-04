@@ -1,11 +1,23 @@
-"""UK income tax assessment (roadmap 2.3; planning §4.2, §5.3, §6).
+"""UK income tax assessment (roadmap 2.3, 9.2; planning §4.2, §5.3, §6).
 
 Implements the core :class:`~glidepath.core.TaxSystem` protocol. Every
 figure — personal allowance, taper threshold and rate, the band
-ladder — comes from the tax-year data files (§5.3); nothing is hardcoded
-here (guard-tested). Non-savings income is assessed under the rUK or
-Scottish schedule per the taxpayer's residency (roadmap 9.1);
-savings/dividend taxation needs the GIA wrapper (roadmap 9.2).
+ladders, the savings and dividend nil rates — comes from the tax-year
+data files (§5.3); nothing is hardcoded here (guard-tested).
+
+Income stacks in HMRC's default order — non-savings, then savings,
+then dividends — up one ladder of band widths (planning §6).
+Non-savings income is assessed under the rUK or Scottish schedule per
+the taxpayer's residency (roadmap 9.1); savings and dividend income is
+UK-wide and always uses the rUK bands, positioned above the taxpayer's
+non-savings taxable income (roadmap 9.2). The savings layer applies
+the starting rate for savings (reduced £1 per £1 of non-savings
+taxable income) and then the personal savings allowance; the dividend
+layer applies the dividend allowance and then the per-band dividend
+rates. All three reliefs are nil *rates*, not deductions: nil-rated
+income still consumes band width (§6). The PSA tier follows the band
+the taxpayer's total taxable income reaches on the (relief-extended)
+rUK ladder.
 
 Rounding follows HMRC's published calculation logic (the Tax Logic
 service guide,
@@ -21,24 +33,33 @@ higher and additional rates of relief here, by HMRC's own mechanism:
 the basic rate limit and every rate limit above it are extended by the
 gross contribution (limits below basic — the Scottish starter rate —
 never move), and adjusted net income — the personal-allowance taper
-measure — deducts it. Net-pay contributions need no assessment
-adjustment: they leave pay before tax, so the caller excludes them from
-the assessed income.
+measure — deducts it. The extension applies to the rUK ladder wherever
+it is used, so savings and dividend band positions move with it too
+(SI 2018/459 extends the limits for Scottish taxpayers likewise).
+Net-pay contributions need no assessment adjustment: they leave pay
+before tax, so the caller excludes them from the assessed income.
 """
 
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import TYPE_CHECKING
 
-from glidepath.core import Money, TaxInput, TaxLine, TaxResidencyId, TaxResult
+from glidepath.core import Money, Rate, TaxInput, TaxLine, TaxResidencyId, TaxResult
 from glidepath.regions.uk.loader import available_tax_years, load_tax_year
 from glidepath.regions.uk.schema import BASIC_BAND_NAME, TaxBand
 from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from glidepath.core import Period
     from glidepath.regions.uk.extension import FutureYearsExtension
-    from glidepath.regions.uk.schema import IncomeTaxSchedule, TaxYearFile
+    from glidepath.regions.uk.schema import (
+        DividendRules,
+        IncomeTaxSchedule,
+        SavingsRules,
+        TaxYearFile,
+    )
 
 RUK_RESIDENCY = TaxResidencyId("uk.ruk")
 """Residency id for England, Wales and Northern Ireland (rUK)."""
@@ -46,9 +67,19 @@ RUK_RESIDENCY = TaxResidencyId("uk.ruk")
 SCOTLAND_RESIDENCY = TaxResidencyId("uk.scotland")
 """Residency id for Scottish taxpayers."""
 
+SAVINGS_STARTING_RATE_BAND = "savings_starting_rate"
+"""Line label of the 0% starting rate for savings (planning §6)."""
+
+SAVINGS_NIL_RATE_BAND = "savings_nil_rate"
+"""Line label of the personal savings allowance nil rate (planning §6)."""
+
+DIVIDEND_NIL_RATE_BAND = "dividend_nil_rate"
+"""Line label of the dividend allowance nil rate (planning §6)."""
+
 _ZERO = Money(Decimal(0))
 _POUND = Decimal(1)
 _PENNY = Decimal("0.01")
+_NIL_RATE = Rate(Decimal(0))
 
 
 def _round_down(money: Money, unit: Decimal) -> Money:
@@ -98,14 +129,8 @@ class UkTaxSystem:
         )
 
     def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:
-        """Assess one period's non-savings income (planning §4.2)."""
-        year = self._tax_year_for(period)
-        schedule = _schedule_for(year, tax_input.residency)
-        return _assess_schedule(
-            schedule,
-            tax_input.non_savings_income,
-            tax_input.relief_at_source_contributions,
-        )
+        """Assess one period's categorised income (planning §4.2)."""
+        return _assess_year(self._tax_year_for(period), tax_input)
 
     def _series(self) -> TaxYearSeries:
         """The shared year-resolution series over this system's files."""
@@ -148,29 +173,41 @@ def _tapered_allowance(
     return max(allowance, _ZERO)
 
 
-def _band_lines(bands: tuple[TaxBand, ...], taxable: Money) -> tuple[TaxLine, ...]:
-    """Charge ``taxable`` income through the ascending band ladder.
+def _ladder_lines(
+    bands: tuple[TaxBand, ...],
+    *,
+    start: Money,
+    amount: Money,
+    line_name: Callable[[int, TaxBand], str],
+    line_rate: Callable[[int, TaxBand], Rate],
+) -> tuple[TaxLine, ...]:
+    """Charge ``amount`` of income stacked from ``start`` up the ladder.
 
     Band uppers are cumulative taxable income above the allowance
-    (§5.3); each band's tax is rounded down to the penny per HMRC's
+    (§5.3): the slice of each band between ``start`` and
+    ``start + amount`` is charged at the band's line rate — the band's
+    own for non-savings and savings layers, the aligned dividend rate
+    for dividends — each rounded down to the penny per HMRC's
     calculation. Bands with nothing in them are omitted.
     """
     lines: list[TaxLine] = []
+    end = start + amount
     lower = _ZERO
-    for band in bands:
-        ceiling = taxable if band.upper is None else min(taxable, band.upper)
-        in_band = ceiling - lower
-        if in_band <= _ZERO:
-            break
-        lines.append(
-            TaxLine(
-                band=band.name,
-                rate=band.rate,
-                taxed=in_band,
-                tax=_round_down(band.rate.of(in_band), _PENNY),
+    for index, band in enumerate(bands):
+        ceiling = end if band.upper is None else min(band.upper, end)
+        floor = max(lower, start)
+        in_band = ceiling - floor
+        if in_band > _ZERO:
+            rate = line_rate(index, band)
+            lines.append(
+                TaxLine(
+                    band=line_name(index, band),
+                    rate=rate,
+                    taxed=in_band,
+                    tax=_round_down(rate.of(in_band), _PENNY),
+                )
             )
-        )
-        if band.upper is None or taxable <= band.upper:
+        if band.upper is None or end <= band.upper:
             break
         lower = band.upper
     return tuple(lines)
@@ -200,24 +237,178 @@ def _extended_bands(
     )
 
 
-def _assess_schedule(
-    schedule: IncomeTaxSchedule, income: Money, ras_gross: Money
-) -> TaxResult:
-    """Assess non-savings ``income`` under one regime's schedule.
+def _band_own_name(_index: int, band: TaxBand) -> str:
+    """A band's own name — the non-savings line label."""
+    return band.name
 
-    ``ras_gross`` — the period's gross relief-at-source pension
-    contributions — extends the bounded band thresholds and comes off
-    adjusted net income for the personal-allowance taper (module
-    docstring).
+
+def _band_own_rate(_index: int, band: TaxBand) -> Rate:
+    """A band's own rate — the non-savings and savings line rate."""
+    return band.rate
+
+
+def _savings_band_name(_index: int, band: TaxBand) -> str:
+    """A savings line label: the band name under the layer prefix."""
+    return f"savings_{band.name}"
+
+
+def _nil_line(name: str, taxed: Money) -> TaxLine:
+    """A zero-tax line that still consumes band width (planning §6)."""
+    return TaxLine(band=name, rate=_NIL_RATE, taxed=taxed, tax=_ZERO)
+
+
+def _psa_amount(
+    savings: SavingsRules, bands: tuple[TaxBand, ...], total_taxable: Money
+) -> Money:
+    """The personal savings allowance tier (planning §6).
+
+    The tier follows the band ``total_taxable`` reaches on the
+    (relief-extended) rUK ladder: within the basic band's limit the
+    basic tier applies, in the unbounded top band the additional tier,
+    and the higher tier between.
     """
-    adjusted_net_income = max(income - ras_gross, _ZERO)
+    basic_upper = next(band.upper for band in bands if band.name == BASIC_BAND_NAME)
+    if basic_upper is None or total_taxable <= basic_upper:
+        return savings.psa_basic
+    top_floor = bands[-2].upper if len(bands) > 1 else None
+    if top_floor is not None and total_taxable > top_floor:
+        return savings.psa_additional
+    return savings.psa_higher
+
+
+def _savings_lines(
+    savings: SavingsRules,
+    bands: tuple[TaxBand, ...],
+    *,
+    taxable_savings: Money,
+    taxable_non_savings: Money,
+    total_taxable: Money,
+) -> tuple[Money, tuple[TaxLine, ...]]:
+    """The savings layer: starting rate, PSA, then the band rates.
+
+    The layer stacks directly above the non-savings taxable income on
+    the rUK ladder. The starting rate for savings covers what remains
+    of its limit after non-savings taxable income eats it £1 per £1
+    (planning §6); the PSA nil rate follows; the remainder is charged
+    at the rUK band rates (savings rates separate from the main rates
+    ship as data from 2027/28, §6). Returns the ladder position after
+    the layer plus the layer's lines.
+    """
+    lines: list[TaxLine] = []
+    position = taxable_non_savings
+    remaining = taxable_savings
+    starting_headroom = max(savings.starting_rate_limit - taxable_non_savings, _ZERO)
+    starting = min(remaining, starting_headroom)
+    if starting > _ZERO:
+        lines.append(_nil_line(SAVINGS_STARTING_RATE_BAND, starting))
+        position = position + starting
+        remaining = remaining - starting
+    psa = min(remaining, _psa_amount(savings, bands, total_taxable))
+    if psa > _ZERO:
+        lines.append(_nil_line(SAVINGS_NIL_RATE_BAND, psa))
+        position = position + psa
+        remaining = remaining - psa
+    if remaining > _ZERO:
+        lines.extend(
+            _ladder_lines(
+                bands,
+                start=position,
+                amount=remaining,
+                line_name=_savings_band_name,
+                line_rate=_band_own_rate,
+            )
+        )
+        position = position + remaining
+    return position, tuple(lines)
+
+
+def _dividend_lines(
+    dividend: DividendRules,
+    bands: tuple[TaxBand, ...],
+    *,
+    position: Money,
+    taxable_dividends: Money,
+) -> tuple[TaxLine, ...]:
+    """The dividend layer: the allowance nil rate, then dividend rates.
+
+    The dividend allowance is a nil rate consuming band width (planning
+    §6); the remainder is charged at the dividend rates aligned
+    positionally with the rUK bands (schema invariant).
+    """
+    lines: list[TaxLine] = []
+    remaining = taxable_dividends
+    nil = min(remaining, dividend.allowance)
+    if nil > _ZERO:
+        lines.append(_nil_line(DIVIDEND_NIL_RATE_BAND, nil))
+        position = position + nil
+        remaining = remaining - nil
+    if remaining > _ZERO:
+        lines.extend(
+            _ladder_lines(
+                bands,
+                start=position,
+                amount=remaining,
+                line_name=lambda index, _band: f"dividend_{dividend.rates[index].name}",
+                line_rate=lambda index, _band: dividend.rates[index].rate,
+            )
+        )
+    return tuple(lines)
+
+
+def _assess_year(year: TaxYearFile, tax_input: TaxInput) -> TaxResult:
+    """Assess one period's categorised income (module docstring).
+
+    The personal allowance is set against income in the stacking order
+    — non-savings, savings, dividends (HMRC's default ordering) — and
+    each category's taxable remainder is charged through its layer.
+    Savings and dividends always stack on the rUK ladder, above the
+    non-savings taxable income, whatever schedule taxed that income
+    (planning §6).
+    """
+    schedule = _schedule_for(year, tax_input.residency)
+    ras_gross = tax_input.relief_at_source_contributions
+    non_savings = tax_input.non_savings_income
+    savings = tax_input.savings_income
+    dividends = tax_input.dividend_income
+    adjusted_net_income = max(non_savings + savings + dividends - ras_gross, _ZERO)
     allowance = _tapered_allowance(schedule, adjusted_net_income)
-    taxable = max(income - allowance, _ZERO)
-    lines = _band_lines(_extended_bands(schedule.bands, ras_gross), taxable)
+    taxable_non_savings = max(non_savings - allowance, _ZERO)
+    allowance_left = max(allowance - non_savings, _ZERO)
+    taxable_savings = max(savings - allowance_left, _ZERO)
+    allowance_left = max(allowance_left - savings, _ZERO)
+    taxable_dividends = max(dividends - allowance_left, _ZERO)
+    total_taxable = taxable_non_savings + taxable_savings + taxable_dividends
+    lines = list(
+        _ladder_lines(
+            _extended_bands(schedule.bands, ras_gross),
+            start=_ZERO,
+            amount=taxable_non_savings,
+            line_name=_band_own_name,
+            line_rate=_band_own_rate,
+        )
+    )
+    if taxable_savings > _ZERO or taxable_dividends > _ZERO:
+        ruk_bands = _extended_bands(year.income_tax_ruk.bands, ras_gross)
+        position, savings_lines = _savings_lines(
+            year.savings,
+            ruk_bands,
+            taxable_savings=taxable_savings,
+            taxable_non_savings=taxable_non_savings,
+            total_taxable=total_taxable,
+        )
+        lines.extend(savings_lines)
+        lines.extend(
+            _dividend_lines(
+                year.dividend,
+                ruk_bands,
+                position=position,
+                taxable_dividends=taxable_dividends,
+            )
+        )
     tax_due = sum((line.tax for line in lines), start=_ZERO)
     return TaxResult(
         tax_due=tax_due,
-        taxable_income=taxable,
+        taxable_income=total_taxable,
         tax_free_allowance=allowance,
-        lines=lines,
+        lines=tuple(lines),
     )

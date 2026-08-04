@@ -13,12 +13,13 @@ tax-free fraction, and access-gate position — and the strategy returns a
   source and skips the iteration entirely.
 
 Strategies encode the wrapper ordering (planning §5.2): the tax-aware
-default of :func:`tax_aware_order` draws wholly tax-free sub-balances
-first, then funds already in drawdown (no fresh tax-free cash), then
-uncrystallised funds whose access gate is open — which, before the
-GIA/cash wrappers of roadmap 9.2 land, reduces to ISA → pension. Access
-ages are respected by construction: the ordering never includes a
-gate-closed source, and the engine refuses any plan that draws on one.
+default of :func:`tax_aware_order` draws taxable-growth accounts
+(GIA/cash) first, then wholly tax-free sub-balances, then funds
+already in drawdown (no fresh tax-free cash), then uncrystallised
+funds whose access gate is open — the full GIA/cash → ISA → pension
+default. Access ages are respected by construction: the ordering never
+includes a gate-closed source, and the engine refuses any plan that
+draws on one.
 
 Everything here is region-agnostic: sources describe themselves through
 the generic tax-treatment vocabulary of :mod:`glidepath.core.wrappers`,
@@ -82,9 +83,9 @@ class TaxFreeCashStrategy(Enum):
     In the first decumulation period whose access gate is open, each
     uncrystallised pension pot crystallises whole: the capped tax-free
     lump sum joins the period's income offset and the remainder moves
-    to the crystallised sub-balance. Accepted v1 cost (planning §5.2):
-    lump-sum cash beyond the period's need is spent, not banked, until
-    the roadmap-9.2 cash wrapper lands.
+    to the crystallised sub-balance. Lump-sum cash beyond the period's
+    need banks into the person's first uncapped taxable wrapper
+    (GIA/cash, roadmap 9.2); with none it is spent (planning §5.2).
     """
 
 
@@ -133,6 +134,15 @@ class WithdrawalSource:
     tax_free_fraction: Decimal
     access_open: bool
     natural_yield: Money = _ZERO
+    growth_taxable: bool = False
+    """Whether the wrapper's growth is taxed as it arises (roadmap 9.2).
+
+    Drawing a taxable-growth account (a GIA or cash account) first
+    stops future income tax accruing on what it holds, so the default
+    ordering spends these before tax-sheltered accounts — the core
+    reads the flag from the generic tax-treatment vocabulary, never
+    from the kind (planning §4.2).
+    """
 
     def __post_init__(self) -> None:
         """Reject a negative balance, yield, or fraction outside [0, 1]."""
@@ -218,9 +228,9 @@ class GrossWithdrawalPlan:
     """Draw exact gross amounts, in order, with no net gross-up.
 
     The net cash delivered is whatever remains after tax; a gap between
-    it and the period's need is reported as shortfall (under-draw) or
-    simply spent (over-draw — income beyond the need is not banked
-    until the cash/GIA wrappers of roadmap 9.2 land).
+    it and the period's need is reported as shortfall (under-draw),
+    while an over-draw banks into the person's first uncapped taxable
+    wrapper — spent only when they hold none (roadmap 9.2).
     """
 
     draws: tuple[GrossDraw, ...]
@@ -261,21 +271,31 @@ class WithdrawalStrategy(Protocol):
 def tax_aware_order(
     sources: Iterable[WithdrawalSource],
 ) -> tuple[WithdrawalSource, ...]:
-    """The v1 default draw order (planning §5.2), gate-closed excluded.
+    """The default draw order (planning §5.2), gate-closed excluded.
 
-    Wholly tax-free sub-balances first (drawing them never wastes a
-    penny of allowance), then funds already in drawdown — their
-    tax-free cash is spent, so they cost only income tax — and last
-    open uncrystallised pension funds, whose draws surrender future
-    tax-free growth. A source whose access gate has not opened is
-    excluded whatever its group: tax treatment says nothing about
-    accessibility — an age-gated tax-free account (e.g. a LISA,
-    roadmap 9.2) is just as ungated-by-§4.1 as a pension. Within each
-    group, plan (wrapper) order is preserved. Before roadmap 9.2's
-    GIA/cash wrappers this reduces to ISA → pension.
+    The full ordering is GIA/cash → ISA → pension: taxable-growth
+    accounts first — every pound left in them keeps accruing income
+    tax, so spending them shelters the rest — then wholly tax-free
+    sub-balances (drawing them never wastes a penny of allowance),
+    then funds already in drawdown — their tax-free cash is spent, so
+    they cost only income tax — and last open uncrystallised pension
+    funds, whose draws surrender future tax-free growth. A source
+    whose access gate has not opened is excluded whatever its group:
+    tax treatment says nothing about accessibility — an age-gated
+    tax-free account (a LISA) is just as ungated-by-§4.1 as a
+    pension. Within each group, plan (wrapper) order is preserved.
     """
     entries = tuple(entry for entry in sources if entry.access_open)
-    free = [entry for entry in entries if entry.tax_free_fraction == _ONE]
+    taxable_growth = [
+        entry
+        for entry in entries
+        if entry.tax_free_fraction == _ONE and entry.growth_taxable
+    ]
+    free = [
+        entry
+        for entry in entries
+        if entry.tax_free_fraction == _ONE and not entry.growth_taxable
+    ]
     crystallised = [
         entry
         for entry in entries
@@ -286,7 +306,7 @@ def tax_aware_order(
         for entry in entries
         if entry.tax_free_fraction != _ONE and not entry.id.crystallised
     ]
-    return (*free, *crystallised, *uncrystallised)
+    return (*taxable_growth, *free, *crystallised, *uncrystallised)
 
 
 @dataclass(frozen=True, slots=True)

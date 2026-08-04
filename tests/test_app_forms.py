@@ -261,6 +261,48 @@ class TestWrapperParsing:
         assert wrapper.balance.as_of == local_today
         assert wrapper.balance.recorded_on == late_evening
 
+    def test_cash_wrapper_defaults_to_a_cash_only_allocation(self) -> None:
+        """A cash account holds cash, never the glide path (9.2)."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {"kind": "uk.cash", "balance": "5000"},
+                    {"kind": "uk.gia", "balance": "5000"},
+                ),
+            )
+        )
+        cash, gia = household.persons[0].wrappers
+        assert cash.allocation is not None
+        assert cash.allocation.cash == Decimal(1)
+        assert cash.allocation.equity == Decimal(0)
+        assert gia.allocation is None  # investment accounts follow the glide path
+
+    def test_crystallised_balance_is_rejected_on_non_pension_kinds(self) -> None:
+        """Only pensions hold drawdown funds — a LISA must not (9.2).
+
+        Accepting one would let pre-60 LISA money bypass the access
+        gate through the always-open crystallised sub-balance.
+        """
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {
+                        "kind": "uk.lisa",
+                        "balance": "5000",
+                        "crystallised_balance": "1000",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "wrapper"
+        assert error.field_key == "crystallised_balance"
+
     def test_employer_contribution_requires_employee_amount(self) -> None:
         """Employer terms without the employee's own choice are rejected."""
         result = parse_facts_form(

@@ -50,9 +50,11 @@ from typing import TYPE_CHECKING, NoReturn
 from glidepath.core import Money
 from glidepath.regions.uk.schema import (
     DataFileError,
+    DividendRules,
     IncomeTaxSchedule,
     IsaRules,
     PensionRules,
+    SavingsRules,
     TaxBand,
     TaxYearFile,
     TaxYearMeta,
@@ -350,6 +352,29 @@ def _indexed_isa(isa: IsaRules, factor: Decimal) -> IsaRules:
     )
 
 
+def _indexed_savings(savings: SavingsRules, factor: Decimal) -> SavingsRules:
+    """Index the savings nil-rate amounts (reserved figures, §5.3).
+
+    The starting-rate limit is legislated frozen with the rUK schedule
+    (planning §6), and the PSA amounts follow the same reserved policy;
+    a zero tier (the additional-rate PSA) stays zero under any factor.
+    """
+    return SavingsRules(
+        starting_rate_limit=_indexed_money(savings.starting_rate_limit, factor),
+        psa_basic=_indexed_money(savings.psa_basic, factor),
+        psa_higher=_indexed_money(savings.psa_higher, factor),
+        psa_additional=_indexed_money(savings.psa_additional, factor),
+    )
+
+
+def _indexed_dividend(dividend: DividendRules, factor: Decimal) -> DividendRules:
+    """Index the dividend allowance; the rates never extrapolate."""
+    return DividendRules(
+        allowance=_indexed_money(dividend.allowance, factor),
+        rates=dividend.rates,
+    )
+
+
 def extend_tax_year(
     base: TaxYearFile,
     target_start_year: int,
@@ -397,6 +422,8 @@ def extend_tax_year(
             income_tax_scotland=base.income_tax_scotland,
             pension=base.pension,
             isa=base.isa,
+            savings=base.savings,
+            dividend=base.dividend,
             state_pension=base.state_pension,
         )
     factor = cpi.growth_factor**steps
@@ -431,5 +458,11 @@ def extend_tax_year(
         income_tax_scotland=scotland,
         pension=base.pension if steps == 0 else _indexed_pension(base.pension, factor),
         isa=base.isa if steps == 0 else _indexed_isa(base.isa, factor),
+        savings=(
+            base.savings if steps == 0 else _indexed_savings(base.savings, factor)
+        ),
+        dividend=(
+            base.dividend if steps == 0 else _indexed_dividend(base.dividend, factor)
+        ),
         state_pension=base.state_pension,
     )

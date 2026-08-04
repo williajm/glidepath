@@ -40,6 +40,7 @@ def source_of(
     tax_free_fraction: str = "0",
     access_open: bool = True,
     natural_yield: str = "0",
+    growth_taxable: bool = False,
 ) -> WithdrawalSource:
     """One drawable sub-balance view."""
     return WithdrawalSource(
@@ -49,6 +50,7 @@ def source_of(
         tax_free_fraction=Decimal(tax_free_fraction),
         access_open=access_open,
         natural_yield=Money(Decimal(natural_yield)),
+        growth_taxable=growth_taxable,
     )
 
 
@@ -109,6 +111,21 @@ class TestTaxAwareOrder:
         first = source_of("isa-a", tax_free_fraction="1")
         second = source_of("isa-b", tax_free_fraction="1")
         assert tax_aware_order((first, second)) == (first, second)
+
+    def test_taxable_growth_sources_lead_the_full_ordering(self) -> None:
+        """The full default is GIA/cash → ISA → pension (roadmap 9.2).
+
+        A taxable-growth account keeps accruing income tax on every
+        pound left in it, so it drains before the tax-free group even
+        though the plan lists it last.
+        """
+        pension = source_of("pension", tax_free_fraction="0.25")
+        crystallised = source_of("pension", crystallised=True)
+        isa = source_of("isa", tax_free_fraction="1")
+        gia = source_of("gia", tax_free_fraction="1", growth_taxable=True)
+        cash = source_of("cash", tax_free_fraction="1", growth_taxable=True)
+        ordered = tax_aware_order((pension, crystallised, isa, gia, cash))
+        assert ordered == (gia, cash, isa, crystallised, pension)
 
 
 class TestFixedReal:
