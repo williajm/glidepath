@@ -130,6 +130,10 @@ from glidepath.core.results import (
     collect_plan_decisions,
     collect_plan_facts,
 )
+from glidepath.core.retirement import (
+    RetirementAgeSearch,
+    earliest_retirement_age,
+)
 from glidepath.core.returns import (
     DeterministicReturnModel,
     PeriodReturns,
@@ -265,6 +269,7 @@ __all__ = [
     "Region",
     "ReliefMechanic",
     "ReportBasis",
+    "RetirementAgeSearch",
     "ReturnModel",
     "ReturnModelFactory",
     "RevaluationBasis",
@@ -326,6 +331,7 @@ __all__ = [
     "decision_target_catalogue",
     "deferral_months",
     "derive_seed",
+    "earliest_retirement_age",
     "entitlement_active_fraction",
     "glide_path_from_shape",
     "int_assumption_value",

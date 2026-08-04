@@ -77,7 +77,13 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "run mode to Monte Carlo, choose the paths and seed, and "
             "press Run Monte Carlo to read the success metrics and draw "
             "10th/median/90th percentile bands over the balances chart; "
-            "the same seed and inputs always reproduce the same result."
+            "the same seed and inputs always reproduce the same result. "
+            'The "When can I retire?" card answers with the earliest '
+            "retirement age at which the plan sustains a target income — "
+            "a replacement rate you choose (66% of your employment income "
+            "by default) — on the selected run mode's basis: met with no "
+            "shortfall deterministically, or with at least your chosen "
+            "Monte Carlo success rate."
         ),
     ),
     (

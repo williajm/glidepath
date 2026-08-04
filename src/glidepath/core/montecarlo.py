@@ -313,7 +313,7 @@ def sustainable_income(
 
     def meets(amount: Money) -> bool:
         """Whether spending ``amount`` meets the target success rate."""
-        probe = _with_spending(plan, amount, config)
+        probe = probe_with_spending(plan, amount, config)
         result = run_paths(probe, assumptions, region, config, paths=search.paths)
         return result.success_rate >= search.target_success_rate
 
@@ -421,14 +421,17 @@ def _path_outcome(index: int, result: ProjectionResult) -> PathOutcome:
     )
 
 
-def _with_spending(plan: Household, amount: Money, config: RunConfig) -> Household:
+def probe_with_spending(plan: Household, amount: Money, config: RunConfig) -> Household:
     """The plan with its spending level replaced by a probe amount.
 
     An existing spending plan keeps its fact metadata and stage
     multipliers; a plan without one gains a bare probe plan whose
     "fact" is synthesized from ``config.today`` (no clock read —
     planning §4.6). Probe plans never leave the search, so the
-    synthetic fact never lands in any result's provenance.
+    synthetic fact never lands in any result's provenance. Shared by
+    the sustainable-income search and the earliest-retirement-age
+    solver (:mod:`glidepath.core.retirement`, roadmap 9.14); not part
+    of the package API.
     """
     spending = plan.spending
     if spending is None:

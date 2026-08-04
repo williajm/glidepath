@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import date, datetime
 
+    from glidepath.app.retirement import RetirementAnswer
     from glidepath.core import MonteCarloResult, Region
     from glidepath.regions.uk import AssumptionValue
 
@@ -65,9 +66,11 @@ class PlanState:
     carries a scenario run failure as a message, mirroring
     ``run_error``. ``monte_carlo`` holds the explicit Monte Carlo run
     over the same plan (roadmap 9.13), with ``monte_carlo_error``
-    mirroring ``run_error``; both reset whenever the state is
-    recomputed through :func:`replanned_state`, so a held result can
-    never go stale against a changed plan.
+    mirroring ``run_error``; ``retirement`` holds the explicit "When
+    can I retire?" answer (roadmap 9.14), with ``retirement_error``
+    alongside. All of them reset whenever the state is recomputed
+    through :func:`replanned_state`, so a held result can never go
+    stale against a changed plan.
     """
 
     assumptions: AssumptionSet
@@ -79,6 +82,8 @@ class PlanState:
     scenario_run_error: str | None = None
     monte_carlo: MonteCarloResult | None = None
     monte_carlo_error: str | None = None
+    retirement: RetirementAnswer | None = None
+    retirement_error: str | None = None
 
 
 @dataclass(frozen=True)

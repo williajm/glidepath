@@ -1,13 +1,17 @@
-"""The projection chart widgets (§4.7, roadmap 8.4, 9.13).
+"""The projection chart widgets (§4.7, roadmap 8.4, 9.13, 9.14).
 
 One sub-tab per chart, each a stacked bar chart bound to the app
 layer's :class:`~glidepath.app.ChartsViewModel`; the money-basis
 radio toggle and the run-mode control forward their selected option
 keys back, and the Monte Carlo run action forwards the raw seed and
 path-count text. Monte Carlo percentile bands draw as line series
-over the stacked bars. All copy, series labels, and the real/nominal
-presentation come from the app layer — this pane only draws what the
-view model says (planning §4.7).
+over the stacked bars. The "When can I retire?" card (9.14) forwards
+the raw replacement-rate and success-target text — plus the Monte
+Carlo panel's seed and path text, its basis under that mode — and
+renders the answer, detail, and message the view model carries. All
+copy, series labels, and the real/nominal presentation come from the
+app layer — this pane only draws what the view model says (planning
+§4.7).
 """
 
 from dataclasses import dataclass
@@ -47,6 +51,7 @@ if TYPE_CHECKING:
         ChartSpec,
         ChartsViewModel,
         MonteCarloPanelViewModel,
+        RetirementPanelViewModel,
     )
 
 _CATEGORY_LABEL_ANGLE = -90
@@ -54,11 +59,18 @@ _CATEGORY_LABEL_ANGLE = -90
 
 @dataclass(frozen=True)
 class ChartsPaneCallbacks:
-    """The shell handlers a :class:`ChartsPane` forwards actions to."""
+    """The shell handlers a :class:`ChartsPane` forwards actions to.
+
+    ``run_retirement`` receives the raw replacement-rate and
+    success-target text plus the Monte Carlo panel's raw seed and
+    path-count text (its basis under that run mode) — the shell
+    parses, the pane only captures (planning §4.7).
+    """
 
     select_basis: Callable[[str], None]
     select_mode: Callable[[str], None]
     run_monte_carlo: Callable[[str, str], None]
+    run_retirement: Callable[[str, str, str, str], None]
 
 
 def _bar_hovered(
@@ -131,6 +143,8 @@ class ChartsPane(QWidget):
         self.monte_carlo_message_label.setWordWrap(True)
         monte_carlo_layout.addWidget(self.monte_carlo_message_label)
 
+        self._build_retirement_box()
+
         self.message_label = QLabel("", self)
         self.message_label.setWordWrap(True)
 
@@ -141,6 +155,7 @@ class ChartsPane(QWidget):
         controls.addWidget(self._basis_box)
         controls.addWidget(self._monte_carlo_box, 1)
         layout.addLayout(controls)
+        layout.addWidget(self._retirement_box)
         layout.addWidget(self.message_label)
         layout.addWidget(self.chart_tabs, 1)
 
@@ -154,6 +169,7 @@ class ChartsPane(QWidget):
         self._basis_box.setTitle(view_model.basis_heading)
         self._sync_basis_buttons(view_model)
         self._sync_monte_carlo(view_model.monte_carlo)
+        self._sync_retirement(view_model.retirement)
         self.message_label.setText(view_model.message)
         self.message_label.setVisible(bool(view_model.message))
         self.chart_tabs.setVisible(bool(view_model.charts))
@@ -170,9 +186,50 @@ class ChartsPane(QWidget):
         if 0 <= selected_index < self.chart_tabs.count():
             self.chart_tabs.setCurrentIndex(selected_index)
 
+    def _build_retirement_box(self) -> None:
+        """Create the "When can I retire?" card's widgets (9.14)."""
+        self._retirement_box = QGroupBox(self)
+        retirement_layout = QVBoxLayout(self._retirement_box)
+        retirement_controls = QHBoxLayout()
+        self.rate_label = QLabel("", self._retirement_box)
+        self.rate_edit = QLineEdit(self._retirement_box)
+        self.success_label = QLabel("", self._retirement_box)
+        self.success_edit = QLineEdit(self._retirement_box)
+        self.retirement_button = QPushButton("", self._retirement_box)
+        self.retirement_button.clicked.connect(self._retirement_clicked)
+        retirement_controls.addWidget(self.rate_label)
+        retirement_controls.addWidget(self.rate_edit)
+        retirement_controls.addWidget(self.success_label)
+        retirement_controls.addWidget(self.success_edit)
+        retirement_controls.addWidget(self.retirement_button)
+        retirement_controls.addStretch(1)
+        retirement_layout.addLayout(retirement_controls)
+        self.retirement_answer_label = QLabel("", self._retirement_box)
+        self.retirement_answer_label.setWordWrap(True)
+        retirement_layout.addWidget(self.retirement_answer_label)
+        self.retirement_detail_label = QLabel("", self._retirement_box)
+        self.retirement_detail_label.setWordWrap(True)
+        retirement_layout.addWidget(self.retirement_detail_label)
+        self.retirement_message_label = QLabel("", self._retirement_box)
+        self.retirement_message_label.setWordWrap(True)
+        retirement_layout.addWidget(self.retirement_message_label)
+
     def _run_clicked(self) -> None:
         """Forward the raw seed and path-count text to the shell."""
         self._callbacks.run_monte_carlo(self.seed_edit.text(), self.paths_edit.text())
+
+    def _retirement_clicked(self) -> None:
+        """Forward the card's raw text to the shell (roadmap 9.14).
+
+        The Monte Carlo panel's seed and path text ride along: they
+        are the search's basis when the Monte Carlo mode is selected.
+        """
+        self._callbacks.run_retirement(
+            self.rate_edit.text(),
+            self.success_edit.text(),
+            self.seed_edit.text(),
+            self.paths_edit.text(),
+        )
 
     def set_monte_carlo_busy(self, *, busy: bool) -> None:
         """Disable the run action while a Monte Carlo run is in flight.
@@ -182,6 +239,14 @@ class ChartsPane(QWidget):
         run from the same inputs.
         """
         self.run_button.setEnabled(not busy)
+
+    def set_retirement_busy(self, *, busy: bool) -> None:
+        """Disable the card's action while a search is in flight (9.14).
+
+        Same rationale as :meth:`set_monte_carlo_busy`: the search
+        runs off the GUI thread and must not overlap itself.
+        """
+        self.retirement_button.setEnabled(not busy)
 
     def _sync_basis_buttons(self, view_model: ChartsViewModel) -> None:
         """Create the basis radio buttons once; keep the selection bound."""
@@ -233,6 +298,23 @@ class ChartsPane(QWidget):
             widget.setVisible(panel.controls_visible)
         self.metrics_label.setVisible(bool(metrics))
         self.monte_carlo_message_label.setVisible(bool(panel.message))
+
+    def _sync_retirement(self, panel: RetirementPanelViewModel) -> None:
+        """Re-render the "When can I retire?" card (roadmap 9.14)."""
+        self._retirement_box.setTitle(panel.heading)
+        self.rate_label.setText(panel.rate_label)
+        self.rate_edit.setText(panel.rate_value)
+        self.success_label.setText(panel.success_label)
+        self.success_edit.setText(panel.success_value)
+        self.retirement_button.setText(panel.run_label)
+        self.success_label.setVisible(panel.success_visible)
+        self.success_edit.setVisible(panel.success_visible)
+        self.retirement_answer_label.setText(panel.answer)
+        self.retirement_answer_label.setVisible(bool(panel.answer))
+        self.retirement_detail_label.setText(panel.detail)
+        self.retirement_detail_label.setVisible(bool(panel.detail))
+        self.retirement_message_label.setText(panel.message)
+        self.retirement_message_label.setVisible(bool(panel.message))
 
     def _chart_view(self, chart: ChartSpec, categories: tuple[str, ...]) -> QChartView:
         """One stacked bar chart, percentile bands overlaid, bound to a spec."""

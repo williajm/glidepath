@@ -18,15 +18,21 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
 from glidepath.app import (
     MONTE_CARLO_STALE_MESSAGE,
     NO_MONTE_CARLO_MESSAGE,
+    NO_RETIREMENT_MESSAGE,
+    RETIREMENT_STALE_MESSAGE,
     ChartsViewModel,
     PlanState,
+    RetirementRequest,
     bar_tooltip,
     build_charts_view_model,
     build_shell_view_model,
     initial_plan_state,
     state_with_household,
     state_with_monte_carlo,
+    state_with_override,
+    state_with_retirement,
 )
+from glidepath.app.retirement import RETIREMENT_ANSWER_PREFIX
 from glidepath.core import (
     Decision,
     EntityId,
@@ -55,12 +61,14 @@ def callbacks(
     select_basis: Callable[[str], None] | None = None,
     select_mode: Callable[[str], None] | None = None,
     run_monte_carlo: Callable[[str, str], None] | None = None,
+    run_retirement: Callable[[str, str, str, str], None] | None = None,
 ) -> ChartsPaneCallbacks:
     """Pane callbacks defaulting to no-ops for uninvolved actions."""
     return ChartsPaneCallbacks(
         select_basis=select_basis or (lambda _key: None),
         select_mode=select_mode or (lambda _key: None),
         run_monte_carlo=run_monte_carlo or (lambda _seed, _paths: None),
+        run_retirement=run_retirement or (lambda _rate, _success, _seed, _paths: None),
     )
 
 
@@ -104,6 +112,48 @@ def wait_for_monte_carlo(window: MainWindow) -> None:
     """Wait out the worker, then deliver its queued finish signal."""
     assert window.monte_carlo_pool.waitForDone(60_000)
     QApplication.processEvents()
+
+
+def retirement_state() -> PlanState:
+    """A short-horizon 60-year-old with employment income, solved.
+
+    The planning age is overridden down to 65, so the deterministic
+    search covers ages 60 to 64 and stays fast.
+    """
+    outcome = state_with_override(
+        initial_plan_state(),
+        "horizon.planning_age",
+        "65",
+        recorded_on=RECORDED,
+        today=TODAY,
+    )
+    assert outcome.error is None
+    isa = Wrapper(
+        id=EntityId("retire-gui-isa"),
+        kind=ISA_KIND,
+        balance=Fact(value=Money(Decimal(300000)), as_of=AS_OF, recorded_on=RECORDED),
+    )
+    person = Person(
+        id=EntityId("retire-gui-person"),
+        date_of_birth=Fact(value=date(1966, 2, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=63, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+        employment_income=Fact(
+            value=Money(Decimal(50000)), as_of=AS_OF, recorded_on=RECORDED
+        ),
+        wrappers=(isa,),
+    )
+    plan = Household(
+        persons=(person,),
+        spending=SpendingPlan(
+            annual_spending_real=Fact(
+                value=Money(Decimal(18000)), as_of=AS_OF, recorded_on=RECORDED
+            )
+        ),
+    )
+    state = state_with_household(outcome.state, plan, today=TODAY)
+    request = RetirementRequest(mode=RunMode.DETERMINISTIC, rate_text="66")
+    return state_with_retirement(state, request, today=TODAY)
 
 
 class TestChartsPane:
@@ -215,6 +265,61 @@ class TestMonteCarloControls:
         assert len(series) == 1 + len(view_model.charts[0].bands)
         band_names = [entry.name() for entry in series[1:]]
         assert band_names == [band.label for band in view_model.charts[0].bands]
+
+
+class TestRetirementCard:
+    """The "When can I retire?" card bindings (9.14)."""
+
+    def test_deterministic_mode_hides_the_success_target(self) -> None:
+        """The deterministic basis offers no success target to set."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        assert pane.success_edit.isHidden()
+        assert pane.success_label.isHidden()
+        assert not pane.rate_edit.isHidden()
+        assert not pane.retirement_button.isHidden()
+        assert pane.retirement_message_label.text() == NO_RETIREMENT_MESSAGE
+
+    def test_monte_carlo_mode_shows_the_success_target(self) -> None:
+        """The Monte Carlo basis adds the success-target input."""
+        pane = ChartsPane(callbacks())
+        view_model = build_charts_view_model(
+            projected_state(), mode=RunMode.MONTE_CARLO
+        )
+        pane.refresh(view_model)
+        assert not pane.success_edit.isHidden()
+        assert not pane.success_label.isHidden()
+
+    def test_find_button_forwards_the_raw_text(self) -> None:
+        """The shell parses; the card only captures and forwards."""
+        searches: list[tuple[str, str, str, str]] = []
+        pane = ChartsPane(
+            callbacks(
+                run_retirement=lambda rate, success, seed, paths: searches.append(
+                    (rate, success, seed, paths)
+                )
+            )
+        )
+        view_model = build_charts_view_model(
+            projected_state(), mode=RunMode.MONTE_CARLO
+        )
+        pane.refresh(view_model)
+        pane.rate_edit.setText("70")
+        pane.success_edit.setText("85")
+        pane.seed_edit.setText("42")
+        pane.paths_edit.setText("5")
+        pane.retirement_button.click()
+        assert searches == [("70", "85", "42", "5")]
+
+    def test_an_answer_renders_on_the_card(self) -> None:
+        """The answer and its detail show; the no-run message hides."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(build_charts_view_model(retirement_state()))
+        assert pane.retirement_answer_label.text()
+        assert not pane.retirement_answer_label.isHidden()
+        assert not pane.retirement_detail_label.isHidden()
+        assert "£33,000.00" in pane.retirement_detail_label.text()
+        assert pane.retirement_message_label.isHidden()
 
 
 class _ToolTipRecorder:
@@ -406,3 +511,54 @@ class TestMainWindowChartsFlow:
         view = pane.chart_tabs.widget(0)
         assert isinstance(view, QChartView)
         assert len(view.chart().series()) == 1
+
+
+class TestMainWindowRetirementFlow:
+    """The retirement-age search runs through the window (9.14)."""
+
+    @pytest.fixture(name="window")
+    def window_fixture(self) -> MainWindow:
+        """A window with a plan carrying employment income saved.
+
+        A 10% replacement rate keeps the search to a single probe:
+        the ascending scan succeeds at the very first candidate age.
+        """
+        window = MainWindow(build_shell_view_model())
+        facts = window.facts_pane
+        facts.person_form.set_value("date_of_birth", "1966-02-01")
+        facts.person_form.set_value("tax_residency", str(RUK_RESIDENCY))
+        facts.person_form.set_value("target_retirement_age", "63")
+        facts.person_form.set_value("employment_income", "50000")
+        facts.spending_form.set_value("annual_spending_real", "18000")
+        wrapper_form = facts.wrappers.add_entry()
+        wrapper_form.set_value("kind", str(ISA_KIND))
+        wrapper_form.set_value("balance", "300000")
+        facts.submit_button.click()
+        return window
+
+    def test_retirement_search_through_the_window(self, window: MainWindow) -> None:
+        """Enter a rate, press find: the answer lands on the card (9.14)."""
+        pane = window.charts_pane
+        pane.rate_edit.setText("10")
+        pane.retirement_button.click()
+        # The search executes off the GUI thread; the button stays
+        # disabled until the finished state is delivered back.
+        assert not pane.retirement_button.isEnabled()
+        wait_for_monte_carlo(window)
+        assert pane.retirement_button.isEnabled()
+        assert pane.retirement_answer_label.text().startswith(RETIREMENT_ANSWER_PREFIX)
+        assert not pane.retirement_detail_label.isHidden()
+        assert pane.rate_edit.text() == "10"
+
+    def test_a_plan_change_discards_an_in_flight_search(
+        self, window: MainWindow
+    ) -> None:
+        """An answer computed from a replaced state never lands (9.14)."""
+        pane = window.charts_pane
+        pane.rate_edit.setText("10")
+        pane.retirement_button.click()
+        window.facts_pane.submit_button.click()
+        wait_for_monte_carlo(window)
+        assert window.statusBar().currentMessage() == RETIREMENT_STALE_MESSAGE
+        assert pane.retirement_message_label.text() == NO_RETIREMENT_MESSAGE
+        assert pane.retirement_button.isEnabled()
