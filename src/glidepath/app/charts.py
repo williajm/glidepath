@@ -147,6 +147,23 @@ def basis_from_key(key: str) -> ReportBasis:
     return basis
 
 
+def basis_key(basis: ReportBasis) -> str:
+    """The option key denoting ``basis`` — the inverse of ``basis_from_key``."""
+    return _KEY_BY_BASIS[basis]
+
+
+def basis_options() -> tuple[ChartBasisOption, ...]:
+    """The money-basis choices every basis toggle offers (planning §5.2)."""
+    return tuple(
+        ChartBasisOption(key=key, label=_BASIS_LABELS[key]) for key in _BASIS_BY_KEY
+    )
+
+
+def basis_suffix(basis: ReportBasis) -> str:
+    """The axis-label suffix naming ``basis`` (e.g. ``today's money``)."""
+    return _BASIS_SUFFIXES[_KEY_BY_BASIS[basis]]
+
+
 def build_charts_view_model(
     state: PlanState, basis: ReportBasis = DEFAULT_CHART_BASIS
 ) -> ChartsViewModel:
@@ -157,10 +174,8 @@ def build_charts_view_model(
     Without a projection the screen carries only the empty-state
     message — the no-run copy, or the run failure held on the state.
     """
-    selected_key = _KEY_BY_BASIS[basis]
-    options = tuple(
-        ChartBasisOption(key=key, label=_BASIS_LABELS[key]) for key in _BASIS_BY_KEY
-    )
+    selected_key = basis_key(basis)
+    options = basis_options()
     if state.result is None:
         message = (
             NO_PROJECTION_MESSAGE
@@ -176,7 +191,7 @@ def build_charts_view_model(
             message=message,
         )
     grouped = _rows_by_period(build_report(state.result, basis))
-    suffix = _BASIS_SUFFIXES[selected_key]
+    suffix = basis_suffix(basis)
     return ChartsViewModel(
         basis_heading=BASIS_HEADING,
         basis_options=options,

@@ -725,3 +725,49 @@ class TestValidationMessages:
         assert "Savings wrapper 2" in text
         assert "Balance" in text
         assert "amount of money" in text
+
+
+class TestEntityIdReuse:
+    """Re-submissions keep entity ids, so scenario overrides survive (§4.3)."""
+
+    @staticmethod
+    def submission() -> FactsFormData:
+        """One valid submission with a person and two wrappers."""
+        return FactsFormData(
+            person=person_values(),
+            wrappers=(
+                {"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},
+                {"kind": str(WORKPLACE_DC_KIND), "balance": "12000"},
+            ),
+        )
+
+    def test_resubmission_reuses_prior_ids(self) -> None:
+        """The person and each wrapper keep their position's prior id."""
+        first = parse(self.submission())
+        result = parse_facts_form(
+            self.submission(), recorded_on=RECORDED, today=TODAY, previous=first
+        )
+        second = result.household
+        assert second is not None
+        assert second.persons[0].id == first.persons[0].id
+        assert [wrapper.id for wrapper in second.persons[0].wrappers] == [
+            wrapper.id for wrapper in first.persons[0].wrappers
+        ]
+
+    def test_sections_beyond_the_prior_plan_mint_fresh_ids(self) -> None:
+        """A newly added wrapper gets a new id; existing ones keep theirs."""
+        first = parse(FactsFormData(person=person_values()))
+        result = parse_facts_form(
+            self.submission(), recorded_on=RECORDED, today=TODAY, previous=first
+        )
+        second = result.household
+        assert second is not None
+        assert second.persons[0].id == first.persons[0].id
+        wrapper_ids = {wrapper.id for wrapper in second.persons[0].wrappers}
+        assert len(wrapper_ids) == 2
+
+    def test_without_previous_every_id_is_fresh(self) -> None:
+        """Two independent parses share no entity ids."""
+        first = parse(self.submission())
+        second = parse(self.submission())
+        assert second.persons[0].id != first.persons[0].id

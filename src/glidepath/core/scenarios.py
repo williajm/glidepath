@@ -163,6 +163,61 @@ class ScenarioResolution:
     applied: tuple[AppliedOverride, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class DecisionTargetInfo:
+    """One addressable decision target: its stable label and current value.
+
+    ``value`` is the decision's bare value (the ``Decision`` wrapper
+    unwrapped; the annuity purchase's enum choices are already bare) —
+    what an override on this target would replace. UIs list these to
+    offer exactly the decision whitelist (planning §4.3) without
+    re-deriving it.
+    """
+
+    target: DecisionTarget
+    label: str
+    value: Any
+
+
+def decision_target_catalogue(household: Household) -> tuple[DecisionTargetInfo, ...]:
+    """Every addressable decision target, with its label and current value.
+
+    The same whitelist :func:`scenario_orphans` checks against, in the
+    same order — planned outflows first, then each person's targets.
+    """
+    entities = _entities_by_id(household)
+    infos = []
+    for (entity_id, field_path), label in _decision_target_labels(household).items():
+        value: Any = entities[entity_id]
+        for segment in field_path.split("."):
+            value = getattr(value, segment)
+        if isinstance(value, Decision):
+            value = value.value
+        infos.append(
+            DecisionTargetInfo(
+                target=DecisionTarget(entity_id=entity_id, field_path=field_path),
+                label=label,
+                value=value,
+            )
+        )
+    return tuple(infos)
+
+
+def _entities_by_id(household: Household) -> dict[EntityId, Any]:
+    """Every override-addressable entity in the household, by id."""
+    entities: dict[EntityId, Any] = {
+        outflow.id: outflow for outflow in household.planned_outflows
+    }
+    for person in household.persons:
+        entities[person.id] = person
+        entities.update({wrapper.id: wrapper for wrapper in person.wrappers})
+        entities.update({pension.id: pension for pension in person.db_pensions})
+        entities.update(
+            {purchase.id: purchase for purchase in person.annuity_purchases}
+        )
+    return entities
+
+
 def scenario_orphans(
     scenario: Scenario, household: Household, assumptions: AssumptionSet
 ) -> tuple[Override, ...]:

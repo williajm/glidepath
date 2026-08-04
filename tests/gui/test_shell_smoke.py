@@ -84,6 +84,7 @@ class TestMainWindow:
         assert tab_labels == [
             view_model.facts_tab_label,
             view_model.charts_tab_label,
+            view_model.scenarios_tab_label,
             view_model.inspector_tab_label,
         ]
         menu_titles = [action.text() for action in window.menuBar().actions()]

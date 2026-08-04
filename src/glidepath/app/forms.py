@@ -22,6 +22,7 @@ from glidepath.core import (
     ContributionSchedule,
     DBPension,
     Decision,
+    EntityId,
     Fact,
     FactorTable,
     Household,
@@ -431,7 +432,7 @@ def _contributions_from(reader: _SectionReader) -> ContributionSchedule | None:
         return None
 
 
-def _wrapper_from(reader: _SectionReader) -> Wrapper | None:
+def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None:
     """One savings wrapper from its section values."""
     kind = reader.choice("kind", _WRAPPER_KINDS)
     if kind is None:
@@ -445,7 +446,7 @@ def _wrapper_from(reader: _SectionReader) -> Wrapper | None:
         return None
     try:
         return Wrapper(
-            id=new_entity_id(),
+            id=entity_id,
             kind=kind,
             balance=balance,
             crystallised_balance=crystallised,
@@ -456,7 +457,7 @@ def _wrapper_from(reader: _SectionReader) -> Wrapper | None:
         return None
 
 
-def _db_pension_from(reader: _SectionReader) -> DBPension | None:
+def _db_pension_from(reader: _SectionReader, entity_id: EntityId) -> DBPension | None:
     """One deferred DB entitlement from its section values.
 
     The statement date doubles as the ``as_of`` for the scheme facts it
@@ -481,7 +482,7 @@ def _db_pension_from(reader: _SectionReader) -> DBPension | None:
     recorded = reader.recorded_on
     try:
         return DBPension(
-            id=new_entity_id(),
+            id=entity_id,
             accrued_annual_pension=Fact(
                 value=accrued, as_of=statement, recorded_on=recorded
             ),
@@ -516,6 +517,7 @@ def _person_from(
     wrappers: tuple[Wrapper, ...],
     db_pensions: tuple[DBPension, ...],
     state_pension: StatePensionRecord | None,
+    entity_id: EntityId,
 ) -> Person | None:
     """The (v1 single) person from the person section plus sub-entities."""
     dob = reader.fact_of(
@@ -535,7 +537,7 @@ def _person_from(
         return None
     try:
         return Person(
-            id=new_entity_id(),
+            id=entity_id,
             date_of_birth=dob,
             target_retirement_age=Decision(
                 value=target, recorded_on=reader.recorded_on
@@ -562,8 +564,19 @@ def _person_from(
         return None
 
 
+def _kept_id(ids: tuple[EntityId, ...], index: int) -> EntityId:
+    """The prior entity id at ``index``, or a fresh one past the end."""
+    if index < len(ids):
+        return ids[index]
+    return new_entity_id()
+
+
 def parse_facts_form(
-    data: FactsFormData, *, recorded_on: datetime, today: date
+    data: FactsFormData,
+    *,
+    recorded_on: datetime,
+    today: date,
+    previous: Household | None = None,
 ) -> FactsFormResult:
     """Parse a submission into a v1 household, or the errors preventing one.
 
@@ -575,11 +588,24 @@ def parse_facts_form(
     midnight the two calendars disagree, and a blank ``as_of``
     defaulted to the UTC date could sit a day after the run's
     ``today``, which §4.8 rejects as future-dated.
+
+    ``previous`` is the household a re-submission replaces: the person
+    and each wrapper and DB pension reuse the prior id at their form
+    position, so scenario overrides targeting them by stable id (§4.3)
+    survive a facts edit instead of orphaning. Sections beyond the
+    prior plan's count mint fresh ids.
     """
     context = _FormContext(
         recorded_on=recorded_on,
         default_as_of=today,
         errors=[],
+    )
+    prior = previous.persons[0] if previous is not None and previous.persons else None
+    prior_wrapper_ids = tuple(
+        wrapper.id for wrapper in (prior.wrappers if prior is not None else ())
+    )
+    prior_pension_ids = tuple(
+        pension.id for pension in (prior.db_pensions if prior is not None else ())
     )
     spending = _spending_from(_SectionReader(context, "spending", data.spending))
     state_pension = _state_pension_from(
@@ -590,7 +616,8 @@ def parse_facts_form(
         for index, values in enumerate(data.wrappers)
         if (
             wrapper := _wrapper_from(
-                _SectionReader(context, "wrapper", values, index=index)
+                _SectionReader(context, "wrapper", values, index=index),
+                _kept_id(prior_wrapper_ids, index),
             )
         )
         is not None
@@ -600,7 +627,8 @@ def parse_facts_form(
         for index, values in enumerate(data.db_pensions)
         if (
             pension := _db_pension_from(
-                _SectionReader(context, "db_pension", values, index=index)
+                _SectionReader(context, "db_pension", values, index=index),
+                _kept_id(prior_pension_ids, index),
             )
         )
         is not None
@@ -610,6 +638,7 @@ def parse_facts_form(
         wrappers,
         db_pensions,
         state_pension,
+        prior.id if prior is not None else new_entity_id(),
     )
     if context.errors or person is None:
         return FactsFormResult(household=None, errors=tuple(context.errors))

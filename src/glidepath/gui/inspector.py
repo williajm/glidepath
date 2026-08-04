@@ -11,49 +11,20 @@ the app layer.
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+
+from glidepath.gui.tableview import fill_table, read_only_table
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from glidepath.app import AssumptionRow, InspectorViewModel
-
-
-def _read_only_table(parent: QWidget) -> QTableWidget:
-    """A table configured for display-only rows."""
-    table = QTableWidget(parent)
-    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-    table.verticalHeader().setVisible(False)
-    return table
-
-
-def _fill_table(
-    table: QTableWidget,
-    columns: tuple[str, ...],
-    rows: list[tuple[str, ...]],
-    tooltips: list[str] | None = None,
-) -> None:
-    """Replace a table's contents with pre-formatted cells."""
-    table.setColumnCount(len(columns))
-    table.setHorizontalHeaderLabels(list(columns))
-    table.setRowCount(len(rows))
-    for row_index, row in enumerate(rows):
-        for column_index, text in enumerate(row):
-            item = QTableWidgetItem(text)
-            if tooltips is not None:
-                item.setToolTip(tooltips[row_index])
-            table.setItem(row_index, column_index, item)
-    table.resizeColumnsToContents()
 
 
 class InspectorPane(QWidget):
@@ -70,28 +41,28 @@ class InspectorPane(QWidget):
         self._view_model: InspectorViewModel | None = None
 
         self._facts_box = QGroupBox(self)
-        self.facts_table = _read_only_table(self._facts_box)
+        self.facts_table = read_only_table(self._facts_box)
         facts_layout = QVBoxLayout(self._facts_box)
         facts_layout.addWidget(self.facts_table)
 
         self._roll_forwards_box = QGroupBox(self)
-        self.roll_forwards_table = _read_only_table(self._roll_forwards_box)
+        self.roll_forwards_table = read_only_table(self._roll_forwards_box)
         roll_forwards_layout = QVBoxLayout(self._roll_forwards_box)
         roll_forwards_layout.addWidget(self.roll_forwards_table)
 
         self._assumptions_box = QGroupBox(self)
-        self.assumptions_table = _read_only_table(self._assumptions_box)
+        self.assumptions_table = read_only_table(self._assumptions_box)
         self.assumptions_table.cellDoubleClicked.connect(self._edit_assumption)
         assumptions_layout = QVBoxLayout(self._assumptions_box)
         assumptions_layout.addWidget(self.assumptions_table)
 
         self._decisions_box = QGroupBox(self)
-        self.decisions_table = _read_only_table(self._decisions_box)
+        self.decisions_table = read_only_table(self._decisions_box)
         decisions_layout = QVBoxLayout(self._decisions_box)
         decisions_layout.addWidget(self.decisions_table)
 
         self._structure_box = QGroupBox(self)
-        self.structure_table = _read_only_table(self._structure_box)
+        self.structure_table = read_only_table(self._structure_box)
         structure_layout = QVBoxLayout(self._structure_box)
         structure_layout.addWidget(self.structure_table)
 
@@ -121,7 +92,7 @@ class InspectorPane(QWidget):
         self._facts_box.setTitle(view_model.facts_heading)
         self._assumptions_box.setTitle(view_model.assumptions_heading)
         self._decisions_box.setTitle(view_model.decisions_heading)
-        _fill_table(
+        fill_table(
             self.facts_table,
             view_model.facts_columns,
             [
@@ -129,7 +100,7 @@ class InspectorPane(QWidget):
                 for row in view_model.facts
             ],
         )
-        _fill_table(
+        fill_table(
             self.assumptions_table,
             view_model.assumptions_columns,
             [
@@ -146,14 +117,14 @@ class InspectorPane(QWidget):
             ],
             tooltips=[row.description for row in view_model.assumptions],
         )
-        _fill_table(
+        fill_table(
             self.decisions_table,
             view_model.decisions_columns,
             [(row.label, row.value, row.recorded) for row in view_model.decisions],
         )
         self._roll_forwards_box.setTitle(view_model.roll_forwards_heading)
         self._roll_forwards_box.setVisible(bool(view_model.roll_forwards))
-        _fill_table(
+        fill_table(
             self.roll_forwards_table,
             view_model.roll_forwards_columns,
             [
@@ -162,7 +133,7 @@ class InspectorPane(QWidget):
             ],
         )
         self._structure_box.setTitle(view_model.structure_heading)
-        _fill_table(
+        fill_table(
             self.structure_table,
             view_model.structure_columns,
             [(row.entity, row.setting, row.value) for row in view_model.structure],
