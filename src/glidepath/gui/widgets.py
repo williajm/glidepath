@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from glidepath.app import (
     DEFAULT_CHART_BASIS,
     DEFAULT_COMPARISON_METRIC_KEY,
+    DEFAULT_RUN_MODE,
     AboutViewModel,
     DisclaimerViewModel,
     FactsFormData,
@@ -46,15 +47,17 @@ from glidepath.app import (
     parse_facts_form,
     plan_entity_ids,
     record_last_plan_path,
+    run_mode_from_key,
     save_plan_state,
     state_with_household,
+    state_with_monte_carlo,
     state_with_override,
     state_with_scenario_added,
     state_with_scenario_override,
     state_without_scenario,
     state_without_scenario_override,
 )
-from glidepath.gui.charts import ChartsPane
+from glidepath.gui.charts import ChartsPane, ChartsPaneCallbacks
 from glidepath.gui.forms import FactsEntryPane
 from glidepath.gui.inspector import InspectorPane
 from glidepath.gui.scenarios import ScenariosPane, ScenariosPaneCallbacks
@@ -192,6 +195,7 @@ class MainWindow(QMainWindow):
         self._plan_path: Path | None = None
         self._state = initial_plan_state()
         self._charts_basis = DEFAULT_CHART_BASIS
+        self._charts_mode = DEFAULT_RUN_MODE
         self._comparison_basis = DEFAULT_CHART_BASIS
         self._comparison_metric = DEFAULT_COMPARISON_METRIC_KEY
         self.setWindowTitle(view_model.window_title)
@@ -202,7 +206,13 @@ class MainWindow(QMainWindow):
             self._handle_facts_submitted,
             self._handle_cleared,
         )
-        self.charts_pane = ChartsPane(self._handle_charts_basis)
+        self.charts_pane = ChartsPane(
+            ChartsPaneCallbacks(
+                select_basis=self._handle_charts_basis,
+                select_mode=self._handle_charts_mode,
+                run_monte_carlo=self._handle_monte_carlo_run,
+            )
+        )
         self.scenarios_pane = ScenariosPane(
             ScenariosPaneCallbacks(
                 add_scenario=self._handle_scenario_added,
@@ -378,8 +388,26 @@ class MainWindow(QMainWindow):
     def _handle_charts_basis(self, key: str) -> None:
         """Re-present the charts in the basis the user selected."""
         self._charts_basis = basis_from_key(key)
+        self._refresh_charts_pane()
+
+    def _handle_charts_mode(self, key: str) -> None:
+        """Re-present the charts in the run mode the user selected (9.13)."""
+        self._charts_mode = run_mode_from_key(key)
+        self._refresh_charts_pane()
+
+    def _handle_monte_carlo_run(self, seed_text: str, paths_text: str) -> None:
+        """Run the plan over seeded Monte Carlo paths and re-render (9.13)."""
+        self._state = state_with_monte_carlo(
+            self._state, seed_text, paths_text, today=_today()
+        )
+        self._refresh_charts_pane()
+
+    def _refresh_charts_pane(self) -> None:
+        """Re-render the charts tab in its selected basis and run mode."""
         self.charts_pane.refresh(
-            build_charts_view_model(self._state, basis=self._charts_basis)
+            build_charts_view_model(
+                self._state, basis=self._charts_basis, mode=self._charts_mode
+            )
         )
 
     def _handle_scenario_added(self, name: str) -> str | None:
@@ -438,9 +466,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_result_panes(self) -> None:
         """Re-render every pane that reads the session's projection."""
-        self.charts_pane.refresh(
-            build_charts_view_model(self._state, basis=self._charts_basis)
-        )
+        self._refresh_charts_pane()
         self._refresh_scenarios_pane()
         self.inspector_pane.refresh(build_inspector_view_model(self._state))
 

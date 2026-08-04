@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import date, datetime
 
-    from glidepath.core import Region
+    from glidepath.core import MonteCarloResult, Region
     from glidepath.regions.uk import AssumptionValue
 
 OVERRIDE_SOURCE = "User override (assumptions inspector)"
@@ -63,7 +63,11 @@ class PlanState:
     scenario is flagged on the scenarios screen and excluded, §4.3) —
     or ``None`` when there is nothing to compare. ``scenario_run_error``
     carries a scenario run failure as a message, mirroring
-    ``run_error``.
+    ``run_error``. ``monte_carlo`` holds the explicit Monte Carlo run
+    over the same plan (roadmap 9.13), with ``monte_carlo_error``
+    mirroring ``run_error``; both reset whenever the state is
+    recomputed through :func:`replanned_state`, so a held result can
+    never go stale against a changed plan.
     """
 
     assumptions: AssumptionSet
@@ -73,6 +77,8 @@ class PlanState:
     scenarios: tuple[Scenario, ...] = ()
     scenario_runs: tuple[tuple[str, ProjectionResult], ...] | None = None
     scenario_run_error: str | None = None
+    monte_carlo: MonteCarloResult | None = None
+    monte_carlo_error: str | None = None
 
 
 @dataclass(frozen=True)

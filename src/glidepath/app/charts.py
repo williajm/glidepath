@@ -15,7 +15,13 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
 from glidepath.app.display import format_money, format_wrapper_kind
-from glidepath.core import Money, ReportBasis, build_report
+from glidepath.app.montecarlo import (
+    BAND_SPECS,
+    DEFAULT_RUN_MODE,
+    MonteCarloPanelViewModel,
+    build_monte_carlo_panel,
+)
+from glidepath.core import Money, ReportBasis, RunMode, build_report
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -23,6 +29,7 @@ if TYPE_CHECKING:
     from glidepath.app.plan import PlanState
     from glidepath.core import (
         EntityId,
+        MonteCarloResult,
         Period,
         PeriodReportRow,
         ProjectionReport,
@@ -102,29 +109,42 @@ class ChartSeries:
 
 
 @dataclass(frozen=True)
+class ChartBand:
+    """One percentile line over the categories (roadmap 9.13)."""
+
+    label: str
+    values: tuple[Decimal, ...]
+
+
+@dataclass(frozen=True)
 class ChartSpec:
     """One chart, ready for a shell to bind to a plotting widget.
 
-    ``y_axis_max`` is the largest stacked total across the periods
-    (never below 1, so an all-zero chart still renders a visible
-    axis); every series value here is non-negative, so the y range is
-    always ``[0, y_axis_max]``.
+    ``bands`` are the Monte Carlo percentile lines drawn over the
+    stacked bars (roadmap 9.13) — empty outside a Monte Carlo
+    presentation. ``y_axis_max`` is the largest stacked total or band
+    value across the periods (never below 1, so an all-zero chart
+    still renders a visible axis); every value here is non-negative,
+    so the y range is always ``[0, y_axis_max]``.
     """
 
     title: str
     y_axis_label: str
     y_axis_max: Decimal
     series: tuple[ChartSeries, ...]
+    bands: tuple[ChartBand, ...] = ()
 
 
 @dataclass(frozen=True)
 class ChartsViewModel:
     """The projection charts screen (roadmap 8.4).
 
-    ``categories`` labels the shared x axis — one period-start year
-    per projected period. ``message`` carries the empty-state copy
-    when there is nothing to chart; it is blank whenever ``charts``
-    is populated.
+    ``categories`` labels the shared x axis — one label per projected
+    period: the period-start year with the person's age at period
+    start alongside (roadmap 9.11; year alone until couples activate,
+    9.4 — a two-person period has no single age to show). ``message``
+    carries the empty-state copy when there is nothing to chart; it
+    is blank whenever ``charts`` is populated.
     """
 
     basis_heading: str
@@ -133,6 +153,7 @@ class ChartsViewModel:
     categories: tuple[str, ...]
     charts: tuple[ChartSpec, ...]
     message: str
+    monte_carlo: MonteCarloPanelViewModel
 
 
 def basis_from_key(key: str) -> ReportBasis:
@@ -175,17 +196,23 @@ def bar_tooltip(category: str, series_label: str, value: Decimal) -> str:
 
 
 def build_charts_view_model(
-    state: PlanState, basis: ReportBasis = DEFAULT_CHART_BASIS
+    state: PlanState,
+    basis: ReportBasis = DEFAULT_CHART_BASIS,
+    mode: RunMode = DEFAULT_RUN_MODE,
 ) -> ChartsViewModel:
     """The charts screen for ``state``, presented in ``basis``.
 
     Real (today's money) is the default; the deflators come from the
     run's own CPI path via the core reporting layer (planning §5.2).
-    Without a projection the screen carries only the empty-state
-    message — the no-run copy, or the run failure held on the state.
+    ``mode`` is the screen's run-mode selection (roadmap 9.13): under
+    ``MONTE_CARLO`` a held Monte Carlo run adds its percentile bands
+    to the balances chart and its metrics to the panel. Without a
+    projection the screen carries only the empty-state message — the
+    no-run copy, or the run failure held on the state.
     """
     selected_key = basis_key(basis)
     options = basis_options()
+    suffix = basis_suffix(basis)
     if state.result is None:
         message = (
             NO_PROJECTION_MESSAGE
@@ -199,21 +226,51 @@ def build_charts_view_model(
             categories=(),
             charts=(),
             message=message,
+            monte_carlo=build_monte_carlo_panel(
+                state, mode, ending_pot_deflator=None, basis_suffix=suffix
+            ),
         )
     grouped = _rows_by_period(build_report(state.result, basis))
-    suffix = basis_suffix(basis)
+    bands = (
+        _balance_bands(state.monte_carlo, grouped)
+        if mode is RunMode.MONTE_CARLO and state.monte_carlo is not None
+        else ()
+    )
+    final_rows = next(reversed(grouped.values()))
     return ChartsViewModel(
         basis_heading=BASIS_HEADING,
         basis_options=options,
         selected_basis_key=selected_key,
-        categories=tuple(str(period.start.year) for period in grouped),
+        categories=tuple(
+            _category_label(period, rows) for period, rows in grouped.items()
+        ),
         charts=(
-            _balances_chart(grouped, suffix),
+            _balances_chart(grouped, suffix, bands),
             _income_chart(grouped, suffix),
             _tax_chart(grouped, suffix),
         ),
         message="",
+        monte_carlo=build_monte_carlo_panel(
+            state,
+            mode,
+            ending_pot_deflator=final_rows[0].balance_deflator,
+            basis_suffix=suffix,
+        ),
     )
+
+
+def _category_label(period: Period, rows: list[PeriodReportRow]) -> str:
+    """One period's x-axis label: its start year, with the person's age.
+
+    ``2032 · 60`` reads the horizon in ages as well as calendar years
+    (roadmap 9.11). Only a single-person period carries an age — a
+    two-person household has no one age to label with (revisit with
+    couples activation, 9.4).
+    """
+    year = str(period.start.year)
+    if len(rows) == 1:
+        return f"{year} · {rows[0].age_at_period_start}"
+    return year
 
 
 def _rows_by_period(
@@ -240,17 +297,24 @@ def _period_total(
     return total.amount
 
 
-def _chart(title: str, y_axis_label: str, series: tuple[ChartSeries, ...]) -> ChartSpec:
-    """A chart spec with its y-axis maximum derived from the stack."""
+def _chart(
+    title: str,
+    y_axis_label: str,
+    series: tuple[ChartSeries, ...],
+    bands: tuple[ChartBand, ...] = (),
+) -> ChartSpec:
+    """A chart spec with its y-axis maximum covering stack and bands."""
     stacked: dict[int, Decimal] = {}
     for entry in series:
         for index, value in enumerate(entry.values):
             stacked[index] = stacked.get(index, Decimal(0)) + value
+    band_values = [value for band in bands for value in band.values]
     return ChartSpec(
         title=title,
         y_axis_label=y_axis_label,
-        y_axis_max=max([*stacked.values(), _MIN_AXIS_MAX]),
+        y_axis_max=max([*stacked.values(), *band_values, _MIN_AXIS_MAX]),
         series=series,
+        bands=bands,
     )
 
 
@@ -280,8 +344,39 @@ def _wrapper_labels(
     return labels
 
 
+def _balance_bands(
+    result: MonteCarloResult, grouped: dict[Period, list[PeriodReportRow]]
+) -> tuple[ChartBand, ...]:
+    """The 10/50/90 percentile bands over the balances chart (9.13).
+
+    The Monte Carlo balances are nominal; CPI is deterministic across
+    paths (planning §5.2), so each period's band value deflates by the
+    same balance deflator the deterministic report rows carry — 1
+    under the nominal basis. A held result whose period count differs
+    from the projection's (the runs straddled a calendar day) draws no
+    bands rather than bands against the wrong periods.
+    """
+    deflators = tuple(rows[0].balance_deflator for rows in grouped.values())
+    if len(result.balance_percentile(BAND_SPECS[0].percentile)) != len(deflators):
+        return ()
+    return tuple(
+        ChartBand(
+            label=spec.band_label,
+            values=tuple(
+                Money(value.amount / deflator).quantized().amount
+                for value, deflator in zip(
+                    result.balance_percentile(spec.percentile), deflators, strict=True
+                )
+            ),
+        )
+        for spec in BAND_SPECS
+    )
+
+
 def _balances_chart(
-    grouped: dict[Period, list[PeriodReportRow]], suffix: str
+    grouped: dict[Period, list[PeriodReportRow]],
+    suffix: str,
+    bands: tuple[ChartBand, ...],
 ) -> ChartSpec:
     """Closing balance per wrapper per period, stacked to the total."""
     series = []
@@ -295,7 +390,9 @@ def _balances_chart(
                         total = total + entry.closing_balance
             values.append(total.amount)
         series.append(ChartSeries(label=label, values=tuple(values)))
-    return _chart(BALANCES_CHART_TITLE, f"Closing balance, £ ({suffix})", tuple(series))
+    return _chart(
+        BALANCES_CHART_TITLE, f"Closing balance, £ ({suffix})", tuple(series), bands
+    )
 
 
 def _income_chart(

@@ -8,6 +8,7 @@ user-entered text back into domain values — lives in
 
 from collections.abc import Mapping
 from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Final
 
@@ -89,6 +90,11 @@ def format_money(value: Money) -> str:
     if amount < 0:
         return f"-£{-amount:,.2f}"
     return f"£{amount:,.2f}"
+
+
+def format_percent(value: Decimal) -> str:
+    """A fraction as a percentage to one decimal place, e.g. ``95.0%``."""
+    return f"{value * Decimal(100):.1f}%"
 
 
 def format_date(value: date) -> str:
