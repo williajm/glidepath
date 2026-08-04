@@ -18,6 +18,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from glidepath.core import (
+    AssetAllocation,
     AssumptionKey,
     ContributionSchedule,
     DBPension,
@@ -183,6 +184,10 @@ _WRAPPER_KINDS: Mapping[str, WrapperKindId] = {
     str(GIA_KIND): GIA_KIND,
     str(CASH_KIND): CASH_KIND,
 }
+_PENSION_KINDS = frozenset({WORKPLACE_DC_KIND, SIPP_KIND})
+"""Kinds whose wrappers may carry a crystallised (drawdown) balance."""
+_CASH_ALLOCATION = AssetAllocation(equity=Decimal(0), bonds=Decimal(0), cash=Decimal(1))
+"""A cash account holds cash — never the glide path (roadmap 9.2)."""
 _RELIEF_MECHANICS: Mapping[str, ReliefMechanic] = {
     "relief_at_source": ReliefMechanic.RELIEF_AT_SOURCE,
     "net_pay": ReliefMechanic.NET_PAY,
@@ -439,7 +444,15 @@ def _contributions_from(reader: _SectionReader) -> ContributionSchedule | None:
 
 
 def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None:
-    """One savings wrapper from its section values."""
+    """One savings wrapper from its section values.
+
+    A crystallised balance is a pension concept — funds already
+    designated to drawdown — so any other kind rejects it here (the
+    engine enforces the same invariant, planning §5.1): accepting one
+    on an age-gated kind would let money bypass its access gate. A
+    cash account holds cash: its allocation is fixed at 100% cash
+    rather than following the glide path (roadmap 9.2).
+    """
     kind = reader.choice("kind", _WRAPPER_KINDS)
     if kind is None:
         reader.error("kind", _REQUIRED_MESSAGE)
@@ -447,6 +460,11 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
     crystallised = reader.fact_of(
         reader.money("crystallised_balance"), "balances_as_of"
     )
+    if kind is not None and kind not in _PENSION_KINDS and crystallised is not None:
+        reader.error(
+            "crystallised_balance",
+            "Only pension wrappers hold a crystallised balance — leave blank.",
+        )
     contributions = _contributions_from(reader)
     if kind is None or balance is None or not reader.ok:
         return None
@@ -457,6 +475,7 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
             balance=balance,
             crystallised_balance=crystallised,
             contributions=contributions,
+            allocation=_CASH_ALLOCATION if kind == CASH_KIND else None,
         )
     except ValueError as exc:
         reader.error("", str(exc))

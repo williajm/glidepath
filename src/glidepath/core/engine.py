@@ -253,6 +253,7 @@ class _WrapperLedger:
     taxable_interest: Money = _ZERO
     taxable_dividends: Money = _ZERO
     growth_tax: Money = _ZERO
+    growth_tax_unfunded: Money = _ZERO
     banked_in: Money = _ZERO
 
 
@@ -980,7 +981,13 @@ class _Projection:
         wrapper_results = tuple(
             self._close_wrapper(ledger, returns, fraction) for ledger in ledgers
         )
-        shortfall = max(wrapper_need - delivered, _ZERO)
+        # Portfolio-income tax a drained wrapper could not fund is
+        # unmet need: it joins the shortfall so the ledger reconciles
+        # and the roadmap-7.3 ruin signal sees it (planning §5.2).
+        unfunded_tax = _ZERO
+        for ledger in ledgers:
+            unfunded_tax = unfunded_tax + ledger.growth_tax_unfunded
+        shortfall = max(wrapper_need - delivered, _ZERO) + unfunded_tax
         person_result = PersonPeriodResult(
             person_id=person.id,
             age_at_period_start=age,
@@ -1243,8 +1250,27 @@ class _Projection:
     def _open_ledger(
         self, wrapper: Wrapper, period: Period, glide: GlidePathConfig, ytr: int
     ) -> _WrapperLedger:
-        """Step 1 for one wrapper: allocation and opening balances."""
+        """Step 1 for one wrapper: allocation and opening balances.
+
+        A crystallised balance is meaningful only on a partially
+        tax-free (pension) kind — funds already designated to drawdown
+        (planning §5.1). Any other kind carrying one is an engine
+        error: crystallised sub-balances are never re-gated, so
+        accepting one on an age-gated kind (a LISA) would let money
+        bypass its access gate.
+        """
         uncrystallised, crystallised = self._balances[wrapper.id]
+        treatment = self.region.wrappers.tax_treatment(wrapper.kind, period)
+        if (
+            crystallised > _ZERO
+            and treatment.withdrawals is not WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+        ):
+            msg = (
+                f"wrapper {wrapper.id}: kind {wrapper.kind!r} does not take a"
+                " crystallised balance — only partially-tax-free (pension)"
+                " kinds hold funds designated to drawdown"
+            )
+            raise EngineError(msg)
         allocation = (
             wrapper.allocation
             if wrapper.allocation is not None
@@ -1253,7 +1279,7 @@ class _Projection:
         return _WrapperLedger(
             wrapper=wrapper,
             allocation=allocation,
-            treatment=self.region.wrappers.tax_treatment(wrapper.kind, period),
+            treatment=treatment,
             uncrystallised=uncrystallised,
             crystallised=crystallised,
             opening_uncrystallised=uncrystallised,
@@ -1271,9 +1297,12 @@ class _Projection:
         """Step 3: scheduled contributions through caps and relief rules.
 
         The region's contribution terms govern each kind (roadmap
-        9.2): scheduled amounts scale by the terms' contribution
-        window (a LISA's stops at 50) on top of escalation and the
-        partial-period ``fraction``; caps are annual allowances shared
+        9.2): scheduled amounts scale by the whole-month share of the
+        period inside the intersection of the run window and the
+        terms' contribution window (a LISA's stops at 50) — one
+        overlap, never the product of separate fractions, so a run
+        starting after the window closes contributes nothing; caps
+        are annual allowances shared
         across wrappers through their allowance groups (LISA inside
         the overall ISA allowance), with employer amounts (employment
         terms, outside the member's control) consuming headroom first;
@@ -1298,7 +1327,10 @@ class _Projection:
             escalation = _ONE
             if schedule.escalation is not None:
                 escalation = factors.factor(schedule.escalation)
-            scale = escalation * fraction * terms.window_fraction
+            flow_fraction = fraction
+            if terms.window is not None:
+                flow_fraction = self._contribution_window_fraction(terms.window, period)
+            scale = escalation * flow_fraction
             employee_intended = schedule.employee_amount.value * scale
             employer = _ZERO
             if schedule.employer_amount is not None:
@@ -1340,6 +1372,23 @@ class _Projection:
             ledger.uncrystallised = (
                 ledger.uncrystallised + outcome.gross_to_pot + employer + bonus
             )
+
+    def _contribution_window_fraction(self, window: Period, period: Period) -> Decimal:
+        """The period's whole-month share inside run ∩ eligibility window.
+
+        The run models only ``[today, horizon_end]`` (roadmap 4.6) and
+        the region's contribution window is an exact date span (§4.1),
+        so the contributable share of the period is the whole months
+        of the *single* three-way overlap over the whole months of the
+        period — never the product of separately measured fractions,
+        which overstates disjoint windows (a run starting the day the
+        window closes must contribute zero).
+        """
+        start = max(self.config.today, window.start)
+        end = min(self._horizon_end(), window.end)
+        if end < start:
+            return Decimal(0)
+        return period_active_fraction(period, start, end)
 
     def _require_permitted_mechanic(
         self, wrapper: Wrapper, schedule: ContributionSchedule
@@ -1793,12 +1842,23 @@ class _Projection:
         Both calls go through the region's one ``assess`` function —
         the same one the final step-5 assessment uses — so the gross-up
         and the final tax picture cannot disagree (planning §5.2).
+
+        Draw pricing deliberately excludes the portfolio-income layers
+        (roadmap 9.2): a draw that shifts the taxpayer's band can raise
+        the tax on savings/dividend income sitting above it (a PSA tier
+        drop, dividends pushed up a rate), and that interaction belongs
+        to the wrapper charge — :meth:`_charge_portfolio_tax` measures
+        the portfolio layers' full cost against the final income
+        picture, so pricing it into the gross-up as well would collect
+        it twice. The decomposition is exact: the offset and gross-ups
+        collect the no-portfolio assessment, the wrapper charge the
+        remainder, and together they sum to the final full assessment.
         """
         if taxable <= _ZERO:
             return _ZERO
-        base = self.region.tax.assess(period, self._tax_input())
+        base = self.region.tax.assess(period, self._tax_input(include_portfolio=False))
         with_draw = self.region.tax.assess(
-            period, self._tax_input(extra_income=taxable)
+            period, self._tax_input(extra_income=taxable, include_portfolio=False)
         )
         return with_draw.tax_due - base.tax_due
 
@@ -1963,6 +2023,10 @@ class _Projection:
             ledger.growth_tax,
             max(post_fee_uncrystallised + growth_uncrystallised, _ZERO),
         )
+        # A drained account cannot fund its assessed portfolio-income
+        # tax; the remainder joins the person's shortfall rather than
+        # silently disappearing from the ledger (planning §5.2).
+        ledger.growth_tax_unfunded = ledger.growth_tax - growth_tax
         closing_uncrystallised = (
             post_fee_uncrystallised + growth_uncrystallised - growth_tax
         ).quantized()

@@ -185,9 +185,11 @@ class UkWrapperRuleset:
         The ISA annual allowance is per person per tax year, shared
         across all their ISAs and LISAs through the ``uk.isa`` group;
         the LISA allowance is a sub-cap inside it, and LISA
-        contributions carry the year's bonus rate within the 18-to-50
-        contribution window (planning §6), pro-rated by whole months
-        across its edges. Pension, GIA and cash kinds are uncapped
+        contributions carry the year's bonus rate within the exact
+        18-to-50 contribution window (planning §6) — the engine
+        intersects the window with the period and the run window and
+        pro-rates by whole months. Pension, GIA and cash kinds are
+        uncapped
         here — the pension annual allowance is a cross-pension measure
         of pension input amounts (roadmap 3.3), not a per-kind cap.
         """
@@ -203,9 +205,7 @@ class UkWrapperRuleset:
                     ContributionCap(ISA_ALLOWANCE_GROUP, year.isa.annual_allowance),
                 ),
                 bonus_rate=year.isa.lisa_bonus_rate,
-                window_fraction=self.ages.lisa_contribution_fraction(
-                    date_of_birth, period
-                ),
+                window=self.ages.lisa_contribution_window(date_of_birth),
             )
         if kind in _PENSION_KINDS or kind in _TAXABLE_KINDS:
             return ContributionTerms()

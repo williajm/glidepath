@@ -845,14 +845,23 @@ and cash kinds activate the deferred wrapper mechanics:
 - *LISA*: TEE like an ISA, plus the data file's 25% government bonus
   on member contributions — a contribution bonus, not tax relief (it
   never extends tax bands, never consumes the caps) — inside the
-  18-to-50 contribution window (`age_rules.toml`), pro-rated by whole
-  months across its edges; the £4,000 LISA allowance is a sub-cap
+  exact 18-to-50 contribution window (`age_rules.toml`): the region's
+  contribution terms carry the window as *dates*, and the engine
+  scales scheduled amounts by the whole-month share of the period
+  inside the single intersection of run window, period, and
+  contribution window — one overlap, never a product of separately
+  measured fractions (a run starting after the window closes
+  contributes nothing); the £4,000 LISA allowance is a sub-cap
   consumed alongside the overall ISA allowance through shared
   *allowance groups* on the region's contribution terms. Access is a
   §4.1 age gate at 60: pre-60 funds are gate-closed (a draw is an
   engine error, the §5.2 execution rule), so the 25% withdrawal
   charge ships as data but no modelled draw ever bears it — the
-  engine never volunteers a charged withdrawal.
+  engine never volunteers a charged withdrawal. A crystallised
+  balance is a pension concept — only partially-tax-free kinds may
+  carry one (engine error otherwise, and the facts form rejects it):
+  crystallised sub-balances are never re-gated, so accepting one on
+  an age-gated kind would bypass its gate.
 - *GIA/cash*: bare accounts — paid from taxed income, withdrawals
   tax-free, growth taxable as it arises. Each period the opening
   balance prices portfolio income through the allocation-weighted
@@ -861,10 +870,22 @@ and cash kinds activate the deferred wrapper mechanics:
   interest, feeding the §6 savings/dividend tax layers. The income
   stays invested (the balance path is untouched); the tax
   attributable — the final assessment less one without the portfolio
-  layers, PA-taper interactions included — is charged to the wrapper
-  at period close, pro rata to income across taxable wrappers: the
-  real-world drag of paying tax out of taxable savings. Capital
-  gains tax is out of scope (§2): income only, never disposals.
+  layers, PA-taper and band interactions included — is charged to
+  the wrapper at period close, pro rata to income across taxable
+  wrappers: the real-world drag of paying tax out of taxable
+  savings. The decomposition is exact and nothing is charged twice:
+  the withdrawal gross-up prices draws on the *no-portfolio* picture
+  (a draw that pushes the portfolio layers up a band — a PSA tier
+  drop, dividends into a higher rate — leaves that interaction to
+  the wrapper charge), so offset + gross-ups + wrapper charges sum
+  to the final full assessment. Tax a drained wrapper cannot fund
+  (the charge is capped at what the account holds at close) joins
+  the period's shortfall — the ledger reconciles and the roadmap-7.3
+  ruin signal sees it, never a silent drop. The app enters cash
+  accounts with a fixed 100%-cash allocation (a cash account holds
+  cash, never the glide path); GIAs default to the glide path like
+  any invested wrapper. Capital gains tax is out of scope (§2):
+  income only, never disposals.
 - *Sweep*: decumulation income and gross draws beyond the period's
   need bank into the first wrapper in plan order whose treatment is
   a bare taxable account (GIA or cash) — banking is not a

@@ -150,20 +150,18 @@ class ContributionTerms:
     ``bonus_rate`` is a government bonus added on top of the member's
     contribution (e.g. the UK LISA's 25%) — distinct from tax relief:
     it never extends tax bands and never counts against the caps.
-    ``window_fraction`` is the whole-month share of the period in which
-    contributions are permitted at all (§4.1 eligibility windows — e.g.
-    LISA contributions stop at 50); scheduled amounts scale by it.
+    ``window`` is the exact date span in which contributions are
+    permitted at all (§4.1 eligibility windows — e.g. LISA
+    contributions run from 18 to the eve of the 50th birthday);
+    ``None`` means unrestricted. The engine intersects it with the
+    period *and* the run window and pro-rates scheduled amounts by
+    whole months — a date span, not a pre-computed fraction, because
+    only the engine knows the run window it must intersect with.
     """
 
     caps: tuple[ContributionCap, ...] = ()
     bonus_rate: Rate | None = None
-    window_fraction: Decimal = _ONE
-
-    def __post_init__(self) -> None:
-        """Require a window fraction in [0, 1]."""
-        if not 0 <= self.window_fraction <= _ONE:
-            msg = "ContributionTerms.window_fraction must lie between 0 and 1"
-            raise ValueError(msg)
+    window: Period | None = None
 
 
 @dataclass(frozen=True, slots=True)

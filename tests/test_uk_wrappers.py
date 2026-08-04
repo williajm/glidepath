@@ -110,7 +110,7 @@ def test_isa_contribution_cap_comes_from_data(ruleset: UkWrapperRuleset) -> None
     assert cap.group == ISA_ALLOWANCE_GROUP
     assert cap.limit == load_tax_year(2026).isa.annual_allowance
     assert terms.bonus_rate is None
-    assert terms.window_fraction == Decimal(1)
+    assert terms.window is None
 
 
 def test_lisa_terms_carry_sub_cap_bonus_and_window(
@@ -124,23 +124,30 @@ def test_lisa_terms_carry_sub_cap_bonus_and_window(
         (ISA_ALLOWANCE_GROUP, year.isa.annual_allowance),
     ]
     assert terms.bonus_rate == year.isa.lisa_bonus_rate
-    assert terms.window_fraction == Decimal(1)
+    assert terms.window == ruleset.ages.lisa_contribution_window(DOB_UNDER_NMPA)
 
 
-def test_lisa_window_halves_in_the_50th_birthday_year(
+def test_lisa_window_ends_on_the_eve_of_the_50th_birthday(
     ruleset: UkWrapperRuleset,
 ) -> None:
-    """The contribution window ends at 50, pro-rated by whole months."""
+    """The terms carry the exact 18-to-50 date span for the engine.
+
+    The engine — not the region — intersects it with the period and
+    the run window, so the terms state dates, never a fraction.
+    """
     terms = ruleset.contribution_terms(
         LISA_KIND, DOB_TURNS_50_MID_YEAR, TAX_YEAR_2026_27
     )
-    assert terms.window_fraction == Decimal(1) / Decimal(2)
+    assert terms.window is not None
+    assert terms.window.start == date(1994, 10, 6)  # 18th birthday
+    assert terms.window.end == date(2026, 10, 5)  # eve of the 50th
 
 
 def test_lisa_window_is_closed_past_50(ruleset: UkWrapperRuleset) -> None:
-    """No LISA contributions (or bonus) once the window has closed."""
+    """The window of an over-50 lies wholly before the tax year."""
     terms = ruleset.contribution_terms(LISA_KIND, DOB_OVER_50, TAX_YEAR_2026_27)
-    assert terms.window_fraction == Decimal(0)
+    assert terms.window is not None
+    assert terms.window.end < TAX_YEAR_2026_27.start
 
 
 @pytest.mark.parametrize("kind", TAXABLE_KINDS)
@@ -151,7 +158,7 @@ def test_taxable_kinds_are_uncapped(
     terms = ruleset.contribution_terms(kind, DOB_UNDER_NMPA, TAX_YEAR_2026_27)
     assert terms.caps == ()
     assert terms.bonus_rate is None
-    assert terms.window_fraction == Decimal(1)
+    assert terms.window is None
 
 
 def test_sub_period_cap_is_the_full_year_figure(ruleset: UkWrapperRuleset) -> None:

@@ -144,6 +144,46 @@ class FlatTaxSystem:
         )
 
 
+TIER_LIMIT = Money(Decimal(10000))
+LOWER_RATE = Decimal("0.20")
+UPPER_RATE = Decimal("0.40")
+
+
+@dataclass(frozen=True)
+class TieredTaxSystem:
+    """20% to 10,000 of stacked income, 40% above (roadmap 9.2 tests).
+
+    Savings and dividends stack on top of non-savings income, so a
+    draw can push the portfolio layers across the tier — the band
+    interaction the portfolio-tax attribution must charge exactly
+    once.
+    """
+
+    def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:
+        """Two tiers over the stacked income picture."""
+        del period
+        taxed = (
+            tax_input.non_savings_income
+            + tax_input.savings_income
+            + tax_input.dividend_income
+        )
+        if taxed <= ZERO:
+            return TaxResult(
+                tax_due=ZERO, taxable_income=taxed, tax_free_allowance=ZERO, lines=()
+            )
+        lower = min(taxed, TIER_LIMIT)
+        upper = max(taxed - TIER_LIMIT, ZERO)
+        tax = Money(
+            (LOWER_RATE * lower.amount + UPPER_RATE * upper.amount).quantize(
+                PENNY, rounding=ROUND_DOWN
+            )
+        )
+        line = TaxLine(band="tiered", rate=Rate(LOWER_RATE), taxed=taxed, tax=tax)
+        return TaxResult(
+            tax_due=tax, taxable_income=taxed, tax_free_allowance=ZERO, lines=(line,)
+        )
+
+
 @dataclass(frozen=True)
 class StubAges:
     """Minimal age rules for the region bundle."""
@@ -179,7 +219,7 @@ class StubWrapperRules:
     free_access_age: int | None = None
     lsa_cap: Money | None = None
     free_bonus_rate: Rate | None = None
-    free_window_fraction: Decimal = Decimal(1)
+    free_window: Period | None = None
     sub_kind_cap: Money | None = None
 
     def tax_treatment(self, kind: WrapperKindId, period: Period) -> WrapperTaxTreatment:
@@ -219,7 +259,7 @@ class StubWrapperRules:
             return ContributionTerms(
                 caps=caps,
                 bonus_rate=self.free_bonus_rate,
-                window_fraction=self.free_window_fraction,
+                window=self.free_window,
             )
         if kind == SUB and self.sub_kind_cap is not None:
             assert self.free_kind_cap is not None, "sub cap needs the shared cap"
@@ -338,20 +378,21 @@ def stub_region(
     free_access_age: int | None = None,
     lsa_cap: Money | None = None,
     free_bonus_rate: Rate | None = None,
-    free_window_fraction: Decimal = Decimal(1),
+    free_window: Period | None = None,
     sub_kind_cap: Money | None = None,
+    tax_system: FlatTaxSystem | TieredTaxSystem | None = None,
 ) -> Region:
     """A calendar-year region over the stub implementations."""
     return Region(
         calendar=AnnualCalendar(),
         ages=StubAges(),
-        tax=FlatTaxSystem(),
+        tax=tax_system or FlatTaxSystem(),
         wrappers=StubWrapperRules(
             free_kind_cap=free_kind_cap,
             free_access_age=free_access_age,
             lsa_cap=lsa_cap,
             free_bonus_rate=free_bonus_rate,
-            free_window_fraction=free_window_fraction,
+            free_window=free_window,
             sub_kind_cap=sub_kind_cap,
         ),
         contributions=contributions or RecordingContributionRules(),
@@ -3299,6 +3340,74 @@ class TestTaxableGrowthWrappers:
         keys = {entry.key for entry in result.provenance.assumptions}
         assert AssumptionKey.YIELD_EQUITY not in keys
 
+    def test_band_interaction_is_charged_once_not_twice(self) -> None:
+        """A draw pushing dividends up a tier never double-collects.
+
+        Under the tiered stub (20% to 10,000, 40% above) with zero
+        returns: the GIA's 1,000 of dividends sits on top of the
+        stack. The retiree's 9,000 need takes the GIA's 1,000 first,
+        then grosses 8,000 net from the crystallised pension — priced
+        on the no-portfolio picture, converging on ~10,000 gross
+        (0.8w = 8,000), never ~10,333 (which would price the
+        dividends' tier-crossing into the draw as well). The
+        tier-crossing cost of the dividends — 400 at the upper rate —
+        is charged once, to the GIA; drained to zero, it cannot fund
+        it, so the 400 lands in the shortfall instead of vanishing.
+        """
+        gia = wrapper_of(TAXABLE, "1000")
+        pension = wrapper_of(PENSION, "0", crystallised="50000")
+        plan = retiree_plan((gia, pension), spending="9000")
+        region = stub_region(tax_system=TieredTaxSystem())
+        assumptions = yield_assumptions({"yield.equity": Decimal(1)})
+        result = run(plan, assumptions, region, one_period_config())
+        person = result.snapshots[0].persons[0]
+        gia_result, pension_result = person.wrappers
+        assert pension_result.withdrawal_taxable == Money(Decimal("9999.99"))
+        assert gia_result.taxable_dividends == Money(Decimal(1000))
+        assert gia_result.closing_uncrystallised == ZERO
+        assert gia_result.growth_tax == ZERO  # nothing left to charge
+        assert person.shortfall == Money(Decimal("400.00"))
+
+    def test_unfunded_growth_tax_joins_the_shortfall(self) -> None:
+        """A drained account's assessed tax is never silently dropped.
+
+        The GIA is emptied by the withdrawal step, so its 250 of flat
+        tax on 1,000 of dividends has no balance to come from: it is
+        reported as shortfall, keeping the ledger and ``tax_due``
+        reconciled.
+        """
+        gia = wrapper_of(TAXABLE, "10000")
+        plan = retiree_plan((gia,), spending="10000")
+        assumptions = yield_assumptions(
+            {"yield.equity": Decimal("0.1"), "returns.equity.real": Decimal(0)}
+        )
+        result = run(plan, assumptions, stub_region(), one_period_config())
+        person = result.snapshots[0].persons[0]
+        (wrapper,) = person.wrappers
+        assert wrapper.taxable_dividends == Money(Decimal(1000))
+        assert wrapper.closing_uncrystallised == ZERO
+        assert wrapper.growth_tax == ZERO
+        assert person.tax.tax_due == Money(Decimal(250))
+        assert person.shortfall == Money(Decimal(250))
+
+    def test_partially_drained_account_funds_what_it_can(self) -> None:
+        """The charge is capped at the closing balance, remainder unmet.
+
+        1,000 survives the 9,000 draw; the 250 of tax comes off it —
+        closing 750, no shortfall beyond the need.
+        """
+        gia = wrapper_of(TAXABLE, "10000")
+        plan = retiree_plan((gia,), spending="9000")
+        assumptions = yield_assumptions(
+            {"yield.equity": Decimal("0.1"), "returns.equity.real": Decimal(0)}
+        )
+        result = run(plan, assumptions, stub_region(), one_period_config())
+        person = result.snapshots[0].persons[0]
+        (wrapper,) = person.wrappers
+        assert wrapper.growth_tax == Money(Decimal(250))
+        assert wrapper.closing_uncrystallised == Money(Decimal(750))
+        assert person.shortfall == ZERO
+
     def test_the_need_never_pays_the_portfolio_income_tax(self) -> None:
         """The offset excludes the taxable account's income tax.
 
@@ -3348,9 +3457,9 @@ class TestContributionBonusAndWindow:
     def test_contribution_window_scales_scheduled_amounts(self) -> None:
         """A half-open window halves the year's contribution.
 
-        The window closing mid-year (a 50th birthday) scales the
-        scheduled 4,000 to 2,000 — structural, so no shortfall — and
-        the bonus follows the scaled amount.
+        The window closing mid-year (a 50th birthday on 1 July) scales
+        the scheduled 4,000 to 2,000 — structural, so no shortfall —
+        and the bonus follows the scaled amount.
         """
         schedule = ContributionSchedule(
             employee_amount=Decision(value=Money(Decimal(4000)), recorded_on=RECORDED)
@@ -3359,13 +3468,36 @@ class TestContributionBonusAndWindow:
         plan = household_of(person_of((account,), employment="30000"))
         region = stub_region(
             free_bonus_rate=Rate(Decimal("0.25")),
-            free_window_fraction=Decimal("0.5"),
+            free_window=Period(start=date(2000, 1, 1), end=date(2026, 6, 30)),
         )
         result = run(plan, assumptions_with(), region, one_period_config())
         (wrapper,) = result.snapshots[0].persons[0].wrappers
         assert wrapper.employee_contribution == Money(Decimal(2000))
         assert wrapper.contribution_bonus == Money(Decimal(500))
         assert wrapper.contribution_shortfall == ZERO
+
+    def test_disjoint_run_and_window_contribute_nothing(self) -> None:
+        """The overlap is one intersection, never a product of fractions.
+
+        The run starts 1 July; the contribution window closed 30 June.
+        Each covers half the period, but their overlap is empty — a
+        product of the two fractions would wrongly contribute a
+        quarter-year (and pay a bonus on it).
+        """
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(4000)), recorded_on=RECORDED)
+        )
+        account = wrapper_of(FREE, "0", schedule=schedule)
+        plan = household_of(person_of((account,), employment="30000"))
+        region = stub_region(
+            free_bonus_rate=Rate(Decimal("0.25")),
+            free_window=Period(start=date(2000, 1, 1), end=date(2026, 6, 30)),
+        )
+        config = RunConfig(today=date(2026, 7, 1), horizon_end=date(2026, 12, 31))
+        result = run(plan, assumptions_with(), region, config)
+        (wrapper,) = result.snapshots[0].persons[0].wrappers
+        assert wrapper.employee_contribution == ZERO
+        assert wrapper.contribution_bonus == ZERO
 
     def test_allowance_groups_share_one_budget_across_kinds(self) -> None:
         """A sub-capped kind consumes the shared group's budget too.
@@ -3444,6 +3576,21 @@ class TestSurplusBanking:
         assert taxable_result.banked_in == Money(Decimal(6000))
         assert free_result.withdrawal_tax_free == Money(Decimal(10000))
         assert person_result.shortfall == ZERO
+
+    def test_crystallised_balance_on_a_non_pension_kind_is_rejected(self) -> None:
+        """Only pension kinds hold drawdown funds (planning §5.1).
+
+        Crystallised sub-balances are never re-gated, so accepting one
+        on an age-gated tax-free kind would let money bypass its
+        access gate.
+        """
+        account = wrapper_of(FREE, "1000", crystallised="500")
+        plan = household_of(person_of((account,)))
+        assumptions = assumptions_with()
+        region = stub_region()
+        config = one_period_config()
+        with pytest.raises(EngineError, match="crystallised balance"):
+            run(plan, assumptions, region, config)
 
     def test_surplus_without_a_taxable_wrapper_is_spent(self) -> None:
         """The pre-9.2 behaviour survives for plans holding none."""
