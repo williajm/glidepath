@@ -1077,6 +1077,33 @@ class TestEntityIdReuse:
             a.id for a in prior.annuity_purchases
         ]
 
+    def test_carried_ids_are_preserved_verbatim(self) -> None:
+        """No normalisation: persistence allows any non-empty id string.
+
+        Scenario overrides target the exact stored id, so even
+        stripping whitespace would change identity and orphan them.
+        """
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {
+                        ENTITY_ID_KEY: " wrapper-a ",
+                        "kind": str(WORKPLACE_DC_KIND),
+                        "balance": "45000",
+                    },
+                    {
+                        ENTITY_ID_KEY: " ",
+                        "kind": str(WORKPLACE_DC_KIND),
+                        "balance": "12000",
+                    },
+                ),
+            )
+        )
+        padded, whitespace_only = household.persons[0].wrappers
+        assert padded.id == EntityId(" wrapper-a ")
+        assert whitespace_only.id == EntityId(" ")
+
     def test_person_reuses_the_prior_plans_id(self) -> None:
         """The (single) person still pairs with the plan being replaced."""
         first = parse(self.submission())

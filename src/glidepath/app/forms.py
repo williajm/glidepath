@@ -165,8 +165,9 @@ ENTITY_ID_KEY: Final = "entity_id"
 Never a rendered field: shells carry it opaquely per section instance
 so wrappers, DB pensions, and annuity purchases keep their stable ids
 — and with them any scenario overrides targeting them — through
-edits, reordering, and row deletion alike. Blank or absent means a
-new entity; ids only ever originate from a parsed household."""
+edits, reordering, and row deletion alike. Empty or absent means a
+new entity; any other value is the id, verbatim — ids only ever
+originate from a parsed household."""
 
 
 @dataclass(frozen=True)
@@ -717,8 +718,14 @@ def _person_from(
 
 
 def _row_entity_id(values: Mapping[str, str]) -> EntityId:
-    """The row's carried entity id, or a fresh one when blank (§4.3)."""
-    text = values.get(ENTITY_ID_KEY, "").strip()
+    """The row's carried entity id, or a fresh one when empty (§4.3).
+
+    Preserved verbatim: persistence accepts any non-empty id, and
+    scenario overrides target the exact stored string — normalising
+    here (even stripping whitespace) would change the entity's
+    identity and orphan its overrides on resave.
+    """
+    text = values.get(ENTITY_ID_KEY, "")
     return EntityId(text) if text else new_entity_id()
 
 
@@ -742,7 +749,7 @@ def parse_facts_form(
     ``today``, which §4.8 rejects as future-dated.
 
     Each wrapper, DB pension, and annuity purchase row carries its own
-    entity id under :data:`ENTITY_ID_KEY` (blank means a new entity),
+    entity id under :data:`ENTITY_ID_KEY` (empty means a new entity),
     so scenario overrides targeting them by stable id (§4.3) survive a
     facts edit — row deletion and reordering included — instead of
     orphaning or silently retargeting. ``previous`` is the household a
