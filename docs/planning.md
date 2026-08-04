@@ -970,7 +970,8 @@ source. The mode lives in `RunConfig`: `RunMode.MONTE_CARLO` requires a
 seed and resolves the stochastic model inside `run()`, with
 `RunConfig.path` naming the substream — the path runner (roadmap 7.3,
 `run_paths`) projects path *i* under `replace(config, path=i)` and
-reduces each path to its success signals (ruin period, ending balance),
+reduces each path to its success signals (ruin period, per-period
+household closing balances for the chart bands, ending balance),
 dropping the period ledgers; the result's provenance is the union of
 the paths' reads in first-read order, since a balance-dependent read
 (natural-yield pricing) can fire on some paths only. A test double
@@ -1570,9 +1571,12 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   horizontal scrollbar and reads for humans — assumption display names,
   manifest behind a summary tooltip, defaults shown only when they
   differ (details under roadmap 8.2/8.3).*
-- [ ] 9.11 Age on chart axes — *chart categories and bar tooltips carry
-  the person's age at period start alongside the year (§4.7);
-  single-person labelling until couples activate (9.4).*
+- [x] 9.11 Age on chart axes — *chart categories and bar tooltips carry
+  the person's age at period start alongside the year (§4.7): every
+  category label reads `year · age` (e.g. `2032 · 60`) in both money
+  bases, and the tooltips inherit it as the category copy;
+  single-person labelling until couples activate (9.4) — a two-person
+  period falls back to the year alone.*
 - [x] 9.12 Annuity purchase entry in the facts form — *purchase age, pot
   fraction, and product type (level / escalating / inflation-linked)
   enterable in a repeatable form section; every field a decision (§5.1),
@@ -1582,11 +1586,25 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   single-person form writes single-life purchases only:
   `form_cannot_represent` now refuses just joint-life purchases
   (couples, 9.4) rather than all annuity purchases.*
-- [ ] 9.13 Monte Carlo in the GUI — *the Phase 7 core surfaced per §4.7:
+- [x] 9.13 Monte Carlo in the GUI — *the Phase 7 core surfaced per §4.7:
   run-mode control (deterministic | Monte Carlo with paths + seed),
   success-metrics readout (success rate, probability of ruin, ending-pot
   percentiles), percentile bands on the balances chart in either basis;
-  same seed + inputs reproduce identical results (§4.6).*
+  same seed + inputs reproduce identical results (§4.6). The run is an
+  explicit action (default 100 paths ≈ 4 s at the §4.6 measurements;
+  path count capped at 10,000) and executes on a worker thread — the
+  shell stays responsive, the run button disables while one is in
+  flight, and a result whose input state was replaced mid-run is
+  discarded rather than adopted. The transition re-anchors the base
+  projection (and scenario runs) to the same `today` before the paths
+  run, so the bands and the chart they overlay always share one
+  valuation date. Each path now also reduces to its per-period
+  household closing balances so the 10/50/90 bands chart from
+  `MonteCarloResult.balance_percentile`, and every plan-changing
+  transition drops the held result so a stale Monte Carlo surface can
+  never show against a changed plan. CPI is deterministic across paths
+  (§5.2), so the bands and ending pots deflate to today's money by the
+  deterministic report's own deflators.*
 - [ ] 9.14 "When can I retire?" solver — *earliest target retirement age
   meeting a replacement-rate target (default 66% of current employment
   income, user-adjustable), mirroring the roadmap 7.3

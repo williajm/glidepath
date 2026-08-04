@@ -8,8 +8,16 @@ render view models and forward raw user input back.
 import contextlib
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QStandardPaths, Qt
+from PySide6.QtCore import (
+    QObject,
+    QRunnable,
+    QStandardPaths,
+    Qt,
+    QThreadPool,
+    Signal,
+)
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -27,10 +35,14 @@ from PySide6.QtWidgets import (
 from glidepath.app import (
     DEFAULT_CHART_BASIS,
     DEFAULT_COMPARISON_METRIC_KEY,
+    DEFAULT_RUN_MODE,
+    MONTE_CARLO_RUNNING_MESSAGE,
+    MONTE_CARLO_STALE_MESSAGE,
     AboutViewModel,
     DisclaimerViewModel,
     FactsFormData,
     HelpGuideViewModel,
+    PlanState,
     ShellViewModel,
     basis_from_key,
     build_charts_view_model,
@@ -46,19 +58,24 @@ from glidepath.app import (
     parse_facts_form,
     plan_entity_ids,
     record_last_plan_path,
+    run_mode_from_key,
     save_plan_state,
     state_with_household,
+    state_with_monte_carlo,
     state_with_override,
     state_with_scenario_added,
     state_with_scenario_override,
     state_without_scenario,
     state_without_scenario_override,
 )
-from glidepath.gui.charts import ChartsPane
+from glidepath.gui.charts import ChartsPane, ChartsPaneCallbacks
 from glidepath.gui.forms import FactsEntryPane
 from glidepath.gui.inspector import InspectorPane
 from glidepath.gui.scenarios import ScenariosPane, ScenariosPaneCallbacks
 from glidepath.gui.style import wordmark_pixmap
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _today() -> date:
@@ -173,6 +190,32 @@ class HelpGuideDialog(QDialog):
         self.resize(560, 640)
 
 
+class _MonteCarloSignals(QObject):
+    """Delivers a finished Monte Carlo state back to the GUI thread."""
+
+    finished = Signal(object)
+
+
+class _MonteCarloWorker(QRunnable):
+    """Runs the Monte Carlo transition off the GUI thread (9.13).
+
+    A run at the recorded per-path cost (planning §4.6) can take
+    seconds to minutes, far too long to block the event loop. The
+    transition itself is pure app-layer code; only the delivery back
+    to the window touches Qt, via a queued signal.
+    """
+
+    def __init__(self, task: Callable[[], PlanState]) -> None:
+        """Hold the pure transition to run and the delivery signal."""
+        super().__init__()
+        self._task = task
+        self.signals = _MonteCarloSignals()
+
+    def run(self) -> None:
+        """Compute the next session state and emit it."""
+        self.signals.finished.emit(self._task())
+
+
 class MainWindow(QMainWindow):
     """The application shell: facts entry, the inspector, and the Help menu."""
 
@@ -192,8 +235,13 @@ class MainWindow(QMainWindow):
         self._plan_path: Path | None = None
         self._state = initial_plan_state()
         self._charts_basis = DEFAULT_CHART_BASIS
+        self._charts_mode = DEFAULT_RUN_MODE
         self._comparison_basis = DEFAULT_CHART_BASIS
         self._comparison_metric = DEFAULT_COMPARISON_METRIC_KEY
+        self.monte_carlo_pool = QThreadPool(self)
+        self.monte_carlo_pool.setMaxThreadCount(1)
+        self._monte_carlo_worker: _MonteCarloWorker | None = None
+        self._monte_carlo_input: PlanState | None = None
         self.setWindowTitle(view_model.window_title)
         self.resize(1120, 780)
 
@@ -202,7 +250,13 @@ class MainWindow(QMainWindow):
             self._handle_facts_submitted,
             self._handle_cleared,
         )
-        self.charts_pane = ChartsPane(self._handle_charts_basis)
+        self.charts_pane = ChartsPane(
+            ChartsPaneCallbacks(
+                select_basis=self._handle_charts_basis,
+                select_mode=self._handle_charts_mode,
+                run_monte_carlo=self._handle_monte_carlo_run,
+            )
+        )
         self.scenarios_pane = ScenariosPane(
             ScenariosPaneCallbacks(
                 add_scenario=self._handle_scenario_added,
@@ -378,8 +432,60 @@ class MainWindow(QMainWindow):
     def _handle_charts_basis(self, key: str) -> None:
         """Re-present the charts in the basis the user selected."""
         self._charts_basis = basis_from_key(key)
+        self._refresh_charts_pane()
+
+    def _handle_charts_mode(self, key: str) -> None:
+        """Re-present the charts in the run mode the user selected (9.13)."""
+        self._charts_mode = run_mode_from_key(key)
+        self._refresh_charts_pane()
+
+    def _handle_monte_carlo_run(self, seed_text: str, paths_text: str) -> None:
+        """Start a Monte Carlo run off the GUI thread (9.13).
+
+        The window stays responsive while the paths run; the finished
+        state arrives back on the GUI thread through the worker's
+        queued signal. The run button is disabled meanwhile, and a
+        second request while one is in flight is ignored.
+        """
+        if self._monte_carlo_worker is not None:
+            return
+        state = self._state
+        today = _today()
+        worker = _MonteCarloWorker(
+            lambda: state_with_monte_carlo(state, seed_text, paths_text, today=today)
+        )
+        worker.signals.finished.connect(self._handle_monte_carlo_finished)
+        self._monte_carlo_worker = worker
+        self._monte_carlo_input = state
+        self.charts_pane.set_monte_carlo_busy(busy=True)
+        self.statusBar().showMessage(MONTE_CARLO_RUNNING_MESSAGE)
+        self.monte_carlo_pool.start(worker)
+
+    def _handle_monte_carlo_finished(self, state: PlanState) -> None:
+        """Adopt a finished Monte Carlo run unless the plan moved on.
+
+        The run was computed from the session state captured at start;
+        if a facts save, override, or scenario edit replaced the state
+        meanwhile, the result describes a plan no longer on screen and
+        is discarded (the status bar says so).
+        """
+        self._monte_carlo_worker = None
+        self.charts_pane.set_monte_carlo_busy(busy=False)
+        stale = self._state is not self._monte_carlo_input
+        self._monte_carlo_input = None
+        if stale:
+            self.statusBar().showMessage(MONTE_CARLO_STALE_MESSAGE)
+            return
+        self._state = state
+        self.statusBar().clearMessage()
+        self._refresh_result_panes()
+
+    def _refresh_charts_pane(self) -> None:
+        """Re-render the charts tab in its selected basis and run mode."""
         self.charts_pane.refresh(
-            build_charts_view_model(self._state, basis=self._charts_basis)
+            build_charts_view_model(
+                self._state, basis=self._charts_basis, mode=self._charts_mode
+            )
         )
 
     def _handle_scenario_added(self, name: str) -> str | None:
@@ -388,13 +494,13 @@ class MainWindow(QMainWindow):
         if outcome.error is not None:
             return outcome.error
         self._state = outcome.state
-        self._refresh_scenarios_pane()
+        self._refresh_result_panes()
         return None
 
     def _handle_scenario_removed(self, name: str) -> None:
         """Remove a scenario and re-render the comparison."""
         self._state = state_without_scenario(self._state, name, today=_today())
-        self._refresh_scenarios_pane()
+        self._refresh_result_panes()
 
     def _handle_scenario_override(
         self, scenario: str, target_key: str, raw_value: str
@@ -406,7 +512,7 @@ class MainWindow(QMainWindow):
         if outcome.error is not None:
             return outcome.error
         self._state = outcome.state
-        self._refresh_scenarios_pane()
+        self._refresh_result_panes()
         return None
 
     def _handle_scenario_override_removed(self, scenario: str, target_key: str) -> None:
@@ -414,7 +520,7 @@ class MainWindow(QMainWindow):
         self._state = state_without_scenario_override(
             self._state, scenario, target_key, today=_today()
         )
-        self._refresh_scenarios_pane()
+        self._refresh_result_panes()
 
     def _handle_comparison_basis(self, key: str) -> None:
         """Re-present the comparison in the basis the user selected."""
@@ -438,9 +544,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_result_panes(self) -> None:
         """Re-render every pane that reads the session's projection."""
-        self.charts_pane.refresh(
-            build_charts_view_model(self._state, basis=self._charts_basis)
-        )
+        self._refresh_charts_pane()
         self._refresh_scenarios_pane()
         self.inspector_pane.refresh(build_inspector_view_model(self._state))
 

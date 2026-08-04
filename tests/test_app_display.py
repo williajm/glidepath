@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from glidepath.app import format_money, format_recorded, format_value
+from glidepath.app import format_money, format_percent, format_recorded, format_value
 from glidepath.core import Money, Sex
 
 
@@ -24,6 +24,24 @@ class TestFormatMoney:
     def test_amounts(self, amount: str, expected: str) -> None:
         """Pounds and pence, exactly two decimal places."""
         assert format_money(Money(Decimal(amount))) == expected
+
+
+class TestFormatPercent:
+    """Fractions render as one-decimal-place percentages (9.13)."""
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("0", "0.0%"),
+            ("1", "100.0%"),
+            ("0.95", "95.0%"),
+            ("0.005", "0.5%"),
+            ("0.6666", "66.7%"),
+        ],
+    )
+    def test_fractions(self, value: str, expected: str) -> None:
+        """The success-rate readout convention."""
+        assert format_percent(Decimal(value)) == expected
 
 
 class TestFormatValue:

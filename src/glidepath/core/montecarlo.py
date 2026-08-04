@@ -5,7 +5,9 @@ function — path *i* is an ordinary :func:`~glidepath.core.engine.run`
 under ``replace(config, path=i)``, so its randomness is exactly
 determined by ``(config.seed, i)`` and any single path is individually
 re-runnable (planning §4.6). Each path reduces to a
-:class:`PathOutcome`; the full period ledgers are dropped, so a
+:class:`PathOutcome` — the ruin signal, the household's closing
+balance per period (what the percentile bands chart, roadmap 9.13),
+and the ending balance; the full period ledgers are dropped, so a
 many-path run holds one projection's snapshots at a time.
 
 Success metrics over the outcomes (planning §5.2):
@@ -73,23 +75,30 @@ class PathOutcome:
     """One Monte Carlo path, reduced to its success signals.
 
     ``first_shortfall_period`` is the first period whose need went
-    unmet — ``None`` on a path that never fell short. ``ending_balance``
-    is the household's total closing balance in the final period,
-    nominal (module docstring). Re-run the path itself with
-    ``run(plan, assumptions, region, replace(config, path=path))``.
+    unmet — ``None`` on a path that never fell short.
+    ``closing_balances`` is the household's total closing balance per
+    period in period order, nominal — what the balances chart's
+    percentile bands read (roadmap 9.13) — and ``ending_balance`` is
+    its final entry, kept as its own field for the ending-pot metrics.
+    Re-run the path itself with ``run(plan, assumptions, region,
+    replace(config, path=path))``.
     """
 
     path: int
     first_shortfall_period: Period | None
     ending_balance: Money
+    closing_balances: tuple[Money, ...] = ()
 
     def __post_init__(self) -> None:
-        """Reject a negative path index or ending balance."""
+        """Reject a negative path index or inconsistent balances."""
         if self.path < 0:
             msg = f"PathOutcome.path must be non-negative, got {self.path}"
             raise ValueError(msg)
         if self.ending_balance < _ZERO:
             msg = "PathOutcome.ending_balance must be non-negative"
+            raise ValueError(msg)
+        if self.closing_balances and self.closing_balances[-1] != self.ending_balance:
+            msg = "PathOutcome.closing_balances must end at ending_balance"
             raise ValueError(msg)
 
     @property
@@ -147,17 +156,36 @@ class MonteCarloResult:
         Raises:
             ValueError: If ``percentile`` lies outside [0, 100].
         """
-        if not Decimal(0) <= percentile <= _HUNDRED:
-            msg = f"percentile must lie between 0 and 100, got {percentile}"
+        return _interpolated_percentile(
+            [outcome.ending_balance for outcome in self.outcomes], percentile
+        )
+
+    def balance_percentile(self, percentile: Decimal) -> tuple[Money, ...]:
+        """The per-period closing-balance percentile over paths (9.13).
+
+        One entry per projected period, in period order — the same
+        order-statistic interpolation as
+        :meth:`ending_pot_percentile`, applied period by period over
+        the paths' nominal household balances. CPI is deterministic
+        across paths (module docstring), so deflating each entry by
+        the period's price level presents the band in today's money.
+
+        Raises:
+            ValueError: If ``percentile`` lies outside [0, 100], or
+                the outcomes carry differing period counts.
+        """
+        _check_percentile(percentile)
+        lengths = {len(outcome.closing_balances) for outcome in self.outcomes}
+        if len(lengths) != 1:
+            msg = "balance_percentile needs every path to cover the same periods"
             raise ValueError(msg)
-        balances = sorted(outcome.ending_balance for outcome in self.outcomes)
-        rank = (Decimal(len(balances)) - _ONE) * percentile / _HUNDRED
-        lower = int(rank)
-        fraction = rank - Decimal(lower)
-        value = balances[lower]
-        if fraction > 0:
-            value = value + (balances[lower + 1] - balances[lower]) * fraction
-        return value.quantized()
+        return tuple(
+            _interpolated_percentile(
+                [outcome.closing_balances[index] for outcome in self.outcomes],
+                percentile,
+            )
+            for index in range(lengths.pop())
+        )
 
 
 def run_paths(
@@ -313,6 +341,39 @@ def sustainable_income(
     return low
 
 
+def _check_percentile(percentile: Decimal) -> None:
+    """Reject a percentile outside [0, 100].
+
+    Raises:
+        ValueError: If ``percentile`` lies outside [0, 100].
+    """
+    if not Decimal(0) <= percentile <= _HUNDRED:
+        msg = f"percentile must lie between 0 and 100, got {percentile}"
+        raise ValueError(msg)
+
+
+def _interpolated_percentile(balances: Sequence[Money], percentile: Decimal) -> Money:
+    """The ``percentile`` of ``balances`` between order statistics.
+
+    Rank ``(count - 1) * percentile / 100`` over the sorted balances,
+    fractional ranks interpolating between the two neighbours — exact
+    ``Decimal`` arithmetic, quantized as a presentation value
+    (planning §4.6).
+
+    Raises:
+        ValueError: If ``percentile`` lies outside [0, 100].
+    """
+    _check_percentile(percentile)
+    ordered = sorted(balances)
+    rank = (Decimal(len(ordered)) - _ONE) * percentile / _HUNDRED
+    lower = int(rank)
+    fraction = rank - Decimal(lower)
+    value = ordered[lower]
+    if fraction > 0:
+        value = value + (ordered[lower + 1] - ordered[lower]) * fraction
+    return value.quantized()
+
+
 def _merged_provenance(provenances: Sequence[RunProvenance]) -> RunProvenance:
     """Path 0's provenance with the assumption union of every path.
 
@@ -341,19 +402,22 @@ def _path_config(config: RunConfig, index: int) -> RunConfig:
 def _path_outcome(index: int, result: ProjectionResult) -> PathOutcome:
     """Reduce one path's projection to its success signals."""
     first_shortfall = None
+    balances = []
     for snapshot in result.snapshots:
         shortfall = _ZERO
+        closing = _ZERO
         for person in snapshot.persons:
             shortfall = shortfall + person.shortfall
-        if shortfall > _ZERO:
+            for wrapper in person.wrappers:
+                closing = closing + wrapper.closing_balance
+        if shortfall > _ZERO and first_shortfall is None:
             first_shortfall = snapshot.period
-            break
-    ending = _ZERO
-    for person in result.snapshots[-1].persons:
-        for wrapper in person.wrappers:
-            ending = ending + wrapper.closing_balance
+        balances.append(closing)
     return PathOutcome(
-        path=index, first_shortfall_period=first_shortfall, ending_balance=ending
+        path=index,
+        first_shortfall_period=first_shortfall,
+        ending_balance=balances[-1],
+        closing_balances=tuple(balances),
     )
 
 

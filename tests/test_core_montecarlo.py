@@ -306,7 +306,10 @@ def mc_config(seed: int | None = SEED, years: int = 4) -> RunConfig:
 
 
 def outcome_of(
-    path: int, ending: str, shortfall_year: int | None = None
+    path: int,
+    ending: str,
+    shortfall_year: int | None = None,
+    balances: tuple[str, ...] | None = None,
 ) -> PathOutcome:
     """A hand-built path outcome, ruined when a shortfall year is given."""
     period = None
@@ -314,10 +317,14 @@ def outcome_of(
         period = Period(
             start=date(shortfall_year, 1, 1), end=date(shortfall_year, 12, 31)
         )
+    closing: tuple[Money, ...] = ()
+    if balances is not None:
+        closing = tuple(Money(Decimal(balance)) for balance in balances)
     return PathOutcome(
         path=path,
         first_shortfall_period=period,
         ending_balance=Money(Decimal(ending)),
+        closing_balances=closing,
     )
 
 
@@ -479,6 +486,16 @@ class TestRunPaths:
             for outcome in result.outcomes
         )
 
+    def test_outcomes_carry_the_per_period_household_balances(self) -> None:
+        """Each path reduces to one closing balance per period (9.13)."""
+        result = run_paths(
+            household_of(), assumptions_with(), stub_region(), mc_config(), paths=2
+        )
+        for outcome in result.outcomes:
+            assert len(outcome.closing_balances) == 4
+            assert outcome.closing_balances[-1] == outcome.ending_balance
+            assert all(balance >= ZERO for balance in outcome.closing_balances)
+
     def test_records_the_config_and_merged_provenance(self) -> None:
         """The result carries the §4.6 manifest side."""
         config = mc_config()
@@ -555,6 +572,18 @@ class TestPathOutcome:
         with pytest.raises(ValueError, match="non-negative"):
             PathOutcome(path=0, first_shortfall_period=None, ending_balance=negative)
 
+    def test_rejects_balances_that_do_not_end_at_the_ending_balance(self) -> None:
+        """The per-period series and the ending balance are one record."""
+        ending = Money(Decimal(100))
+        drifted = (Money(Decimal(300)), Money(Decimal(200)))
+        with pytest.raises(ValueError, match="must end at ending_balance"):
+            PathOutcome(
+                path=0,
+                first_shortfall_period=None,
+                ending_balance=ending,
+                closing_balances=drifted,
+            )
+
 
 class TestMonteCarloMetrics:
     """Metric arithmetic over hand-built outcomes."""
@@ -595,6 +624,42 @@ class TestMonteCarloMetrics:
         excessive = Decimal(101)
         with pytest.raises(ValueError, match="between 0 and 100"):
             result.ending_pot_percentile(excessive)
+
+    def test_balance_percentiles_interpolate_period_by_period(self) -> None:
+        """The band values apply the ending-pot convention per period."""
+        result = result_of(
+            outcome_of(0, "50", balances=("100", "50")),
+            outcome_of(1, "150", balances=("200", "150")),
+            outcome_of(2, "250", balances=("300", "250")),
+        )
+        median = result.balance_percentile(Decimal(50))
+        floor = result.balance_percentile(Decimal(0))
+        assert median == (Money(Decimal(200)), Money(Decimal(150)))
+        assert floor == (Money(Decimal(100)), Money(Decimal(50)))
+
+    def test_balance_percentiles_reject_mismatched_period_counts(self) -> None:
+        """Bands over unaligned paths would chart the wrong periods."""
+        result = result_of(
+            outcome_of(0, "50", balances=("100", "50")),
+            outcome_of(1, "150", balances=("150",)),
+        )
+        median = Decimal(50)
+        with pytest.raises(ValueError, match="same periods"):
+            result.balance_percentile(median)
+
+    def test_balance_percentiles_reject_an_out_of_range_percentile(self) -> None:
+        """Percentiles live in [0, 100] here too."""
+        result = result_of(outcome_of(0, "50", balances=("100", "50")))
+        negative = Decimal(-1)
+        with pytest.raises(ValueError, match="between 0 and 100"):
+            result.balance_percentile(negative)
+
+    def test_balance_percentiles_validate_before_iterating(self) -> None:
+        """Outcomes with no balance series must not swallow the check."""
+        result = result_of(outcome_of(0, "50"))
+        negative = Decimal(-1)
+        with pytest.raises(ValueError, match="between 0 and 100"):
+            result.balance_percentile(negative)
 
     def test_rejects_an_empty_outcome_set(self) -> None:
         """Metrics over no paths are undefined."""

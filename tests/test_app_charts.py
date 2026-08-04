@@ -23,6 +23,7 @@ from glidepath.app import (
     initial_plan_state,
     state_with_household,
 )
+from glidepath.app.charts import _category_label
 from glidepath.core import (
     AnnuityPurchase,
     Decision,
@@ -164,16 +165,33 @@ class TestProjectedCharts:
         for chart in view_model.charts:
             assert "today's money" in chart.y_axis_label
 
-    def test_one_category_per_period(
+    def test_one_category_per_period_with_year_and_age(
         self, projected: PlanState, view_model: ChartsViewModel
     ) -> None:
-        """The x axis is the period-start years, in order."""
+        """Each x-axis label carries the year and the age at its start (9.11)."""
         assert projected.result is not None
-        snapshot_years = [
-            str(snapshot.period.start.year) for snapshot in projected.result.snapshots
+        expected = [
+            f"{row.period.start.year} · {row.age_at_period_start}"
+            for row in build_report(projected.result).rows
         ]
-        assert list(view_model.categories) == snapshot_years
-        assert view_model.categories[0] == str(TODAY.year)
+        assert list(view_model.categories) == expected
+        assert view_model.categories[0] == f"{TODAY.year} · 35"
+
+    def test_categories_carry_the_age_in_both_bases(
+        self, projected: PlanState, view_model: ChartsViewModel
+    ) -> None:
+        """The year-and-age labels are basis-independent (9.11)."""
+        nominal = build_charts_view_model(projected, basis=ReportBasis.NOMINAL)
+        assert nominal.categories == view_model.categories
+
+    def test_a_two_person_period_labels_with_the_year_alone(
+        self, projected: PlanState
+    ) -> None:
+        """No single age exists to show until couples activate (9.4)."""
+        assert projected.result is not None
+        row = build_report(projected.result).rows[0]
+        label = _category_label(row.period, [row, row])
+        assert label == str(row.period.start.year)
 
     def test_every_series_spans_every_category(
         self, view_model: ChartsViewModel

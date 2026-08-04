@@ -69,10 +69,15 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
     (
         "Charts — see the projection",
         (
-            "The Charts tab draws the projection, one bar per tax year: "
-            "wrapper balances, income composition, and tax due. Hover a "
-            "bar for the exact figures, and switch between real (today's "
-            "money) and nominal presentation with the basis toggle."
+            "The Charts tab draws the projection, one bar per tax year "
+            "labelled with the year and your age at its start: wrapper "
+            "balances, income composition, and tax due. Hover a bar for "
+            "the exact figures, and switch between real (today's money) "
+            "and nominal presentation with the basis toggle. Switch the "
+            "run mode to Monte Carlo, choose the paths and seed, and "
+            "press Run Monte Carlo to read the success metrics and draw "
+            "10th/median/90th percentile bands over the balances chart; "
+            "the same seed and inputs always reproduce the same result."
         ),
     ),
     (
