@@ -55,6 +55,7 @@ from glidepath.app.firstrun import (
     record_last_plan_path,
 )
 from glidepath.app.forms import (
+    ENTITY_ID_KEY,
     ChoiceOption,
     FactsFormData,
     FactsFormResult,
@@ -62,12 +63,14 @@ from glidepath.app.forms import (
     FieldKind,
     FieldSpec,
     FormError,
+    PlanEntityIds,
     SectionSpec,
     build_facts_form_view_model,
     facts_form_data_from_household,
     form_cannot_represent,
     format_form_errors,
     parse_facts_form,
+    plan_entity_ids,
 )
 from glidepath.app.inspector import (
     AssumptionRow,
@@ -125,6 +128,7 @@ __all__ = [
     "DISCLAIMER_BODY",
     "DISCLAIMER_DECLINE_LABEL",
     "DISCLAIMER_TITLE",
+    "ENTITY_ID_KEY",
     "HELP_GUIDE_INTRO",
     "HELP_GUIDE_SECTIONS",
     "HELP_GUIDE_TITLE",
@@ -158,6 +162,7 @@ __all__ = [
     "LoadOutcome",
     "OverrideOutcome",
     "OverrideRow",
+    "PlanEntityIds",
     "PlanState",
     "ReportBasis",
     "RollForwardRow",
@@ -191,6 +196,7 @@ __all__ = [
     "load_state",
     "metric_from_key",
     "parse_facts_form",
+    "plan_entity_ids",
     "record_disclaimer_acknowledged",
     "record_last_plan_path",
     "save_plan_state",

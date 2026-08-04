@@ -44,6 +44,7 @@ from glidepath.app import (
     load_plan_state,
     metric_from_key,
     parse_facts_form,
+    plan_entity_ids,
     record_last_plan_path,
     save_plan_state,
     state_with_household,
@@ -355,6 +356,10 @@ class MainWindow(QMainWindow):
         if result.household is None:
             return format_form_errors(self._view_model.facts_form, result.errors)
         self._state = state_with_household(self._state, result.household, today=today)
+        # Rows typed fresh mint their entity ids at parse time; seeding
+        # them back means the next resubmission edits the same entities
+        # instead of minting again and orphaning overrides (§4.3).
+        self.facts_pane.set_entity_ids(plan_entity_ids(result.household))
         self._refresh_result_panes()
         return facts_saved_message(self._state)
 

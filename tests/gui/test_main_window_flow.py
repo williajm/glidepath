@@ -7,7 +7,7 @@ provenance; an in-place override flows back through the app layer.
 
 from typing import TYPE_CHECKING
 
-from glidepath.app import build_shell_view_model
+from glidepath.app import ENTITY_ID_KEY, build_shell_view_model
 from glidepath.gui import inspector as inspector_module
 from glidepath.gui.widgets import MainWindow
 from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
@@ -83,6 +83,21 @@ class TestFactsToInspectorFlow:
         assert window.inspector_pane.decisions_table.rowCount() > 0
         assert "Projected" in window.inspector_pane.summary_label.text()
         assert "Run manifest" in window.inspector_pane.summary_label.toolTip()
+
+    def test_successful_save_seeds_row_entity_ids(self) -> None:
+        """A typed row adopts its minted id on save (§4.3).
+
+        Without the write-back a resave would mint a fresh entity and
+        orphan any scenario override created in between.
+        """
+        window = filled_window()
+        window.facts_pane.submit_button.click()
+        [values] = window.facts_pane.wrappers.values_list()
+        minted_id = values[ENTITY_ID_KEY]
+        assert minted_id != ""
+        window.facts_pane.submit_button.click()
+        [resubmitted] = window.facts_pane.wrappers.values_list()
+        assert resubmitted[ENTITY_ID_KEY] == minted_id
 
     def test_invalid_submission_reports_field_errors(self) -> None:
         """An empty submission lists the missing required fields."""

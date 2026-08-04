@@ -207,6 +207,29 @@ class TestLoadGuards:
         assert "planned outflows" in outcome.message
         assert "cannot edit yet" in outcome.message
 
+    def test_noted_plan_is_refused(self, tmp_path: Path) -> None:
+        """A note on a fact is refused at open, never silently stripped.
+
+        No in-app surface authors fact or decision notes yet, so a
+        noted plan is hand-edited — but the refuse-rather-than-reduce
+        contract holds for it all the same (§4.5).
+        """
+        path = tmp_path / "plan.glidepath.json"
+        document = document_from_state(projected_state())
+        assert document is not None
+        person = document.household.persons[0]
+        noted = _altered(person.date_of_birth, note="from my passport")
+        _saved_document(
+            path,
+            household=_altered(
+                document.household, persons=(_altered(person, date_of_birth=noted),)
+            ),
+        )
+        outcome = load_plan_state(path, today=TODAY)
+        assert outcome.state is None
+        assert "notes on facts or decisions" in outcome.message
+        assert "cannot edit yet" in outcome.message
+
     def test_defective_table_override_is_refused(self, tmp_path: Path) -> None:
         """A stored table its policy parser rejects fails the load."""
         path = tmp_path / "plan.glidepath.json"

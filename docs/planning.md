@@ -1469,7 +1469,16 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   (originally every fact had one). On resubmission the parse carries
   those facts' stored dates forward from the plan being replaced
   wherever the value is unchanged, so a load → edit → save cycle never
-  silently rewrites persisted `as_of` provenance. Date-valued fields are marked
+  silently rewrites persisted `as_of` provenance. Every repeatable row
+  (wrapper, DB pension, annuity purchase) carries its entity id
+  opaquely through the form (`ENTITY_ID_KEY`; blank means a new
+  entity), so identity — and any scenario override targeting it by
+  stable id (§4.3) — survives edits, reordering, and row deletion
+  alike; shells seed freshly minted ids back into their rows after a
+  successful save so the next resubmission edits the same entities.
+  Notes on facts and decisions have no form field yet, so a plan
+  carrying one is refused at open (`form_cannot_represent`) rather
+  than silently stripped on the next save. Date-valued fields are marked
   `FieldKind.DATE`: the raw value stays ISO text and blank keeps its
   meaning (today / none), so shells render typed entry first-class with
   a calendar as an assist — never a spinner-style date widget that
@@ -1542,7 +1551,7 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   (`form_cannot_represent` — extra persons, planned outflows, joint-life
   annuity purchases (since 9.12), personal glide paths, stage
   multipliers, wrapper allocations/fees, independently dated fact
-  pairs) is refused at open
+  pairs, notes on facts or decisions) is refused at open
   rather than silently reduced on the next save; stored table
   overrides (base and per-scenario) are vetted by their policy parsers
   at load so a defective table fails the open, never a run mid-flight;
@@ -1567,7 +1576,7 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 - [x] 9.12 Annuity purchase entry in the facts form — *purchase age, pot
   fraction, and product type (level / escalating / inflation-linked)
   enterable in a repeatable form section; every field a decision (§5.1),
-  ids reused on resubmission so scenario overrides survive (§4.3);
+  ids carried per row on resubmission so scenario overrides survive (§4.3);
   round-tripped through `facts_form_data_from_household`, so the income
   chart's existing annuity series is now reachable from the shell. The
   single-person form writes single-life purchases only:
