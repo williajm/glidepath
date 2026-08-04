@@ -633,14 +633,22 @@ def test_unused_allowance_survives_for_future_years(pension: PensionRules) -> No
     assert carry_forward_generated(assessment, scheme_member=True) == money("40000")
 
 
-def test_only_unused_alternative_allowance_carries_after_access(
+def test_only_unused_alternative_allowance_carries_when_mpaa_exceeded(
     pension: PensionRules,
 ) -> None:
     """Unused MPAA headroom never carries forward (HS345)."""
-    assessment = assessed(pension, "5000", "20000", mpaa_active=True)
-    # 50,000 alternative allowance less 20,000 of DB input; the 5,000
-    # of money-purchase headroom under the MPAA adds nothing.
+    assessment = assessed(pension, "15000", "20000", mpaa_active=True)
+    # Money-purchase inputs over the MPAA: 50,000 alternative
+    # allowance less 20,000 of DB input carries, nothing more.
     assert carry_forward_generated(assessment, scheme_member=True) == money("30000")
+
+
+def test_within_the_mpaa_the_default_basis_generates(pension: PensionRules) -> None:
+    """MP inputs inside the MPAA keep the normal AA basis (PTM056510)."""
+    assessment = assessed(pension, "5000", "20000", mpaa_active=True)
+    # No money-purchase excess, so the full 60,000 allowance less the
+    # 25,000 total inputs carries despite the trigger.
+    assert carry_forward_generated(assessment, scheme_member=True) == money("35000")
 
 
 def test_a_year_without_scheme_membership_generates_nothing(

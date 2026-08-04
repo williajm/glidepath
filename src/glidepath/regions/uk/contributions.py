@@ -50,8 +50,9 @@ excess, consuming years earliest-first and only to the extent that
 reduces the charge; the MPAA is never topped up, so the money-purchase
 excess is a floor no carry-forward can offset (HS345).
 :func:`carry_forward_generated` is what a year adds to the pool — only
-the unused *alternative* allowance after flexible access, and nothing
-from a year without registered-scheme membership.
+the unused *alternative* allowance once money-purchase inputs exceed
+the MPAA (PTM056510), and nothing from a year without
+registered-scheme membership.
 :func:`roll_carry_forward` advances the pool one tax year, expiring the
 oldest entry.
 """
@@ -333,13 +334,19 @@ class AnnualAllowanceAssessment:
     def unused_allowance(self) -> Money:
         """The year's unused allowance for carry-forward purposes.
 
-        After flexible access only the unused *alternative* allowance
-        carries forward — unused MPAA headroom never does (HS345);
-        otherwise it is the allowance left over total pension inputs.
-        Whether the year in fact generates carry-forward also depends
-        on scheme membership (:func:`carry_forward_generated`).
+        In a year whose money-purchase inputs *exceed* the MPAA only
+        the unused *alternative* allowance carries forward — unused
+        MPAA headroom never does (HS345). Otherwise — including a
+        flexibly-accessed year whose money-purchase inputs stay within
+        the MPAA — the full allowance less total pension inputs
+        carries (PTM056510). Whether the year in fact generates
+        carry-forward also depends on scheme membership
+        (:func:`carry_forward_generated`).
         """
-        if self.alternative_annual_allowance is not None:
+        if (
+            self.alternative_annual_allowance is not None
+            and self.money_purchase_excess > _ZERO
+        ):
             return max(self.alternative_annual_allowance - self.other_inputs, _ZERO)
         total = self.money_purchase_inputs + self.other_inputs
         return max(self.annual_allowance - total, _ZERO)
