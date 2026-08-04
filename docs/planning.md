@@ -542,9 +542,12 @@ at the earliest of `active_until_age` (the leave-and-defer decision;
 `None` means service continues to the benefits start), the benefits
 start itself, and retirement — accrual is gated by the same §5.2
 period-open convention that stops employment income and contributions
-at the target retirement age. The final active period pro-rates its
-credit by whole months of service; an `active_until_age` after the
-taken-at age is a construction error. Final-salary linkage is not
+at the target retirement age, and the pre-run span is clamped at the
+exact target-retirement date (whole months — the span is never
+modelled period-by-period, so the period-open gate cannot apply; the
+date clamp is the conservative counterpart). The final active period
+pro-rates its credit by whole months of service; an `active_until_age`
+after the taken-at age is a construction error. Final-salary linkage is not
 modelled (§2): a final-salary scheme is approximated by CARE accrual
 at the stated salary. Member DB contributions are likewise not
 modelled — a known v1 limitation: schemes that deduct member
@@ -1039,6 +1042,7 @@ relief_at_source_rate      = "0.20"
 tax_free_lump_sum_fraction = "0.25"
 lump_sum_allowance         = "268275"
 lump_sum_death_benefit_allowance = "1073100"
+db_valuation_factor        = 16  # FA 2004 s234 relevant valuation factor (9.6)
 
 [isa]
 annual_allowance = "20000"
@@ -1106,7 +1110,7 @@ untouched because its uprating is governed by
 task** after each Budget: copy previous year's file, re-verify every
 figure, update `verified_on`/`sources`, update §6.
 
-### 5.4 Plan document format (`.glidepath.json` schema v1)
+### 5.4 Plan document format (`.glidepath.json` schema v2)
 
 Implements the §4.5 decision (`glidepath/persistence/`, roadmap 6.2/6.4;
 region-agnostic like the core — the region's shipped defaults and data
@@ -1114,7 +1118,7 @@ version are function inputs, never imports). Top level:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "region": "uk",
   "assumptions_resolved_against": "<region data_version at last save>",
   "household": { "persons": [...], "spending": ..., "planned_outflows": [...] },
@@ -1150,9 +1154,11 @@ the shipped default value and description; a stored value whose shape no
 longer matches the shipped default fails loudly, the §4.3 rule).
 Migration (roadmap 6.4): upgraders keyed by the schema version they
 read, each stepping exactly one version, applied in sequence on load
-before strict decoding; a current-version file passes through untouched
-(the wired v1→v1 no-op), and a newer-than-current file errors with an
-"upgrade glidepath" message.
+before strict decoding; a current-version file passes through untouched,
+and a newer-than-current file errors with an "upgrade glidepath"
+message. Registered upgraders: v1→v2 (roadmap 9.6) adds
+`"active_membership": null` to every DB pension — a v1 file's pensions
+all load deferred.
 
 ## 6. Verified UK policy figures (2026/27)
 

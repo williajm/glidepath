@@ -844,10 +844,12 @@ class _Projection:
         The accrued entitlement revalues from the statement date to
         ``today`` (whole-month convention, §4.6). An active membership
         additionally credits the statement→today span's service at the
-        stated salary, un-revalued (§5.1), clamped at the service end;
-        service still to run carries the accrual parameters into the
-        period loop. Service already over just leaves the pension
-        deferred — tolerant, like a benefits start already past.
+        stated salary, un-revalued (§5.1), clamped at the earliest of
+        the service end and the exact target-retirement date — the
+        pre-run counterpart of the in-run retirement gate; service
+        still to run carries the accrual parameters into the period
+        loop. Service already over just leaves the pension deferred —
+        tolerant, like a benefits start already past.
         """
         today = self.config.today
         person = self.person
@@ -859,8 +861,11 @@ class _Projection:
         accrual = None
         membership = pension.active_membership
         if membership is not None:
+            retirement = date_age_attained(
+                person.date_of_birth.value, person.target_retirement_age.value
+            )
             service_end = db_service_end_date(pension, person.date_of_birth.value)
-            span_end = min(today, service_end)
+            span_end = min(today, service_end, retirement)
             if span_end > pension.statement_date:
                 service_months = whole_months_between(pension.statement_date, span_end)
                 accrued = accrued + membership.pensionable_salary.value * (

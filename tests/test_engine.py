@@ -2099,6 +2099,24 @@ class TestActiveDBAccrual:
         first = result.snapshots[0]
         assert first.persons[0].db_income == Money(Decimal("10000.00"))
 
+    def test_pre_run_span_stops_at_the_retirement_date(self) -> None:
+        """Retirement between statement and today caps the span (§5.1).
+
+        Statement 2023, retirement on the 64th birthday in 2024, today
+        2026: only the one pre-retirement year credits — 9,000 pays,
+        not the 11,000 an unclamped three-year span would produce.
+        """
+        plan = self.accruing_plan(
+            date_of_birth=date(1960, 1, 1),
+            statement=date(2023, 1, 1),
+            retire_at=64,
+        )
+        result = run(
+            plan, assumptions_with(), stub_region(), self.three_period_config()
+        )
+        first = result.snapshots[0]
+        assert first.persons[0].db_income == Money(Decimal("9000.00"))
+
     def test_salary_escalates_with_earnings_growth(self) -> None:
         """5% earnings growth lifts 2027's credit to 1,050."""
         result = run(
