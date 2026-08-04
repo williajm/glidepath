@@ -447,15 +447,32 @@ class MainWindow(QMainWindow):
         self._charts_mode = run_mode_from_key(key)
         self._refresh_charts_pane()
 
+    def _transition_in_flight(self) -> bool:
+        """Whether a Monte Carlo run or retirement search is running.
+
+        The two transitions share one guard: both compute from the
+        session state captured at start, so a second launched while
+        the first runs could only ever be discarded as stale after
+        minutes of wasted compute.
+        """
+        return self._monte_carlo_worker is not None or (
+            self._retirement_worker is not None
+        )
+
+    def _set_transitions_busy(self, *, busy: bool) -> None:
+        """Disable (or re-enable) both slow-run actions together."""
+        self.charts_pane.set_monte_carlo_busy(busy=busy)
+        self.charts_pane.set_retirement_busy(busy=busy)
+
     def _handle_monte_carlo_run(self, seed_text: str, paths_text: str) -> None:
         """Start a Monte Carlo run off the GUI thread (9.13).
 
         The window stays responsive while the paths run; the finished
         state arrives back on the GUI thread through the worker's
-        queued signal. The run button is disabled meanwhile, and a
-        second request while one is in flight is ignored.
+        queued signal. Both slow-run actions are disabled meanwhile,
+        and a request while either is in flight is ignored.
         """
-        if self._monte_carlo_worker is not None:
+        if self._transition_in_flight():
             return
         state = self._state
         today = _today()
@@ -465,7 +482,7 @@ class MainWindow(QMainWindow):
         worker.signals.finished.connect(self._handle_monte_carlo_finished)
         self._monte_carlo_worker = worker
         self._monte_carlo_input = state
-        self.charts_pane.set_monte_carlo_busy(busy=True)
+        self._set_transitions_busy(busy=True)
         self.statusBar().showMessage(MONTE_CARLO_RUNNING_MESSAGE)
         self.monte_carlo_pool.start(worker)
 
@@ -478,7 +495,7 @@ class MainWindow(QMainWindow):
         is discarded (the status bar says so).
         """
         self._monte_carlo_worker = None
-        self.charts_pane.set_monte_carlo_busy(busy=False)
+        self._set_transitions_busy(busy=False)
         stale = self._state is not self._monte_carlo_input
         self._monte_carlo_input = None
         if stale:
@@ -495,12 +512,12 @@ class MainWindow(QMainWindow):
 
         The search runs the plan once per candidate age — same
         threading rules as the Monte Carlo run: the window stays
-        responsive, the card's button disables meanwhile, and a second
-        request while one is in flight is ignored. The screen's
+        responsive, both slow-run actions disable meanwhile, and a
+        request while either is in flight is ignored. The screen's
         current run mode is the search's basis; the seed and path text
         come from the Monte Carlo panel's own controls.
         """
-        if self._retirement_worker is not None:
+        if self._transition_in_flight():
             return
         state = self._state
         today = _today()
@@ -517,7 +534,7 @@ class MainWindow(QMainWindow):
         worker.signals.finished.connect(self._handle_retirement_finished)
         self._retirement_worker = worker
         self._retirement_input = state
-        self.charts_pane.set_retirement_busy(busy=True)
+        self._set_transitions_busy(busy=True)
         self.statusBar().showMessage(RETIREMENT_RUNNING_MESSAGE)
         self.monte_carlo_pool.start(worker)
 
@@ -529,7 +546,7 @@ class MainWindow(QMainWindow):
         describes a plan no longer on screen and is discarded.
         """
         self._retirement_worker = None
-        self.charts_pane.set_retirement_busy(busy=False)
+        self._set_transitions_busy(busy=False)
         stale = self._state is not self._retirement_input
         self._retirement_input = None
         if stale:

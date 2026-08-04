@@ -445,6 +445,64 @@ class TestDeterministicSolver:
         assert stated_low == 60
 
 
+class TestRetirementExposure:
+    """Candidates past the horizon never succeed vacuously."""
+
+    def test_an_age_beyond_the_horizon_is_not_a_vacuous_success(self) -> None:
+        """Ages 64+ retire after the 2033 horizon and must fail.
+
+        150,000 a year genuinely fails at every age with a retired
+        period (even age 63's single year outspends the pot). Without
+        the exposure gate, age 64 would activate no spending at all
+        and "succeed" with the target never tested.
+        """
+        unaffordable = Money(Decimal(150000))
+        age = earliest_retirement_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            search_of(target=unaffordable, minimum_age=60, maximum_age=70),
+        )
+        assert age is None
+
+    def test_the_last_age_inside_the_horizon_can_still_succeed(self) -> None:
+        """Age 63's single retired year is real exposure, not vacuous."""
+        one_year_of_the_pot = Money(Decimal(100000))
+        age = earliest_retirement_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            search_of(target=one_year_of_the_pot, minimum_age=60, maximum_age=70),
+        )
+        assert age == 63
+
+    def test_monte_carlo_candidates_past_the_horizon_also_fail(self) -> None:
+        """The exposure gate is mode-independent."""
+        age = earliest_retirement_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            mc_config(),
+            search_of(minimum_age=64, maximum_age=70, paths=2),
+        )
+        assert age is None
+
+    def test_the_default_horizon_comes_from_the_planning_age(self) -> None:
+        """Without an explicit horizon the planning-age assumption governs."""
+        config = RunConfig(today=date(2026, 1, 1))
+        affordable = Money(Decimal(2000))
+        age = earliest_retirement_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            config,
+            search_of(target=affordable, minimum_age=56, maximum_age=56),
+        )
+        assert age == 56
+
+
 class TestMonteCarloSolver:
     """The same scan under a seeded Monte Carlo config."""
 

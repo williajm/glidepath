@@ -1626,7 +1626,14 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   minus one, runs on the worker thread with the 9.13 staleness and
   re-anchoring rules, and reports the earliest age — or that none in
   range meets — with the target income and the basis it was computed
-  on.*
+  on. A candidate with no retired period inside the projected horizon
+  never tests the income and fails rather than succeeding vacuously; a
+  Monte Carlo search is additionally bounded to 20,000
+  path-projections across its candidate ages (the per-run path cap
+  alone would let an unsuccessful search multiply to hundreds of
+  thousands); and the Monte Carlo run and the search share one
+  in-flight guard, since a second slow run launched mid-flight could
+  only ever be discarded as stale.*
 
 ## 9. Open questions
 

@@ -38,6 +38,7 @@ from glidepath.app.retirement import (
     DEFAULT_RETIREMENT_RATE_VALUE,
     DEFAULT_RETIREMENT_SUCCESS_VALUE,
     RETIREMENT_ANSWER_PREFIX,
+    RETIREMENT_BUDGET_MESSAGE,
     RETIREMENT_DETERMINISTIC_BASIS,
     RETIREMENT_FAILED_PREFIX,
     RETIREMENT_HEADING,
@@ -203,6 +204,21 @@ class TestStateWithRetirement:
         assert state.retirement is None
         assert state.retirement_error == RETIREMENT_NO_INCOME_MESSAGE
 
+    def test_a_target_that_quantizes_to_zero_is_rejected(self) -> None:
+        """A tiny income times a small rate rounds to no target at all.
+
+        The rejection must happen at the parse boundary: past it the
+        core search would refuse the zero target with an exception the
+        worker cannot deliver.
+        """
+        tiny = state_with_household(
+            short_horizon_state(), household(employment="0.01"), today=TODAY
+        )
+        request = replace(DETERMINISTIC_REQUEST, rate_text="1")
+        state = state_with_retirement(tiny, request, today=TODAY)
+        assert state.retirement is None
+        assert state.retirement_error == RETIREMENT_NO_INCOME_MESSAGE
+
     @pytest.mark.parametrize("rate_text", ["", "0", "101", "-5", "sixty", "66.5"])
     def test_an_unusable_rate_is_rejected(
         self, projected: PlanState, rate_text: str
@@ -250,6 +266,20 @@ class TestStateWithRetirement:
         state = state_with_retirement(projected, request, today=TODAY)
         assert state.retirement is None
         assert state.retirement_error == MONTE_CARLO_PATHS_MESSAGE
+
+    def test_an_over_budget_monte_carlo_search_is_rejected(
+        self, projected: PlanState
+    ) -> None:
+        """Candidate ages times paths is bounded, not paths alone.
+
+        10,000 paths pass the per-run cap, but across the five
+        candidate ages they would project 50,000 paths — over the
+        search budget.
+        """
+        request = replace(MONTE_CARLO_REQUEST, paths_text="10000")
+        state = state_with_retirement(projected, request, today=TODAY)
+        assert state.retirement is None
+        assert state.retirement_error == RETIREMENT_BUDGET_MESSAGE
 
     @pytest.mark.parametrize("success_text", ["", "0", "101", "ninety"])
     def test_an_unusable_success_target_is_rejected(

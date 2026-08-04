@@ -81,6 +81,20 @@ RETIREMENT_HORIZON_MESSAGE: Final = (
     "No ages to search — the planning horizon age is not beyond the current age."
 )
 
+MAX_RETIREMENT_PATH_RUNS: Final = 20_000
+"""The most Monte Carlo path-projections one search may add up to.
+
+The 9.13 per-run path cap bounds one Monte Carlo run; a search
+multiplies its path count by up to a few dozen candidate ages, so it
+carries its own aggregate budget — comparable to the accepted
+worst-case cost of a single maximal Monte Carlo run.
+"""
+
+RETIREMENT_BUDGET_MESSAGE: Final = (
+    "Lower the path count — this search would project more than"
+    f" {MAX_RETIREMENT_PATH_RUNS:,} Monte Carlo paths across its candidate ages."
+)
+
 RETIREMENT_FAILED_PREFIX: Final = "The retirement-age search failed: "
 
 RETIREMENT_RUNNING_MESSAGE: Final = "Searching for the earliest retirement age…"
@@ -200,22 +214,8 @@ def state_with_retirement(
     except ValueError as exc:
         return _with_retirement_error(state, str(exc))
     base = replanned_state(state.assumptions, household, state.scenarios, today=today)
-    config = RunConfig(today=today)
-    search = RetirementAgeSearch(
-        target_income=inputs.target_income,
-        minimum_age=inputs.minimum_age,
-        maximum_age=inputs.maximum_age,
-    )
-    if request.mode is RunMode.MONTE_CARLO:
-        config = RunConfig(today=today, mode=RunMode.MONTE_CARLO, seed=inputs.seed)
-        search = RetirementAgeSearch(
-            target_income=inputs.target_income,
-            minimum_age=inputs.minimum_age,
-            maximum_age=inputs.maximum_age,
-            paths=inputs.paths or 1,
-            target_success_rate=inputs.target_success_rate or Decimal(1),
-        )
     try:
+        config, search = _config_and_search(inputs, request.mode, today)
         age = earliest_retirement_age(
             household, state.assumptions, region_for(state.assumptions), config, search
         )
@@ -337,15 +337,20 @@ def _solver_inputs(
 
     Raises:
         ValueError: With the user-facing message, on anything unusable
-            — no (positive) employment income, an unparseable rate, an
-            empty age bracket, or an unusable Monte Carlo seed, path
-            count, or success target.
+            — no (positive) employment income, a target income that
+            quantizes to nothing, an unparseable rate, an empty age
+            bracket, an unusable Monte Carlo seed, path count, or
+            success target, or a Monte Carlo search whose candidate
+            ages times paths would exceed the search budget.
     """
     person = household.persons[0]
     employment = person.employment_income
     if employment is None or employment.value <= _ZERO:
         raise ValueError(RETIREMENT_NO_INCOME_MESSAGE)
     rate = _parsed_percent(request.rate_text, RETIREMENT_RATE_MESSAGE)
+    target_income = (employment.value * rate).quantized()
+    if target_income <= _ZERO:
+        raise ValueError(RETIREMENT_NO_INCOME_MESSAGE)
     minimum_age = age_on(person.date_of_birth.value, today)
     planning_age = int_assumption_value(
         assumptions.get(AssumptionKey.HORIZON_PLANNING_AGE)
@@ -367,16 +372,49 @@ def _solver_inputs(
             raise ValueError(MONTE_CARLO_PATHS_MESSAGE) from None
         if not 1 <= paths <= MAX_PATHS:
             raise ValueError(MONTE_CARLO_PATHS_MESSAGE)
+        candidates = maximum_age - minimum_age + 1
+        if candidates * paths > MAX_RETIREMENT_PATH_RUNS:
+            raise ValueError(RETIREMENT_BUDGET_MESSAGE)
         success = _parsed_percent(request.success_text, RETIREMENT_SUCCESS_MESSAGE)
     return _SolverInputs(
         replacement_rate=rate,
         employment_income=employment.value,
-        target_income=(employment.value * rate).quantized(),
+        target_income=target_income,
         minimum_age=minimum_age,
         maximum_age=maximum_age,
         seed=seed,
         paths=paths,
         target_success_rate=success,
+    )
+
+
+def _config_and_search(
+    inputs: _SolverInputs, mode: RunMode, today: date
+) -> tuple[RunConfig, RetirementAgeSearch]:
+    """The run config and search one parsed submission denotes.
+
+    Built inside the transition's exception boundary, so a search the
+    core rejects folds into ``retirement_error`` like any other
+    failure (the :mod:`glidepath.app.plan` rule).
+    """
+    if mode is RunMode.MONTE_CARLO:
+        return (
+            RunConfig(today=today, mode=RunMode.MONTE_CARLO, seed=inputs.seed),
+            RetirementAgeSearch(
+                target_income=inputs.target_income,
+                minimum_age=inputs.minimum_age,
+                maximum_age=inputs.maximum_age,
+                paths=inputs.paths or 1,
+                target_success_rate=inputs.target_success_rate or Decimal(1),
+            ),
+        )
+    return (
+        RunConfig(today=today),
+        RetirementAgeSearch(
+            target_income=inputs.target_income,
+            minimum_age=inputs.minimum_age,
+            maximum_age=inputs.maximum_age,
+        ),
     )
 
 

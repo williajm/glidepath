@@ -16,6 +16,7 @@ from PySide6.QtCharts import QBarSet, QChartView, QStackedBarSeries
 from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
 
 from glidepath.app import (
+    MONTE_CARLO_RUNNING_MESSAGE,
     MONTE_CARLO_STALE_MESSAGE,
     NO_MONTE_CARLO_MESSAGE,
     NO_RETIREMENT_MESSAGE,
@@ -562,3 +563,27 @@ class TestMainWindowRetirementFlow:
         assert window.statusBar().currentMessage() == RETIREMENT_STALE_MESSAGE
         assert pane.retirement_message_label.text() == NO_RETIREMENT_MESSAGE
         assert pane.retirement_button.isEnabled()
+
+    def test_the_slow_runs_share_one_in_flight_guard(self, window: MainWindow) -> None:
+        """A search request during a Monte Carlo run is ignored.
+
+        Both transitions compute from the state captured at start and
+        share one worker pool, so a second launched mid-run could only
+        ever be discarded as stale — both actions disable together and
+        the ignored click leaves the status line on the running run.
+        """
+        pane = window.charts_pane
+        buttons = {button.text(): button for button in pane.findChildren(QRadioButton)}
+        buttons["Monte Carlo"].click()
+        pane.seed_edit.setText("7")
+        pane.paths_edit.setText("2")
+        pane.run_button.click()
+        assert not pane.run_button.isEnabled()
+        assert not pane.retirement_button.isEnabled()
+        pane.retirement_button.click()
+        assert window.statusBar().currentMessage() == MONTE_CARLO_RUNNING_MESSAGE
+        wait_for_monte_carlo(window)
+        assert pane.run_button.isEnabled()
+        assert pane.retirement_button.isEnabled()
+        assert "Success rate" in pane.metrics_label.text()
+        assert pane.retirement_message_label.text() == NO_RETIREMENT_MESSAGE
