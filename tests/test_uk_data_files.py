@@ -26,7 +26,7 @@ def test_tax_year_2026_27_meta() -> None:
     assert meta.tax_year == "2026/27"
     assert meta.start_date == date(2026, 4, 6)
     assert meta.end_date == date(2027, 4, 5)
-    assert meta.verified_on == date(2026, 8, 2)
+    assert meta.verified_on == date(2026, 8, 4)
     assert meta.sources
     assert all(source.startswith("https://") for source in meta.sources)
 
@@ -103,6 +103,31 @@ def test_isa_allowances() -> None:
     assert isa.lisa_allowance == Money(Decimal(4000))
     assert isa.lisa_bonus_rate == Rate(Decimal("0.25"))
     assert isa.lisa_withdrawal_charge == Rate(Decimal("0.25"))
+
+
+def test_savings_nil_rates() -> None:
+    """Savings figures match §6 (starting rate £5,000; PSA 1,000/500/0)."""
+    savings = load_tax_year(2026).savings
+    assert savings.starting_rate_limit == Money(Decimal(5000))
+    assert savings.psa_basic == Money(Decimal(1000))
+    assert savings.psa_higher == Money(Decimal(500))
+    assert savings.psa_additional == Money(Decimal(0))
+
+
+def test_dividend_allowance_and_rates() -> None:
+    """Dividend figures match §6 (£500; 10.75/35.75/39.35 in force)."""
+    dividend = load_tax_year(2026).dividend
+    assert dividend.allowance == Money(Decimal(500))
+    assert [entry.name for entry in dividend.rates] == [
+        "ordinary",
+        "upper",
+        "additional",
+    ]
+    assert [entry.rate.value for entry in dividend.rates] == [
+        Decimal("0.1075"),
+        Decimal("0.3575"),
+        Decimal("0.3935"),
+    ]
 
 
 def test_state_pension_figures() -> None:

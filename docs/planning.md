@@ -1083,6 +1083,20 @@ separately (§5.3, §7).
 | Cash ISA limit £12,000 for under-65s (overall £20,000 unchanged) | 6 April 2027 | [ISA reform factsheet](https://www.gov.uk/government/publications/fiscal-events-2026-factsheets/isa-reform-2027-anti-circumvention-rules-factsheet) |
 | NICs on salary-sacrificed pension contributions above £2,000/yr | April 2029 | [Employer Bulletin Dec 2025](https://www.gov.uk/government/publications/employer-bulletin-december-2025/december-2025-issue-of-the-employer-bulletin) |
 
+### Savings and dividend taxation (2026/27)
+
+Verified **2026-08-04** from live-fetched primary pages (roadmap 9.2 —
+the GIA/cash wrappers bring these into the model).
+
+| Figure | Value | Source |
+| --- | --- | --- |
+| Dividend allowance | £500/yr — a nil *rate*, not a deduction: nil-rated dividends still consume band width (HMRC pseudocode reduces the remaining band capacity by zero-rated allocations) | [gov.uk/tax-on-dividends](https://www.gov.uk/tax-on-dividends); [HMRC tax logic guide — tax calculation](https://developer.service.hmrc.gov.uk/guides/tax-logic-service-guide/documentation/tax-calculation.html) |
+| Dividend rates | ordinary 10.75% (basic band), upper 35.75% (higher), additional 39.35% — the Budget 2025 +2ppt change, in force 2026/27 (see announced changes above) | [gov.uk/tax-on-dividends](https://www.gov.uk/tax-on-dividends) |
+| Personal savings allowance | £1,000 basic / £500 higher / £0 additional rate — likewise a nil rate consuming band width; the tier follows the band the taxpayer's income reaches | [gov.uk/apply-tax-free-interest-on-savings](https://www.gov.uk/apply-tax-free-interest-on-savings); HMRC tax logic guide |
+| Starting rate for savings | 0% on up to £5,000 of savings income; reduced £1 per £1 of non-savings income above the personal allowance (nil from £17,570); limit legislated 2026/27–2030/31 (§ income tax rUK above) | [gov.uk/apply-tax-free-interest-on-savings](https://www.gov.uk/apply-tax-free-interest-on-savings); [Budget 2025 OOTLAR](https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar) |
+| Savings rates 2026/27 | savings income above the nil rates is taxed at the main rUK rates (20/40/45); the separate 22/42/47 savings rates take effect 6 April 2027 and ship as data in the 2027/28 file | [Budget 2025 OOTLAR](https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar) |
+| Income layer ordering | non-savings → savings → dividends up one ladder; savings and dividend income of Scottish taxpayers uses the rUK bands (Scottish rates cover non-savings/non-dividend income only) | HMRC tax logic guide; [gov.uk/scottish-income-tax](https://www.gov.uk/scottish-income-tax) |
+
 ### Pensions
 
 | Figure | Value | Source |

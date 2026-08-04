@@ -44,6 +44,14 @@ POLICY_FIGURES = (
     "3600",  # member relief basic amount
     "241.30",  # full new state pension, weekly
     "184.90",  # full basic (old) state pension, weekly
+    "5000",  # starting rate for savings limit
+    "17570",  # PA + starting-rate limit: savings taper exhaustion point
+    "0.1075",  # dividend ordinary rate
+    "0.3575",  # dividend upper rate
+    "0.3935",  # dividend additional rate
+    # The PSA amounts (1000/500/0) and dividend allowance (500) are too
+    # generic to grep for without false positives; the loader tests pin
+    # them to §6 instead.
 )
 
 

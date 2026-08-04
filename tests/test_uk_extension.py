@@ -308,6 +308,12 @@ def test_first_indexed_year_figures(
     assert pension.lump_sum_death_benefit_allowance == Money(Decimal(1094562))
     assert extended.isa.annual_allowance == Money(Decimal(20400))
     assert extended.isa.lisa_allowance == Money(Decimal(4080))
+    savings = extended.savings
+    assert savings.starting_rate_limit == Money(Decimal(5100))
+    assert savings.psa_basic == Money(Decimal(1020))
+    assert savings.psa_higher == Money(Decimal(510))
+    assert savings.psa_additional == Money(Decimal(0))  # zero indexes to zero
+    assert extended.dividend.allowance == Money(Decimal(510))
 
 
 def test_rates_never_extrapolate(
@@ -329,6 +335,7 @@ def test_rates_never_extrapolate(
     )
     assert extended.isa.lisa_bonus_rate == base.isa.lisa_bonus_rate
     assert extended.isa.lisa_withdrawal_charge == base.isa.lisa_withdrawal_charge
+    assert extended.dividend.rates == base.dividend.rates
 
 
 def test_state_pension_is_never_extrapolated(

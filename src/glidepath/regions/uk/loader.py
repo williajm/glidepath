@@ -28,6 +28,8 @@ from glidepath.regions.uk.schema import (
     AssumptionDefault,
     AssumptionsFile,
     DataFileError,
+    DividendRate,
+    DividendRules,
     FileMeta,
     IncomeTaxSchedule,
     IsaRules,
@@ -35,6 +37,7 @@ from glidepath.regions.uk.schema import (
     NewStatePension,
     NmpaStep,
     PensionRules,
+    SavingsRules,
     SpaAgeBand,
     SpaBand,
     SpaDateBand,
@@ -330,6 +333,45 @@ def _parse_isa(raw: object, context: str) -> IsaRules:
     return rules
 
 
+def _parse_savings(raw: object, context: str) -> SavingsRules:
+    """Parse the ``[savings]`` table."""
+    table = _Table(raw, context)
+    rules = SavingsRules(
+        starting_rate_limit=_money(
+            table.take("starting_rate_limit"), f"{context}.starting_rate_limit"
+        ),
+        psa_basic=_money(table.take("psa_basic"), f"{context}.psa_basic"),
+        psa_higher=_money(table.take("psa_higher"), f"{context}.psa_higher"),
+        psa_additional=_money(
+            table.take("psa_additional"), f"{context}.psa_additional"
+        ),
+    )
+    table.finish()
+    return rules
+
+
+def _parse_dividend_rate(raw: object, context: str) -> DividendRate:
+    """Parse one entry of the ``dividend.rates`` array."""
+    table = _Table(raw, context)
+    name = _string(table.take("name"), f"{context}.name")
+    rate = _fraction(table.take("rate"), f"{context}.rate")
+    table.finish()
+    return DividendRate(name=name, rate=rate)
+
+
+def _parse_dividend(raw: object, context: str) -> DividendRules:
+    """Parse the ``[dividend]`` table."""
+    table = _Table(raw, context)
+    allowance = _money(table.take("allowance"), f"{context}.allowance")
+    rates_raw = _array(table.take("rates"), f"{context}.rates")
+    rates = tuple(
+        _parse_dividend_rate(item, f"{context}.rates[{index}]")
+        for index, item in enumerate(rates_raw)
+    )
+    table.finish()
+    return DividendRules(allowance=allowance, rates=rates)
+
+
 def _parse_state_pension(raw: object, context: str) -> StatePensionRules:
     """Parse the ``[state_pension]`` table."""
     table = _Table(raw, context)
@@ -367,6 +409,8 @@ def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFil
     income_tax.finish()
     pension = _parse_pension(root.take("pension"), f"{context}.pension")
     isa = _parse_isa(root.take("isa"), f"{context}.isa")
+    savings = _parse_savings(root.take("savings"), f"{context}.savings")
+    dividend = _parse_dividend(root.take("dividend"), f"{context}.dividend")
     state_pension = _parse_state_pension(
         root.take("state_pension"), f"{context}.state_pension"
     )
@@ -378,6 +422,8 @@ def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFil
         income_tax_scotland=scotland,
         pension=pension,
         isa=isa,
+        savings=savings,
+        dividend=dividend,
         state_pension=state_pension,
     )
 

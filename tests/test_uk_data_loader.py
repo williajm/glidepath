@@ -80,6 +80,22 @@ lisa_allowance = "4000"
 lisa_bonus_rate = "0.25"
 lisa_withdrawal_charge = "0.25"
 """
+TAX_SAVINGS = """
+[savings]
+starting_rate_limit = "5000"
+psa_basic = "1000"
+psa_higher = "500"
+psa_additional = "0"
+"""
+TAX_DIVIDEND = """
+[dividend]
+allowance = "500"
+rates = [
+  { name = "ordinary", rate = "0.1075" },
+  { name = "upper", rate = "0.3575" },
+  { name = "additional", rate = "0.3935" },
+]
+"""
 TAX_STATE_PENSION = """
 [state_pension]
 new_full_weekly = "241.30"
@@ -93,6 +109,8 @@ VALID_TAX_YEAR = (
     + TAX_SCOTLAND
     + TAX_PENSION
     + TAX_ISA
+    + TAX_SAVINGS
+    + TAX_DIVIDEND
     + TAX_STATE_PENSION
 )
 
@@ -168,7 +186,23 @@ def test_valid_tax_year_parses_into_typed_values() -> None:
     assert file.income_tax_ruk.bands[-1].upper is None
     assert file.income_tax_scotland.bands[0].rate == Rate(Decimal("0.19"))
     assert file.pension.mpaa == Money(Decimal(10000))
+    assert file.savings.starting_rate_limit == Money(Decimal(5000))
+    assert file.dividend.rates[0].rate == Rate(Decimal("0.1075"))
     assert file.state_pension.qualifying_years_full == 35
+
+
+def test_descending_psa_tier_order_is_enforced_at_load() -> None:
+    """PSA tiers must descend basic >= higher >= additional."""
+    broken = _mutated(VALID_TAX_YEAR, 'psa_higher = "500"', 'psa_higher = "2000"')
+    with pytest.raises(DataFileError, match="basic >= higher >= additional"):
+        parse_tax_year(broken)
+
+
+def test_misaligned_dividend_rates_are_an_error() -> None:
+    """Dividend rates must align one-to-one with the rUK bands."""
+    broken = _mutated(VALID_TAX_YEAR, '  { name = "ordinary", rate = "0.1075" },\n', "")
+    with pytest.raises(DataFileError, match="align one-to-one with the rUK bands"):
+        parse_tax_year(broken)
 
 
 def test_invalid_toml_is_a_load_error() -> None:
