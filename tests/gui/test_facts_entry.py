@@ -5,10 +5,15 @@ spec fields become editors, raw text collects back keyed like the
 specs, and repeatable sections add and remove instances.
 """
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtWidgets import QComboBox, QLineEdit, QPushButton
 
 from glidepath.app import FactsFormData, FieldKind, build_facts_form_view_model
 from glidepath.gui.forms import FactsEntryPane, RepeatableSection, SectionForm
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class TestSectionForm:
@@ -82,6 +87,14 @@ class TestRepeatableSection:
         assert remaining["balance"] == "2222"
 
 
+def _pane(
+    on_submit: Callable[[FactsFormData], str] = lambda _data: "",
+    on_clear: Callable[[], str] = lambda: "",
+) -> FactsEntryPane:
+    """A pane with no-op callbacks unless a test supplies its own."""
+    return FactsEntryPane(build_facts_form_view_model(), on_submit, on_clear)
+
+
 class TestFactsEntryPane:
     """The pane assembles raw text and forwards it on submit."""
 
@@ -93,7 +106,7 @@ class TestFactsEntryPane:
             received.append(data)
             return "status text"
 
-        pane = FactsEntryPane(build_facts_form_view_model(), on_submit)
+        pane = _pane(on_submit=on_submit)
         pane.person_form.set_value("date_of_birth", "1984-05-20")
         wrapper_form = pane.wrappers.add_entry()
         wrapper_form.set_value("balance", "25000")
@@ -103,3 +116,38 @@ class TestFactsEntryPane:
         assert data.wrappers[0]["balance"] == "25000"
         assert data.db_pensions == ()
         assert pane.status_label.text() == "status text"
+
+    def test_set_form_data_populates_every_section(self) -> None:
+        """Programmatic form data lands field-for-field, lists included."""
+        pane = _pane()
+        pane.set_form_data(
+            FactsFormData(
+                person={"date_of_birth": "1991-06-15"},
+                spending={"annual_spending_real": "28000"},
+                wrappers=({"balance": "48000"}, {"balance": "16500"}),
+            )
+        )
+        data = pane.form_data()
+        assert data.person["date_of_birth"] == "1991-06-15"
+        assert data.spending["annual_spending_real"] == "28000"
+        assert [values["balance"] for values in data.wrappers] == ["48000", "16500"]
+
+    def test_set_form_data_replaces_previous_contents(self) -> None:
+        """Setting new data never merges with what was on screen."""
+        pane = _pane()
+        pane.person_form.set_value("employment_income", "52000")
+        pane.wrappers.add_entry().set_value("balance", "111")
+        pane.set_form_data(FactsFormData(person={"date_of_birth": "1991-06-15"}))
+        data = pane.form_data()
+        assert data.person["employment_income"] == ""
+        assert data.wrappers == ()
+
+    def test_clear_button_empties_the_form_and_shows_the_status(self) -> None:
+        """The clear callback's status appears once the form is blank."""
+        pane = _pane(on_clear=lambda: "cleared status")
+        pane.person_form.set_value("date_of_birth", "1984-05-20")
+        pane.wrappers.add_entry().set_value("balance", "25000")
+        pane.clear_button.click()
+        assert pane.form_data().person["date_of_birth"] == ""
+        assert pane.form_data().wrappers == ()
+        assert pane.status_label.text() == "cleared status"

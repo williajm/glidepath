@@ -18,11 +18,14 @@ from glidepath.app import (
     should_show_disclaimer,
 )
 from glidepath.gui import widgets
+from glidepath.gui.style import apply_theme
 
 
 def run(argv: list[str] | None = None) -> int:
     """Run the desktop shell; returns the process exit code."""
     app = QApplication.instance() or QApplication(sys.argv if argv is None else argv)
+    if isinstance(app, QApplication):
+        apply_theme(app)
     view_model = build_shell_view_model()
     state_path = default_state_path()
     if should_show_disclaimer(load_state(state_path)):

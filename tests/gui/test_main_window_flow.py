@@ -16,9 +16,16 @@ if TYPE_CHECKING:
     import pytest
 
 
+def blank_window() -> MainWindow:
+    """A window cleared back from the launch example to an empty form."""
+    window = MainWindow(build_shell_view_model())
+    window.facts_pane.clear_button.click()
+    return window
+
+
 def filled_window() -> MainWindow:
     """A window with a minimal projectable plan typed into the facts tab."""
-    window = MainWindow(build_shell_view_model())
+    window = blank_window()
     facts = window.facts_pane
     facts.person_form.set_value("date_of_birth", "1991-02-01")
     facts.person_form.set_value("tax_residency", str(RUK_RESIDENCY))
@@ -28,6 +35,32 @@ def filled_window() -> MainWindow:
     wrapper_form.set_value("kind", str(ISA_KIND))
     wrapper_form.set_value("balance", "25000")
     return window
+
+
+class TestLaunchExample:
+    """The window opens with the §4.9 example plan projected."""
+
+    def test_opens_with_the_example_projected(self) -> None:
+        """First launch shows a filled form, live output, and the note."""
+        view_model = build_shell_view_model()
+        window = MainWindow(view_model)
+        facts = window.facts_pane
+        assert facts.status_label.text() == view_model.facts_form.example_note
+        assert facts.person_form.values()["date_of_birth"] != ""
+        assert len(facts.wrappers.forms) == 2
+        assert window.inspector_pane.facts_table.rowCount() > 0
+
+    def test_clear_button_resets_the_form_and_the_session(self) -> None:
+        """One click back to a blank form and an empty projection."""
+        view_model = build_shell_view_model()
+        window = MainWindow(view_model)
+        window.facts_pane.clear_button.click()
+        facts = window.facts_pane
+        assert facts.status_label.text() == view_model.facts_form.cleared_note
+        assert facts.person_form.values()["date_of_birth"] == ""
+        assert facts.wrappers.values_list() == ()
+        assert facts.db_pensions.values_list() == ()
+        assert window.inspector_pane.facts_table.rowCount() == 0
 
 
 class TestFactsToInspectorFlow:
@@ -44,7 +77,7 @@ class TestFactsToInspectorFlow:
 
     def test_invalid_submission_reports_field_errors(self) -> None:
         """An empty submission lists the missing required fields."""
-        window = MainWindow(build_shell_view_model())
+        window = blank_window()
         window.facts_pane.submit_button.click()
         status = window.facts_pane.status_label.text()
         assert "required" in status

@@ -112,6 +112,12 @@ class FactsFormViewModel:
     wrapper: SectionSpec
     db_pension: SectionSpec
     submit_label: str
+    clear_label: str
+    """The button that empties the whole form (planning §4.9)."""
+    example_note: str
+    """Status shown while the launch example is on screen (§4.9)."""
+    cleared_note: str
+    """Status shown after the form is cleared (§4.9)."""
 
     @property
     def sections(self) -> tuple[SectionSpec, ...]:
@@ -1087,4 +1093,12 @@ def build_facts_form_view_model() -> FactsFormViewModel:
         wrapper=_wrapper_section(),
         db_pension=_db_pension_section(),
         submit_label="Save facts and project",
+        clear_label="Clear the form",
+        example_note=(
+            "This is an example plan so you can see glidepath's output "
+            "straight away — nothing here is your data. Replace the "
+            "values with your own facts and save, or clear the form to "
+            "start blank."
+        ),
+        cleared_note="Form cleared — enter your facts and save to project.",
     )
