@@ -41,9 +41,9 @@ decumulation — under explicit, inspectable inputs.
 
 | | Contents |
 | --- | --- |
-| **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA. DB pensions (deferred/accrued entitlements only). State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
-| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; LISA/GIA/cash wrappers; dividend/savings taxation (needs GIA); AA carry-forward; DB active accrual (accrual rate, pensionable salary, service); couples activation; announced future rules (2027 cash-ISA reform, 2029 salary-sacrifice NICs). |
-| **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy). |
+| **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions (deferred/accrued entitlements only). State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
+| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; AA carry-forward; DB active accrual (accrual rate, pensionable salary, service); couples activation; announced future rules (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs). |
+| **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy); capital gains tax — the GIA models dividend and savings *income* only (9.2), never disposals. |
 
 ## 3. Architecture
 
@@ -421,8 +421,8 @@ class Person:
 
 
 # Wrapper kinds are OPAQUE region-defined ids ("uk.workplace_dc",
-# "uk.sipp", "uk.isa"; extensions "uk.lisa", "uk.gia", "uk.cash") — core
-# never enumerates them; the region's WrapperRuleset maps id -> rules, so
+# "uk.sipp", "uk.isa", "uk.lisa", "uk.gia", "uk.cash") — core never
+# enumerates them; the region's WrapperRuleset maps id -> rules, so
 # no UK account type leaks into the core model (4.2).
 WrapperKindId = NewType("WrapperKindId", str)
 TaxResidencyId = NewType("TaxResidencyId", str)  # same pattern
@@ -513,8 +513,9 @@ conventions); a start date before `today` means the pension is
 already in payment and the lump sum already lives in the stated
 balances. In decumulation, net-of-tax DB/state-pension income and any
 commutation lump sum meet the net spending need before wrappers are
-drawn; income beyond the need is not banked — there is no cash/GIA
-wrapper until roadmap 9.2.
+drawn; income beyond the need banks into the person's first uncapped
+taxable wrapper (GIA/cash, roadmap 9.2) and is spent only when they
+hold none.
 
 State pension: an official forecast, when present, is the fact and wins.
 The qualifying-years derivation (÷35) is valid **only for NI records
@@ -733,8 +734,10 @@ internally consistent after penny rounding.
 (`withdraw(state, need) -> WithdrawalPlan`): v1 fixed-real and fixed-%;
 then guardrails (Guyton–Klinger-style bands) and natural yield. Strategies
 also encode wrapper ordering (tax-aware, configurable; the full default is
-GIA/cash → ISA → pension, which in v1 — before the GIA/cash wrappers land
-in Phase 9 — reduces to ISA → pension); the tax-free cash strategy
+GIA/cash → ISA → pension — taxable-growth accounts first, since every
+pound left in them keeps accruing income tax, then wholly tax-free
+sub-balances, then crystallised and finally uncrystallised pension
+funds); the tax-free cash strategy
 (PCLS up front vs UFPLS-style phased vs phased flexi-access drawdown)
 is a separate, orthogonal decision on `RunConfig` — any combination of
 the two is valid (see below). Conventions (roadmap 5.1): the
@@ -750,8 +753,9 @@ period's active fraction, allocated in the default order. Execution
 enforces the access gates on every plan (a draw on a gate-closed source
 is an engine error, never a silent draw); a gross-defined under-draw
 against the need is reported as shortfall — the roadmap-7.3 ruin signal
-survives strategies that ignore the need — and an over-draw is spent,
-not banked (no cash/GIA wrapper before 9.2).
+survives strategies that ignore the need — and an over-draw banks into
+the first uncapped taxable wrapper, spent only when the person holds
+none (9.2).
 
 **Guardrails and natural yield (decided — roadmap 5.3).** Two post-v1
 strategies behind the same protocol. *Guardrails*
@@ -830,11 +834,43 @@ resolve every mode as `SPLIT_EACH_PAYMENT`: an exact gross amount is
 a payment instruction, not a designation.
 Outside decumulation (planned-outflow funding), `UP_FRONT_LUMP_SUM`
 also resolves draws as split payments — the up-front designation is a
-retirement event. **Accepted v1 cost:** with no cash/GIA wrapper until
-roadmap 9.2, an up-front lump sum beyond the period's need is spent,
-not banked (exactly the DB commutation-lump-sum convention), so
-`UP_FRONT_LUMP_SUM` understates what a real saver would keep; the 9.2
-cash wrapper removes the distortion.
+retirement event. An up-front lump sum beyond the period's need banks
+with the rest of the period's surplus income (the 9.2 sweep below);
+only a person holding no uncapped taxable wrapper still spends it —
+the pre-9.2 accepted cost, now confined to that case.
+
+**Taxable wrappers and surplus banking (roadmap 9.2).** The LISA, GIA
+and cash kinds activate the deferred wrapper mechanics:
+
+- *LISA*: TEE like an ISA, plus the data file's 25% government bonus
+  on member contributions — a contribution bonus, not tax relief (it
+  never extends tax bands, never consumes the caps) — inside the
+  18-to-50 contribution window (`age_rules.toml`), pro-rated by whole
+  months across its edges; the £4,000 LISA allowance is a sub-cap
+  consumed alongside the overall ISA allowance through shared
+  *allowance groups* on the region's contribution terms. Access is a
+  §4.1 age gate at 60: pre-60 funds are gate-closed (a draw is an
+  engine error, the §5.2 execution rule), so the 25% withdrawal
+  charge ships as data but no modelled draw ever bears it — the
+  engine never volunteers a charged withdrawal.
+- *GIA/cash*: bare accounts — paid from taxed income, withdrawals
+  tax-free, growth taxable as it arises. Each period the opening
+  balance prices portfolio income through the allocation-weighted
+  `yield.*` assumptions (the natural-yield machinery's model): the
+  equity slice arrives as dividends, the bond and cash slices as
+  interest, feeding the §6 savings/dividend tax layers. The income
+  stays invested (the balance path is untouched); the tax
+  attributable — the final assessment less one without the portfolio
+  layers, PA-taper interactions included — is charged to the wrapper
+  at period close, pro rata to income across taxable wrappers: the
+  real-world drag of paying tax out of taxable savings. Capital
+  gains tax is out of scope (§2): income only, never disposals.
+- *Sweep*: decumulation income and gross draws beyond the period's
+  need bank into the first wrapper in plan order whose treatment is
+  a bare taxable account (GIA or cash) — banking is not a
+  contribution (no caps, relief, or bonus). The spending need never
+  pays a wrapper's portfolio-income tax: the decumulation income
+  offset is assessed without the portfolio layers.
 
 **Return model and Monte Carlo.** `ReturnModel.returns_for(period, path)`:
 deterministic impl = expected real returns + CPI → nominal, same every
@@ -943,6 +979,22 @@ lisa_allowance   = "4000"  # counts within the overall ISA allowance
 lisa_bonus_rate  = "0.25"
 lisa_withdrawal_charge = "0.25"
 
+# Nil rates consume band width (§6); savings above them are taxed at the
+# rUK band rates until the separate savings rates land in the 2027/28 file.
+[savings]
+starting_rate_limit = "5000"
+psa_basic      = "1000"
+psa_higher     = "500"
+psa_additional = "0"
+
+[dividend]
+allowance = "500"  # a nil rate, not a deduction
+rates = [  # aligned positionally with the rUK bands (dividends are UK-wide)
+  { name = "ordinary", rate = "0.1075" },
+  { name = "upper", rate = "0.3575" },
+  { name = "additional", rate = "0.3935" },
+]
+
 [state_pension]
 new_full_weekly       = "241.30"
 qualifying_years_full = 35
@@ -976,9 +1028,12 @@ rates) ship as data in the relevant year's file, so legislated data
 always beats extrapolation.
 Extension conventions: indexation compounds assumed CPI once from the last
 shipped file (a target year never depends on intermediate synthesized
-years) and scales the money figures of the income-tax schedules and the
-pension/ISA allowances, quantized to whole pounds (half-even); band and
-taper *rates* never extrapolate; the state pension rate is carried forward
+years) and scales the money figures of the income-tax schedules, the
+pension/ISA allowances, and the savings/dividend nil-rate amounts (the
+starting-rate limit is legislated frozen with the rUK schedule, §6; the
+PSA and dividend allowance follow the same reserved policy), quantized
+to whole pounds (half-even); band, taper and dividend *rates* never
+extrapolate; the state pension rate is carried forward
 untouched because its uprating is governed by
 `policy.state_pension.uprating` (§7), never by this policy. **Recurring
 task** after each Budget: copy previous year's file, re-verify every
@@ -1181,8 +1236,9 @@ Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 | `annuity.age_adjustment` | Per-age/type multipliers on the single-65 base rates (knots at 55–75, linear interpolation between, no extrapolation outside); joint-life factor 0.92; escalating products increase 3%/yr | Relativities from the Hargreaves Lansdown best-buy annuity tables (single/joint life; level, RPI-linked, 3% escalation), snapshot 2026-07-31, retrieved 2026-08-03 ([hl.co.uk](https://www.hl.co.uk/retirement/annuities/best-buy-rates)); the inflation-linked curve uses the RPI-linked product's relativities |
 
 *The `yield.*` rows price the natural-yield withdrawal strategy
-(roadmap 5.3); they are read — and recorded in provenance — only when
-that strategy runs.*
+(roadmap 5.3) and the portfolio income of taxable-growth wrappers
+(roadmap 9.2); they are read — and recorded in provenance — only when
+that strategy runs or the plan holds a GIA/cash wrapper.*
 
 ## 8. Phased roadmap — issue basis
 
@@ -1323,8 +1379,14 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 
 - [x] 9.1 Scottish bands activation — *`tax_residency = SCOTLAND` uses the
   Scottish table already shipped in data.*
-- [ ] 9.2 LISA/GIA/cash wrappers — *LISA bonus/charge/ages; GIA brings
-  dividend/savings taxation (2026/27 dividend data already verified in §6).*
+- [x] 9.2 LISA/GIA/cash wrappers — *LISA bonus/charge/ages; GIA brings
+  dividend/savings taxation (2026/27 dividend data already verified in §6).
+  Shipped: TEE LISA with the 25% bonus inside the 18–50 window, the £4k
+  sub-allowance inside the overall ISA allowance, and the age-60 gate
+  (the withdrawal charge ships as data; gated funds are never drawn);
+  GIA/cash with yield-priced dividend/savings income taxed per §6 and
+  charged to the wrapper; the full GIA/cash → ISA → pension ordering;
+  decumulation surplus banking (§5.2). CGT stays out of scope (§2).*
 - [ ] 9.3 New tax-year data file after each Budget — *recurring; process in
   §5.3.*
 - [ ] 9.4 Couples activation spike — *survivor benefits, marriage allowance,
