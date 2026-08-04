@@ -33,12 +33,14 @@ from glidepath.core import (
     add_months,
     date_age_attained,
     is_age_attained_by_period_start,
+    period_active_fraction,
 )
 from glidepath.regions.uk.loader import load_age_rules
 from glidepath.regions.uk.schema import SpaAgeBand
 
 if TYPE_CHECKING:
     from datetime import date
+    from decimal import Decimal
 
     from glidepath.regions.uk.schema import AgeRulesFile, SpaBand
 
@@ -146,6 +148,19 @@ class UkAgeRules:
         return is_age_attained_by_period_start(
             date_of_birth, self.rules.lisa.access_age, period
         )
+
+    def lisa_contribution_fraction(
+        self, date_of_birth: date, period: Period
+    ) -> Decimal:
+        """The whole-month share of ``period`` open to LISA contributions.
+
+        Intersects the contribution window with the period per the
+        module's eligibility-window convention: flows crossing either
+        edge pro-rate by whole months, and an overlap under one whole
+        month is zero.
+        """
+        window = self.lisa_contribution_window(date_of_birth)
+        return period_active_fraction(period, window.start, window.end)
 
 
 def _age_window(date_of_birth: date, opens_at: int, closes_at: int) -> Period:

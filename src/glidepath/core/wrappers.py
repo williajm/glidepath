@@ -117,6 +117,56 @@ class WrapperTaxTreatment:
 
 
 @dataclass(frozen=True, slots=True)
+class ContributionCap:
+    """One annual limit a contribution counts against (roadmap 9.2).
+
+    ``group`` is an opaque region-defined allowance id: contributions
+    to every kind naming the same group share that group's annual
+    budget (e.g. the UK's overall ISA allowance across ISA and LISA),
+    and one kind may name several groups (a UK LISA consumes its own
+    sub-allowance *and* the overall allowance).
+    """
+
+    group: str
+    limit: Money
+
+    def __post_init__(self) -> None:
+        """Reject unnamed groups and negative limits."""
+        if not self.group:
+            msg = "ContributionCap.group must not be empty"
+            raise ValueError(msg)
+        if self.limit < _ZERO:
+            msg = "ContributionCap.limit must be non-negative"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class ContributionTerms:
+    """One kind's contribution terms for one person and period (§4.2).
+
+    ``caps`` are the annual allowances the contribution counts against
+    (empty: uncapped here — any cross-wrapper measure, like a pension
+    annual allowance, is the region's contribution-checking concern).
+    ``bonus_rate`` is a government bonus added on top of the member's
+    contribution (e.g. the UK LISA's 25%) — distinct from tax relief:
+    it never extends tax bands and never counts against the caps.
+    ``window_fraction`` is the whole-month share of the period in which
+    contributions are permitted at all (§4.1 eligibility windows — e.g.
+    LISA contributions stop at 50); scheduled amounts scale by it.
+    """
+
+    caps: tuple[ContributionCap, ...] = ()
+    bonus_rate: Rate | None = None
+    window_fraction: Decimal = _ONE
+
+    def __post_init__(self) -> None:
+        """Require a window fraction in [0, 1]."""
+        if not 0 <= self.window_fraction <= _ONE:
+            msg = "ContributionTerms.window_fraction must lie between 0 and 1"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
 class Wrapper:
     """One account a person holds, of an opaque region-defined kind.
 
@@ -169,16 +219,17 @@ class WrapperRuleset(Protocol):
         """The in/during/out tax treatment of ``kind`` during ``period``."""
         ...
 
-    def annual_contribution_limit(
-        self, kind: WrapperKindId, period: Period
-    ) -> Money | None:
-        """The per-person cap on contributions to ``kind`` for ``period``.
+    def contribution_terms(
+        self, kind: WrapperKindId, date_of_birth: date, period: Period
+    ) -> ContributionTerms:
+        """The contribution terms of ``kind`` for one person and period.
 
-        ``None`` means no per-kind cap applies here (any cross-wrapper
-        measure, like a pension annual allowance, is the region's
-        contribution-checking concern — roadmap 3.3). The cap is shared
-        across all of a person's wrappers of the kind; enforcement lands
-        with contribution schedules (roadmap 3.2).
+        Caps are per person per year, shared across wrappers through
+        their allowance groups (:class:`ContributionCap`); the bonus
+        rate and contribution window are likewise the region's call
+        (roadmap 9.2). Cross-wrapper measures like a pension annual
+        allowance stay the region's contribution-checking concern
+        (roadmap 3.3).
         """
         ...
 

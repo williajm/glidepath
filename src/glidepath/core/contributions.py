@@ -106,8 +106,10 @@ class MemberContributionOutcome:
     must grant further relief on (feeds
     :attr:`~glidepath.core.tax.TaxInput.relief_at_source_contributions`);
     ``unrelieved_excess`` is intended gross beyond the region's relief
-    limit — clipped, not contributed (routing it to a taxable wrapper
-    is a later concern, roadmap 9.2).
+    limit — clipped and reported, never contributed or rerouted: a
+    schedule states intent for one wrapper, and a member's forgone
+    cash under a relief mechanic is not the gross amount (someone who
+    wants taxable saving schedules a GIA contribution directly).
 
     The identity ``gross_to_pot == member_cash_cost + provider_relief``
     is enforced, so any outcome that exists is internally consistent.

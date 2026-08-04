@@ -24,8 +24,10 @@ from glidepath.core import (
     Assumption,
     AssumptionKey,
     AssumptionSet,
+    ContributionCap,
     ContributionSchedule,
     ContributionTaxTreatment,
+    ContributionTerms,
     DBPension,
     Decision,
     EngineError,
@@ -178,14 +180,16 @@ class StubWrapperRules:
         msg = f"unknown stub wrapper kind {kind!r}"
         raise ValueError(msg)
 
-    def annual_contribution_limit(
-        self, kind: WrapperKindId, period: Period
-    ) -> Money | None:
+    def contribution_terms(
+        self, kind: WrapperKindId, date_of_birth: date, period: Period
+    ) -> ContributionTerms:
         """Only the free kind carries a per-kind cap here."""
-        del period
-        if kind == FREE:
-            return self.free_kind_cap
-        return None
+        del date_of_birth, period
+        if kind == FREE and self.free_kind_cap is not None:
+            return ContributionTerms(
+                caps=(ContributionCap(group=str(FREE), limit=self.free_kind_cap),)
+            )
+        return ContributionTerms()
 
     def permitted_relief_mechanics(
         self, kind: WrapperKindId

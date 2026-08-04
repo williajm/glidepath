@@ -85,7 +85,12 @@ from glidepath.regions.uk.tax import (
     UkTaxSystem,
 )
 from glidepath.regions.uk.wrappers import (
+    CASH_KIND,
+    GIA_KIND,
+    ISA_ALLOWANCE_GROUP,
     ISA_KIND,
+    LISA_ALLOWANCE_GROUP,
+    LISA_KIND,
     SIPP_KIND,
     WORKPLACE_DC_KIND,
     UkWrapperError,
@@ -96,8 +101,13 @@ from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
 __all__ = [
     "AGE_RULES_FILENAME",
     "ASSUMPTIONS_FILENAME",
+    "CASH_KIND",
     "DIVIDEND_NIL_RATE_BAND",
+    "GIA_KIND",
+    "ISA_ALLOWANCE_GROUP",
     "ISA_KIND",
+    "LISA_ALLOWANCE_GROUP",
+    "LISA_KIND",
     "RUK_RESIDENCY",
     "SAVINGS_NIL_RATE_BAND",
     "SAVINGS_STARTING_RATE_BAND",

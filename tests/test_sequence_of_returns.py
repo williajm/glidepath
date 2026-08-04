@@ -29,6 +29,7 @@ from glidepath.core import (
     AssumptionKey,
     AssumptionSet,
     ContributionTaxTreatment,
+    ContributionTerms,
     Decision,
     EntityId,
     Fact,
@@ -137,12 +138,12 @@ class FreeWrapperRules:
             withdrawals=WithdrawalTaxTreatment.TAX_FREE,
         )
 
-    def annual_contribution_limit(
-        self, kind: WrapperKindId, period: Period
-    ) -> Money | None:
-        """Uncapped."""
-        del kind, period
-        return None
+    def contribution_terms(
+        self, kind: WrapperKindId, date_of_birth: date, period: Period
+    ) -> ContributionTerms:
+        """Uncapped, no bonus, no window."""
+        del kind, date_of_birth, period
+        return ContributionTerms()
 
     def permitted_relief_mechanics(
         self, kind: WrapperKindId
