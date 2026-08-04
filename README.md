@@ -10,8 +10,26 @@
 [![License: MIT](https://img.shields.io/github/license/williajm/glidepath)](LICENSE)
 
 A desktop retirement and investment planner. UK-first, built so other
-regions can be added later. Early days — the engine and desktop shell
-exist; feature screens land phase by phase.
+regions can be added later. Every number in a plan is a **fact** you
+stated, a **decision** you made, or an **assumption** the app defaulted
+— always inspectable, never silently guessed. All data stays local;
+nothing is transmitted.
+
+What it models today (single person, UK):
+
+- **Wrappers** — workplace DC, SIPP, S&S ISA, LISA, GIA and cash, with
+  UK contribution relief mechanics and dividend/savings taxation.
+- **Defined benefit pensions** — deferred entitlements or active
+  CARE-style accrual, with revaluation, early/late factors and
+  commutation; **state pension** from your forecast or NI record,
+  including deferral.
+- **Tax** — rUK and Scottish income tax from verified 2026/27 data
+  files; pension allowances (AA/taper/MPAA, lump-sum allowance).
+- **Projection** — deterministic or Monte Carlo, with a de-risking
+  glide path, tax-aware decumulation (fixed real, fixed %, guardrails,
+  natural yield), annuity purchases, and tax-free-cash strategies.
+- **Scenarios** — named what-ifs over your decisions and assumptions,
+  with a side-by-side comparison; plans saved as a local JSON file.
 
 ## Disclaimer
 
@@ -32,6 +50,15 @@ make hooks         # installs the pre-commit hooks (required)
 One-time per machine: set `UV_PROJECT_ENVIRONMENT` user-wide (`.venv-win`
 on Windows, `.venv-wsl` in WSL) so bare `uv` commands and the git hooks use
 the same venv as make. See `CLAUDE.md`.
+
+## Run
+
+```sh
+uv run glidepath
+```
+
+Launches the desktop app: accept the disclaimer, enter your plan's
+facts, and project. Plans are saved as `.glidepath.json` files you own.
 
 ## Everyday commands
 
