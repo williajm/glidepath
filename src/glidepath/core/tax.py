@@ -25,10 +25,11 @@ _ZERO = Money(Decimal(0))
 class TaxInput:
     """One person's categorised gross income for a single period.
 
-    v1 carries non-savings income only (employment, pension and property
-    income share one ladder in the UK); further categories (savings,
-    dividends) are added as fields when the wrappers that produce them
-    land (roadmap 9.2).
+    ``non_savings_income`` is the employment/pension/property ladder;
+    ``savings_income`` (interest) and ``dividend_income`` arise from
+    taxable-growth wrappers (roadmap 9.2). How the categories stack —
+    ordering, nil rates, which schedule each uses — is wholly the
+    region's concern (planning §4.2).
 
     ``relief_at_source_contributions`` is the period's gross member
     pension contributions paid under a relief-at-source mechanic
@@ -42,16 +43,25 @@ class TaxInput:
 
     residency: TaxResidencyId
     non_savings_income: Money
+    savings_income: Money = _ZERO
+    dividend_income: Money = _ZERO
     relief_at_source_contributions: Money = _ZERO
 
     def __post_init__(self) -> None:
         """Reject negative amounts."""
-        if self.non_savings_income < _ZERO:
-            msg = "TaxInput.non_savings_income must be non-negative"
-            raise ValueError(msg)
-        if self.relief_at_source_contributions < _ZERO:
-            msg = "TaxInput.relief_at_source_contributions must be non-negative"
-            raise ValueError(msg)
+        amounts = (
+            ("non_savings_income", self.non_savings_income),
+            ("savings_income", self.savings_income),
+            ("dividend_income", self.dividend_income),
+            (
+                "relief_at_source_contributions",
+                self.relief_at_source_contributions,
+            ),
+        )
+        for name, amount in amounts:
+            if amount < _ZERO:
+                msg = f"TaxInput.{name} must be non-negative"
+                raise ValueError(msg)
 
 
 @dataclass(frozen=True, slots=True)

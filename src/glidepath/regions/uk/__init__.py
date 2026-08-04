@@ -76,7 +76,10 @@ from glidepath.regions.uk.state_pension import (
     UkStatePensionScheme,
 )
 from glidepath.regions.uk.tax import (
+    DIVIDEND_NIL_RATE_BAND,
     RUK_RESIDENCY,
+    SAVINGS_NIL_RATE_BAND,
+    SAVINGS_STARTING_RATE_BAND,
     SCOTLAND_RESIDENCY,
     UkTaxError,
     UkTaxSystem,
@@ -93,8 +96,11 @@ from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
 __all__ = [
     "AGE_RULES_FILENAME",
     "ASSUMPTIONS_FILENAME",
+    "DIVIDEND_NIL_RATE_BAND",
     "ISA_KIND",
     "RUK_RESIDENCY",
+    "SAVINGS_NIL_RATE_BAND",
+    "SAVINGS_STARTING_RATE_BAND",
     "SCHEMA_VERSION",
     "SCOTLAND_RESIDENCY",
     "SIPP_KIND",
