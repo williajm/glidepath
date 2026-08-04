@@ -119,6 +119,16 @@ def test_schedule_requires_increasing_uppers() -> None:
         make_schedule(bands)
 
 
+def test_schedule_requires_a_basic_band() -> None:
+    """Every ladder needs the 'basic' anchor for the RAS extension."""
+    bands = (
+        TaxBand(name="starter", rate=Rate(Decimal("0.19")), upper=Money(Decimal(50))),
+        TaxBand(name="top", rate=Rate(Decimal("0.48")), upper=None),
+    )
+    with pytest.raises(DataFileError, match="named 'basic'"):
+        make_schedule(bands)
+
+
 def test_state_pension_rules_reject_min_above_full() -> None:
     """Qualifying-year counts must satisfy 0 < min <= full."""
     weekly = Money(Decimal(200))

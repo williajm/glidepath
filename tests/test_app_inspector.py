@@ -43,12 +43,12 @@ from glidepath.core import (
     RevaluationBasis,
     RevaluationReference,
     SpendingPlan,
+    TaxResidencyId,
     Wrapper,
 )
 from glidepath.regions.uk import (
     ISA_KIND,
     RUK_RESIDENCY,
-    SCOTLAND_RESIDENCY,
     SIPP_KIND,
 )
 
@@ -238,12 +238,12 @@ class TestProjectedSession:
     def test_failed_run_reports_in_the_summary(self) -> None:
         """A run failure renders as the summary line, not a crash."""
         failed_person = Person(
-            id=EntityId("inspector-scot"),
+            id=EntityId("inspector-unassessable"),
             date_of_birth=Fact(
                 value=date(1991, 2, 1), as_of=AS_OF, recorded_on=RECORDED
             ),
             target_retirement_age=Decision(value=60, recorded_on=RECORDED),
-            tax_residency=SCOTLAND_RESIDENCY,
+            tax_residency=TaxResidencyId("uk.mars"),
             employment_income=money_fact("42000"),
         )
         state = state_with_household(

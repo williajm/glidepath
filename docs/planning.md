@@ -41,8 +41,8 @@ decumulation — under explicit, inspectable inputs.
 
 | | Contents |
 | --- | --- |
-| **v1** | Single person, UK (rUK tax). Wrappers: workplace DC, SIPP, S&S ISA. DB pensions (deferred/accrued entitlements only). State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
-| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; LISA/GIA/cash wrappers; Scottish bands (designed-for now); dividend/savings taxation (needs GIA); AA carry-forward; DB active accrual (accrual rate, pensionable salary, service); couples activation; announced future rules (2027 cash-ISA reform, 2029 salary-sacrifice NICs). |
+| **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA. DB pensions (deferred/accrued entitlements only). State pension. Deterministic annual projection. Withdrawal strategies: fixed real, fixed %. Scenarios + comparison. JSON persistence. |
+| **Deferred (phased)** | Monte Carlo; guardrails + natural yield; annuities incl. partial annuitisation; LISA/GIA/cash wrappers; dividend/savings taxation (needs GIA); AA carry-forward; DB active accrual (accrual rate, pensionable salary, service); couples activation; announced future rules (2027 cash-ISA reform, 2029 salary-sacrifice NICs). |
 | **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy). |
 
 ## 3. Architecture
@@ -1044,7 +1044,7 @@ become the Phase 2 data files.
 | Starting rate for savings limit | £5,000 (2026/27–2030/31) | [Budget 2025 OOTLAR](https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar) |
 | Marriage allowance | £1,260 transferable (max £252/yr) | [gov.uk/marriage-allowance](https://www.gov.uk/marriage-allowance) — current, not year-stamped; arithmetically fixed while PA frozen |
 
-### Income tax (Scotland — designed-for; non-savings/non-dividend income)
+### Income tax (Scotland — non-savings/non-dividend income)
 
 | Band | Rate | Taxable income above PA | Source |
 | --- | --- | --- | --- |
@@ -1074,7 +1074,7 @@ become the Phase 2 data files.
 | AA taper | threshold income £200,000; adjusted income £260,000; −£1 per £2 (reduction rounded down to the whole £, PTM057100); floor £10,000. Adjusted income includes all employer-funded pension input (for DB: input amount net of member contributions). Known v1 limitation: the post-8-July-2015 salary-sacrifice add-back to threshold income is not modelled (no salary-sacrifice concept in v1) | rates page; [tapered AA guidance](https://www.gov.uk/guidance/pension-schemes-work-out-your-tapered-annual-allowance); [PTM057100](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm057100) |
 | MPAA | £10,000; triggered by first FAD income payment, first UFPLS, etc. (not by PCLS-only or standard lifetime annuity); when triggered, DB accrual keeps an *alternative* annual allowance = AA − MPAA (£50,000; computed, not an independent figure — nil at maximum taper; carry-forward may top up the alternative AA but never the MPAA; verified 2026-08-02) | rates page; [PTM056520](https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm056520); [HS345 (2026)](https://www.gov.uk/government/publications/pensions-tax-charges-on-any-excess-over-the-lifetime-allowance-annual-allowance-special-annual-allowance-and-on-unauthorised-payments-hs345-self/hs345-pension-savings-tax-charges-2026) |
 | AA carry-forward | unused AA from previous 3 tax years (detail re-verify at implementation) | [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance) |
-| Relief at source | provider adds 20% basic-rate relief (25% top-up on net); higher/additional via assessment; Scottish variants | [pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief) |
+| Relief at source | provider adds 20% basic-rate relief (25% top-up on net); higher/additional via assessment — the basic rate limit and every limit above it are extended by the gross contribution, never the Scottish starter limit; starter-rate payers keep the 20% top-up (verified 2026-08-04) | [pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief); [SI 2018/459 note](https://www.legislation.gov.uk/uksi/2018/459/note/made) |
 | Net pay | pre-tax deduction; full marginal relief automatic | same |
 | Tax-free lump sum | up to 25%, capped by LSA £268,275 | [lump sum allowance](https://www.gov.uk/tax-on-your-private-pension/lump-sum-allowance); rates page |
 | LSDBA | £1,073,100 | same |
@@ -1289,7 +1289,7 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 
 ### Phase 9 — Extensions
 
-- [ ] 9.1 Scottish bands activation — *`tax_residency = SCOTLAND` uses the
+- [x] 9.1 Scottish bands activation — *`tax_residency = SCOTLAND` uses the
   Scottish table already shipped in data.*
 - [ ] 9.2 LISA/GIA/cash wrappers — *LISA bonus/charge/ages; GIA brings
   dividend/savings taxation (2026/27 dividend data already verified in §6).*

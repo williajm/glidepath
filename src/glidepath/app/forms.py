@@ -719,7 +719,7 @@ def _person_section() -> SectionSpec:
                     ),
                     ChoiceOption(
                         value=str(SCOTLAND_RESIDENCY),
-                        label="Scotland (projection arrives with roadmap 9.1)",
+                        label="Scotland",
                     ),
                 ),
             ),

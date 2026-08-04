@@ -1,9 +1,12 @@
-"""Golden rUK income tax tests against hand-worked HMRC examples (issue 2.3).
+"""Golden UK income tax tests against hand-worked examples (issues 2.3, 9.1).
 
 Figures hand-worked from the 2026/27 rules verified in planning §6:
-personal allowance £12,570 tapering to £0 across £100,000-£125,140;
-basic 20% on the first £37,700 of taxable income, higher 40% to
-£125,140, additional 45% above.
+personal allowance £12,570 tapering to £0 across £100,000-£125,140
+(both regimes); rUK basic 20% on the first £37,700 of taxable income,
+higher 40% to £125,140, additional 45% above; Scottish starter 19% to
+£3,967 of taxable income, basic 20% to £16,956, intermediate 21% to
+£31,092, higher 42% to £62,430, advanced 45% to £125,140, top 48%
+above.
 """
 
 from datetime import date
@@ -185,13 +188,92 @@ def test_uncovered_period_is_rejected(
         system.assess(uncovered, income)
 
 
-def test_scottish_residency_not_yet_active(system: UkTaxSystem) -> None:
-    """Scottish bands ship in data but activate in roadmap 9.1."""
-    scottish = TaxInput(
-        residency=SCOTLAND_RESIDENCY, non_savings_income=Money(Decimal(60000))
+def scot_income(amount: str, ras_gross: str = "0") -> TaxInput:
+    """Gross non-savings income for a Scottish taxpayer."""
+    return TaxInput(
+        residency=SCOTLAND_RESIDENCY,
+        non_savings_income=Money(Decimal(amount)),
+        relief_at_source_contributions=Money(Decimal(ras_gross)),
     )
-    with pytest.raises(UkTaxError, match=r"9\.1"):
-        system.assess(TAX_YEAR_2026_27, scottish)
+
+
+@pytest.mark.parametrize(
+    ("income", "expected_tax"),
+    [
+        ("0", "0"),  # no income
+        ("10000", "0"),  # below the personal allowance
+        ("12570", "0"),  # exactly the personal allowance
+        ("16537", "753.73"),  # top of the starter band: 19% of 3,967
+        ("16538", "753.93"),  # first pound at the Scottish basic 20%
+        ("25000", "2446.33"),  # 753.73 + 20% of 8,463
+        ("29526", "3351.53"),  # top of the basic band: taxable 16,956
+        ("43662", "6320.09"),  # top of the intermediate band: taxable 31,092
+        ("50000", "8982.05"),  # 6,320.09 + 42% of 6,338
+        ("75000", "19482.05"),  # top of the higher band: taxable 62,430
+        ("75001", "19482.50"),  # first pound at the advanced 45%
+        ("100000", "30732.05"),  # taper threshold: PA still intact
+        ("110000", "37482.05"),  # PA 7,570, taxable 102,430
+        ("125140", "47701.55"),  # PA fully tapered to nil
+        ("125141", "47702.03"),  # first pound at the top 48%
+        ("150000", "59634.35"),  # 47,701.55 + 48% of 24,860
+    ],
+)
+def test_golden_scottish_assessment(
+    system: UkTaxSystem, income: str, expected_tax: str
+) -> None:
+    """Total tax matches the hand-worked Scottish figure (roadmap 9.1)."""
+    result = system.assess(TAX_YEAR_2026_27, scot_income(income))
+    assert result.tax_due == Money(Decimal(expected_tax))
+
+
+def test_scottish_breakdown_at_50000(system: UkTaxSystem) -> None:
+    """The Scottish band-by-band breakdown matches the hand-worked ladder."""
+    result = system.assess(TAX_YEAR_2026_27, scot_income("50000"))
+    assert result.tax_free_allowance == Money(Decimal(12570))
+    assert result.taxable_income == Money(Decimal(37430))
+    assert [line.band for line in result.lines] == [
+        "starter",
+        "basic",
+        "intermediate",
+        "higher",
+    ]
+    assert [line.taxed for line in result.lines] == [
+        Money(Decimal(3967)),
+        Money(Decimal(12989)),
+        Money(Decimal(14136)),
+        Money(Decimal(6338)),
+    ]
+    assert [line.tax for line in result.lines] == [
+        Money(Decimal("753.73")),
+        Money(Decimal("2597.80")),
+        Money(Decimal("2968.56")),
+        Money(Decimal("2661.96")),
+    ]
+
+
+def test_scottish_and_ruk_regimes_diverge(system: UkTaxSystem) -> None:
+    """The same income assesses differently under the two schedules."""
+    scottish = system.assess(TAX_YEAR_2026_27, scot_income("50000"))
+    ruk = system.assess(TAX_YEAR_2026_27, ruk_income("50000"))
+    assert scottish.tax_due - ruk.tax_due == Money(Decimal("1496.05"))
+
+
+def test_scottish_ras_leaves_the_starter_limit_fixed(system: UkTaxSystem) -> None:
+    """RAS extends the basic limit and above; the starter limit never moves.
+
+    FA 2004 s192 as applied to Scottish taxpayers (SI 2018/459): a
+    £10,000 gross contribution at £50,000 income moves the basic,
+    intermediate and later limits up by £10,000, but the starter band
+    still holds exactly £3,967.
+    """
+    result = system.assess(TAX_YEAR_2026_27, scot_income("50000", ras_gross="10000"))
+    assert result.tax_due == Money(Decimal("7551.07"))
+    assert [line.band for line in result.lines] == ["starter", "basic", "intermediate"]
+    assert [line.taxed for line in result.lines] == [
+        Money(Decimal(3967)),  # unmoved: limits below basic are never extended
+        Money(Decimal(22989)),  # basic limit 16,956 + 10,000, less the starter
+        Money(Decimal(10474)),
+    ]
 
 
 def test_unknown_residency_is_rejected(system: UkTaxSystem) -> None:

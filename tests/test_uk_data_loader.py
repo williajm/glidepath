@@ -54,6 +54,7 @@ pa_taper_threshold = "100000"
 pa_taper_rate = "0.5"
 bands = [
   { name = "starter", rate = "0.19", upper = "3967" },
+  { name = "basic", rate = "0.20", upper = "16956" },
   { name = "top", rate = "0.48" },
 ]
 """

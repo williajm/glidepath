@@ -183,7 +183,7 @@ class TestPersonParsing:
         assert person.lsa_used.as_of == date(2025, 3, 31)
 
     def test_scottish_residency_is_enterable(self) -> None:
-        """Scotland parses; projection support arrives with roadmap 9.1."""
+        """Scotland parses into the Scottish residency id."""
         household = parse(
             FactsFormData(person=person_values(tax_residency=str(SCOTLAND_RESIDENCY)))
         )

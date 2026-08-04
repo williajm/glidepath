@@ -121,6 +121,16 @@ class TaxYearMeta:
             _fail("TaxYearMeta", "end_date must be 5 April of the following year")
 
 
+BASIC_BAND_NAME = "basic"
+"""The statutory basic-rate band every regime's ladder must define.
+
+Relief at source extends the basic rate limit and every rate limit
+above it — never the limits below it, i.e. the Scottish starter band
+(FA 2004 s192; SI 2018/459 for Scottish taxpayers) — so the assessment
+needs this anchor present in every schedule.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class TaxBand:
     """One income-tax band: width is taxable income above the allowance."""
@@ -141,7 +151,7 @@ class IncomeTaxSchedule:
     bands: tuple[TaxBand, ...]
 
     def __post_init__(self) -> None:
-        """Require ascending bands with exactly one unbounded top band."""
+        """Require ascending bands, one unbounded top, one basic band."""
         owner = "IncomeTaxSchedule"
         if not self.bands:
             _fail(owner, "at least one tax band is required")
@@ -155,6 +165,9 @@ class IncomeTaxSchedule:
             if previous_upper is not None and band.upper <= previous_upper:
                 _fail(owner, "band uppers must be strictly increasing")
             previous_upper = band.upper
+        basic_count = sum(band.name == BASIC_BAND_NAME for band in self.bands)
+        if basic_count != 1:
+            _fail(owner, f"exactly one band must be named {BASIC_BAND_NAME!r}")
 
 
 @dataclass(frozen=True, slots=True)
