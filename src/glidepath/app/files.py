@@ -9,10 +9,18 @@ every load, and a load records nothing back to disk — plans live
 wherever the user chooses (§4.5).
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from glidepath.app.plan import PlanState, region_for, replanned_state
+from glidepath.app.forms import form_cannot_represent
+from glidepath.app.plan import (
+    PlanState,
+    check_table_override,
+    region_for,
+    replanned_state,
+)
+from glidepath.core import AssumptionTarget
 from glidepath.persistence import (
     PersistenceError,
     PlanDocument,
@@ -54,6 +62,11 @@ _SAVE_FAILED_PREFIX: Final = "Could not save the plan: "
 _OPEN_FAILED_PREFIX: Final = "Could not open the plan: "
 
 _WRONG_REGION_MESSAGE: Final = "this plan's region {region!r} is not supported"
+
+_UNREPRESENTABLE_MESSAGE: Final = (
+    "this plan holds {reason}, which the facts form cannot edit yet — "
+    "opening it would lose that data on the next save"
+)
 
 _DEFAULTS_MOVED_NOTE: Final = (
     "Note: the shipped default assumptions have changed since this plan "
@@ -117,6 +130,37 @@ def save_plan_state(state: PlanState, path: Path) -> SaveOutcome:
     return SaveOutcome(saved=True, message=f"Plan saved to {path}.")
 
 
+def _table_override_error(document: PlanDocument) -> str | None:
+    """The first stored table override its policy parser rejects.
+
+    ``resolve_assumptions`` checks only broad value shape (mapping vs
+    scalar); a structurally defective table would otherwise decode
+    cleanly and raise mid-run, past the load's failure boundary. The
+    same policy parsers the editors use are the contract here (issue
+    #71), for the base overrides and every scenario's alike.
+    """
+    for override in document.assumption_overrides:
+        if isinstance(override.value, Mapping):
+            try:
+                check_table_override(override.key, override.value)
+            except ValueError as exc:
+                return f"override on {override.key.value!r}: {exc}"
+    for scenario in document.scenarios:
+        for entry in scenario.overrides:
+            target = entry.target
+            if isinstance(target, AssumptionTarget) and isinstance(
+                entry.value, Mapping
+            ):
+                try:
+                    check_table_override(target.key, entry.value)
+                except ValueError as exc:
+                    return (
+                        f"scenario {scenario.name!r} override on"
+                        f" {target.key.value!r}: {exc}"
+                    )
+    return None
+
+
 def load_plan_state(path: Path, *, today: date) -> LoadOutcome:
     """Read the plan at ``path`` into a freshly projected session state.
 
@@ -126,6 +170,8 @@ def load_plan_state(path: Path, *, today: date) -> LoadOutcome:
     silently re-pricing the plan. A run failure inside an otherwise
     loadable plan still loads — the state carries the run error, and
     the result panes report it exactly as they do after a facts edit.
+    A plan the facts form cannot faithfully edit is refused outright:
+    opening it would silently discard the extra data on the next save.
     """
     try:
         document = load_plan(path)
@@ -134,6 +180,13 @@ def load_plan_state(path: Path, *, today: date) -> LoadOutcome:
     if document.region != PLAN_REGION:
         detail = _WRONG_REGION_MESSAGE.format(region=document.region)
         return LoadOutcome(state=None, message=f"{_OPEN_FAILED_PREFIX}{detail}")
+    reason = form_cannot_represent(document.household)
+    if reason is not None:
+        detail = _UNREPRESENTABLE_MESSAGE.format(reason=reason)
+        return LoadOutcome(state=None, message=f"{_OPEN_FAILED_PREFIX}{detail}")
+    table_error = _table_override_error(document)
+    if table_error is not None:
+        return LoadOutcome(state=None, message=f"{_OPEN_FAILED_PREFIX}{table_error}")
     try:
         assumptions = resolve_assumptions(document, default_assumption_set())
     except PersistenceError as exc:

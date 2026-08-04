@@ -234,8 +234,14 @@ class MainWindow(QMainWindow):
         self.facts_pane.status_label.setText(self._view_model.facts_form.example_note)
 
     def _handle_cleared(self) -> str:
-        """Reset the session to no plan and re-render the result panes."""
+        """Reset the session to no plan and re-render the result panes.
+
+        The session's plan file detaches too: after a clear, the next
+        Save asks where to write rather than overwriting the file the
+        cleared plan came from.
+        """
         self._state = initial_plan_state()
+        self._plan_path = None
         self._refresh_result_panes()
         return self._view_model.facts_form.cleared_note
 

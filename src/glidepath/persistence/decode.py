@@ -88,10 +88,16 @@ def load_plan(path: Path) -> PlanDocument:
     """Read and parse the plan document stored at ``path``.
 
     Raises:
-        PersistenceError: As :func:`loads_plan`.
+        PersistenceError: As :func:`loads_plan`, or if the file is not
+            UTF-8 text (a defective document, same as invalid JSON).
         OSError: If the file cannot be read.
     """
-    return loads_plan(path.read_text(encoding="utf-8"))
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        msg = "plan file is not UTF-8 text"
+        raise PersistenceError(msg) from exc
+    return loads_plan(text)
 
 
 def _reject_float(text: str) -> object:

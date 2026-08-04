@@ -16,6 +16,7 @@ strict reader refuses that the domain model does not already rule out
 ids) is rejected here too.
 """
 
+import contextlib
 import json
 from typing import TYPE_CHECKING
 
@@ -84,14 +85,23 @@ def dumps_plan(document: PlanDocument) -> str:
 def save_plan(document: PlanDocument, path: Path) -> None:
     """Write the document to ``path`` in canonical form.
 
-    Serialization completes before the file is opened, so a document
-    that cannot be encoded never truncates an existing file.
+    Serialization completes before any file is opened, so a document
+    that cannot be encoded never touches the disk; the text is then
+    written to a sibling temporary file and moved over ``path`` only
+    once the write has closed cleanly, so a mid-write failure (disk
+    full, power loss) can never truncate the last saved plan.
     ``newline=""`` disables platform newline translation so the file
     carries LF endings on every platform (planning §4.5).
     """
     text = dumps_plan(document)
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        handle.write(text)
+    temp = path.with_name(path.name + ".tmp")
+    try:
+        with temp.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+        temp.replace(path)
+    finally:
+        with contextlib.suppress(OSError):
+            temp.unlink(missing_ok=True)
 
 
 def _document_payload(document: PlanDocument) -> dict[str, object]:

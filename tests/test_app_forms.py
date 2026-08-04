@@ -5,8 +5,10 @@ The acceptance criterion — every §5.1 fact enterable with its
 round trip into `Fact`/`Decision`-wrapped domain objects.
 """
 
+from dataclasses import fields
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 
@@ -15,16 +17,29 @@ from glidepath.app import (
     build_facts_form_view_model,
     example_facts_form_data,
     facts_form_data_from_household,
+    form_cannot_represent,
     format_form_errors,
     parse_facts_form,
 )
 from glidepath.core import (
+    AnnuityPurchase,
+    AssetAllocation,
     AssumptionKey,
+    Decision,
+    EntityId,
+    FeeSchedule,
+    GlidePathConfig,
+    GlidePathPoint,
     Household,
+    LifeStage,
     Money,
+    PlannedOutflow,
+    Rate,
     ReliefMechanic,
     RevaluationReference,
     Sex,
+    TaxResidencyId,
+    WrapperKindId,
 )
 from glidepath.regions.uk import RUK_RESIDENCY, SCOTLAND_RESIDENCY, WORKPLACE_DC_KIND
 
@@ -995,6 +1010,189 @@ def _maximal_submission() -> FactsFormData:
             },
         ),
     )
+
+
+def _altered[T](entity: T, **changes: object) -> T:
+    """A copy of a frozen dataclass with ``changes`` applied.
+
+    Explicit reconstruction rather than ``dataclasses.replace`` so the
+    result keeps a concrete type for every analyser.
+    """
+    source = cast("Any", entity)
+    values = {spec.name: getattr(source, spec.name) for spec in fields(source)}
+    values.update(changes)
+    return cast("T", type(source)(**values))
+
+
+def _with_person(base: Household, **changes: object) -> Household:
+    """The household with its (single) person altered."""
+    return _altered(base, persons=(_altered(base.persons[0], **changes),))
+
+
+def _with_first_wrapper(base: Household, **changes: object) -> Household:
+    """The household with its first wrapper altered."""
+    person = base.persons[0]
+    wrappers = (_altered(person.wrappers[0], **changes), *person.wrappers[1:])
+    return _with_person(base, wrappers=wrappers)
+
+
+class TestFormCannotRepresent:
+    """Plans richer than the form is refused an edit, never reduced."""
+
+    @pytest.fixture(name="base")
+    def base_fixture(self) -> Household:
+        """A maximal but fully form-representable household."""
+        return parse(_maximal_submission())
+
+    def test_representable_household_passes(self, base: Household) -> None:
+        """Everything the form itself produced is representable."""
+        assert form_cannot_represent(base) is None
+
+    def test_second_person_is_flagged(self, base: Household) -> None:
+        """The v1 form edits exactly one person."""
+        person = base.persons[0]
+        second = _altered(
+            person,
+            id=EntityId("forms-second-person"),
+            wrappers=(),
+            db_pensions=(),
+            state_pension=None,
+        )
+        household = _altered(base, persons=(person, second))
+        assert form_cannot_represent(household) == "more than one person"
+
+    def test_planned_outflows_are_flagged(self, base: Household) -> None:
+        """Planned outflows have no form section yet."""
+        outflow = PlannedOutflow(
+            id=EntityId("forms-outflow"),
+            label="New roof",
+            amount_real=Decision(value=Money(Decimal(20000)), recorded_on=RECORDED),
+            at_age_of=(base.persons[0].id, 60),
+        )
+        household = _altered(base, planned_outflows=(outflow,))
+        assert form_cannot_represent(household) == "planned outflows"
+
+    def test_annuity_purchases_are_flagged(self, base: Household) -> None:
+        """Annuity purchases have no form section yet."""
+        purchase = AnnuityPurchase(
+            id=EntityId("forms-annuity"),
+            at_age=Decision(value=65, recorded_on=RECORDED),
+            fraction_of_pot=Decision(value=Decimal("0.5"), recorded_on=RECORDED),
+        )
+        household = _with_person(base, annuity_purchases=(purchase,))
+        assert form_cannot_represent(household) == "annuity purchases"
+
+    def test_personal_glide_path_is_flagged(self, base: Household) -> None:
+        """A per-person glide path has no form field yet."""
+        glide = GlidePathConfig(
+            points=(
+                GlidePathPoint(
+                    years_to_retirement=0,
+                    allocation=AssetAllocation(
+                        equity=Decimal("0.4"), bonds=Decimal("0.6")
+                    ),
+                ),
+            )
+        )
+        household = _with_person(base, glide_path=glide)
+        assert form_cannot_represent(household) == "a personal glide path"
+
+    def test_stage_multipliers_are_flagged(self, base: Household) -> None:
+        """Spending stage multipliers have no form field yet."""
+        spending = _altered(
+            base.spending,
+            stage_multipliers={LifeStage.DECUMULATION: Decimal("0.9")},
+        )
+        household = _altered(base, spending=spending)
+        assert form_cannot_represent(household) == "spending stage multipliers"
+
+    def test_unknown_residency_is_flagged(self, base: Household) -> None:
+        """A residency the form does not list cannot be re-picked."""
+        household = _with_person(base, tax_residency=TaxResidencyId("uk-nowhere"))
+        assert form_cannot_represent(household) == "the tax residency 'uk-nowhere'"
+
+    def test_unknown_wrapper_kind_is_flagged(self, base: Household) -> None:
+        """A wrapper kind the form does not list cannot be re-picked."""
+        household = _with_first_wrapper(base, kind=WrapperKindId("offshore_trust"))
+        assert form_cannot_represent(household) == "the wrapper kind 'offshore_trust'"
+
+    def test_wrapper_fees_are_flagged(self, base: Household) -> None:
+        """A per-wrapper fee schedule has no form field yet."""
+        fees = FeeSchedule(platform=Rate(Decimal("0.002")), fund=Rate(Decimal("0.001")))
+        household = _with_first_wrapper(base, fees=fees)
+        assert form_cannot_represent(household) == "a wrapper fee schedule"
+
+    def test_wrapper_allocation_is_flagged(self, base: Household) -> None:
+        """A non-cash wrapper's own allocation has no form field yet."""
+        allocation = AssetAllocation(equity=Decimal(1), bonds=Decimal(0))
+        household = _with_first_wrapper(base, allocation=allocation)
+        assert form_cannot_represent(household) == "a per-wrapper asset allocation"
+
+    def test_split_dated_balances_are_flagged(self, base: Household) -> None:
+        """The form shares one as_of between the two balances."""
+        wrapper = base.persons[0].wrappers[0]
+        assert wrapper.crystallised_balance is not None
+        moved = _altered(wrapper.crystallised_balance, as_of=date(2026, 6, 1))
+        household = _with_first_wrapper(base, crystallised_balance=moved)
+        assert (
+            form_cannot_represent(household)
+            == "wrapper balances dated on different days"
+        )
+
+    def test_unknown_escalation_is_flagged(self, base: Household) -> None:
+        """Only the earnings escalation is offered by the form."""
+        wrapper = base.persons[0].wrappers[0]
+        assert wrapper.contributions is not None
+        contributions = _altered(
+            wrapper.contributions, escalation=AssumptionKey.INFLATION_CPI
+        )
+        household = _with_first_wrapper(base, contributions=contributions)
+        assert (
+            form_cannot_represent(household)
+            == "the contribution escalation 'inflation.cpi'"
+        )
+
+    def test_split_dated_forecast_is_flagged(self, base: Household) -> None:
+        """The form shares one as_of across the forecast pair."""
+        record = base.persons[0].state_pension
+        assert record is not None
+        assert record.protected_payment is not None
+        moved = _altered(record.protected_payment, as_of=date(2026, 6, 1))
+        household = _with_person(
+            base, state_pension=_altered(record, protected_payment=moved)
+        )
+        assert (
+            form_cannot_represent(household)
+            == "state pension forecast facts dated on different days"
+        )
+
+    def test_split_dated_ni_record_is_flagged(self, base: Household) -> None:
+        """The form shares one as_of across the NI record pair."""
+        record = base.persons[0].state_pension
+        assert record is not None
+        assert record.qualifying_years is not None
+        moved = _altered(record.qualifying_years, as_of=date(2026, 6, 1))
+        household = _with_person(
+            base, state_pension=_altered(record, qualifying_years=moved)
+        )
+        assert (
+            form_cannot_represent(household)
+            == "NI record facts dated on different days"
+        )
+
+    def test_off_statement_db_fact_is_flagged(self, base: Household) -> None:
+        """The statement date must date every DB scheme fact."""
+        person = base.persons[0]
+        pension = person.db_pensions[0]
+        moved = _altered(pension.accrued_annual_pension, as_of=date(2026, 6, 1))
+        household = _with_person(
+            base,
+            db_pensions=(_altered(pension, accrued_annual_pension=moved),),
+        )
+        assert (
+            form_cannot_represent(household)
+            == "DB scheme facts dated off the statement date"
+        )
 
 
 class TestFormDataFromHousehold:

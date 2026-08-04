@@ -61,6 +61,7 @@ from glidepath.app.forms import (
     SectionSpec,
     build_facts_form_view_model,
     facts_form_data_from_household,
+    form_cannot_represent,
     format_form_errors,
     parse_facts_form,
 )
@@ -167,6 +168,7 @@ __all__ = [
     "example_facts_form_data",
     "facts_form_data_from_household",
     "facts_saved_message",
+    "form_cannot_represent",
     "format_date",
     "format_form_errors",
     "format_money",

@@ -7,9 +7,10 @@ into a status message instead of an exception at the shell.
 """
 
 import json
+from dataclasses import fields
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from glidepath.app import (
     NOTHING_TO_SAVE_MESSAGE,
@@ -24,10 +25,23 @@ from glidepath.app import (
     state_with_override,
     state_with_scenario_added,
 )
-from glidepath.core import AssumptionKey, Provenance
+from glidepath.core import (
+    AssumptionKey,
+    AssumptionTarget,
+    Decision,
+    EntityId,
+    Money,
+    Override,
+    PlannedOutflow,
+    Provenance,
+    Scenario,
+)
+from glidepath.persistence import AssumptionOverride, save_plan
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from glidepath.persistence import PlanDocument
 
 RECORDED = datetime(2026, 8, 3, 12, 0, tzinfo=UTC)
 TODAY = RECORDED.date()
@@ -151,3 +165,85 @@ class TestLoadPlanState:
         outcome = load_plan_state(path, today=TODAY)
         assert outcome.state is not None
         assert "default assumptions have changed" not in outcome.message
+
+
+def _altered[T](entity: T, **changes: object) -> T:
+    """A copy of a frozen dataclass with ``changes`` applied."""
+    source = cast("Any", entity)
+    values = {spec.name: getattr(source, spec.name) for spec in fields(source)}
+    values.update(changes)
+    return cast("T", type(source)(**values))
+
+
+def _saved_document(path: Path, **changes: object) -> PlanDocument:
+    """The example plan's document, altered and written to ``path``."""
+    document = document_from_state(projected_state())
+    assert document is not None
+    varied = _altered(document, **changes)
+    save_plan(varied, path)
+    return varied
+
+
+class TestLoadGuards:
+    """A load that could lose or crash on data is refused up front."""
+
+    def test_unrepresentable_plan_is_refused(self, tmp_path: Path) -> None:
+        """A plan the facts form cannot faithfully edit never opens."""
+        path = tmp_path / "plan.glidepath.json"
+        document = document_from_state(projected_state())
+        assert document is not None
+        outflow = PlannedOutflow(
+            id=EntityId("files-outflow"),
+            label="New roof",
+            amount_real=Decision(value=Money(Decimal(20000)), recorded_on=RECORDED),
+            at_age_of=(document.household.persons[0].id, 60),
+        )
+        _saved_document(
+            path,
+            household=_altered(document.household, planned_outflows=(outflow,)),
+        )
+        outcome = load_plan_state(path, today=TODAY)
+        assert outcome.state is None
+        assert "planned outflows" in outcome.message
+        assert "cannot edit yet" in outcome.message
+
+    def test_defective_table_override_is_refused(self, tmp_path: Path) -> None:
+        """A stored table its policy parser rejects fails the load."""
+        path = tmp_path / "plan.glidepath.json"
+        override = AssumptionOverride(
+            key=AssumptionKey.GLIDEPATH_DEFAULT_SHAPE,
+            value={"nonsense": 1},
+            source="hand-edited",
+            recorded_on=RECORDED,
+        )
+        _saved_document(path, assumption_overrides=(override,))
+        outcome = load_plan_state(path, today=TODAY)
+        assert outcome.state is None
+        assert "glidepath.default_shape" in outcome.message
+
+    def test_defective_scenario_table_override_is_refused(self, tmp_path: Path) -> None:
+        """A scenario's stored table is vetted exactly like the base's."""
+        path = tmp_path / "plan.glidepath.json"
+        scenario = Scenario(
+            name="Riskier shape",
+            overrides=(
+                Override(
+                    target=AssumptionTarget(key=AssumptionKey.GLIDEPATH_DEFAULT_SHAPE),
+                    value={"nonsense": 1},
+                ),
+            ),
+        )
+        _saved_document(path, scenarios=(scenario,))
+        outcome = load_plan_state(path, today=TODAY)
+        assert outcome.state is None
+        assert "Riskier shape" in outcome.message
+        assert "glidepath.default_shape" in outcome.message
+
+    def test_non_utf8_file_reports_rather_than_raises(self, tmp_path: Path) -> None:
+        """A binary or mis-encoded file comes back as a status message."""
+        path = tmp_path / "plan.glidepath.json"
+        path.write_bytes(b"\xff\xfe\x00\x00 not text")
+        outcome = load_plan_state(path, today=TODAY)
+        assert outcome.state is None
+        assert outcome.message.startswith("Could not open the plan")
+        assert "UTF-8" in outcome.message

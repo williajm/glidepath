@@ -217,11 +217,13 @@ def _parsed_override_value(
         except ValueError:
             raise ValueError(_INT_OVERRIDE_MESSAGE) from None
     table = parse_table_text(raw)
-    _check_table(base.key, table)
+    check_table_override(base.key, table)
     return table
 
 
-def _check_table(key: AssumptionKey, table: Mapping[str, AssumptionValue]) -> None:
+def check_table_override(
+    key: AssumptionKey, table: Mapping[str, AssumptionValue]
+) -> None:
     """Vet a table override through its policy parser (issue #71).
 
     A shape check alone would accept nonsense — any mapping passes —

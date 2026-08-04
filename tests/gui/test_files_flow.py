@@ -169,6 +169,38 @@ class TestOpenFlow:
         window.open_plan_dialog()
         assert window.facts_pane.form_data() == before
 
+    def test_clear_detaches_the_plan_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """After a clear, Save asks afresh instead of overwriting.
+
+        Clearing resets the session; a later plan entered into the
+        blank form is a different plan, so Save must never silently
+        overwrite the file the cleared plan came from.
+        """
+        plan = tmp_path / "my-plan.glidepath.json"
+        window = _window_with_example()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(plan), "")),
+        )
+        window.save_plan_as_dialog()
+        original = plan.read_bytes()
+
+        window.facts_pane.clear_button.click()
+        window.facts_pane.set_form_data(example_facts_form_data())
+        window.facts_pane.submit_button.click()
+        other = tmp_path / "other-plan.glidepath.json"
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(other), "")),
+        )
+        window.save_plan()
+        assert other.exists()
+        assert plan.read_bytes() == original
+
     def test_opened_plan_saves_back_without_asking(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

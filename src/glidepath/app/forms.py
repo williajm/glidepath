@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum, auto
+from itertools import chain
 from typing import TYPE_CHECKING
 
 from glidepath.core import (
@@ -872,6 +873,102 @@ def _db_pension_values(pension: DBPension) -> dict[str, str]:
         values["pensionable_salary"] = str(membership.pensionable_salary.value.amount)
         values["active_until_age"] = "" if until is None else str(until.value)
     return values
+
+
+def _wrapper_cannot_represent(wrapper: Wrapper) -> str | None:
+    """Why the form cannot faithfully edit ``wrapper``; ``None`` if it can."""
+    if str(wrapper.kind) not in _WRAPPER_KINDS:
+        return f"the wrapper kind {str(wrapper.kind)!r}"
+    if wrapper.fees is not None:
+        return "a wrapper fee schedule"
+    expected_allocation = _CASH_ALLOCATION if wrapper.kind == CASH_KIND else None
+    if wrapper.allocation != expected_allocation:
+        return "a per-wrapper asset allocation"
+    crystallised = wrapper.crystallised_balance
+    if crystallised is not None and crystallised.as_of != wrapper.balance.as_of:
+        return "wrapper balances dated on different days"
+    contributions = wrapper.contributions
+    if (
+        contributions is not None
+        and contributions.escalation is not None
+        and contributions.escalation not in _ESCALATION_KEYS
+    ):
+        return f"the contribution escalation {contributions.escalation.value!r}"
+    return None
+
+
+def _state_pension_cannot_represent(record: StatePensionRecord | None) -> str | None:
+    """Why the form cannot faithfully edit ``record``; ``None`` if it can."""
+    if record is None:
+        return None
+    forecast = record.forecast_weekly_amount
+    protected = record.protected_payment
+    if (
+        forecast is not None
+        and protected is not None
+        and forecast.as_of != protected.as_of
+    ):
+        return "state pension forecast facts dated on different days"
+    ni_start = record.ni_record_start
+    qualifying = record.qualifying_years
+    if (
+        ni_start is not None
+        and qualifying is not None
+        and ni_start.as_of != qualifying.as_of
+    ):
+        return "NI record facts dated on different days"
+    return None
+
+
+def _db_pension_cannot_represent(pension: DBPension) -> str | None:
+    """Why the form cannot faithfully edit ``pension``; ``None`` if it can."""
+    dated = [pension.accrued_annual_pension.as_of, pension.normal_pension_age.as_of]
+    if pension.commutation_factor is not None:
+        dated.append(pension.commutation_factor.as_of)
+    membership = pension.active_membership
+    if membership is not None:
+        dated.append(membership.accrual_rate.as_of)
+        dated.append(membership.pensionable_salary.as_of)
+    if any(as_of != pension.statement_date for as_of in dated):
+        return "DB scheme facts dated off the statement date"
+    return None
+
+
+def _person_cannot_represent(person: Person) -> str | None:
+    """Why the form cannot faithfully edit ``person``; ``None`` if it can."""
+    if person.annuity_purchases:
+        return "annuity purchases"
+    if person.glide_path is not None:
+        return "a personal glide path"
+    if str(person.tax_residency) not in _RESIDENCIES:
+        return f"the tax residency {str(person.tax_residency)!r}"
+    reasons = chain(
+        (_state_pension_cannot_represent(person.state_pension),),
+        (_wrapper_cannot_represent(wrapper) for wrapper in person.wrappers),
+        (_db_pension_cannot_represent(pension) for pension in person.db_pensions),
+    )
+    return next((reason for reason in reasons if reason is not None), None)
+
+
+def form_cannot_represent(household: Household) -> str | None:
+    """Why the v1 facts form cannot faithfully edit ``household``.
+
+    ``None`` when every stored detail lands in a form field. The domain
+    model legitimately holds more than the form yet offers (extra
+    persons, planned outflows, annuity purchases, personal glide paths,
+    spending stage multipliers, wrapper allocations and fees,
+    independently dated fact pairs) — resubmitting the populated form
+    would silently rebuild a reduced household, so a shell must refuse
+    to open such a plan rather than lose the data (§4.5).
+    """
+    if len(household.persons) != 1:
+        return "more than one person"
+    if household.planned_outflows:
+        return "planned outflows"
+    spending = household.spending
+    if spending is not None and spending.stage_multipliers is not None:
+        return "spending stage multipliers"
+    return _person_cannot_represent(household.persons[0])
 
 
 def facts_form_data_from_household(household: Household) -> FactsFormData:
