@@ -1632,9 +1632,9 @@ def build_facts_form_view_model() -> FactsFormViewModel:
         title="Your plan's facts",
         intro=(
             "Everything here is either a fact you state or a choice you "
-            'make — never a guess. "As of" dates default to today when '
-            "blank; estimates and defaults live in the assumptions "
-            "inspector."
+            "make — never a guess. Balances and statements carry an "
+            '"as of" date that defaults to today when blank; estimates '
+            "and defaults live in the assumptions inspector."
         ),
         person=_person_section(),
         spending=_spending_section(),

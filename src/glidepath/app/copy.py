@@ -59,8 +59,10 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "balance and contributions, any defined benefit pension, and "
             "any planned annuity purchase — converting part of your "
             "pension pot into lifetime income at an age you choose. "
-            'Add one wrapper, DB, or annuity section per item; "as of" dates '
-            'left blank default to today. Press "Save facts and project" to run the '
+            "Add one wrapper, DB, or annuity section per item. Dates can "
+            "be typed or picked from the calendar assist, and the "
+            '"as of" dates on balances and statements default to today '
+            'when left blank. Press "Save facts and project" to run the '
             "projection — if anything cannot be read, the message under "
             "the buttons says which field to fix and nothing is saved "
             "until it parses."
@@ -78,6 +80,10 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "press Run Monte Carlo to read the success metrics and draw "
             "10th/median/90th percentile bands over the balances chart; "
             "the same seed and inputs always reproduce the same result. "
+            "Runs execute in the background — the buttons disable while "
+            "one is in flight — and any change to the plan clears a held "
+            "Monte Carlo result, so the charts never show a run that no "
+            "longer matches the plan on screen. "
             'The "When can I retire?" card answers with the earliest '
             "retirement age at which the plan sustains a target income — "
             "a replacement rate you choose (66% of your employment income "
@@ -112,10 +118,10 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
         "Save and reopen your plan",
         (
             'File → "Save plan" writes everything — facts, decisions, '
-            "overrides, and scenarios — to a plan file on your computer, "
-            'and "Open plan…" loads one back; the last plan you used '
-            "reopens on the next launch. All data stays local; nothing is "
-            "ever transmitted."
+            "overrides, and scenarios — to a plan file on your computer "
+            '("Save plan as…" picks a new file), and "Open plan…" loads '
+            "one back; the last plan you used reopens on the next "
+            "launch. All data stays local; nothing is ever transmitted."
         ),
     ),
     ("Not financial advice", DISCLAIMER_BODY),

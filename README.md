@@ -27,9 +27,18 @@ What it models today (single person, UK):
   including deferral.
 - **Tax** — rUK and Scottish income tax from verified 2026/27 data
   files; pension allowances (AA/taper/MPAA, lump-sum allowance).
-- **Projection** — deterministic or Monte Carlo, with a de-risking
-  glide path, tax-aware decumulation (fixed real, fixed %, guardrails,
-  natural yield), annuity purchases, and tax-free-cash strategies.
+- **Projection** — deterministic or Monte Carlo runs from the app:
+  success rate, probability of ruin, ending-pot percentiles, and
+  10th/median/90th bands on the charts, reproducible from a seed. With
+  a de-risking glide path, tax-aware decumulation, and annuity
+  purchases entered in the facts form. (The engine also models
+  alternative withdrawal strategies — fixed %, guardrails, natural
+  yield — and tax-free-cash strategies; the app currently runs the
+  fixed-real defaults, with no strategy picker in the UI yet.)
+- **"When can I retire?"** — a solver for the earliest retirement age
+  that sustains a target income (a replacement rate you choose, 66% of
+  employment income by default), met deterministically or at a Monte
+  Carlo success target.
 - **Scenarios** — named what-ifs over your decisions and assumptions,
   with a side-by-side comparison; plans saved as a local JSON file.
 
@@ -59,10 +68,14 @@ the same venv as make. See `CLAUDE.md`.
 uv run glidepath
 ```
 
-Launches the desktop app: accept the disclaimer, enter your plan's
-facts, and project. Save your plan from the File menu as a
-`.glidepath.json` file you own, stored wherever you choose; the next
-launch reopens your last plan automatically.
+Launches the desktop app. Accept the disclaimer and a fresh install
+opens with an example plan already projected, so every tab has
+something to show — replace its values with your own facts, or clear
+the form and start blank. Charts label each bar with the tax year and
+your age and switch between today's money and nominal; Help → "How to
+use glidepath" walks through every tab. Save your plan from the File
+menu as a `.glidepath.json` file you own, stored wherever you choose;
+the next launch reopens your last plan automatically.
 
 ## Everyday commands
 
