@@ -19,7 +19,7 @@ from PySide6.QtCharts import (
     QChartView,
     QValueAxis,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QComboBox,
@@ -175,14 +175,13 @@ class ScenariosPane(QWidget):
         self.add_override_button.setText(view_model.add_override_label)
         self.remove_override_button.setText(view_model.remove_override_label)
         selected = self.selected_scenario_name()
-        self.scenario_list.blockSignals(True)  # noqa: FBT003 - Qt's own flag API
-        self.scenario_list.clear()
-        self.scenario_list.addItems([item.name for item in view_model.scenarios])
-        names = [item.name for item in view_model.scenarios]
-        if names:
-            row = names.index(selected) if selected in names else 0
-            self.scenario_list.setCurrentRow(row)
-        self.scenario_list.blockSignals(False)  # noqa: FBT003 - Qt's own flag API
+        with QSignalBlocker(self.scenario_list):
+            self.scenario_list.clear()
+            self.scenario_list.addItems([item.name for item in view_model.scenarios])
+            names = [item.name for item in view_model.scenarios]
+            if names:
+                row = names.index(selected) if selected in names else 0
+                self.scenario_list.setCurrentRow(row)
         self._render_selected_scenario()
 
     def _selected_item(self) -> ScenarioItem | None:
@@ -254,16 +253,15 @@ class ScenariosPane(QWidget):
     def _sync_metric_combo(self, view_model: ScenariosViewModel) -> None:
         """Rebuild the metric picker; keep the selection bound."""
         self.metric_label.setText(view_model.metric_heading)
-        self.metric_combo.blockSignals(True)  # noqa: FBT003 - Qt's own flag API
-        self.metric_combo.clear()
-        for option in view_model.metric_options:
-            self.metric_combo.addItem(option.label, userData=option.key)
-        keys = [option.key for option in view_model.metric_options]
-        if view_model.selected_metric_key in keys:
-            self.metric_combo.setCurrentIndex(
-                keys.index(view_model.selected_metric_key)
-            )
-        self.metric_combo.blockSignals(False)  # noqa: FBT003 - Qt's own flag API
+        with QSignalBlocker(self.metric_combo):
+            self.metric_combo.clear()
+            for option in view_model.metric_options:
+                self.metric_combo.addItem(option.label, userData=option.key)
+            keys = [option.key for option in view_model.metric_options]
+            if view_model.selected_metric_key in keys:
+                self.metric_combo.setCurrentIndex(
+                    keys.index(view_model.selected_metric_key)
+                )
 
     def _metric_selected(self, index: int) -> None:
         """Forward a user-chosen metric's key to the shell."""
@@ -303,7 +301,7 @@ class ScenariosPane(QWidget):
             view_model.target_prompt,
             labels,
             0,
-            False,  # noqa: FBT003 - Qt positional editable flag
+            editable=False,
         )
         if not accepted:
             return
@@ -355,7 +353,7 @@ class ScenariosPane(QWidget):
                 view_model.value_prompt,
                 list(choices),
                 current,
-                False,  # noqa: FBT003 - Qt positional editable flag
+                editable=False,
             )
         if structured:
             return QInputDialog.getMultiLineText(

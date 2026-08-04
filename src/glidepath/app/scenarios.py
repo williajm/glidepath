@@ -622,7 +622,7 @@ def _scenario_item(
     if state.household is not None:
         orphans = scenario_orphans(scenario, state.household, state.assumptions)
     rows = tuple(
-        _override_row(override, override in orphans, names, infos)
+        _override_row(override, names, infos, orphaned=override in orphans)
         for override in scenario.overrides
     )
     return ScenarioItem(
@@ -642,9 +642,10 @@ def _invalid_status(count: int) -> str:
 
 def _override_row(
     override: Override,
-    orphaned: bool,  # noqa: FBT001 - internal builder, callers pass a named check
     names: Mapping[str, str],
     infos: Mapping[tuple[EntityId, str], DecisionTargetInfo],
+    *,
+    orphaned: bool,
 ) -> OverrideRow:
     """One override as its diff line, orphan status included."""
     target = override.target
