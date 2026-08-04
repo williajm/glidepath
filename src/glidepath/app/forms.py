@@ -42,7 +42,10 @@ from glidepath.core import (
     validate_household_v1,
 )
 from glidepath.regions.uk import (
+    CASH_KIND,
+    GIA_KIND,
     ISA_KIND,
+    LISA_KIND,
     RUK_RESIDENCY,
     SCOTLAND_RESIDENCY,
     SIPP_KIND,
@@ -176,6 +179,9 @@ _WRAPPER_KINDS: Mapping[str, WrapperKindId] = {
     str(WORKPLACE_DC_KIND): WORKPLACE_DC_KIND,
     str(SIPP_KIND): SIPP_KIND,
     str(ISA_KIND): ISA_KIND,
+    str(LISA_KIND): LISA_KIND,
+    str(GIA_KIND): GIA_KIND,
+    str(CASH_KIND): CASH_KIND,
 }
 _RELIEF_MECHANICS: Mapping[str, ReliefMechanic] = {
     "relief_at_source": ReliefMechanic.RELIEF_AT_SOURCE,
@@ -826,12 +832,12 @@ def _wrapper_section() -> SectionSpec:
         key="wrapper",
         title="Savings wrapper",
         description=(
-            "One pension or ISA. Balances are facts from a statement; "
-            "contributions are your choices plus your employer's terms. "
-            "A balance dated a whole month or more before today is "
-            "rolled forward to today at the assumed return — "
-            "contributions in the gap are not added, so restate the "
-            "balance if your statement is old."
+            "One pension, ISA, or taxable account. Balances are facts "
+            "from a statement; contributions are your choices plus your "
+            "employer's terms. A balance dated a whole month or more "
+            "before today is rolled forward to today at the assumed "
+            "return — contributions in the gap are not added, so "
+            "restate the balance if your statement is old."
         ),
         repeatable=True,
         add_label="Add wrapper",
@@ -849,6 +855,11 @@ def _wrapper_section() -> SectionSpec:
                     ),
                     ChoiceOption(value=str(SIPP_KIND), label="SIPP"),
                     ChoiceOption(value=str(ISA_KIND), label="Stocks & shares ISA"),
+                    ChoiceOption(value=str(LISA_KIND), label="Lifetime ISA"),
+                    ChoiceOption(
+                        value=str(GIA_KIND), label="General investment account"
+                    ),
+                    ChoiceOption(value=str(CASH_KIND), label="Cash savings"),
                 ),
             ),
             FieldSpec(
@@ -879,7 +890,10 @@ def _wrapper_section() -> SectionSpec:
                 label="Tax relief mechanic",
                 kind=FieldKind.CHOICE,
                 choices=(
-                    ChoiceOption(value="", label="None (ISAs; pensions must pick one)"),
+                    ChoiceOption(
+                        value="",
+                        label="None (ISAs, LISAs, GIA, cash; pensions must pick one)",
+                    ),
                     ChoiceOption(value="relief_at_source", label="Relief at source"),
                     ChoiceOption(value="net_pay", label="Net pay"),
                 ),

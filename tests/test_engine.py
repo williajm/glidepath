@@ -89,6 +89,10 @@ RESIDENCY = TaxResidencyId("test.main")
 
 PENSION = WrapperKindId("test.pension")
 FREE = WrapperKindId("test.free")
+TAXABLE = WrapperKindId("test.taxable")
+SUB = WrapperKindId("test.sub")
+FREE_GROUP = "test.free"
+SUB_GROUP = "test.sub"
 
 TAX_RATE = Decimal("0.25")
 PENSION_FREE_FRACTION = Decimal("0.25")
@@ -115,12 +119,20 @@ def money_fact(amount: str, as_of: date = AS_OF) -> Fact[Money]:
 
 @dataclass(frozen=True)
 class FlatTaxSystem:
-    """Flat 25% on every pound of non-savings income, floored to the penny."""
+    """Flat 25% on every pound of income, floored to the penny.
+
+    Savings and dividend income join the same flat band (roadmap 9.2),
+    so the portfolio-income attribution stays hand-computable.
+    """
 
     def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:
         """One flat band; relief-at-source amounts are ignored by design."""
         del period
-        taxed = tax_input.non_savings_income
+        taxed = (
+            tax_input.non_savings_income
+            + tax_input.savings_income
+            + tax_input.dividend_income
+        )
         if taxed <= ZERO:
             return TaxResult(
                 tax_due=ZERO, taxable_income=taxed, tax_free_allowance=ZERO, lines=()
@@ -147,19 +159,28 @@ class StubAges:
 
 @dataclass(frozen=True)
 class StubWrapperRules:
-    """Two wrapper kinds: an EET pension and a TEE tax-free account.
+    """Four wrapper kinds: EET pension, TEE free, taxable, sub-capped.
 
     ``free_access_age`` age-gates the tax-free kind when set (a
     LISA-like account, roadmap 9.2): tax treatment says nothing about
     accessibility, so the engine must consult the gate for every kind.
     ``lsa_cap`` is the lifetime cap on pension tax-free cash (roadmap
-    5.2); ``None`` — the default — means uncapped.
+    5.2); ``None`` — the default — means uncapped. The 9.2 knobs:
+    ``free_bonus_rate`` and ``free_window_fraction`` decorate the free
+    kind's contribution terms (a LISA-like bonus and age window), and
+    ``sub_kind_cap`` gives the sub kind its own cap *inside* the free
+    kind's allowance group (the LISA-inside-ISA shape). The taxable
+    kind is a bare GIA/cash-like account: taxed in, growth taxable,
+    tax-free out, uncapped.
     """
 
     access_age: int = 55
     free_kind_cap: Money | None = None
     free_access_age: int | None = None
     lsa_cap: Money | None = None
+    free_bonus_rate: Rate | None = None
+    free_window_fraction: Decimal = Decimal(1)
+    sub_kind_cap: Money | None = None
 
     def tax_treatment(self, kind: WrapperKindId, period: Period) -> WrapperTaxTreatment:
         """The pension pays out 25% tax-free; the free kind wholly so."""
@@ -171,10 +192,16 @@ class StubWrapperRules:
                 withdrawals=WithdrawalTaxTreatment.PARTIALLY_TAX_FREE,
                 tax_free_fraction=Rate(PENSION_FREE_FRACTION),
             )
-        if kind == FREE:
+        if kind in (FREE, SUB):
             return WrapperTaxTreatment(
                 contributions=ContributionTaxTreatment.FROM_TAXED_INCOME,
                 growth=GrowthTaxTreatment.TAX_FREE,
+                withdrawals=WithdrawalTaxTreatment.TAX_FREE,
+            )
+        if kind == TAXABLE:
+            return WrapperTaxTreatment(
+                contributions=ContributionTaxTreatment.FROM_TAXED_INCOME,
+                growth=GrowthTaxTreatment.TAXABLE,
                 withdrawals=WithdrawalTaxTreatment.TAX_FREE,
             )
         msg = f"unknown stub wrapper kind {kind!r}"
@@ -183,11 +210,24 @@ class StubWrapperRules:
     def contribution_terms(
         self, kind: WrapperKindId, date_of_birth: date, period: Period
     ) -> ContributionTerms:
-        """Only the free kind carries a per-kind cap here."""
+        """The free kind's cap, bonus and window; the sub kind's sub-cap."""
         del date_of_birth, period
-        if kind == FREE and self.free_kind_cap is not None:
+        if kind == FREE:
+            caps: tuple[ContributionCap, ...] = ()
+            if self.free_kind_cap is not None:
+                caps = (ContributionCap(group=FREE_GROUP, limit=self.free_kind_cap),)
             return ContributionTerms(
-                caps=(ContributionCap(group=str(FREE), limit=self.free_kind_cap),)
+                caps=caps,
+                bonus_rate=self.free_bonus_rate,
+                window_fraction=self.free_window_fraction,
+            )
+        if kind == SUB and self.sub_kind_cap is not None:
+            assert self.free_kind_cap is not None, "sub cap needs the shared cap"
+            return ContributionTerms(
+                caps=(
+                    ContributionCap(group=SUB_GROUP, limit=self.sub_kind_cap),
+                    ContributionCap(group=FREE_GROUP, limit=self.free_kind_cap),
+                )
             )
         return ContributionTerms()
 
@@ -292,10 +332,14 @@ class StubStatePension:
 
 def stub_region(
     contributions: RecordingContributionRules | None = None,
+    *,
     free_kind_cap: Money | None = None,
     state_pension: StubStatePension | None = None,
     free_access_age: int | None = None,
     lsa_cap: Money | None = None,
+    free_bonus_rate: Rate | None = None,
+    free_window_fraction: Decimal = Decimal(1),
+    sub_kind_cap: Money | None = None,
 ) -> Region:
     """A calendar-year region over the stub implementations."""
     return Region(
@@ -306,6 +350,9 @@ def stub_region(
             free_kind_cap=free_kind_cap,
             free_access_age=free_access_age,
             lsa_cap=lsa_cap,
+            free_bonus_rate=free_bonus_rate,
+            free_window_fraction=free_window_fraction,
+            sub_kind_cap=sub_kind_cap,
         ),
         contributions=contributions or RecordingContributionRules(),
         state_pension=state_pension or StubStatePension(),
@@ -3183,3 +3230,232 @@ class TestAnnuityPurchases:
         config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2040, 12, 31))
         with pytest.raises(EngineError, match="covers ages"):
             run(plan, assumptions, region, config)
+
+
+def yield_assumptions(overrides: dict[str, object] | None = None) -> AssumptionSet:
+    """The baseline assumptions plus the three ``yield.*`` keys.
+
+    A taxable-growth wrapper prices its portfolio income from all
+    three per-asset yields (roadmap 9.2), so runs holding one must
+    supply them: equity 2%, bonds 2.5%, cash 1.5%.
+    """
+    values: dict[str, object] = {
+        "yield.equity": Decimal("0.02"),
+        "yield.bonds": Decimal("0.025"),
+        "yield.cash": Decimal("0.015"),
+    }
+    values.update(overrides or {})
+    return assumptions_with(values)
+
+
+class TestTaxableGrowthWrappers:
+    """Roadmap 9.2: GIA/cash-like accounts taxed as growth arises."""
+
+    def test_portfolio_income_is_taxed_from_the_balance(self) -> None:
+        """The income is assessed and its tax leaves the wrapper.
+
+        10,000 wholly in equity yields 2% — 200 of dividend income —
+        taxed at the flat 25%: 50. Growth of 10% applies to the full
+        balance (the income stays invested), and the tax settles at
+        close: 11,000 - 50 = 10,950.
+        """
+        account = wrapper_of(TAXABLE, "10000")
+        plan = household_of(person_of((account,)))
+        result = run(plan, yield_assumptions(), stub_region(), one_period_config())
+        person = result.snapshots[0].persons[0]
+        (wrapper,) = person.wrappers
+        assert wrapper.taxable_dividends == Money(Decimal(200))
+        assert wrapper.taxable_interest == ZERO
+        assert wrapper.growth_tax == Money(Decimal(50))
+        assert wrapper.closing_uncrystallised == Money(Decimal(10950))
+        assert person.tax.tax_due == Money(Decimal(50))
+
+    def test_portfolio_income_splits_by_asset_class(self) -> None:
+        """Equity yields dividends; bonds and cash yield interest.
+
+        10,000 at 50/30/20: dividends 10,000 x 0.5 x 2% = 100;
+        interest 10,000 x (0.3 x 2.5% + 0.2 x 1.5%) = 105.
+        """
+        allocation = AssetAllocation(
+            equity=Decimal("0.5"), bonds=Decimal("0.3"), cash=Decimal("0.2")
+        )
+        account = wrapper_of(TAXABLE, "10000", allocation=allocation)
+        plan = household_of(person_of((account,)))
+        result = run(plan, yield_assumptions(), stub_region(), one_period_config())
+        (wrapper,) = result.snapshots[0].persons[0].wrappers
+        assert wrapper.taxable_dividends == Money(Decimal(100))
+        assert wrapper.taxable_interest == Money(Decimal(105))
+        assert wrapper.growth_tax == Money(Decimal("51.25"))
+
+    def test_tax_free_wrappers_accrue_no_portfolio_income(self) -> None:
+        """A TEE account reads no yield keys and pays no growth tax."""
+        account = wrapper_of(FREE, "10000")
+        plan = household_of(person_of((account,)))
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        (wrapper,) = result.snapshots[0].persons[0].wrappers
+        assert wrapper.taxable_dividends == ZERO
+        assert wrapper.taxable_interest == ZERO
+        assert wrapper.growth_tax == ZERO
+        keys = {entry.key for entry in result.provenance.assumptions}
+        assert AssumptionKey.YIELD_EQUITY not in keys
+
+    def test_the_need_never_pays_the_portfolio_income_tax(self) -> None:
+        """The offset excludes the taxable account's income tax.
+
+        A retiree's 1,000 need is met wholly from the ordering's first
+        source — the taxable account itself (GIA/cash → ISA →
+        pension) — while its 50 of portfolio-income tax is charged to
+        the balance, never added to the need.
+        """
+        free_account = wrapper_of(FREE, "5000")
+        taxable_account = wrapper_of(TAXABLE, "10000")
+        plan = retiree_plan((taxable_account, free_account), spending="1000")
+        result = run(plan, yield_assumptions(), stub_region(), one_period_config())
+        person = result.snapshots[0].persons[0]
+        taxable_result, free_result = person.wrappers
+        assert person.net_withdrawn == Money(Decimal(1000))
+        assert person.shortfall == ZERO
+        assert taxable_result.growth_tax == Money(Decimal(50))
+        assert taxable_result.withdrawal_tax_free == Money(Decimal(1000))
+        assert free_result.withdrawal_tax_free == ZERO
+
+
+class TestContributionBonusAndWindow:
+    """Roadmap 9.2: LISA-like bonus, window, and shared allowance groups."""
+
+    def test_bonus_credits_the_pot_without_consuming_the_cap(self) -> None:
+        """A 25% bonus rides on top of a cap-filling contribution.
+
+        Employee 4,000 exactly fills the cap; the 1,000 bonus lands on
+        top: the pot holds 5,000 before growth, closing 5,500.
+        """
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(4000)), recorded_on=RECORDED)
+        )
+        account = wrapper_of(FREE, "0", schedule=schedule)
+        plan = household_of(person_of((account,), employment="30000"))
+        region = stub_region(
+            free_kind_cap=Money(Decimal(4000)),
+            free_bonus_rate=Rate(Decimal("0.25")),
+        )
+        result = run(plan, assumptions_with(), region, one_period_config())
+        (wrapper,) = result.snapshots[0].persons[0].wrappers
+        assert wrapper.employee_contribution == Money(Decimal(4000))
+        assert wrapper.contribution_bonus == Money(Decimal(1000))
+        assert wrapper.contribution_shortfall == ZERO
+        assert wrapper.closing_uncrystallised == Money(Decimal(5500))
+
+    def test_contribution_window_scales_scheduled_amounts(self) -> None:
+        """A half-open window halves the year's contribution.
+
+        The window closing mid-year (a 50th birthday) scales the
+        scheduled 4,000 to 2,000 — structural, so no shortfall — and
+        the bonus follows the scaled amount.
+        """
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(4000)), recorded_on=RECORDED)
+        )
+        account = wrapper_of(FREE, "0", schedule=schedule)
+        plan = household_of(person_of((account,), employment="30000"))
+        region = stub_region(
+            free_bonus_rate=Rate(Decimal("0.25")),
+            free_window_fraction=Decimal("0.5"),
+        )
+        result = run(plan, assumptions_with(), region, one_period_config())
+        (wrapper,) = result.snapshots[0].persons[0].wrappers
+        assert wrapper.employee_contribution == Money(Decimal(2000))
+        assert wrapper.contribution_bonus == Money(Decimal(500))
+        assert wrapper.contribution_shortfall == ZERO
+
+    def test_allowance_groups_share_one_budget_across_kinds(self) -> None:
+        """A sub-capped kind consumes the shared group's budget too.
+
+        Sub cap 4,000 inside a shared 10,000: the sub account clips
+        its intended 6,000 to 4,000; the free account then finds only
+        6,000 of the shared allowance left for its intended 8,000.
+        """
+        sub_schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(6000)), recorded_on=RECORDED)
+        )
+        free_schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(8000)), recorded_on=RECORDED)
+        )
+        sub_account = wrapper_of(SUB, "0", schedule=sub_schedule)
+        free_account = wrapper_of(FREE, "0", schedule=free_schedule)
+        plan = household_of(person_of((sub_account, free_account), employment="50000"))
+        region = stub_region(
+            free_kind_cap=Money(Decimal(10000)), sub_kind_cap=Money(Decimal(4000))
+        )
+        result = run(plan, assumptions_with(), region, one_period_config())
+        sub_result, free_result = result.snapshots[0].persons[0].wrappers
+        assert sub_result.employee_contribution == Money(Decimal(4000))
+        assert sub_result.contribution_shortfall == Money(Decimal(2000))
+        assert free_result.employee_contribution == Money(Decimal(6000))
+        assert free_result.contribution_shortfall == Money(Decimal(2000))
+
+
+class TestSurplusBanking:
+    """Roadmap 9.2: decumulation surplus banks into a taxable wrapper."""
+
+    def test_income_beyond_the_need_banks_and_grows(self) -> None:
+        """Net state pension beyond the need lands in the taxable account.
+
+        Gross 10,000 less the flat 25% leaves 7,500 net against a
+        3,000 need: 4,500 banks, then grows 10% to 4,950.
+        """
+        account = wrapper_of(TAXABLE, "0")
+        person = person_of(
+            (account,),
+            date_of_birth=date(1958, 1, 1),
+            retire_at=60,
+            state_pension=sp_record(),
+        )
+        plan = household_of(person, spending="3000")
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        region = stub_region(state_pension=scheme)
+        assumptions = assumptions_with({"policy.state_pension.uprating": "cpi"})
+        result = run(plan, assumptions, region, one_period_config())
+        person_result = result.snapshots[0].persons[0]
+        (wrapper,) = person_result.wrappers
+        assert person_result.banked == Money(Decimal(4500))
+        assert wrapper.banked_in == Money(Decimal(4500))
+        assert wrapper.closing_uncrystallised == Money(Decimal(4950))
+
+    def test_gross_over_draw_banks_rather_than_evaporates(self) -> None:
+        """A fixed-percent draw beyond the need is kept, not spent.
+
+        10% of the 100,000 free account draws 10,000 net (tax-free)
+        against a 4,000 need: 6,000 banks into the taxable account.
+        """
+        free_account = wrapper_of(FREE, "100000")
+        taxable_account = wrapper_of(TAXABLE, "0")
+        plan = retiree_plan((free_account, taxable_account), spending="4000")
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                rate=Rate(Decimal("0.10"))
+            ),
+        )
+        result = run(plan, assumptions_with(), stub_region(), config)
+        person_result = result.snapshots[0].persons[0]
+        free_result, taxable_result = person_result.wrappers
+        assert person_result.banked == Money(Decimal(6000))
+        assert taxable_result.banked_in == Money(Decimal(6000))
+        assert free_result.withdrawal_tax_free == Money(Decimal(10000))
+        assert person_result.shortfall == ZERO
+
+    def test_surplus_without_a_taxable_wrapper_is_spent(self) -> None:
+        """The pre-9.2 behaviour survives for plans holding none."""
+        free_account = wrapper_of(FREE, "100000")
+        plan = retiree_plan((free_account,), spending="4000")
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                rate=Rate(Decimal("0.10"))
+            ),
+        )
+        result = run(plan, assumptions_with(), stub_region(), config)
+        person_result = result.snapshots[0].persons[0]
+        assert person_result.banked == ZERO

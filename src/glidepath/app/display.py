@@ -19,8 +19,11 @@ WRAPPER_KIND_NAMES: Final[Mapping[str, str]] = {
     "uk.workplace_dc": "Workplace DC",
     "uk.sipp": "SIPP",
     "uk.isa": "ISA",
+    "uk.lisa": "Lifetime ISA",
+    "uk.gia": "General investment account",
+    "uk.cash": "Cash savings",
 }
-"""Display names for the shipped wrapper kinds (planning §2)."""
+"""Display names for the shipped wrapper kinds (planning §2, roadmap 9.2)."""
 
 
 def format_wrapper_kind(kind: object) -> str:
