@@ -7,6 +7,7 @@ render view models and forward raw user input back.
 
 from datetime import UTC, date, datetime
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -47,6 +48,7 @@ from glidepath.gui.charts import ChartsPane
 from glidepath.gui.forms import FactsEntryPane
 from glidepath.gui.inspector import InspectorPane
 from glidepath.gui.scenarios import ScenariosPane, ScenariosPaneCallbacks
+from glidepath.gui.style import wordmark_pixmap
 
 
 def _today() -> date:
@@ -242,10 +244,22 @@ class MainWindow(QMainWindow):
         self._refresh_scenarios_pane()
         self.inspector_pane.refresh(build_inspector_view_model(self._state))
 
+    def about_box(self) -> QMessageBox:
+        """The About box: the wordmark over the disclaimer copy (§1)."""
+        about = self._about_view_model
+        box = QMessageBox(self)
+        box.setWindowTitle(about.title)
+        box.setText(about.body)
+        box.setIconPixmap(
+            wordmark_pixmap().scaledToWidth(
+                360, Qt.TransformationMode.SmoothTransformation
+            )
+        )
+        return box
+
     def show_about(self) -> None:
         """Show the About box; it repeats the disclaimer (§1)."""
-        about = self._about_view_model
-        QMessageBox.about(self, about.title, about.body)
+        self.about_box().exec()
 
 
 def prompt_disclaimer(view_model: DisclaimerViewModel) -> bool:

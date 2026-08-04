@@ -1,9 +1,15 @@
-"""Theme smoke tests, offscreen: palette, stylesheet, painted icon."""
+"""Theme smoke tests, offscreen: palette, stylesheet, brand assets."""
 
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
-from glidepath.gui.style import ACCENT, STYLESHEET, apply_theme, placeholder_icon
+from glidepath.gui.style import (
+    ACCENT,
+    STYLESHEET,
+    app_icon,
+    apply_theme,
+    wordmark_pixmap,
+)
 
 
 class TestTheme:
@@ -24,8 +30,14 @@ class TestTheme:
         assert app.styleSheet() == STYLESHEET
         assert not app.windowIcon().isNull()
 
-    def test_placeholder_icon_paints_every_size(self) -> None:
-        """The stand-in icon covers taskbar-to-tile sizes."""
-        icon = placeholder_icon()
+    def test_app_icon_loads_every_size(self) -> None:
+        """The packaged brand icon covers taskbar-to-tile sizes."""
+        icon = app_icon()
         assert not icon.isNull()
         assert len(icon.availableSizes()) >= 7
+
+    def test_wordmark_loads_at_display_resolution(self) -> None:
+        """The About/README wordmark asset is present and wide."""
+        pixmap = wordmark_pixmap()
+        assert not pixmap.isNull()
+        assert pixmap.width() >= 800

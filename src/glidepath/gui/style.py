@@ -1,24 +1,25 @@
-"""The shell's visual theme: one palette, one stylesheet, one icon (§4.7).
+"""The shell's visual theme: palette, stylesheet, and branding (§4.7).
 
 Purely presentational Qt mechanics — no copy, no policy. The Fusion
 style gives an identical baseline on every platform; the palette and
-stylesheet build a light, neutral look with one accent colour; the
-window icon is a painted placeholder that branding art can replace
-without touching anything else.
+stylesheet build a light, neutral look around the brand green; the
+window icon and the About wordmark load from ``assets/`` (the icon at
+every taskbar-to-tile size), so refreshed art is a file swap.
 """
 
+from importlib import resources
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPalette, QPixmap
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
-ACCENT = "#23735b"
-"""The single accent colour: buttons, focus, selections, tab underline."""
-_ACCENT_HOVER = "#1c5f4b"
-_ACCENT_PRESSED = "#164e3d"
+ACCENT = "#1e6d59"
+"""The single accent colour — the brand tile's green: buttons, focus,
+selections, the active tab underline."""
+_ACCENT_HOVER = "#195b4a"
+_ACCENT_PRESSED = "#144a3c"
 _WINDOW = "#f4f6f4"
 _CARD = "#ffffff"
 _BORDER = "#d7dcd6"
@@ -110,41 +111,26 @@ QScrollArea {{
 """
 
 
-def placeholder_icon() -> QIcon:
-    """A painted stand-in app icon: a glide curve on the accent tile.
+def _asset_bytes(name: str) -> bytes:
+    """One packaged asset's raw bytes."""
+    return (resources.files("glidepath.gui") / "assets" / name).read_bytes()
 
-    Deliberately replaceable: branding art dropped in here (an SVG or
-    ``.ico``) changes the window and taskbar identity without touching
-    the shell.
-    """
+
+def app_icon() -> QIcon:
+    """The brand icon — the glide curve on the green tile — every size."""
     icon = QIcon()
     for size in _ICON_SIZES:
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(ACCENT))
-        radius = size / 5
-        painter.drawRoundedRect(0, 0, size, size, radius, radius)
-        pen = QPen(QColor("white"))
-        pen.setWidthF(max(size / 10, 1.0))
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        # The namesake glide path: a de-risking curve from top-left
-        # flattening out towards the bottom-right.
-        points = [
-            QPointF(size * 0.22, size * 0.25),
-            QPointF(size * 0.30, size * 0.52),
-            QPointF(size * 0.46, size * 0.68),
-            QPointF(size * 0.62, size * 0.74),
-            QPointF(size * 0.80, size * 0.76),
-        ]
-        painter.drawPolyline(points)
-        painter.end()
+        pixmap = QPixmap()
+        pixmap.loadFromData(_asset_bytes(f"icon_{size}.png"))
         icon.addPixmap(pixmap)
     return icon
+
+
+def wordmark_pixmap() -> QPixmap:
+    """The horizontal wordmark, for the About screen."""
+    pixmap = QPixmap()
+    pixmap.loadFromData(_asset_bytes("wordmark.png"))
+    return pixmap
 
 
 def apply_theme(app: QApplication) -> None:
@@ -161,7 +147,7 @@ def apply_theme(app: QApplication) -> None:
     palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(_MUTED))
     app.setPalette(palette)
     app.setStyleSheet(STYLESHEET)
-    app.setWindowIcon(placeholder_icon())
+    app.setWindowIcon(app_icon())
 
 
-__all__ = ["ACCENT", "STYLESHEET", "apply_theme", "placeholder_icon"]
+__all__ = ["ACCENT", "STYLESHEET", "app_icon", "apply_theme", "wordmark_pixmap"]

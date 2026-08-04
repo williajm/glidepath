@@ -1507,8 +1507,9 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   §5.1).*
 - [x] 9.7 Launch example + shell theme — *the facts form opens with the
   §4.9 example plan projected and a clear button resetting the session;
-  a Fusion-based theme and a replaceable placeholder window icon live
-  in `gui/style.py` (presentation only, no copy or policy).*
+  a Fusion-based theme in `gui/style.py` (presentation only, no copy or
+  policy) built around the brand green, with the icon and About/README
+  wordmark shipped as packaged assets under `gui/assets/`.*
 
 ## 9. Open questions
 
