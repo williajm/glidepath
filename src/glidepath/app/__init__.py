@@ -33,6 +33,7 @@ from glidepath.app.display import (
     format_recorded,
     format_value,
 )
+from glidepath.app.example import example_facts_form_data
 from glidepath.app.firstrun import (
     FirstRunState,
     default_state_path,
@@ -145,6 +146,7 @@ __all__ = [
     "build_scenarios_view_model",
     "build_shell_view_model",
     "default_state_path",
+    "example_facts_form_data",
     "facts_saved_message",
     "format_date",
     "format_form_errors",

@@ -1,4 +1,6 @@
-# glidepath
+<p align="center">
+  <img src="src/glidepath/gui/assets/wordmark.png" alt="glidepath" width="420">
+</p>
 
 [![CI](https://github.com/williajm/glidepath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/williajm/glidepath/actions/workflows/ci.yml)
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=williajm_glidepath&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=williajm_glidepath)

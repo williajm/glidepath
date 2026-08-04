@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
 from glidepath.app import FactsFormData, FactsFormViewModel, FieldKind, SectionSpec
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
 
 
 class SectionForm(QGroupBox):
@@ -71,6 +72,19 @@ class SectionForm(QGroupBox):
             else:
                 collected[key] = editor.text()
         return collected
+
+    def set_values(self, values: Mapping[str, str]) -> None:
+        """Set the given fields; keys absent from ``values`` are untouched."""
+        for key, value in values.items():
+            self.set_value(key, value)
+
+    def clear(self) -> None:
+        """Blank every text field and reset every choice to its first option."""
+        for editor in self._editors.values():
+            if isinstance(editor, QComboBox):
+                editor.setCurrentIndex(0)
+            else:
+                editor.setText("")
 
 
 class RepeatableSection(QWidget):
@@ -122,19 +136,32 @@ class RepeatableSection(QWidget):
         """Raw text for every instance, in display order."""
         return tuple(form.values() for form in self._forms)
 
+    def set_values_list(self, values_list: Sequence[Mapping[str, str]]) -> None:
+        """Replace every instance with one per entry of ``values_list``."""
+        self.clear()
+        for values in values_list:
+            self.add_entry().set_values(values)
+
+    def clear(self) -> None:
+        """Drop every section instance."""
+        for container in tuple(self._entries):
+            self._remove_entry(container)
+
 
 class FactsEntryPane(QWidget):
-    """The facts tab: all sections, a submit button, and a status line."""
+    """The facts tab: sections, submit and clear buttons, a status line."""
 
     def __init__(
         self,
         view_model: FactsFormViewModel,
         on_submit: Callable[[FactsFormData], str],
+        on_clear: Callable[[], str],
         parent: QWidget | None = None,
     ) -> None:
-        """Render the form and wire the submit callback."""
+        """Render the form and wire the submit and clear callbacks."""
         super().__init__(parent)
         self._on_submit = on_submit
+        self._on_clear = on_clear
 
         intro = QLabel(view_model.intro, self)
         intro.setWordWrap(True)
@@ -144,7 +171,10 @@ class FactsEntryPane(QWidget):
         self.wrappers = RepeatableSection(view_model.wrapper)
         self.db_pensions = RepeatableSection(view_model.db_pension)
         self.submit_button = QPushButton(view_model.submit_label, self)
+        self.submit_button.setObjectName("primaryButton")
         self.submit_button.clicked.connect(self.submit)
+        self.clear_button = QPushButton(view_model.clear_label, self)
+        self.clear_button.clicked.connect(self.clear)
         self.status_label = QLabel("", self)
         self.status_label.setWordWrap(True)
 
@@ -162,10 +192,17 @@ class FactsEntryPane(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setWidget(content)
 
+        buttons = QWidget(self)
+        buttons_layout = QHBoxLayout(buttons)
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+        buttons_layout.addWidget(self.clear_button)
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.submit_button)
+
         layout = QVBoxLayout(self)
         layout.addWidget(scroll)
         layout.addWidget(self.status_label)
-        layout.addWidget(self.submit_button)
+        layout.addWidget(buttons)
 
     def form_data(self) -> FactsFormData:
         """The whole form's raw text as one submission."""
@@ -177,9 +214,25 @@ class FactsEntryPane(QWidget):
             db_pensions=self.db_pensions.values_list(),
         )
 
+    def set_form_data(self, data: FactsFormData) -> None:
+        """Replace the whole form's raw text (e.g. the launch example)."""
+        self.person_form.clear()
+        self.person_form.set_values(data.person)
+        self.spending_form.clear()
+        self.spending_form.set_values(data.spending)
+        self.state_pension_form.clear()
+        self.state_pension_form.set_values(data.state_pension)
+        self.wrappers.set_values_list(data.wrappers)
+        self.db_pensions.set_values_list(data.db_pensions)
+
     def submit(self) -> None:
         """Forward the submission and show the returned status text."""
         self.status_label.setText(self._on_submit(self.form_data()))
+
+    def clear(self) -> None:
+        """Empty every section, then show the clear callback's status."""
+        self.set_form_data(FactsFormData())
+        self.status_label.setText(self._on_clear())
 
 
 __all__ = [

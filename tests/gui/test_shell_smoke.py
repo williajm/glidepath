@@ -90,22 +90,12 @@ class TestMainWindow:
         menu_titles = [action.text() for action in window.menuBar().actions()]
         assert menu_titles == [f"&{view_model.help_menu_label}"]
 
-    def test_about_shows_view_model_copy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_about_shows_view_model_copy(self) -> None:
         """About shows the about view model — which repeats the disclaimer."""
-        shown: list[tuple[str, str]] = []
-
-        class RecordingMessageBox:
-            """Test double capturing the About invocation."""
-
-            @staticmethod
-            def about(_parent: MainWindow, title: str, body: str) -> None:
-                """Record what would have been shown."""
-                shown.append((title, body))
-
-        monkeypatch.setattr(widgets, "QMessageBox", RecordingMessageBox)
         view_model = build_shell_view_model()
-        MainWindow(view_model).show_about()
-        assert shown == [(view_model.about.title, view_model.about.body)]
+        box = MainWindow(view_model).about_box()
+        assert box.windowTitle() == view_model.about.title
+        assert box.text() == view_model.about.body
 
 
 class TestRun:

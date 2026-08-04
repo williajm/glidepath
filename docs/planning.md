@@ -311,6 +311,26 @@ a span under one whole month rolls by nothing (the §4.1 whole-month
 convention), which keeps the common freshly-stated case an exact
 no-op.
 
+### 4.9 Launch example and form clearing
+
+**Decision.** The facts form opens pre-filled with a shipped example
+plan (`app/example.py` — the §4.5 golden persona extended with a
+workplace DC, an ISA, a state pension forecast, and a spending need)
+and the shell submits it immediately, so the first launch shows a real
+projection instead of a blank screen. The status line says it is an
+example and not the user's data; one clear button empties the form and
+resets the session to no plan. The example is nothing but raw form
+text driven through the ordinary `parse_facts_form` path — a test
+guarantees it parses and projects, so the opening screen can never
+show an error. **Why.** An empty form hides the product — §1's
+inspectability means nothing with nothing to inspect — and routing the
+example through the normal submission path preserves the facts
+principle: the app still never silently invents *user* facts; the
+example is labelled, replaceable, and clearable. **Rejected:** seeding
+the session with a pre-built `Household` (bypasses the form pipeline
+and can drift from what a user could actually type); a separate demo
+mode (a second surface to maintain for no extra information).
+
 ## 5. Design
 
 ### 5.1 Domain model
@@ -1485,6 +1505,11 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   engine when the AA charge is wired (9.5 note). Final-salary linkage,
   split revaluation bases and member DB contributions stay out (§2,
   §5.1).*
+- [x] 9.7 Launch example + shell theme — *the facts form opens with the
+  §4.9 example plan projected and a clear button resetting the session;
+  a Fusion-based theme in `gui/style.py` (presentation only, no copy or
+  policy) built around the brand green, with the icon and About/README
+  wordmark shipped as packaged assets under `gui/assets/`.*
 
 ## 9. Open questions
 

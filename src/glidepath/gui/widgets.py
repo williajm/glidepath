@@ -7,6 +7,7 @@ render view models and forward raw user input back.
 
 from datetime import UTC, date, datetime
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -30,6 +31,7 @@ from glidepath.app import (
     build_charts_view_model,
     build_inspector_view_model,
     build_scenarios_view_model,
+    example_facts_form_data,
     facts_saved_message,
     format_form_errors,
     initial_plan_state,
@@ -46,6 +48,7 @@ from glidepath.gui.charts import ChartsPane
 from glidepath.gui.forms import FactsEntryPane
 from glidepath.gui.inspector import InspectorPane
 from glidepath.gui.scenarios import ScenariosPane, ScenariosPaneCallbacks
+from glidepath.gui.style import wordmark_pixmap
 
 
 def _today() -> date:
@@ -93,9 +96,12 @@ class MainWindow(QMainWindow):
         self._comparison_basis = DEFAULT_CHART_BASIS
         self._comparison_metric = DEFAULT_COMPARISON_METRIC_KEY
         self.setWindowTitle(view_model.window_title)
+        self.resize(1120, 780)
 
         self.facts_pane = FactsEntryPane(
-            view_model.facts_form, self._handle_facts_submitted
+            view_model.facts_form,
+            self._handle_facts_submitted,
+            self._handle_cleared,
         )
         self.charts_pane = ChartsPane(self._handle_charts_basis)
         self.scenarios_pane = ScenariosPane(
@@ -115,13 +121,30 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.scenarios_pane, view_model.scenarios_tab_label)
         tabs.addTab(self.inspector_pane, view_model.inspector_tab_label)
         self.setCentralWidget(tabs)
-        self._refresh_result_panes()
+        self._load_example()
 
         # The "&" mnemonic is toolkit mechanics, not copy — the label
         # itself comes from the app layer (§4.7).
         help_menu = self.menuBar().addMenu(f"&{view_model.help_menu_label}")
         about_action = help_menu.addAction(view_model.about.title)
         about_action.triggered.connect(self.show_about)
+
+    def _load_example(self) -> None:
+        """Open with the example plan on screen and projected (§4.9).
+
+        The example is raw form text through the normal submission
+        path — guaranteed parseable by test — with the status line
+        explaining it is an example, not the user's data.
+        """
+        self.facts_pane.set_form_data(example_facts_form_data())
+        self._handle_facts_submitted(self.facts_pane.form_data())
+        self.facts_pane.status_label.setText(self._view_model.facts_form.example_note)
+
+    def _handle_cleared(self) -> str:
+        """Reset the session to no plan and re-render the result panes."""
+        self._state = initial_plan_state()
+        self._refresh_result_panes()
+        return self._view_model.facts_form.cleared_note
 
     def _handle_facts_submitted(self, data: FactsFormData) -> str:
         """Parse a facts submission; on success, re-project and refresh."""
@@ -221,10 +244,22 @@ class MainWindow(QMainWindow):
         self._refresh_scenarios_pane()
         self.inspector_pane.refresh(build_inspector_view_model(self._state))
 
+    def about_box(self) -> QMessageBox:
+        """The About box: the wordmark over the disclaimer copy (§1)."""
+        about = self._about_view_model
+        box = QMessageBox(self)
+        box.setWindowTitle(about.title)
+        box.setText(about.body)
+        box.setIconPixmap(
+            wordmark_pixmap().scaledToWidth(
+                360, Qt.TransformationMode.SmoothTransformation
+            )
+        )
+        return box
+
     def show_about(self) -> None:
         """Show the About box; it repeats the disclaimer (§1)."""
-        about = self._about_view_model
-        QMessageBox.about(self, about.title, about.body)
+        self.about_box().exec()
 
 
 def prompt_disclaimer(view_model: DisclaimerViewModel) -> bool:
