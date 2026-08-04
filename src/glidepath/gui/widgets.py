@@ -433,7 +433,11 @@ class MainWindow(QMainWindow):
 
     def show_about(self) -> None:
         """Show the About dialog; it repeats the disclaimer (§1)."""
-        self.about_dialog().exec()
+        dialog = self.about_dialog()
+        dialog.exec()
+        # Parented dialogs outlive exec(); release each one instead of
+        # accruing a child per menu click until the window closes.
+        dialog.deleteLater()
 
     def help_guide_dialog(self) -> HelpGuideDialog:
         """The how-to-use guide, bound to the shell's guide view model."""
@@ -441,7 +445,9 @@ class MainWindow(QMainWindow):
 
     def show_help_guide(self) -> None:
         """Show the how-to-use guide."""
-        self.help_guide_dialog().exec()
+        dialog = self.help_guide_dialog()
+        dialog.exec()
+        dialog.deleteLater()
 
 
 def prompt_disclaimer(view_model: DisclaimerViewModel) -> bool:

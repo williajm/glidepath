@@ -38,10 +38,13 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
     (
         "Start from the example",
         (
-            "Glidepath opens with an example plan already projected, so "
-            "every tab has something to show. Nothing in it is your data: "
-            'replace the values with your own facts, or press "Clear the '
-            'form" to start blank.'
+            "On a fresh install glidepath opens with an example plan "
+            "already projected, so every tab has something to show; the "
+            "note under the form's buttons tells you while the example is "
+            "on screen. Replace its values with your own facts, or press "
+            '"Clear the form" to start blank. Once you have saved or '
+            "opened a plan of your own, the last one you used reopens at "
+            "launch instead."
         ),
     ),
     (
@@ -52,8 +55,8 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "your state pension record, each savings wrapper (workplace "
             "pension, SIPP, ISA, LISA, general account, or cash) with its "
             "balance and contributions, and any defined benefit pension. "
-            "Add one wrapper or DB section per account; dates left blank "
-            'default to today. Press "Save facts and project" to run the '
+            'Add one wrapper or DB section per account; "as of" dates '
+            'left blank default to today. Press "Save facts and project" to run the '
             "projection — if anything cannot be read, the message under "
             "the buttons says which field to fix and nothing is saved "
             "until it parses."
@@ -73,8 +76,8 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
         (
             "The Scenarios tab compares variants of your plan. Add a named "
             "scenario, then give it overrides: each override changes one "
-            "of your decisions (retirement age, contributions, planned "
-            "outflows) or one assumption — never a stated fact. The "
+            "of your decisions (like your retirement age or contribution "
+            "choices) or one assumption — never a stated fact. The "
             "comparison table and chart show every scenario against the "
             "base plan on the metric and money basis you pick."
         ),
