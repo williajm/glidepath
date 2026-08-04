@@ -14,10 +14,11 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGroupBox,
     QLabel,
     QMainWindow,
-    QMessageBox,
     QPushButton,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -29,6 +30,7 @@ from glidepath.app import (
     AboutViewModel,
     DisclaimerViewModel,
     FactsFormData,
+    HelpGuideViewModel,
     ShellViewModel,
     basis_from_key,
     build_charts_view_model,
@@ -90,8 +92,88 @@ class DisclaimerDialog(QDialog):
         layout.addWidget(buttons)
 
 
+class AboutDialog(QDialog):
+    """The About box: the wordmark above the disclaimer copy (§1).
+
+    A stock ``QMessageBox`` would put the wordmark beside the text and
+    squeeze the disclaimer into a narrow column; stacking them keeps
+    the copy readable.
+    """
+
+    def __init__(
+        self, view_model: AboutViewModel, parent: QWidget | None = None
+    ) -> None:
+        """Bind the about view model to the dialog."""
+        super().__init__(parent)
+        self.setWindowTitle(view_model.title)
+
+        self.wordmark_label = QLabel(self)
+        self.wordmark_label.setPixmap(
+            wordmark_pixmap().scaledToWidth(
+                320, Qt.TransformationMode.SmoothTransformation
+            )
+        )
+        self.wordmark_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        self.body_label = QLabel(view_model.body, self)
+        self.body_label.setWordWrap(True)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok, self)
+        buttons.accepted.connect(self.accept)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.wordmark_label)
+        layout.addWidget(self.body_label)
+        layout.addWidget(buttons)
+        # A wrapped label only wraps against a bound, and its size hint
+        # understates the wrapped height — fix the width and take the
+        # height from the layout's height-for-width so no line is cut.
+        self.setFixedSize(440, layout.totalHeightForWidth(440))
+
+
+class HelpGuideDialog(QDialog):
+    """The how-to-use guide: the intro, then one card per section."""
+
+    def __init__(
+        self, view_model: HelpGuideViewModel, parent: QWidget | None = None
+    ) -> None:
+        """Bind the help guide view model to the dialog."""
+        super().__init__(parent)
+        self.setWindowTitle(view_model.title)
+
+        self.intro_label = QLabel(view_model.intro, self)
+        self.intro_label.setWordWrap(True)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        cards = []
+        for section in view_model.sections:
+            card = QGroupBox(section.heading, content)
+            body = QLabel(section.body, card)
+            body.setWordWrap(True)
+            card_layout = QVBoxLayout(card)
+            card_layout.addWidget(body)
+            content_layout.addWidget(card)
+            cards.append(card)
+        self.section_cards = tuple(cards)
+        content_layout.addStretch(1)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.intro_label)
+        layout.addWidget(scroll, 1)
+        layout.addWidget(buttons)
+        self.resize(560, 640)
+
+
 class MainWindow(QMainWindow):
-    """The application shell: facts entry, the inspector, and Help → About."""
+    """The application shell: facts entry, the inspector, and the Help menu."""
 
     def __init__(
         self, view_model: ShellViewModel, settings_path: Path | None = None
@@ -149,8 +231,10 @@ class MainWindow(QMainWindow):
         save_as_action = file_menu.addAction(view_model.file_menu.save_as_label)
         save_as_action.triggered.connect(self.save_plan_as_dialog)
         help_menu = self.menuBar().addMenu(f"&{view_model.help_menu_label}")
-        about_action = help_menu.addAction(view_model.about.title)
-        about_action.triggered.connect(self.show_about)
+        self.help_guide_action = help_menu.addAction(view_model.help_guide.title)
+        self.help_guide_action.triggered.connect(self.show_help_guide)
+        self.about_action = help_menu.addAction(view_model.about.title)
+        self.about_action.triggered.connect(self.show_about)
 
     def open_plan(self, path: Path) -> bool:
         """Load the plan at ``path`` into the session; True when it loaded.
@@ -343,22 +427,27 @@ class MainWindow(QMainWindow):
         self._refresh_scenarios_pane()
         self.inspector_pane.refresh(build_inspector_view_model(self._state))
 
-    def about_box(self) -> QMessageBox:
-        """The About box: the wordmark over the disclaimer copy (§1)."""
-        about = self._about_view_model
-        box = QMessageBox(self)
-        box.setWindowTitle(about.title)
-        box.setText(about.body)
-        box.setIconPixmap(
-            wordmark_pixmap().scaledToWidth(
-                360, Qt.TransformationMode.SmoothTransformation
-            )
-        )
-        return box
+    def about_dialog(self) -> AboutDialog:
+        """The About dialog, bound to the shell's about view model."""
+        return AboutDialog(self._about_view_model, self)
 
     def show_about(self) -> None:
-        """Show the About box; it repeats the disclaimer (§1)."""
-        self.about_box().exec()
+        """Show the About dialog; it repeats the disclaimer (§1)."""
+        dialog = self.about_dialog()
+        dialog.exec()
+        # Parented dialogs outlive exec(); release each one instead of
+        # accruing a child per menu click until the window closes.
+        dialog.deleteLater()
+
+    def help_guide_dialog(self) -> HelpGuideDialog:
+        """The how-to-use guide, bound to the shell's guide view model."""
+        return HelpGuideDialog(self._view_model.help_guide, self)
+
+    def show_help_guide(self) -> None:
+        """Show the how-to-use guide."""
+        dialog = self.help_guide_dialog()
+        dialog.exec()
+        dialog.deleteLater()
 
 
 def prompt_disclaimer(view_model: DisclaimerViewModel) -> bool:
@@ -368,8 +457,10 @@ def prompt_disclaimer(view_model: DisclaimerViewModel) -> bool:
 
 
 __all__ = [
+    "AboutDialog",
     "AboutViewModel",
     "DisclaimerDialog",
+    "HelpGuideDialog",
     "MainWindow",
     "prompt_disclaimer",
 ]

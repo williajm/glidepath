@@ -15,6 +15,9 @@ from glidepath.app.copy import (
     DISCLAIMER_BODY,
     DISCLAIMER_DECLINE_LABEL,
     DISCLAIMER_TITLE,
+    HELP_GUIDE_INTRO,
+    HELP_GUIDE_SECTIONS,
+    HELP_GUIDE_TITLE,
     HELP_MENU_LABEL,
 )
 from glidepath.app.files import (
@@ -66,6 +69,23 @@ class AboutViewModel:
 
 
 @dataclass(frozen=True)
+class HelpSectionViewModel:
+    """One titled passage of the how-to-use guide."""
+
+    heading: str
+    body: str
+
+
+@dataclass(frozen=True)
+class HelpGuideViewModel:
+    """The how-to-use guide: what each part of the shell is for."""
+
+    title: str
+    intro: str
+    sections: tuple[HelpSectionViewModel, ...]
+
+
+@dataclass(frozen=True)
 class ShellViewModel:
     """Top-level application shell."""
 
@@ -78,6 +98,7 @@ class ShellViewModel:
     inspector_tab_label: str
     disclaimer: DisclaimerViewModel
     about: AboutViewModel
+    help_guide: HelpGuideViewModel
     facts_form: FactsFormViewModel
 
 
@@ -117,6 +138,14 @@ def build_shell_view_model() -> ShellViewModel:
         about=AboutViewModel(
             title=ABOUT_TITLE,
             body=f"{APP_NAME} {_installed_version()}\n\n{DISCLAIMER_BODY}",
+        ),
+        help_guide=HelpGuideViewModel(
+            title=HELP_GUIDE_TITLE,
+            intro=HELP_GUIDE_INTRO,
+            sections=tuple(
+                HelpSectionViewModel(heading=heading, body=body)
+                for heading, body in HELP_GUIDE_SECTIONS
+            ),
         ),
         facts_form=build_facts_form_view_model(),
     )

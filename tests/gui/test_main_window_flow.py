@@ -50,12 +50,13 @@ class TestLaunchExample:
         assert len(facts.wrappers.forms) == 2
         assert window.inspector_pane.facts_table.rowCount() > 0
 
-    def test_about_box_carries_the_wordmark_and_disclaimer(self) -> None:
-        """The About box heads the §1 disclaimer with the brand wordmark."""
+    def test_about_dialog_carries_the_wordmark_and_disclaimer(self) -> None:
+        """The About dialog heads the §1 disclaimer with the brand wordmark."""
         window = MainWindow(build_shell_view_model())
-        box = window.about_box()
-        assert not box.iconPixmap().isNull()
-        assert "glidepath" in box.text()
+        dialog = window.about_dialog()
+        wordmark = dialog.wordmark_label.pixmap()
+        assert not wordmark.isNull()
+        assert "glidepath" in dialog.body_label.text()
 
     def test_clear_button_resets_the_form_and_the_session(self) -> None:
         """One click back to a blank form and an empty projection."""
