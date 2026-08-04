@@ -41,7 +41,7 @@ decumulation — under explicit, inspectable inputs.
 
 | | Contents |
 | --- | --- |
-| **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions: deferred/accrued entitlements, plus active membership with CARE-style accrual (accrual rate, pensionable salary, service projection — 9.6). State pension incl. deferral. Deterministic and Monte Carlo annual projection (one step function, two return models — §5.2). Withdrawal strategies: fixed real, fixed %, guardrails, natural yield. Annuity purchases incl. partial annuitisation. Scenarios + comparison. JSON persistence. |
+| **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions: deferred/accrued entitlements, plus active membership with CARE-style accrual (accrual rate, pensionable salary, service projection — 9.6). State pension incl. deferral. Deterministic and Monte Carlo annual projection (one step function, two return models — §5.2). Withdrawal strategies: fixed real, fixed %, guardrails, natural yield. Annuity purchases incl. partial annuitisation. "When can I retire?" solver: earliest retirement age meeting a replacement-rate target, deterministic or Monte Carlo (§5.2, 9.14). Scenarios + comparison. JSON persistence. |
 | **Deferred (phased)** | Couples activation (the 9.4 spike scopes it first); announced future rules shipping as data in their year's files (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs); final-salary linkage and split deferment/in-payment revaluation bases for DB schemes (9.6 ships CARE-style accrual on the single basis). |
 | **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy); capital gains tax — the GIA models dividend and savings *income* only (9.2), never disposals. |
 
@@ -999,6 +999,26 @@ fixtures (roadmap 7.4): same returns, different order → different
 outcome — order-independent without withdrawals, materially different
 endings with them, and ruin in the bad-returns-first order at a
 spending level the good-first order survives.
+
+**Earliest retirement age.** `earliest_retirement_age` (roadmap 9.14)
+answers "when can I retire?", mirroring the `sustainable_income`
+search-over-runs shape. It probes candidate retirement ages in
+ascending order; each probe replaces the retirement-age decision and
+the spending plan with the target income — a whole-percent replacement
+rate times stated employment income, treated as the net spending need
+in today's money — and reuses one config, so probes share common
+random numbers and the result is reproducible from the seed (§4.6).
+The age domain is a few dozen whole years, so the ascending scan
+returns the exact earliest success even where success is not monotone
+in age — cheaper and more robust than the spending search's
+scan-plus-bisection over a continuum. Deterministic success is "no
+period's need unmet" (the ruin signal above); in Monte Carlo mode the
+same solver reads "success rate ≥ target" over the caller's seed and
+path count, with the search bounded by a path-projection budget across
+its candidate ages (20,000 by default) so an unsuccessful search
+cannot multiply the per-run path cap. A candidate with no retired
+period inside the projected horizon never tests the income and fails
+rather than succeeding vacuously.
 
 ### 5.3 UK region data files
 
