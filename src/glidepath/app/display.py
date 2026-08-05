@@ -97,6 +97,18 @@ def format_percent(value: Decimal) -> str:
     return f"{value * Decimal(100):.1f}%"
 
 
+def format_share(value: Decimal) -> str:
+    """A fraction as a whole-reading percentage, e.g. ``80%`` or ``62.5%``.
+
+    Trailing zeros are trimmed — allocation copy reads "80% equity",
+    never "80.0% equity".
+    """
+    text = format(value * Decimal(100), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return f"{text}%"
+
+
 def format_date(value: date) -> str:
     """A date in ISO format — the one date format the product uses."""
     return value.isoformat()

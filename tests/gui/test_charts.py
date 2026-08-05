@@ -201,6 +201,17 @@ class TestChartsPane:
         pane.refresh(view_model)
         assert pane.chart_tabs.count() == len(view_model.charts)
 
+    def test_the_allocation_note_renders(self) -> None:
+        """The "Invested as" line shows with a projection, hides without."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(build_charts_view_model(initial_plan_state()))
+        assert pane.allocation_label.isHidden()
+        view_model = projected_view_model()
+        pane.refresh(view_model)
+        assert not pane.allocation_label.isHidden()
+        assert pane.allocation_label.text() == view_model.allocation_note
+        assert view_model.allocation_note.startswith("Invested as")
+
     def test_refresh_keeps_the_selected_chart(self) -> None:
         """Rebuilding the sub-tabs must not move the user off a chart."""
         pane = ChartsPane(callbacks())

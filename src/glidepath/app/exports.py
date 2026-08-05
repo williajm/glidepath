@@ -363,6 +363,8 @@ def _results_sections(state: PlanState, request: ReportRequest) -> list[str]:
         f"<h2>{escape(_RESULTS_HEADING)}</h2>",
         f"<p>Money basis: {escape(_basis_label(request.basis))}</p>",
     ]
+    if charts.allocation_note:
+        parts.append(f"<p>{escape(charts.allocation_note)}</p>")
     for index, chart in enumerate(charts.charts):
         parts.append(f"<h3>{escape(chart.title)}</h3>")
         parts.append(

@@ -211,6 +211,9 @@ class ChartsPane(QWidget):
         self._build_backtest_box()
         busy_row = self._build_busy_row()
 
+        self.allocation_label = QLabel("", self)
+        self.allocation_label.setWordWrap(True)
+
         self.message_label = QLabel("", self)
         self.message_label.setWordWrap(True)
 
@@ -224,6 +227,7 @@ class ChartsPane(QWidget):
         layout.addWidget(self._retirement_box)
         layout.addWidget(self._backtest_box)
         layout.addLayout(busy_row)
+        layout.addWidget(self.allocation_label)
         layout.addWidget(self.message_label)
         layout.addWidget(self.chart_tabs, 1)
 
@@ -239,6 +243,8 @@ class ChartsPane(QWidget):
         self._sync_monte_carlo(view_model.monte_carlo)
         self._sync_retirement(view_model.retirement)
         self._sync_backtest(view_model.backtest)
+        self.allocation_label.setText(view_model.allocation_note)
+        self.allocation_label.setVisible(bool(view_model.allocation_note))
         self.message_label.setText(view_model.message)
         self.message_label.setVisible(bool(view_model.message))
         self.chart_tabs.setVisible(bool(view_model.charts))

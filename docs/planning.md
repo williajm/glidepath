@@ -1787,6 +1787,26 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   dialogs, the chart raster, and the QPdfWriter device (no new
   runtime dependency). Every export carries the §1 disclaimer.*
 
+- [x] 9.20 Allocation transparency and per-wrapper allocation entry —
+  *the modelled asset mix must never be a silent assumption (a user
+  holding 100% equity was being projected on the default 80/20→40/60
+  glide path with nothing on screen saying so). Two parts. **Facts
+  form:** each savings wrapper gains an optional "Equity allocation,
+  %" field — one number, the remainder in bonds, blank follows the
+  glide path — parsed to the engine's existing `Wrapper.allocation`
+  (which already persisted; only the form refused it). Cash accounts
+  stay pinned all-cash and reject an entry rather than ignore it;
+  `form_cannot_represent` now refuses only cash-bearing allocations
+  (hand-edited files), not equity/bond splits. **Charts:** an
+  "Invested as" line on the charts tab (and the 9.19 PDF report)
+  states what each wrapper actually ran — a stated split as
+  "100% equity (stated)", pinned cash, or the glide path summarised
+  with its provenance ("80% equity de-risking to 40% over the 15
+  years before retirement (shipped default)" vs "(your override)") —
+  so every projection surface names its allocation. Percent copy
+  trims trailing zeros (`format_share`); a stated "62.5" round-trips
+  through the form exactly.*
+
 ## 9. Open questions
 
 Carried from the 2026-08-01 research pass:

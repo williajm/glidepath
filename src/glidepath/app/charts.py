@@ -19,7 +19,7 @@ from glidepath.app.backtest import (
     build_backtest_panel,
     selected_window,
 )
-from glidepath.app.display import format_money, format_wrapper_kind
+from glidepath.app.display import format_money, format_share, format_wrapper_kind
 from glidepath.app.montecarlo import (
     BAND_SPECS,
     DEFAULT_RUN_MODE,
@@ -30,13 +30,22 @@ from glidepath.app.retirement import (
     RetirementPanelViewModel,
     build_retirement_panel,
 )
-from glidepath.core import Money, ReportBasis, RunMode, build_report
+from glidepath.core import (
+    AssumptionKey,
+    Money,
+    Provenance,
+    ReportBasis,
+    RunMode,
+    build_report,
+    mapping_assumption_value,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
     from glidepath.app.plan import PlanState
     from glidepath.core import (
+        AssetAllocation,
         BacktestResult,
         EntityId,
         MonteCarloResult,
@@ -155,7 +164,11 @@ class ChartsViewModel:
     start alongside (roadmap 9.11; year alone until couples activate,
     9.4 — a two-person period has no single age to show). ``message``
     carries the empty-state copy when there is nothing to chart; it
-    is blank whenever ``charts`` is populated.
+    is blank whenever ``charts`` is populated. ``allocation_note``
+    states the asset allocation each wrapper actually ran — stated
+    equity split, pinned cash, or the glide path with its provenance —
+    so a projection can never silently model a mix the user does not
+    hold.
     """
 
     basis_heading: str
@@ -164,6 +177,7 @@ class ChartsViewModel:
     categories: tuple[str, ...]
     charts: tuple[ChartSpec, ...]
     message: str
+    allocation_note: str
     monte_carlo: MonteCarloPanelViewModel
     retirement: RetirementPanelViewModel
     backtest: BacktestPanelViewModel
@@ -246,6 +260,7 @@ def build_charts_view_model(
             categories=(),
             charts=(),
             message=message,
+            allocation_note="",
             monte_carlo=build_monte_carlo_panel(
                 state, mode, ending_pot_deflator=None, basis_suffix=suffix
             ),
@@ -273,6 +288,7 @@ def build_charts_view_model(
             _tax_chart(grouped, suffix),
         ),
         message="",
+        allocation_note=_allocation_note(state, grouped),
         monte_carlo=build_monte_carlo_panel(
             state,
             mode,
@@ -309,6 +325,73 @@ def _chart_bands(
     if state.backtest is not None:
         return _backtest_trajectories(state.backtest, grouped, backtest_year)
     return ()
+
+
+def _glide_note(state: PlanState) -> str:
+    """The glide path summarised with its provenance (planning §5.1)."""
+    assumption = state.assumptions.get(AssumptionKey.GLIDEPATH_DEFAULT_SHAPE)
+    shape = mapping_assumption_value(assumption)
+    start = format_share(Decimal(str(shape["equity_start"])))
+    at_retirement = format_share(Decimal(str(shape["equity_at_retirement"])))
+    years = shape["derisk_years_before_retirement"]
+    provenance = (
+        "shipped default"
+        if assumption.provenance is Provenance.DEFAULT_ASSUMPTION
+        else "your override"
+    )
+    if start == at_retirement:
+        return f"glide path — {start} equity throughout ({provenance})"
+    return (
+        f"glide path — {start} equity de-risking to {at_retirement} over the"
+        f" {years} years before retirement ({provenance})"
+    )
+
+
+def _allocation_text(allocation: AssetAllocation) -> str:
+    """One stated allocation as copy: ``70% equity, 30% bonds``.
+
+    Zero slices are dropped — the weights sum to one, so at least one
+    always remains.
+    """
+    slices = (
+        (allocation.equity, "equity"),
+        (allocation.bonds, "bonds"),
+        (allocation.cash, "cash"),
+    )
+    return ", ".join(
+        f"{format_share(value)} {name}" for value, name in slices if value != Decimal(0)
+    )
+
+
+def _allocation_note(
+    state: PlanState, grouped: dict[Period, list[PeriodReportRow]]
+) -> str:
+    """What each wrapper is invested in, as one status line (§5.1).
+
+    Every projection surface — deterministic, Monte Carlo, backtest —
+    runs this allocation, so the line sits with the charts it
+    explains. A stated equity split reads ``(stated)``; a cash
+    account's pinned allocation is a rule and carries no suffix; a
+    wrapper with nothing stated names the glide path and whether it
+    is the shipped default or an override.
+    """
+    household = state.household
+    if household is None:
+        return ""
+    labels = wrapper_display_labels(row for rows in grouped.values() for row in rows)
+    glide = _glide_note(state)
+    parts = []
+    for person in household.persons:
+        for wrapper in person.wrappers:
+            label = labels.get(wrapper.id, format_wrapper_kind(wrapper.kind))
+            allocation = wrapper.allocation
+            if allocation is None:
+                parts.append(f"{label}: {glide}")
+            elif allocation.cash == Decimal(1):
+                parts.append(f"{label}: {_allocation_text(allocation)}")
+            else:
+                parts.append(f"{label}: {_allocation_text(allocation)} (stated)")
+    return "Invested as — " + "; ".join(parts)
 
 
 def _category_label(period: Period, rows: list[PeriodReportRow]) -> str:
