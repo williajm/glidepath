@@ -16,11 +16,14 @@ from decimal import ROUND_DOWN, Decimal
 import pytest
 
 from glidepath.core import (
+    AnnualAllowanceMeasurement,
+    AnnualAllowanceOutcome,
     AnnualCalendar,
     AnnuityBasis,
     AnnuityPurchase,
     AnnuityType,
     AssetAllocation,
+    AssetReturns,
     Assumption,
     AssumptionKey,
     AssumptionSet,
@@ -50,12 +53,15 @@ from glidepath.core import (
     NaturalYieldWithdrawalStrategy,
     NetWithdrawalPlan,
     Period,
+    PeriodReturns,
     Person,
     PlannedOutflow,
     Provenance,
     Rate,
     Region,
     ReliefMechanic,
+    ReturnModel,
+    ReturnModelFactory,
     RevaluationBasis,
     RevaluationReference,
     RunConfig,
@@ -68,6 +74,7 @@ from glidepath.core import (
     TaxLine,
     TaxResidencyId,
     TaxResult,
+    TrackedAssumptions,
     WithdrawalPlan,
     WithdrawalSourceId,
     WithdrawalState,
@@ -144,6 +151,19 @@ class FlatTaxSystem:
             tax_due=tax, taxable_income=taxed, tax_free_allowance=ZERO, lines=(line,)
         )
 
+    def annual_allowance_charge(
+        self, period: Period, tax_input: TaxInput, excess: Money
+    ) -> tuple[TaxLine, ...]:
+        """The flat rate on the excess, as its own labelled line."""
+        del period, tax_input
+        if excess <= ZERO:
+            return ()
+        tax = Money((TAX_RATE * excess.amount).quantize(PENNY, rounding=ROUND_DOWN))
+        line = TaxLine(
+            band="aa_charge_flat", rate=Rate(TAX_RATE), taxed=excess, tax=tax
+        )
+        return (line,)
+
 
 TIER_LIMIT = Money(Decimal(10000))
 LOWER_RATE = Decimal("0.20")
@@ -183,6 +203,43 @@ class TieredTaxSystem:
         return TaxResult(
             tax_due=tax, taxable_income=taxed, tax_free_allowance=ZERO, lines=(line,)
         )
+
+    def annual_allowance_charge(
+        self, period: Period, tax_input: TaxInput, excess: Money
+    ) -> tuple[TaxLine, ...]:
+        """No annual-allowance charge in this region."""
+        del period, tax_input, excess
+        return ()
+
+
+@dataclass(frozen=True)
+class FixedReturnModel:
+    """Every period returns the same all-equity nominal rate at zero CPI."""
+
+    equity: Decimal
+
+    def returns_for(self, period: Period, path: int, /) -> PeriodReturns:
+        """The fixed return, whatever the period and path."""
+        del period, path
+        return PeriodReturns(
+            assets=AssetReturns(
+                equity=Rate(self.equity),
+                bonds=Rate(Decimal(0)),
+                cash=Rate(Decimal(0)),
+            ),
+            cpi=Rate(Decimal(0)),
+        )
+
+
+def fixed_returns(equity: str) -> ReturnModelFactory:
+    """A factory injecting a fixed all-equity return into a run."""
+    model = FixedReturnModel(equity=Decimal(equity))
+
+    def build(_tracked: TrackedAssumptions) -> ReturnModel:
+        """The fixed model, whatever the run's assumptions."""
+        return model
+
+    return build
 
 
 @dataclass(frozen=True)
@@ -307,9 +364,30 @@ class StubWrapperRules:
 
 @dataclass
 class RecordingContributionRules:
-    """Pass-through relief mechanics that record every request."""
+    """Pass-through relief mechanics that record every request.
+
+    The annual-allowance hook records each period's measurement and
+    answers with the configured ``excess`` and ``rolled_pool``, so
+    tests can pin what the engine measured and how it applies the
+    outcome (roadmap 3.3).
+    """
 
     requests: list[MemberContributionRequest] = dataclass_field(default_factory=list)
+    measurements: list[AnnualAllowanceMeasurement] = dataclass_field(
+        default_factory=list
+    )
+    excess: Money = ZERO
+    rolled_pool: tuple[Money, ...] = ()
+
+    def annual_allowance(
+        self, measurement: AnnualAllowanceMeasurement, period: Period
+    ) -> AnnualAllowanceOutcome:
+        """Record the measurement; answer with the configured outcome."""
+        del period
+        self.measurements.append(measurement)
+        return AnnualAllowanceOutcome(
+            chargeable_excess=self.excess, carry_forward=self.rolled_pool
+        )
 
     def member_contribution(
         self, request: MemberContributionRequest, period: Period
@@ -2660,6 +2738,55 @@ class TestPartialPeriods:
         assert wrapper_result.fee == ZERO
         assert wrapper_result.closing_uncrystallised == Money(Decimal("10000.00"))
 
+    def test_stochastic_deviation_scales_by_root_fraction(self) -> None:
+        """A half-year period scales the shock by sqrt(1/2), not 1/2 (#115).
+
+        The injected model returns 20% against a 10% expectation
+        (10% real equity at zero CPI), so the half-year growth rate is
+        the expected 10% x 1/2 plus the 10% deviation x sqrt(1/2) —
+        not the linear (20% - 0%) x 1/2 — keeping a partial period's
+        return standard deviation at sigma root-f.
+        """
+        account = wrapper_of(FREE, "10000", as_of=date(2026, 7, 1))
+        plan = household_of(person_of((account,)))
+        result = run(
+            plan,
+            assumptions_with(),
+            stub_region(),
+            RunConfig(today=date(2026, 7, 1), horizon_end=date(2026, 12, 31)),
+            return_model_factory=fixed_returns("0.20"),
+        )
+        [snapshot] = result.snapshots
+        assert snapshot.year_fraction == Decimal("0.5")
+        [person_result] = snapshot.persons
+        [wrapper_result] = person_result.wrappers
+        rate = (
+            Decimal("0.10") * Decimal("0.5") + Decimal("0.10") * Decimal("0.5").sqrt()
+        )
+        assert wrapper_result.growth == Money(Decimal(10000) * rate).quantized()
+
+    def test_deterministic_partial_growth_stays_linear(self) -> None:
+        """With no deviation the half-year growth is exactly rate x 1/2.
+
+        The default deterministic model realises its own expectation,
+        so the sqrt-scaled shock term is exactly zero and the 10%
+        annual return contributes 5% — the pre-#115 arithmetic,
+        bit-for-bit.
+        """
+        account = wrapper_of(FREE, "10000", as_of=date(2026, 7, 1))
+        plan = household_of(person_of((account,)))
+        result = run(
+            plan,
+            assumptions_with(),
+            stub_region(),
+            RunConfig(today=date(2026, 7, 1), horizon_end=date(2026, 12, 31)),
+        )
+        [snapshot] = result.snapshots
+        [person_result] = snapshot.persons
+        [wrapper_result] = person_result.wrappers
+        assert wrapper_result.growth == Money(Decimal("500.00"))
+        assert wrapper_result.closing_uncrystallised == Money(Decimal("10500.00"))
+
 
 class TestBalanceRollForward:
     """Planning §4.8: stale wrapper balance facts roll forward to today."""
@@ -4264,3 +4391,199 @@ class TestSurplusBanking:
         )
         [person_result] = result.snapshots[0].persons
         assert person_result.banked == ZERO
+
+
+class TestAnnualAllowance:
+    """Roadmap 3.3: the per-period annual-allowance measurement and charge."""
+
+    def test_measurement_reports_pension_inputs_and_income(self) -> None:
+        """Only pension-wrapper contributions count as money purchase.
+
+        The RAS pension takes 10,000 member gross + 5,000 employer;
+        the free wrapper's 3,000 is not a pension input. Income is the
+        60,000 employment; the RAS gross feeds the relief measure.
+        """
+        pension_schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(10000)), recorded_on=RECORDED),
+            employer_amount=money_fact("5000"),
+            relief_mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
+        )
+        free_schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(3000)), recorded_on=RECORDED),
+        )
+        pension = wrapper_of(PENSION, "0", schedule=pension_schedule)
+        free = wrapper_of(FREE, "0", schedule=free_schedule)
+        rules = RecordingContributionRules()
+        person = person_of((pension, free), employment="60000")
+        run(
+            household_of(person),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [measurement] = rules.measurements
+        assert measurement.member_money_purchase == Money(Decimal(10000))
+        assert measurement.employer_money_purchase == Money(Decimal(5000))
+        assert measurement.total_income == Money(Decimal(60000))
+        assert measurement.net_pay_contributions == ZERO
+        assert measurement.relief_at_source_gross == Money(Decimal(10000))
+        assert measurement.db_arrangements == ()
+        assert measurement.mpaa_triggered_on is None
+        assert measurement.carry_forward == ()
+        assert measurement.scheme_member is True
+
+    def test_net_pay_deduction_is_added_back_to_total_income(self) -> None:
+        """Total income is measured before member pension deductions.
+
+        An 8,000 net-pay contribution leaves 52,000 of assessed pay,
+        but the taper measures start from the full 60,000 with the
+        8,000 reported as the net-pay deduction.
+        """
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(8000)), recorded_on=RECORDED),
+            relief_mechanic=ReliefMechanic.NET_PAY,
+        )
+        pension = wrapper_of(PENSION, "0", schedule=schedule)
+        rules = RecordingContributionRules()
+        person = person_of((pension,), employment="60000")
+        run(
+            household_of(person),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [measurement] = rules.measurements
+        assert measurement.total_income == Money(Decimal(60000))
+        assert measurement.net_pay_contributions == Money(Decimal(8000))
+        assert measurement.relief_at_source_gross == ZERO
+
+    def test_a_person_without_pensions_is_not_a_scheme_member(self) -> None:
+        """Only pension wrappers or DB streams mark scheme membership."""
+        free = wrapper_of(FREE, "1000")
+        rules = RecordingContributionRules()
+        run(
+            household_of(person_of((free,))),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [measurement] = rules.measurements
+        assert measurement.scheme_member is False
+
+    def test_charge_lines_append_to_the_final_assessment(self) -> None:
+        """A chargeable excess joins the period's tax as its own lines.
+
+        Flat 25% on 60,000 of income is 15,000; the region prices the
+        configured 4,000 excess at 1,000, so the final result carries
+        both lines and the 16,000 total — while taxable income stays
+        60,000 (the excess is a charge, not income).
+        """
+        rules = RecordingContributionRules(excess=Money(Decimal(4000)))
+        person = person_of((wrapper_of(FREE, "0"),), employment="60000")
+        result = run(
+            household_of(person),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.tax.tax_due == Money(Decimal(16000))
+        assert person_result.tax.taxable_income == Money(Decimal(60000))
+        assert [line.band for line in person_result.tax.lines] == [
+            "flat",
+            "aa_charge_flat",
+        ]
+        assert person_result.tax.lines[-1].tax == Money(Decimal(1000))
+
+    def test_rolled_pool_feeds_the_next_period(self) -> None:
+        """Each period's outcome pool is the next measurement's input."""
+        rules = RecordingContributionRules(
+            rolled_pool=(Money(Decimal(1000)), Money(Decimal(2000)))
+        )
+        person = person_of((wrapper_of(FREE, "1000"),))
+        run(
+            household_of(person),
+            assumptions_with(),
+            stub_region(rules),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first, second = rules.measurements
+        assert first.carry_forward == ()
+        assert second.carry_forward == (Money(Decimal(1000)), Money(Decimal(2000)))
+
+    def test_measurement_takes_the_trigger_standing_at_contribution_time(
+        self,
+    ) -> None:
+        """An in-period step-4 trigger reaches the measurement next period.
+
+        The first decumulation draw's taxable element marks flexible
+        access during step 4 — after the period's contributions — so
+        the first measurement still sees no trigger and the second
+        sees the recorded date.
+        """
+        pension = wrapper_of(PENSION, "50000")
+        rules = RecordingContributionRules()
+        person = person_of((pension,), date_of_birth=date(1960, 1, 1), retire_at=65)
+        run(
+            household_of(person, spending="10000"),
+            assumptions_with(),
+            stub_region(rules),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first, second = rules.measurements
+        assert first.mpaa_triggered_on is None
+        assert second.mpaa_triggered_on == date(2026, 1, 1)
+
+    def test_a_trigger_fact_reaches_the_first_measurement(self) -> None:
+        """A pre-plan flexible-access fact is in force from period one."""
+        pension = wrapper_of(PENSION, "1000")
+        rules = RecordingContributionRules()
+        person = person_of((pension,), mpaa_triggered_on=date(2025, 6, 1))
+        run(
+            household_of(person),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [measurement] = rules.measurements
+        assert measurement.mpaa_triggered_on == date(2025, 6, 1)
+
+    def test_db_streams_supply_openings_and_closings(self) -> None:
+        """A deferred DB stream reports pre-credit opening and closing.
+
+        The active membership credits 2% x 50,000 = 1,000 at the
+        period open, so the year's arrangement values 8,000 opening
+        against 9,000 closing (no revaluation on the NONE basis).
+        """
+        pension = db_pension_of(accrued="8000", membership=membership_of())
+        rules = RecordingContributionRules()
+        person = person_of((wrapper_of(FREE, "0"),), db_pensions=(pension,))
+        run(
+            household_of(person),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [measurement] = rules.measurements
+        [arrangement] = measurement.db_arrangements
+        assert arrangement.opening_annual == Money(Decimal(8000))
+        assert arrangement.closing_annual == Money(Decimal(9000))
+        assert measurement.scheme_member is True
+
+    def test_a_db_stream_in_payment_generates_no_arrangement(self) -> None:
+        """Benefits commencing by the period end stop the input amounts."""
+        pension = db_pension_of(accrued="8000", npa=66)
+        rules = RecordingContributionRules()
+        person = person_of(
+            (wrapper_of(FREE, "0"),),
+            date_of_birth=date(1960, 6, 1),
+            db_pensions=(pension,),
+        )
+        run(
+            household_of(person),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [measurement] = rules.measurements
+        assert measurement.db_arrangements == ()

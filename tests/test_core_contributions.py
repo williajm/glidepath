@@ -6,8 +6,11 @@ from decimal import Decimal
 import pytest
 
 from glidepath.core import (
+    AnnualAllowanceMeasurement,
+    AnnualAllowanceOutcome,
     AssumptionKey,
     ContributionSchedule,
+    DbArrangementInput,
     Decision,
     Fact,
     MemberContributionOutcome,
@@ -109,3 +112,51 @@ def test_outcome_net_pay_shape_constructs() -> None:
         unrelieved_excess=money("0"),
     )
     assert net_pay.taxable_pay_deduction == money("100")
+
+
+# --- annual-allowance boundary types (issue #116) ----------------------------
+
+
+def measurement(total_income: str = "50000") -> AnnualAllowanceMeasurement:
+    """A minimal valid measurement."""
+    return AnnualAllowanceMeasurement(
+        member_money_purchase=money("0"),
+        employer_money_purchase=money("0"),
+        db_arrangements=(),
+        total_income=money(total_income),
+        net_pay_contributions=money("0"),
+        relief_at_source_gross=money("0"),
+        cpi=Decimal(0),
+        mpaa_triggered_on=None,
+        scheme_member=True,
+        carry_forward=(),
+    )
+
+
+def test_measurement_constructs() -> None:
+    """A valid measurement carries its inputs unchanged."""
+    built = measurement()
+    assert built.total_income == money("50000")
+    assert built.carry_forward == ()
+
+
+def test_measurement_rejects_negative_amounts() -> None:
+    """Every monetary input must be non-negative."""
+    with pytest.raises(ValueError, match="non-negative"):
+        measurement(total_income="-1")
+
+
+def test_db_arrangement_rejects_negative_entitlements() -> None:
+    """Opening and closing annual pensions must be non-negative."""
+    opening = money("-1")
+    closing = money("0")
+    with pytest.raises(ValueError, match="non-negative"):
+        DbArrangementInput(opening_annual=opening, closing_annual=closing)
+
+
+def test_outcome_rejects_negative_carry_forward() -> None:
+    """A rolled pool must hold non-negative entries."""
+    excess = money("0")
+    pool = (money("-1"),)
+    with pytest.raises(ValueError, match="non-negative"):
+        AnnualAllowanceOutcome(chargeable_excess=excess, carry_forward=pool)

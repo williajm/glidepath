@@ -119,3 +119,21 @@ class TaxSystem(Protocol):
     def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:
         """Assess ``tax_input`` for ``period`` under this region's rules."""
         ...
+
+    def annual_allowance_charge(
+        self, period: Period, tax_input: TaxInput, excess: Money
+    ) -> tuple[TaxLine, ...]:
+        """Price the tax on a pension-input excess for ``period``.
+
+        ``excess`` is the chargeable excess a region's annual-allowance
+        measurement produced
+        (:meth:`~glidepath.core.contributions.ContributionRuleset.annual_allowance`);
+        ``tax_input`` is the same full income picture the period's
+        final assessment sees, fixing the excess's position in the
+        region's rate structure. The excess is a charge, not income —
+        it must never feed back into ``assess`` (it would distort
+        income-measured allowances) — so it prices here as separate
+        lines the engine appends to the final result. A region without
+        such a charge returns no lines.
+        """
+        ...

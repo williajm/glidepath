@@ -624,9 +624,12 @@ FA 2004 s234) with the opening value uprated by CPI (s235; the run's
 CPI path stands in for the September-CPI appropriate percentage) and
 the result floored at nil (PTM053301) — a deferred arrangement whose
 revaluation never outruns CPI generates nil by construction, matching
-the deferred-member carve-out. The region function ships with 9.6;
-the engine reads it when the AA charge is wired (§5.2, roadmap 9.5
-note).
+the deferred-member carve-out. The region function ships with 9.6 and
+the engine reads it each period through the annual-allowance
+measurement (#116, §5.2 step 5): every DB stream not yet in payment
+supplies its pre-credit opening entitlement and its
+credited-and-revalued closing entitlement, with benefits commencing by
+the period end ending the arrangement's input amounts.
 
 State pension: the official DWP forecast **is the fact and the only
 route to an amount** (#97). It is authoritative, free, and instant to
@@ -722,8 +725,9 @@ and UFPLS are gated by the NMPA schedule (§4.1). In-run tracking
 (roadmap 5.2): the run seeds a per-person tax-free-cash ledger from
 `lsa_used` and its flexible-access state from `mpaa_triggered_on`; each
 period's snapshot reports the cumulative tax-free cash used and the
-MPAA trigger date in effect at period end, so the UI and the later AA
-machinery (roadmap 9.5) read them straight off the result.
+MPAA trigger date in effect at period end, so the UI and the AA
+machinery (roadmap 9.5, wired by #116) read them straight off the
+result.
 
 **Life stages and glide path.** A person is not a snapshot: the projection
 moves them through `EARLY_ACCUMULATION → MID_ACCUMULATION → PRE_RETIREMENT
@@ -769,8 +773,9 @@ the `ReturnModel` differs** — a design invariant, not an aspiration.
 2. **Income** — DB in payment (revalued/uprated), state pension (uprating
    assumption), annuity income, employment income; entitlements beginning
    this period are pro-rated by whole months from their exact start date.
-3. **Contributions** — employee + employer, relief mechanics, AA/taper/MPAA
-   checks (region ruleset).
+3. **Contributions** — employee + employer, relief mechanics (region
+   ruleset); the AA/taper/MPAA measurement of what landed follows in
+   step 5, once the period's full income picture exists.
 4. **Withdrawals** — per strategy. `SpendingPlan` is a **net (after-tax)**
    need, so net-defined strategies (fixed real) are grossed up against the
    region tax system: iterate gross withdrawal → `TaxSystem.assess` → net
@@ -781,6 +786,9 @@ the `ReturnModel` differs** — a design invariant, not an aspiration.
 5. **Tax** — final `TaxSystem.assess` per person on the period's full
    categorised income picture. The gross-up in step 4 calls the same
    function, so the final assessment is consistent by construction.
+   The year's pension inputs are then measured against the region's
+   allowances and any chargeable excess is priced and appended to the
+   assessment (the annual-allowance conventions below).
 6. **Fees** — platform + fund on average balances (the mean of the
    opening and post-flow balances; the fee never exceeds what the
    account holds).
@@ -792,6 +800,39 @@ growth approximates intra-year accrual acceptably at annual resolution.
 `PeriodSnapshot` records per person/wrapper: opening/closing balances,
 flows by category, tax with breakdown, ages, stage, allocation.
 
+**Annual-allowance wiring (decided — #116, roadmap 3.3/9.5).** Each
+period the engine builds a region-agnostic measurement of the year's
+pension inputs — member gross (provider relief included) plus employer
+contributions into pension wrappers, and each not-yet-in-payment DB
+stream's opening/closing entitlement for the region to value (§6) —
+alongside the income measures the taper needs: total taxable income
+*before* member pension deductions (net-pay amounts added back,
+portfolio income included), the net-pay and relief-at-source member
+amounts, and the period's CPI. The region ruleset applies its taper,
+MPAA and carry-forward machinery and returns the chargeable excess
+plus the rolled carry-forward pool. Conventions: the measurement takes
+the MPAA trigger *standing when the contributions were made*, so
+inputs paid at step 3 before a step-4 in-period trigger are measured
+pre-trigger (HS345's pre/post-trigger split at the model's own event
+order), while a pre-plan trigger fact governs every period; the
+carry-forward pool starts empty at the run start — pre-run years'
+unused allowance is unknown, so none is assumed (§4.1 conservative) —
+and rolls forward with each period's outcome; a DB stream whose
+benefits commence by the period end has crystallised and generates no
+input amount. The excess is priced by the region's tax system as
+top-slice lines at the taxpayer's own schedule rates with the
+relief-extended limits (FA 2004 s227B, s192(4)) — a charge, not
+income, so it never feeds back through `assess` (the personal
+allowance and its taper cannot move) and never disturbs the
+offset/gross-up/wrapper-charge decomposition; the lines are appended
+to the period's final assessment, so the snapshot's `tax_due` is the
+period's whole liability. Like the rest of an accumulation period's
+assessed tax, the charge is reported, not funded from modelled
+balances (employment tax likewise settles outside the model). Whole-
+year convention: a partial period's pro-rated inputs meet the full
+year's allowances, and a DB opening value takes the full year's CPI
+uplift.
+
 **Partial first and last periods (decided — roadmap 4.6).** The run
 anchors on the period containing `config.today` and ends with the period
 containing the horizon end, but models only the window
@@ -802,8 +843,8 @@ under one whole month the fraction is 0). Flows (employment income,
 scheduled contributions, spending need) are multiplied by the fraction,
 so a mid-period `today` never re-models months already reflected in the
 balance facts and the final period never models time past the horizon
-end. **Growth and fees scale the annual rate linearly by the same
-fraction** rather than compounding by a fractional exponent: linear
+end. **Fees and expected growth scale the annual rate linearly by the
+same fraction** rather than compounding by a fractional exponent: linear
 scaling is exact `Decimal` arithmetic (multiplication and division only,
 fully reproducible per §4.6), matches §4.1's linear whole-month
 convention, and its error against fractional-exponent compounding is
@@ -811,7 +852,17 @@ second-order small and confined to at most two periods per run.
 Fractional-exponent compounding was rejected because `Decimal` powers
 with non-integer exponents are only "almost always correctly rounded"
 (Python `decimal` docs), which is not the byte-identical reproducibility
-§4.6 demands. The cumulative CPI and nominal escalation factors advance
+§4.6 demands. **A stochastic return's deviation from the model's
+expectation scales by the square root of the fraction** (#115): the
+period return splits at the expected rate — the same Fisher
+composition the deterministic model returns and the mean the lognormal
+draws are matched to — with the expected component scaled linearly
+(keeping the mean on the deterministic path) and the shock scaled by
+`sqrt(fraction)`, so a partial period's return standard deviation is
+σ·√f rather than the understated σ·f. `Decimal.sqrt` *is* correctly
+rounded (unlike non-integer powers), so §4.6 reproducibility holds; in
+a deterministic run the deviation is exactly zero and the linear
+scaling is bit-for-bit unchanged. The cumulative CPI and nominal escalation factors advance
 between periods the same way — by the completed period's annual rate
 scaled linearly by that period's active fraction — so a mid-year start
 advances later price and earnings levels only by the months actually
@@ -1465,7 +1516,10 @@ phase are mostly parallelisable; phases are dependency-ordered. Labels:
 - [x] 3.3 Annual allowance + taper + MPAA — *taper arithmetic golden-tested;
   AA measures pension input amounts (incl. employer/DB) separately from the
   member relief limit (§6); MPAA flips on first flexible access, persists,
-  and leaves the alternative allowance for DB accrual (§9).*
+  and leaves the alternative allowance for DB accrual (§9). Engine-wired
+  (#116): each period's inputs are measured through the region ruleset at
+  §5.2 step 5 and the chargeable excess is priced as top-slice tax lines
+  (FA 2004 s227B) appended to the period's assessment.*
 - [x] 3.4 Fees and growth application — *applied per §5.2 operation order.*
 - [x] 3.5 Glide-path / life-stage allocation — *allocation interpolates the
   years-to-retirement table; stage derived, not stored.*
@@ -1600,7 +1654,9 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   topping up both s227ZA computations but never the MPAA;
   `carry_forward_generated` gates generation on scheme membership;
   `roll_carry_forward` advances the pool, expiring the oldest year.
-  Engine wiring lands with the AA charge (§5.2).*
+  Engine-wired with the AA charge (#116): the pool starts empty at the
+  run start (§4.1 conservative — pre-run years' unused allowance is
+  unknown) and rolls forward with each period's assessment (§5.2).*
 - [x] 9.6 DB active accrual — *accrual rate, pensionable salary and service
   projection for active DB membership. Shipped: `DBActiveMembership`
   (accrual rate, pensionable salary, optional leave-and-defer age) on
@@ -1609,7 +1665,8 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   earnings growth, service gated by the retirement/leave/taken
   boundaries; `pension.db_valuation_factor` (16) in the tax-year data
   and the region's `db_pension_input_amount` per PTM053301, read by the
-  engine when the AA charge is wired (9.5 note). Final-salary linkage,
+  engine each period through the annual-allowance measurement (#116;
+  §5.2 step 5). Final-salary linkage,
   split revaluation bases and member DB contributions stay out (§2,
   §5.1).*
 - [x] 9.7 Launch example + shell theme — *the facts form opens with the

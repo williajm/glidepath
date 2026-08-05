@@ -19,7 +19,9 @@ from decimal import Decimal
 import pytest
 
 from glidepath.core import (
+    AnnualAllowanceMeasurement,
     ContributionRuleset,
+    DbArrangementInput,
     MemberContributionRequest,
     Money,
     Period,
@@ -806,3 +808,146 @@ def test_db_input_rejects_negative_amounts(pension: PensionRules) -> None:
         db_pension_input_amount(
             pension, opening_annual=opening, closing_annual=closing, cpi=cpi
         )
+
+
+# --- the composed annual_allowance measurement (issue #116) ------------------
+
+
+def measurement_of(
+    *,
+    member: str = "0",
+    employer: str = "0",
+    db: tuple[DbArrangementInput, ...] = (),
+    total_income: str = "50000",
+    net_pay: str = "0",
+    ras: str = "0",
+    cpi: str = "0",
+    mpaa_triggered_on: date | None = None,
+    scheme_member: bool = True,
+    carry_forward: tuple[str, ...] = (),
+) -> AnnualAllowanceMeasurement:
+    """One period's measurement with hand-set inputs."""
+    return AnnualAllowanceMeasurement(
+        member_money_purchase=money(member),
+        employer_money_purchase=money(employer),
+        db_arrangements=db,
+        total_income=money(total_income),
+        net_pay_contributions=money(net_pay),
+        relief_at_source_gross=money(ras),
+        cpi=Decimal(cpi),
+        mpaa_triggered_on=mpaa_triggered_on,
+        scheme_member=scheme_member,
+        carry_forward=tuple(money(entry) for entry in carry_forward),
+    )
+
+
+def test_inputs_within_the_allowance_generate_carry_forward(
+    rules: UkContributionRuleset,
+) -> None:
+    """£20,000 of inputs against the £60,000 AA: no excess, £40,000 carried."""
+    outcome = rules.annual_allowance(
+        measurement_of(member="15000", employer="5000"), TAX_YEAR_2026_27
+    )
+    assert outcome.chargeable_excess == money("0")
+    assert outcome.carry_forward == (money("40000"),)
+
+
+def test_excess_above_the_allowance_is_chargeable(
+    rules: UkContributionRuleset,
+) -> None:
+    """£70,000 of inputs: £10,000 chargeable, nothing carried forward."""
+    outcome = rules.annual_allowance(
+        measurement_of(member="50000", employer="20000", total_income="80000"),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.chargeable_excess == money("10000")
+    assert outcome.carry_forward == (money("0"),)
+
+
+def test_taper_reduces_the_allowance(rules: UkContributionRuleset) -> None:
+    """£300,000 income tapers the AA to £40,000: £60,000 in leaves £20,000.
+
+    Threshold income is 240,000 (60,000 relief-at-source deducted) and
+    adjusted income 300,000 — 40,000 over the limit, so the allowance
+    drops by 20,000.
+    """
+    outcome = rules.annual_allowance(
+        measurement_of(member="60000", total_income="300000", ras="60000"),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.chargeable_excess == money("20000")
+
+
+def test_mpaa_floors_the_excess_against_carry_forward(
+    rules: UkContributionRuleset,
+) -> None:
+    """Post-trigger money-purchase inputs over the MPAA resist the pool.
+
+    £20,000 after flexible access exceeds the £10,000 MPAA by £10,000
+    — a floor no carry-forward can offset (HS345), however much the
+    pool holds.
+    """
+    outcome = rules.annual_allowance(
+        measurement_of(
+            member="20000",
+            mpaa_triggered_on=date(2025, 1, 1),
+            carry_forward=("50000",),
+        ),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.chargeable_excess == money("10000")
+
+
+def test_a_trigger_after_the_period_leaves_the_full_allowance(
+    rules: UkContributionRuleset,
+) -> None:
+    """Inputs made before the trigger period measure against the full AA."""
+    outcome = rules.annual_allowance(
+        measurement_of(member="20000", mpaa_triggered_on=date(2027, 6, 1)),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.chargeable_excess == money("0")
+    assert outcome.carry_forward == (money("40000"),)
+
+
+def test_carry_forward_offsets_earliest_first(
+    rules: UkContributionRuleset,
+) -> None:
+    """A £10,000 excess draws £5,000 then £3,000, leaving £2,000 charged."""
+    outcome = rules.annual_allowance(
+        measurement_of(
+            member="70000", total_income="80000", carry_forward=("5000", "3000")
+        ),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.chargeable_excess == money("2000")
+    assert outcome.carry_forward == (money("0"), money("0"), money("0"))
+
+
+def test_db_arrangements_value_into_pension_inputs(
+    rules: UkContributionRuleset,
+) -> None:
+    """A DB input of 16 x (11,000 - 10,000 x 1.02) joins the measure.
+
+    The £12,800 DB amount on top of £50,000 money purchase makes
+    £62,800 of pension inputs — £2,800 over the allowance.
+    """
+    arrangement = DbArrangementInput(
+        opening_annual=money("10000"), closing_annual=money("11000")
+    )
+    outcome = rules.annual_allowance(
+        measurement_of(member="50000", db=(arrangement,), cpi="0.02"),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.chargeable_excess == money("2800")
+
+
+def test_no_scheme_membership_generates_no_carry_forward(
+    rules: UkContributionRuleset,
+) -> None:
+    """A year without membership carries nothing, however unused the AA."""
+    outcome = rules.annual_allowance(
+        measurement_of(scheme_member=False), TAX_YEAR_2026_27
+    )
+    assert outcome.chargeable_excess == money("0")
+    assert outcome.carry_forward == (money("0"),)
