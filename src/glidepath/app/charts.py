@@ -328,22 +328,29 @@ def _chart_bands(
 
 
 def _glide_note(state: PlanState) -> str:
-    """The glide path summarised with its provenance (planning §5.1)."""
+    """The glide path summarised with its provenance (planning §5.1).
+
+    The flat-shape check compares the Decimal values, not their
+    formatted text — ``1.0`` and ``1`` are the same allocation.
+    """
     assumption = state.assumptions.get(AssumptionKey.GLIDEPATH_DEFAULT_SHAPE)
     shape = mapping_assumption_value(assumption)
-    start = format_share(Decimal(str(shape["equity_start"])))
-    at_retirement = format_share(Decimal(str(shape["equity_at_retirement"])))
+    start_share = Decimal(str(shape["equity_start"]))
+    retirement_share = Decimal(str(shape["equity_at_retirement"]))
     years = shape["derisk_years_before_retirement"]
     provenance = (
         "shipped default"
         if assumption.provenance is Provenance.DEFAULT_ASSUMPTION
         else "your override"
     )
-    if start == at_retirement:
-        return f"glide path — {start} equity throughout ({provenance})"
+    if start_share == retirement_share:
+        return (
+            f"glide path — {format_share(start_share)} equity throughout ({provenance})"
+        )
     return (
-        f"glide path — {start} equity de-risking to {at_retirement} over the"
-        f" {years} years before retirement ({provenance})"
+        f"glide path — {format_share(start_share)} equity de-risking to"
+        f" {format_share(retirement_share)} over the {years} years before"
+        f" retirement ({provenance})"
     )
 
 
