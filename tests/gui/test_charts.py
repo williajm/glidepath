@@ -12,7 +12,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtCharts import QBarSet, QChartView, QStackedBarSeries
+from PySide6.QtCharts import QBarSet, QChartView, QLineSeries, QStackedBarSeries
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
 
 from glidepath.app import (
@@ -53,6 +54,7 @@ from glidepath.core import (
 )
 from glidepath.gui import charts as gui_charts
 from glidepath.gui.charts import ChartsPane, ChartsPaneCallbacks
+from glidepath.gui.style import CHART_BAND_INKS, CHART_SERIES, CHART_SURFACE
 from glidepath.gui.widgets import MainWindow
 from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
 
@@ -407,6 +409,78 @@ class TestRetirementCard:
         assert not pane.retirement_detail_label.isHidden()
         assert "£33,000.00" in pane.retirement_detail_label.text()
         assert pane.retirement_message_label.isHidden()
+
+
+class TestChartTheme:
+    """The charts wear the theme's series palette and chrome (§4.7)."""
+
+    def test_bar_sets_take_the_series_palette_in_fixed_order(self) -> None:
+        """Series colours come from the fixed-order palette, by slot.
+
+        The slot order is the palette's colour-vision-safety
+        mechanism, so it is pinned: re-ranking or cycling colours
+        would silently break the validated adjacent-pair separation.
+        The surface-coloured border is the gap that keeps stacked
+        segments readable.
+        """
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        for tab_index in range(pane.chart_tabs.count()):
+            view = pane.chart_tabs.widget(tab_index)
+            assert isinstance(view, QChartView)
+            [series] = view.chart().series()
+            assert isinstance(series, QStackedBarSeries)
+            for slot, bar_set in enumerate(series.barSets()):
+                assert bar_set.color().name() == CHART_SERIES[slot]
+                assert bar_set.borderColor().name() == CHART_SURFACE
+
+    def test_band_lines_wear_the_ordered_inks(self) -> None:
+        """Percentile overlays take the neutral ink ramp, in band order.
+
+        One hue stepped by lightness keeps the ordered bands apart
+        from every series fill and from each other.
+        """
+        pane = ChartsPane(callbacks())
+        pane.refresh(monte_carlo_view_model())
+        view = pane.chart_tabs.widget(0)
+        assert isinstance(view, QChartView)
+        bands = view.chart().series()[1:]
+        assert bands
+        for slot, line in enumerate(bands):
+            assert isinstance(line, QLineSeries)
+            pen = line.pen()
+            assert pen.color().name() == CHART_BAND_INKS[slot]
+            assert pen.width() == 2
+
+    def test_the_chart_chrome_is_recessive(self) -> None:
+        """White surface, horizontal-only hairline grid, muted axes."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        view = pane.chart_tabs.widget(0)
+        assert isinstance(view, QChartView)
+        chart = view.chart()
+        assert chart.backgroundBrush().color().name() == CHART_SURFACE
+        assert chart.localizeNumbers()
+        [x_axis] = chart.axes(Qt.Orientation.Horizontal)
+        assert not x_axis.isGridLineVisible()
+        [y_axis] = chart.axes(Qt.Orientation.Vertical)
+        assert y_axis.isGridLineVisible()
+
+    def test_single_series_charts_drop_the_legend(self) -> None:
+        """One unbanded series: the sub-tab title alone names it.
+
+        As soon as a second labelled entry appears (a percentile
+        band), the legend is back — identity is never colour-alone.
+        """
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        view = pane.chart_tabs.widget(0)
+        assert isinstance(view, QChartView)
+        assert not view.chart().legend().isVisible()
+        pane.refresh(monte_carlo_view_model())
+        banded = pane.chart_tabs.widget(0)
+        assert isinstance(banded, QChartView)
+        assert banded.chart().legend().isVisible()
 
 
 class _ToolTipRecorder:

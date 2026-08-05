@@ -17,6 +17,14 @@ stated, a **decision** you made, or an **assumption** the app defaulted
 — always inspectable, never silently guessed. All data stays local;
 nothing is transmitted.
 
+<p align="center">
+  <img src="docs/screenshots/charts.png"
+       alt="The charts tab: wrapper balances stacked by tax year with Monte Carlo percentile bands over them, the success-rate readout, and the retirement-age and backtest cards"
+       width="800">
+</p>
+
+*(All screenshots show example data, not anyone's real finances.)*
+
 What it models today (single person, UK):
 
 - **Wrappers** — workplace DC, SIPP, S&S ISA, LISA, GIA and cash, with
@@ -48,6 +56,28 @@ What it models today (single person, UK):
   sequence-of-returns risk that independent Monte Carlo draws miss.
 - **Scenarios** — named what-ifs over your decisions and assumptions,
   with a side-by-side comparison; plans saved as a local JSON file.
+
+## More screenshots
+
+Facts entry — everything on this screen is either a fact you state or
+a choice you make; anything estimated lives in the assumptions
+inspector instead:
+
+<p align="center">
+  <img src="docs/screenshots/facts.png"
+       alt="The facts tab: the About you, Household spending, and State pension cards of the entry form, with the example plan's values filled in"
+       width="800">
+</p>
+
+Stated vs assumed — the provenance view: the facts you stated, the
+choices in effect, and every assumption the run used with its value,
+default/overridden status, source, and date:
+
+<p align="center">
+  <img src="docs/screenshots/stated_vs_assumed.png"
+       alt="The stated-vs-assumed tab: tables of stated facts, choices in effect, assumptions used with sources, and the plan structure"
+       width="800">
+</p>
 
 ## Disclaimer
 

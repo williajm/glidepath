@@ -22,12 +22,13 @@ from PySide6.QtCharts import (
     QBarSet,
     QChart,
     QChartView,
+    QLegend,
     QLineSeries,
     QStackedBarSeries,
     QValueAxis,
 )
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QCursor, QImage, QPainter
+from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
@@ -43,6 +44,15 @@ from PySide6.QtWidgets import (
 )
 
 from glidepath.app import bar_tooltip
+from glidepath.gui.style import (
+    CHART_AXIS_LINE,
+    CHART_BAND_INKS,
+    CHART_GRID,
+    CHART_LABEL_INK,
+    CHART_SERIES,
+    CHART_SURFACE,
+    CHART_TEXT_INK,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -59,6 +69,12 @@ if TYPE_CHECKING:
 _CATEGORY_LABEL_ANGLE = -90
 
 _REPORT_CHART_SIZE = QSize(880, 460)
+
+_BAR_WIDTH = 0.65
+"""Bars fill this share of each category slot — substantial marks
+that still keep a clear gap between neighbouring years."""
+
+_BAND_LINE_WIDTH = 2
 
 
 @dataclass(frozen=True)
@@ -95,19 +111,52 @@ def _bar_hovered(
         QToolTip.hideText()
 
 
-def tooltip_bar_set(entry: ChartSeries, categories: tuple[str, ...]) -> QBarSet:
+def tooltip_bar_set(
+    entry: ChartSeries, categories: tuple[str, ...], slot: int = 0
+) -> QBarSet:
     """One series as a bar set with hover tooltips bound (§4.7).
 
     The tooltip copy comes from the app layer's exact ``Decimal``
-    amounts, not the float plot coordinates.
+    amounts, not the float plot coordinates. ``slot`` is the series'
+    position in the chart, picking its colour from the fixed-order
+    palette; the surface-coloured border keeps a hairline gap between
+    stacked segments so neighbours never read as one block.
     """
     bar_set = QBarSet(entry.label)
     for value in entry.values:
         bar_set.append(float(value))
+    bar_set.setColor(QColor(CHART_SERIES[slot % len(CHART_SERIES)]))
+    bar_set.setBorderColor(QColor(CHART_SURFACE))
     bar_set.hovered.connect(
         lambda status, index: _bar_hovered(entry, categories, index, hovering=status)
     )
     return bar_set
+
+
+def _apply_chart_chrome(
+    qchart: QChart, x_axis: QBarCategoryAxis, y_axis: QValueAxis
+) -> None:
+    """Dress one chart in the theme's chrome (style module docstring).
+
+    Recessive horizontal-only gridlines, muted axis ink, legend text
+    in primary ink with circular series markers, and locale-formatted
+    axis numbers so five-figure balances read with grouping
+    separators.
+    """
+    qchart.setBackgroundBrush(QBrush(QColor(CHART_SURFACE)))
+    qchart.setBackgroundRoundness(0)
+    qchart.setLocalizeNumbers(True)
+    legend = qchart.legend()
+    legend.setMarkerShape(QLegend.MarkerShape.MarkerShapeCircle)
+    legend.setLabelColor(QColor(CHART_TEXT_INK))
+    x_axis.setGridLineVisible(False)
+    x_axis.setTruncateLabels(False)
+    y_axis.setLabelFormat("%.0f")
+    y_axis.setGridLinePen(QPen(QColor(CHART_GRID), 1))
+    for axis in (x_axis, y_axis):
+        axis.setLinePen(QPen(QColor(CHART_AXIS_LINE), 1))
+        axis.setLabelsColor(QColor(CHART_LABEL_INK))
+        axis.setTitleBrush(QBrush(QColor(CHART_LABEL_INK)))
 
 
 def chart_view(
@@ -115,8 +164,9 @@ def chart_view(
 ) -> QChartView:
     """One stacked bar chart, percentile bands overlaid, bound to a spec."""
     series = QStackedBarSeries()
-    for entry in chart.series:
-        series.append(tooltip_bar_set(entry, categories))
+    series.setBarWidth(_BAR_WIDTH)
+    for slot, entry in enumerate(chart.series):
+        series.append(tooltip_bar_set(entry, categories, slot))
 
     qchart = QChart()
     qchart.addSeries(series)
@@ -134,15 +184,23 @@ def chart_view(
     qchart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
     series.attachAxis(y_axis)
 
-    for band in chart.bands:
+    for slot, band in enumerate(chart.bands):
         line = QLineSeries()
         line.setName(band.label)
+        line.setPen(
+            QPen(QColor(CHART_BAND_INKS[slot % len(CHART_BAND_INKS)]), _BAND_LINE_WIDTH)
+        )
         for index, value in enumerate(band.values):
             line.append(float(index), float(value))
         qchart.addSeries(line)
         line.attachAxis(x_axis)
         line.attachAxis(y_axis)
 
+    _apply_chart_chrome(qchart, x_axis, y_axis)
+    # A single unbanded series needs no legend box — the sub-tab title
+    # already names it; identity-by-colour only starts at two entries.
+    if len(chart.series) + len(chart.bands) == 1:
+        qchart.legend().setVisible(False)
     view = QChartView(qchart, parent)
     view.setRenderHint(QPainter.RenderHint.Antialiasing)
     return view
@@ -298,6 +356,7 @@ class ChartsPane(QWidget):
         retirement_controls.addStretch(1)
         retirement_layout.addLayout(retirement_controls)
         self.retirement_answer_label = QLabel("", self._retirement_box)
+        self.retirement_answer_label.setObjectName("answerLabel")
         self.retirement_answer_label.setWordWrap(True)
         retirement_layout.addWidget(self.retirement_answer_label)
         self.retirement_detail_label = QLabel("", self._retirement_box)
