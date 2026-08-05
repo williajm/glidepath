@@ -1,7 +1,7 @@
 # Canonical developer commands for glidepath. See CLAUDE.md.
 
 .DEFAULT_GOAL := help
-.PHONY: help check fix test deps audit sonar hooks
+.PHONY: help check fix test deps bump audit sonar hooks
 
 # Per-machine venv naming: Windows and WSL share this checkout, so each
 # platform gets its own environment (see CLAUDE.md).
@@ -20,6 +20,7 @@ help:
 	@echo "make fix    - auto-fix lint issues and format"
 	@echo "make test   - run tests with coverage"
 	@echo "make deps   - upgrade/lock dependencies with the 7-day cooldown, sync, verify"
+	@echo "make bump   - set the release version (V=X.Y.Z), minimally re-lock, verify"
 	@echo "make audit  - pip-audit the lockfile for known CVEs"
 	@echo "make sonar  - run tests then a local SonarQube scan (needs sonar-scanner)"
 	@echo "make hooks  - install pre-commit hooks"
@@ -50,6 +51,17 @@ test:
 deps:
 	uv run --no-project python scripts/update_exclude_newer.py
 	uv lock --upgrade
+	uv sync --locked
+	uv run --locked python scripts/check_dep_age.py
+
+# Sanctioned version bump for releases (planning §4.10). uv.lock embeds the
+# project version, so a bump needs a re-lock — but a MINIMAL one: no
+# --upgrade, so every existing pin is kept, the exclude-newer cooldown
+# cutoff still applies to anything newly resolved, and the age check
+# re-verifies the whole lockfile afterwards.
+bump:
+	uv run --no-project python scripts/bump_version.py $(V)
+	uv lock
 	uv sync --locked
 	uv run --locked python scripts/check_dep_age.py
 
