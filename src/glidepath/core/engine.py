@@ -109,8 +109,9 @@ v1 engine conventions, superseded as later phases land:
   spends portfolio income.
 - Wrapper balance facts are dated by their statement (planning §4.8):
   each sub-balance rolls forward from its ``as_of`` to ``today`` over
-  whole months at the wrapper's expected nominal return — the
-  deterministic composition, whatever the run mode — with every
+  whole months at the wrapper's expected nominal return net of its
+  fee drag — the deterministic composition, whatever the run mode,
+  with fees before growth as in every modelled period — with every
   non-zero adjustment reported in the run's provenance; a balance
   dated after ``today`` is an engine error (the DB statement-date
   convention). Annual-allowance measurement joins the loop when the
@@ -226,6 +227,8 @@ _GROSS_UP_ITERATION_CAP = 48
 """Fixed-point iteration cap for the net-need gross-up (§5.2 step 4)."""
 _NET_TOLERANCE = Money(Decimal("0.005"))
 """Half a penny: residuals below ledger precision are settled, not chased."""
+_NO_FEES = FeeSchedule(platform=Rate(Decimal(0)), fund=Rate(Decimal(0)))
+"""The schedule of a kind the region exempts from the default fees."""
 _OUTFLOW_FUNDING = FixedRealWithdrawalStrategy()
 """Funds planned outflows falling before decumulation (roadmap 5.4).
 
@@ -695,10 +698,10 @@ class _Projection:
         """Seed each wrapper's opening sub-balances at ``today`` (§4.8).
 
         Every balance fact rolls forward from its statement ``as_of``
-        over whole months at the wrapper's expected nominal return,
-        and each non-zero adjustment is recorded for the run's
-        provenance — an estimate layered on the stated fact is never
-        applied silently (planning §4.8).
+        over whole months at the wrapper's expected nominal return net
+        of its fee drag, and each non-zero adjustment is recorded for
+        the run's provenance — an estimate layered on the stated fact
+        is never applied silently (planning §4.8).
         """
         balances: dict[str, tuple[Money, Money]] = {}
         for wrapper in self.person.wrappers:
@@ -721,17 +724,21 @@ class _Projection:
 
         The whole-month convention makes a balance stated within one
         month of ``today`` an exact no-op — no adjustment, no record.
-        The factor compounds like the DB statement-date convention:
-        integer-exponent whole years, linear remainder months, exact
-        ``Decimal`` arithmetic (planning §4.6). An *expected* nominal
-        return of -100% per year or worse is rejected — the same
-        positive-gross invariant the stochastic model enforces on its
-        expectation — so the factor is always strictly positive.
+        The annual rate is the expected nominal return net of the
+        wrapper's fee drag — ``(1 + nominal)(1 - fees) - 1``, fees
+        before growth exactly as every modelled period charges them
+        (§5.2 step 6; issue #111) — and the factor compounds like the
+        DB statement-date convention: integer-exponent whole years,
+        linear remainder months, exact ``Decimal`` arithmetic
+        (planning §4.6). A fee-adjusted expected return of -100% per
+        year or worse is rejected — the same positive-gross invariant
+        the stochastic model enforces on its expectation — so the
+        factor is always strictly positive.
 
         Raises:
             EngineError: If the fact is dated after ``today``, or the
-                wrapper's expected nominal gross return is not
-                positive.
+                wrapper's fee-adjusted expected nominal gross return
+                is not positive.
         """
         today = self.config.today
         if fact.as_of > today:
@@ -743,10 +750,12 @@ class _Projection:
         months = whole_months_between(fact.as_of, today)
         if months == 0:
             return fact.value
-        rate = self._expected_nominal_rate(self._opening_allocation(wrapper))
+        nominal = self._expected_nominal_rate(self._opening_allocation(wrapper))
+        kept_after_fees = _ONE - self._fees_for(wrapper).total_rate.value
+        rate = (_ONE + nominal) * kept_after_fees - _ONE
         if rate <= _MINUS_ONE:
             msg = (
-                f"{label}: the wrapper's expected nominal return"
+                f"{label}: the wrapper's fee-adjusted expected nominal return"
                 f" ({rate} per year) is -100% or worse; the roll-forward"
                 " needs a positive expected gross return (planning §4.8)"
             )
@@ -959,9 +968,18 @@ class _Projection:
         return glide_path_from_shape(shape)
 
     def _fees_for(self, wrapper: Wrapper) -> FeeSchedule:
-        """The wrapper's fee schedule, or the shipped fee assumptions."""
+        """The wrapper's fee schedule, or the shipped fee assumptions.
+
+        A kind the region exempts from the default fees — a bare cash
+        savings account, whose rate already is the whole deal — pays
+        nothing unless the wrapper states its own schedule; the fee
+        assumption keys are then never read, so they stay out of the
+        run's provenance (issue #118).
+        """
         if wrapper.fees is not None:
             return wrapper.fees
+        if not self.region.wrappers.bears_default_fees(wrapper.kind):
+            return _NO_FEES
         return FeeSchedule(
             platform=Rate(
                 decimal_assumption_value(self.tracked.get(AssumptionKey.FEES_PLATFORM))

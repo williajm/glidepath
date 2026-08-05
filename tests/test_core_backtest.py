@@ -142,6 +142,11 @@ class FreeWrapperRules:
         del kind
         return frozenset()
 
+    def bears_default_fees(self, kind: WrapperKindId) -> bool:
+        """Every kind bears the default fee assumptions."""
+        del kind
+        return True
+
     def lump_sum_allowance(self, period: Period) -> Money | None:
         """Uncapped."""
         del period

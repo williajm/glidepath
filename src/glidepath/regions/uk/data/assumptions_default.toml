@@ -40,7 +40,7 @@ basis = "Consistent with current gilt real-yield ballpark and the FCA lower rate
 [[assumption]]
 key = "returns.cash.real"
 value = "-0.005"
-basis = "Cash trails inflation after fees over long horizons"
+basis = "Cash trails inflation over long horizons; cash-kind accounts bear no default fees, so this is their whole return - a cash slice inside a platform wrapper bears that wrapper's fees on top"
 
 [[assumption]]
 key = "volatility.equity"
@@ -110,7 +110,7 @@ basis = "Typical UK target-date/lifestyling shape; a starting point only - per-p
 [[assumption]]
 key = "policy.state_pension.uprating"
 value = { rule = "triple_lock", floor = "0.025", deterministic_cpi_margin = "0.005" }
-basis = "Triple lock = max(earnings, CPI, floor 2.5%); deterministic mode proxies the long-run earnings premium as CPI + 0.5%; alternative scenario: cpi. Monte Carlo applies the true rule per path. Triple lock committed only to ~2029 (planning §6)"
+basis = "Triple lock = max(earnings, CPI, floor 2.5%), proxied as max(CPI + 0.5%, floor) - the margin stands in for the long-run earnings premium; alternative scenario: cpi. The proxy applies in every run mode: CPI is deterministic across Monte Carlo paths and no earnings series is modelled. Triple lock committed only to ~2029 (planning §6)"
 
 [[assumption]]
 key = "policy.tax.future_years"

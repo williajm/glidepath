@@ -222,6 +222,7 @@ class StubWrapperRules:
     free_bonus_rate: Rate | None = None
     free_window: Period | None = None
     sub_kind_cap: Money | None = None
+    fee_free_kinds: frozenset[WrapperKindId] = frozenset()
 
     def tax_treatment(self, kind: WrapperKindId, period: Period) -> WrapperTaxTreatment:
         """The pension pays out 25% tax-free; the free kind wholly so."""
@@ -279,6 +280,10 @@ class StubWrapperRules:
         if kind == PENSION:
             return frozenset({ReliefMechanic.RELIEF_AT_SOURCE, ReliefMechanic.NET_PAY})
         return frozenset()
+
+    def bears_default_fees(self, kind: WrapperKindId) -> bool:
+        """Every kind bears the default fees unless configured exempt."""
+        return kind not in self.fee_free_kinds
 
     def lump_sum_allowance(self, period: Period) -> Money | None:
         """The configured lifetime tax-free cash cap (None: uncapped)."""
@@ -380,6 +385,7 @@ def stub_region(
     free_bonus_rate: Rate | None = None,
     free_window: Period | None = None,
     sub_kind_cap: Money | None = None,
+    fee_free_kinds: frozenset[WrapperKindId] = frozenset(),
     tax_system: FlatTaxSystem | TieredTaxSystem | None = None,
 ) -> Region:
     """A calendar-year region over the stub implementations."""
@@ -394,6 +400,7 @@ def stub_region(
             free_bonus_rate=free_bonus_rate,
             free_window=free_window,
             sub_kind_cap=sub_kind_cap,
+            fee_free_kinds=fee_free_kinds,
         ),
         contributions=contributions or RecordingContributionRules(),
         state_pension=state_pension or StubStatePension(),
@@ -2599,6 +2606,97 @@ class TestBalanceRollForward:
         assert person_result.wrappers[0].opening_uncrystallised == Money(
             Decimal("11550.00")
         )
+
+    def test_roll_forward_nets_the_wrapper_fee_drag(self) -> None:
+        """Fees before growth net the roll-forward rate (issue #111).
+
+        A 1% platform fee on a 10% nominal return leaves
+        1.10 x 0.99 - 1 = 8.9% per year — the same fees-then-growth
+        order every modelled period applies — so 12 stale months open
+        10,000 at 10,890 rather than the gross 11,000.
+        """
+        pension = Wrapper(
+            id=EntityId("wrapper-stale-fee"),
+            kind=PENSION,
+            balance=money_fact("10000", as_of=date(2025, 1, 1)),
+            allocation=EQUITY_ONLY,
+            fees=FeeSchedule(platform=Rate(Decimal("0.01")), fund=Rate(Decimal(0))),
+        )
+        plan = household_of(person_of((pension,)))
+        result = run(plan, assumptions_with(), stub_region(), one_period_config())
+        [record] = result.provenance.balance_roll_forwards
+        assert record.factor == Decimal("1.089")
+        [person_result] = result.snapshots[0].persons
+        assert person_result.wrappers[0].opening_uncrystallised == Money(
+            Decimal("10890.00")
+        )
+
+    def test_default_fee_assumptions_drag_the_roll_forward(self) -> None:
+        """A wrapper without its own schedule nets the shipped defaults.
+
+        Platform 0.5% + fund 0.5% make the same 1% total drag as the
+        explicit-schedule case: factor 1.089, opening 10,890.
+        """
+        pension = Wrapper(
+            id=EntityId("wrapper-stale-default-fees"),
+            kind=PENSION,
+            balance=money_fact("10000", as_of=date(2025, 1, 1)),
+            allocation=EQUITY_ONLY,
+        )
+        plan = household_of(person_of((pension,)))
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "fees.platform": Decimal("0.005"),
+                    "fees.fund": Decimal("0.005"),
+                }
+            ),
+            stub_region(),
+            one_period_config(),
+        )
+        [record] = result.provenance.balance_roll_forwards
+        assert record.factor == Decimal("1.089")
+        [person_result] = result.snapshots[0].persons
+        assert person_result.wrappers[0].opening_uncrystallised == Money(
+            Decimal("10890.00")
+        )
+
+    def test_fee_exempt_kind_rolls_gross_and_pays_no_fee(self) -> None:
+        """A kind the region exempts ignores the default fees (#118).
+
+        With non-zero default fee assumptions but the pension kind
+        marked fee-exempt, the stale balance rolls at the gross 10%
+        and the modelled period charges no fee — and the fee
+        assumption keys, never read, stay out of the provenance.
+        """
+        pension = Wrapper(
+            id=EntityId("wrapper-stale-fee-exempt"),
+            kind=PENSION,
+            balance=money_fact("10000", as_of=date(2025, 1, 1)),
+            allocation=EQUITY_ONLY,
+        )
+        plan = household_of(person_of((pension,)))
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "fees.platform": Decimal("0.005"),
+                    "fees.fund": Decimal("0.005"),
+                }
+            ),
+            stub_region(fee_free_kinds=frozenset({PENSION})),
+            one_period_config(),
+        )
+        [record] = result.provenance.balance_roll_forwards
+        assert record.factor == Decimal("1.10")
+        [person_result] = result.snapshots[0].persons
+        [wrapper_result] = person_result.wrappers
+        assert wrapper_result.opening_uncrystallised == Money(Decimal("11000.00"))
+        assert wrapper_result.fee == ZERO
+        keys_read = {entry.key for entry in result.provenance.assumptions}
+        assert AssumptionKey.FEES_PLATFORM not in keys_read
+        assert AssumptionKey.FEES_FUND not in keys_read
 
 
 @dataclass(frozen=True)
