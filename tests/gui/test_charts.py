@@ -307,7 +307,7 @@ class TestBacktestCard:
         assert isinstance(view, QChartView)
         series = view.chart().series()
         assert len(series) == 1 + len(view_model.charts[0].bands)
-        assert len(view_model.charts[0].bands) == 3
+        assert len(view_model.charts[0].bands) == 5
 
 
 class TestRetirementCard:
@@ -689,7 +689,7 @@ class TestMainWindowBacktestFlow:
         assert "Worst starting year" in text
         view = pane.chart_tabs.widget(0)
         assert isinstance(view, QChartView)
-        assert len(view.chart().series()) == 4
+        assert len(view.chart().series()) == 6
 
     def test_a_plan_change_discards_an_in_flight_backtest(
         self, window: MainWindow

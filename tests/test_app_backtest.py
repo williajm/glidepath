@@ -279,14 +279,26 @@ class TestBacktestBands:
     def test_a_held_backtest_draws_bands_in_the_default_mode(
         self, bt_view_model: ChartsViewModel
     ) -> None:
-        """Acceptance criterion: the outcome range charts as 10/50/90 bands."""
+        """Acceptance criterion: the outcome range charts as bands.
+
+        The 9.13 percentile trio wrapped in the worst/best envelope —
+        window extremes are real historical outcomes, so the envelope
+        is drawn for a backtest where Monte Carlo clips to 10/90.
+        """
         balances = bt_view_model.charts[0]
-        assert len(balances.bands) == 3
+        labels = [band.label for band in balances.bands]
+        assert labels == [
+            "Worst",
+            "10th percentile",
+            "Median",
+            "90th percentile",
+            "Best",
+        ]
 
     def test_bands_survive_the_monte_carlo_mode(self, bt_state: PlanState) -> None:
         """With no Monte Carlo run held, the backtest bands still draw."""
         view_model = build_charts_view_model(bt_state, mode=RunMode.MONTE_CARLO)
-        assert len(view_model.charts[0].bands) == 3
+        assert len(view_model.charts[0].bands) == 5
 
     def test_no_backtest_no_bands(self, projected: PlanState) -> None:
         """Without a held result the balances chart draws bars alone."""

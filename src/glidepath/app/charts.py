@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
-from glidepath.app.backtest import BacktestPanelViewModel, build_backtest_panel
+from glidepath.app.backtest import (
+    BACKTEST_BAND_SPECS,
+    BacktestPanelViewModel,
+    build_backtest_panel,
+)
 from glidepath.app.display import format_money, format_wrapper_kind
 from glidepath.app.montecarlo import (
     BAND_SPECS,
@@ -31,6 +35,7 @@ from glidepath.core import Money, ReportBasis, RunMode, build_report
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
+    from glidepath.app.montecarlo import BandSpec
     from glidepath.app.plan import PlanState
     from glidepath.core import (
         BacktestResult,
@@ -288,9 +293,9 @@ def _chart_bands(
     other's result.
     """
     if mode is RunMode.MONTE_CARLO and state.monte_carlo is not None:
-        return _balance_bands(state.monte_carlo, grouped)
+        return _balance_bands(state.monte_carlo, grouped, BAND_SPECS)
     if state.backtest is not None:
-        return _balance_bands(state.backtest, grouped)
+        return _balance_bands(state.backtest, grouped, BACKTEST_BAND_SPECS)
     return ()
 
 
@@ -381,20 +386,24 @@ def wrapper_display_labels(rows: Iterable[PeriodReportRow]) -> dict[EntityId, st
 def _balance_bands(
     result: MonteCarloResult | BacktestResult,
     grouped: dict[Period, list[PeriodReportRow]],
+    specs: tuple[BandSpec, ...],
 ) -> tuple[ChartBand, ...]:
-    """The 10/50/90 percentile bands over the balances chart (9.13, 9.18).
+    """The percentile bands over the balances chart (9.13, 9.18).
 
     Both slow-run results answer the same ``balance_percentile``
-    reduction, so one composition serves paths and windows alike. The
-    balances are nominal; CPI is deterministic across paths and
-    windows (planning §5.2), so each period's band value deflates by
-    the same balance deflator the deterministic report rows carry — 1
-    under the nominal basis. A held result whose period count differs
-    from the projection's (the runs straddled a calendar day) draws no
-    bands rather than bands against the wrong periods.
+    reduction, so one composition serves paths and windows alike —
+    Monte Carlo draws the 10/50/90 trio, the backtest wraps it in the
+    worst/best envelope (``BACKTEST_BAND_SPECS``: window extremes are
+    real history, path extremes are sampling noise). The balances are
+    nominal; CPI is deterministic across paths and windows (planning
+    §5.2), so each period's band value deflates by the same balance
+    deflator the deterministic report rows carry — 1 under the nominal
+    basis. A held result whose period count differs from the
+    projection's (the runs straddled a calendar day) draws no bands
+    rather than bands against the wrong periods.
     """
     deflators = tuple(rows[0].balance_deflator for rows in grouped.values())
-    if len(result.balance_percentile(BAND_SPECS[0].percentile)) != len(deflators):
+    if len(result.balance_percentile(specs[0].percentile)) != len(deflators):
         return ()
     return tuple(
         ChartBand(
@@ -406,7 +415,7 @@ def _balance_bands(
                 )
             ),
         )
-        for spec in BAND_SPECS
+        for spec in specs
     )
 
 

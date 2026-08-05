@@ -15,17 +15,17 @@ plan.
 """
 
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from glidepath.app.display import format_money, format_percent
-from glidepath.app.montecarlo import BAND_SPECS, SUCCESS_RATE_LABEL
+from glidepath.app.montecarlo import BAND_SPECS, SUCCESS_RATE_LABEL, BandSpec
 from glidepath.app.plan import PlanState, region_for, replanned_state
 from glidepath.core import Money, RunConfig, run_windows
 from glidepath.regions.uk import load_returns_history
 
 if TYPE_CHECKING:
     from datetime import date
-    from decimal import Decimal
 
     from glidepath.core import BacktestResult
 
@@ -53,6 +53,30 @@ BACKTEST_STALE_MESSAGE: Final = (
 WINDOWS_LABEL: Final = "Windows"
 
 WORST_WINDOW_LABEL: Final = "Worst starting year"
+
+BACKTEST_BAND_SPECS: Final[tuple[BandSpec, ...]] = (
+    BandSpec(
+        band_label="Worst",
+        ending_pot_label="Ending pot, worst",
+        percentile=Decimal(0),
+    ),
+    *BAND_SPECS,
+    BandSpec(
+        band_label="Best",
+        ending_pot_label="Ending pot, best",
+        percentile=Decimal(100),
+    ),
+)
+"""The backtest's chart bands: the 9.13 trio wrapped in the envelope.
+
+Unlike Monte Carlo — whose path extremes are sampling noise that
+widens with the path count, hence its 10/90 clip — a window extreme
+is an actual historical outcome over a bounded window set, so the
+worst and best lines carry real meaning ("this is what starting in
+1907 did"). The mean is deliberately absent: ending-pot distributions
+are right-skewed, so a mean line reads optimistic against the median
+the trio already carries.
+"""
 
 
 @dataclass(frozen=True)

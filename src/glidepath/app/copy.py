@@ -93,8 +93,9 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "inflation): press Run backtest to read the share of "
             "historical starting years the plan survives, the worst "
             "starting year, and the range of outcomes as bands over the "
-            "balances chart — sequence-of-returns risk that independent "
-            "Monte Carlo draws cannot reproduce. "
+            "balances chart — worst to best, with the 10th/median/90th "
+            "percentiles between — sequence-of-returns risk that "
+            "independent Monte Carlo draws cannot reproduce. "
             'The "When can I retire?" card answers with the earliest '
             "retirement age at which the plan sustains a target income — "
             "a replacement rate you choose (66% of your employment income "
