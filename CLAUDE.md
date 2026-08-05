@@ -15,6 +15,8 @@ PySide6 shell (`glidepath/gui/`) over the UI-agnostic app layer
 - `make fix` — ruff auto-fix + format.
 - `make test` — tests with coverage.
 - `make deps` — the ONLY sanctioned way to add or upgrade dependencies.
+- `make bump V=X.Y.Z` — the ONLY sanctioned way to set the release version
+  (rewrites `[project] version`, minimal re-lock, re-verifies ages).
 - `make audit` — pip-audit the lockfile for known CVEs.
 - `make sonar` — tests + local SonarQube scan.
 - `make hooks` — install pre-commit hooks.
@@ -29,9 +31,13 @@ releases). Rules:
   `exclude-newer` cutoff in `pyproject.toml` to UTC now minus 7 days, runs
   `uv lock --upgrade`, syncs, and then runs `scripts/check_dep_age.py` to
   verify. Never run bare `uv add`, `uv lock`, or `uv lock --upgrade`.
+- One exception: `make bump V=X.Y.Z` (release version bump) runs a bare
+  `uv lock` because uv.lock embeds the project version. It is a minimal
+  re-lock — no `--upgrade`, existing pins kept, the `exclude-newer` cutoff
+  still applies — and it re-runs `scripts/check_dep_age.py` afterwards.
 - All other commands (make targets, pre-commit hooks) use
-  `uv run --locked`, so nothing outside `make deps` can rewrite the
-  lockfile.
+  `uv run --locked`, so nothing outside `make deps` and `make bump` can
+  rewrite the lockfile.
 - `scripts/check_dep_age.py` independently verifies the lockfile: the
   embedded cutoff must be ≥7 days old right now, every package must come
   from PyPI (root project excepted), and every locked wheel/sdist's PyPI
@@ -74,6 +80,19 @@ releases). Rules:
 - Product disclaimer: glidepath is a personal modelling tool, not regulated
   financial advice; the disclaimer must be preserved in the UI, exports,
   and README.
+
+## Release process (details in planning §4.10)
+
+- SemVer 0.x; the version lives in `[project] version`, released as a
+  `vX.Y.Z` tag on `main`. Releases are tag + GitHub Release only — no
+  built artifacts yet (§4.10 records why).
+- `CHANGELOG.md` (Keep a Changelog format) is curated in the release PR;
+  the tagged version's section becomes the GitHub Release notes.
+- To cut a release, on an up-to-date `dev`: `make bump V=X.Y.Z`, move the
+  Unreleased items into a dated `## [X.Y.Z]` section, `make check`, PR to
+  `main`. After the merge, tag the merge commit `vX.Y.Z` and push the
+  tag; `release.yml` validates it (tag on main, version match, changelog
+  section present) and publishes the GitHub Release.
 
 ## Coding conventions
 

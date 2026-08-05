@@ -134,6 +134,12 @@ gate plus `make audit` and the SonarCloud quality gate on each PR — so a
 clean `make check` locally does not quite guarantee a green pipeline. See
 `CLAUDE.md` for the full policies.
 
+## Releases
+
+Releases are `vX.Y.Z` tags on `main`; each GitHub Release carries its
+notes from [`CHANGELOG.md`](CHANGELOG.md). There are no packaged builds
+yet — run from source as above.
+
 ## Data licences
 
 The code is MIT-licensed (see `LICENSE`). One data file is not: the

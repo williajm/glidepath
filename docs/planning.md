@@ -364,6 +364,40 @@ the session with a pre-built `Household` (bypasses the form pipeline
 and can drift from what a user could actually type); a separate demo
 mode (a second surface to maintain for no extra information).
 
+### 4.10 Release process
+
+**Decision.** Releases are SemVer 0.x tags on `main` plus a GitHub
+Release whose notes come verbatim from a curated `CHANGELOG.md` (Keep
+a Changelog format) — no built artifacts. The version lives in
+`[project] version` in `pyproject.toml`; minor bumps carry features
+and behaviour changes (plan-file schema steps ride the §4.5 migration
+harness), patch bumps carry fixes only; 1.0.0 is deferred until the
+product is stable enough for outside users. Cut flow: on an
+up-to-date `dev`, `make bump V=X.Y.Z` sets the version (uv.lock
+embeds the project version, so the target performs the one sanctioned
+bare `uv lock` — minimal, no `--upgrade`, the `exclude-newer` cutoff
+still applying, `check_dep_age.py` re-verifying after); the release
+PR moves the Unreleased changelog items into a dated `## [X.Y.Z]`
+section (drafted from the merged PR titles since the last release);
+after the merge, the merge commit is tagged `vX.Y.Z` and the tag
+pushed. `release.yml` then refuses to publish unless the tagged
+commit is on `main`, the tag matches the pyproject version
+(`scripts/release_notes.py`), and the changelog has a section for it
+— a mistyped or misplaced tag fails loudly instead of shipping.
+**Why tag-only.** The natural desktop artifact — a PyInstaller
+Windows build — would ship unsigned: SmartScreen interposes a
+"Windows protected your PC" warning on every new release's binary
+(reputation resets per binary) and PyInstaller output is a known
+antivirus false-positive trigger, while code signing costs a
+recurring OV-certificate fee (Azure Trusted Signing is currently
+org-only). At 0.x with a run-from-source audience, that cost buys
+little; packaging (and signing) can be added to `release.yml` later
+without changing the tag/changelog process. **Rejected:** unsigned
+`.exe` zips now (SmartScreen/AV friction documented above);
+PyPI publication (a GUI app is an awkward fit and it implies an API
+stability the 0.x line does not promise); CalVer (clashes with the
+existing 0.1.0 and with SemVer-style schema-migration discipline).
+
 ## 5. Design
 
 ### 5.1 Domain model
@@ -1926,6 +1960,10 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   and/or payment from a taxable account alongside the portfolio-tax
   charge. Needs a §5.2 decision record on the default route and its
   interaction with the fee/growth order before code.*
+- [x] 9.22 Release process — *SemVer 0.x tag-driven GitHub Releases
+  with a curated `CHANGELOG.md`, `make bump` for the version, and a
+  validating `release.yml`; tag-only for now (no built artifacts) —
+  decision record in §4.10.*
 
 ## 9. Open questions
 

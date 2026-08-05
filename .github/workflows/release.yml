@@ -1,0 +1,40 @@
+# Publishes a GitHub Release when a vX.Y.Z tag is pushed. Releases are
+# tag-only (no built artifacts) per the release process in
+# docs/planning.md §4.10. Actions are pinned to commit SHAs
+# (supply-chain policy — tags can be moved, SHAs cannot).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history — the tag is verified against main)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Only commits that went through the merge gates may be released.
+      - name: Verify the tagged commit is on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+
+      # Fails if the tag disagrees with [project] version or CHANGELOG.md
+      # has no section for it (stdlib-only script — no project sync).
+      - name: Extract release notes from CHANGELOG.md
+        run: python3 scripts/release_notes.py "$GITHUB_REF_NAME" > release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "glidepath $GITHUB_REF_NAME" \
+            --notes-file release-notes.md
