@@ -1724,12 +1724,16 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   `scripts/build_returns_history.py` — the world equity series is the
   GDP-weighted average of the 16-to-18 JST countries' local returns
   converted into GBP (currency effects included), the JST papers' own
-  world-index convention; the file is CC BY-NC-SA 4.0 with attribution
+  world-index convention; the JST `gdp` column is in country-specific
+  units (millions/billions/trillions of local currency), so the script
+  normalises it to a common unit before forming USD weights (#108
+  fixed weights that had effectively excluded the US and Japan); the
+  file is CC BY-NC-SA 4.0 with attribution
   (unlike the MIT code — noted in the file header and README), a
   licence-clean source where MSCI/DMS/Barclays data could not be
   redistributed. Sanity anchors at derivation: 1900–2020 geometric
-  real means of +5.9% equity / +1.3% gilts / +0.5% bills, with 2008,
-  1990, 1948, 1920, 1974 the worst real equity years. Engine:
+  real means of +6.4% equity / +1.3% gilts / +0.5% bills, with 1974,
+  2002, 1990, 1931, 1920 the worst real equity years. Engine:
   `run_windows` projects window *w* through the ordinary deterministic
   `run` with a `HistoricalWindowModel` factory — the same one step
   function, no seed, fully reproducible; each observed year's real
