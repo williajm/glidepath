@@ -22,9 +22,11 @@ Per year, the series carries four nominal annual rates (TOML strings, the
   (``eq_tr``) converted into GBP through the year's ``xrusd`` cross
   rates, weighted by prior-year USD GDP (the JST papers' own world-index
   convention; GDP weights overweight Europe and Japan relative to a
-  market-cap index such as MSCI World). A country missing any required
-  figure in a year is dropped from that year's average and the weights
-  renormalised over the countries that remain.
+  market-cap index such as MSCI World). The JST ``gdp`` column is in
+  country-specific units, so it is normalised to a common unit (see
+  ``_GDP_UNIT_MULTIPLIERS``) before the USD conversion. A country
+  missing any required figure in a year is dropped from that year's
+  average and the weights renormalised over the countries that remain.
 - ``bonds`` — UK long government bond (gilt) total return (``bond_tr``).
 - ``cash`` — UK short-term bill rate (``bill_rate``).
 - ``cpi`` — UK CPI inflation, derived from the ``cpi`` index.
@@ -58,6 +60,35 @@ LAST_YEAR = 2020
 
 _COLUMNS = ("eq_tr", "bond_tr", "bill_rate", "cpi", "xrusd", "gdp")
 _EXPECTED_ARGC = 3
+
+#: JST R6 stores nominal GDP in country-specific units — millions of
+#: local currency for most countries, billions for seven, and trillions
+#: of yen for Japan (eurozone members continue in legacy-currency units
+#: after 1999, matching their ``xrusd`` rates). These multipliers bring
+#: every country to millions so cross-country USD GDP weights are
+#: comparable; verified against known nominal GDPs for 1971 and 2019.
+#: A country absent from this map cannot be weighted — the derivation
+#: fails rather than guessing its unit.
+_GDP_UNIT_MULTIPLIERS = {
+    "AUS": 1.0,
+    "BEL": 1.0,
+    "CHE": 1.0,
+    "ESP": 1.0,
+    "FIN": 1.0,
+    "IRL": 1.0,
+    "NLD": 1.0,
+    "NOR": 1.0,
+    "PRT": 1.0,
+    "SWE": 1.0,
+    "CAN": 1e3,
+    "DEU": 1e3,
+    "DNK": 1e3,
+    "FRA": 1e3,
+    "GBR": 1e3,
+    "ITA": 1e3,
+    "USA": 1e3,
+    "JPN": 1e6,
+}
 
 Table = dict[tuple[int, str], dict[str, float]]
 
@@ -136,7 +167,9 @@ def world_equity_gbp(table: Table, year: int) -> float:
     GBP through the year's exchange-rate move (``xrusd`` is local currency
     per USD, so GBP per local unit is the UK rate over the country's) and
     weighted by its prior-year GDP expressed in USD — weights an investor
-    could have formed at the start of the year.
+    could have formed at the start of the year. The raw ``gdp`` figures
+    are in per-country units and must be normalised through
+    ``_GDP_UNIT_MULTIPLIERS`` before they are comparable.
     """
     uk_now = table[(year, "GBR")]["xrusd"]
     uk_prev = table[(year - 1, "GBR")]["xrusd"]
@@ -148,9 +181,12 @@ def world_equity_gbp(table: Table, year: int) -> float:
             continue
         if "xrusd" not in prev or "gdp" not in prev:
             continue
+        if iso not in _GDP_UNIT_MULTIPLIERS:
+            msg = f"{iso}: no GDP unit multiplier — cannot weight this country"
+            raise DerivationError(msg)
+        usd_gdp = prev["gdp"] * _GDP_UNIT_MULTIPLIERS[iso] / prev["xrusd"]
         gbp_factor = (uk_now / now["xrusd"]) / (uk_prev / prev["xrusd"])
         return_gbp = (1.0 + now["eq_tr"]) * gbp_factor - 1.0
-        usd_gdp = prev["gdp"] / prev["xrusd"]
         weighted.append((usd_gdp, return_gbp))
     if not weighted:
         msg = f"{year}: no country has the columns the world average needs"
