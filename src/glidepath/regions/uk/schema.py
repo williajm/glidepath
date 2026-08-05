@@ -9,6 +9,7 @@ SPA band contiguity, assumption-key completeness) are enforced in
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import pairwise
@@ -17,7 +18,7 @@ from typing import TYPE_CHECKING, NoReturn
 from glidepath.core import AssumptionKey, Money, Rate
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator
     from decimal import Decimal
 
 SCHEMA_VERSION = 1
@@ -308,6 +309,18 @@ class TaxYearFile:
                 "dividend.rates must align one-to-one with the rUK bands",
             )
 
+    def __hash__(self) -> int:
+        """Hash the meta table only, not the whole figure tree.
+
+        Equal files always carry equal metas, so the hash/eq contract
+        holds; distinct files with the same meta merely collide, and
+        equality still decides. The synthesis cache
+        (:func:`~glidepath.regions.uk.extension.extend_tax_year`) hashes
+        its base file on every tax-year lookup, where the generated
+        field-tuple hash walked every figure in the file (planning §5.2).
+        """
+        return hash(self.meta)
+
 
 @dataclass(frozen=True, slots=True)
 class NmpaStep:
@@ -475,6 +488,40 @@ class AgeRulesFile:
 
 type AssumptionValue = Decimal | int | str | Mapping[str, AssumptionValue]
 """A shipped default: a number, an enum-like tag, or a structured table."""
+
+
+class FrozenTable(Mapping[str, "AssumptionValue"]):
+    """A read-only assumption table value that survives pickling.
+
+    Shipped structured defaults need an immutable mapping — consumers
+    type against ``Mapping`` and must never mutate a shared default —
+    but ``types.MappingProxyType`` cannot pickle, and a Monte Carlo
+    run ships the assumption set to worker processes (planning §5.2).
+    Equality (any mapping with the same items, via the ``Mapping``
+    mixin) and unhashability match the proxy it replaces.
+    """
+
+    __slots__ = ("_entries",)
+
+    def __init__(self, entries: Mapping[str, AssumptionValue]) -> None:
+        """Copy ``entries`` so no caller retains a mutating handle."""
+        self._entries: dict[str, AssumptionValue] = dict(entries)
+
+    def __getitem__(self, key: str) -> AssumptionValue:
+        """The value stored under ``key``."""
+        return self._entries[key]
+
+    def __iter__(self) -> Iterator[str]:
+        """Iterate the keys in insertion order."""
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        """How many entries the table holds."""
+        return len(self._entries)
+
+    def __repr__(self) -> str:
+        """Show the underlying entries."""
+        return f"{type(self).__name__}({self._entries!r})"
 
 
 @dataclass(frozen=True, slots=True)

@@ -60,6 +60,7 @@ from glidepath.core.money import Money, Rate
 from glidepath.core.montecarlo import (
     MonteCarloResult,
     PathOutcome,
+    PathParallelism,
     SustainableIncomeSearch,
     run_paths,
     sustainable_income,
@@ -253,6 +254,7 @@ __all__ = [
     "Override",
     "OverrideTarget",
     "PathOutcome",
+    "PathParallelism",
     "Period",
     "PeriodMetrics",
     "PeriodReportRow",

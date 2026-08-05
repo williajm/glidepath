@@ -7,6 +7,7 @@ equals the need while pots last, provenance carries the UK data
 version) through the real UK region.
 """
 
+import pickle
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -67,6 +68,21 @@ class TestDefaultAssumptionSet:
         assumptions = default_assumption_set()
         assert assumptions.get(AssumptionKey.INFLATION_CPI).value == Decimal("0.02")
         assert assumptions.get(AssumptionKey.HORIZON_PLANNING_AGE).value == 95
+
+    def test_the_assumption_set_and_region_are_picklable(self) -> None:
+        """A parallel Monte Carlo run ships both to worker processes.
+
+        Guard: a structured default wrapped in an unpicklable view (the
+        ``MappingProxyType`` this once was), or a closure smuggled into
+        a ruleset, would only surface as a runtime failure inside the
+        GUI's process pool (planning §5.2).
+        """
+        assumptions = default_assumption_set()
+        region = uk_region(
+            future_years_extension(assumptions), state_pension_uprating(assumptions)
+        )
+        assert pickle.dumps(assumptions)
+        assert pickle.dumps(region)
 
 
 class TestFutureYearsExtension:

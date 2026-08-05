@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from glidepath.core.config import RunConfig
     from glidepath.core.entities import Household, Person
+    from glidepath.core.montecarlo import PathParallelism
     from glidepath.core.provenance import AssumptionSet
     from glidepath.core.region import Region
     from glidepath.core.results import ProjectionResult
@@ -105,6 +106,8 @@ def earliest_retirement_age(
     region: Region,
     config: RunConfig,
     search: RetirementAgeSearch,
+    *,
+    parallelism: PathParallelism | None = None,
 ) -> int | None:
     """The earliest retirement age sustaining the target income (9.14).
 
@@ -120,7 +123,12 @@ def earliest_retirement_age(
     irrelevant to the search: each probe carries the candidate age and
     the target income instead, everything else unchanged, and
     re-running the plan at the returned age with the target income as
-    its spending reproduces the success.
+    its spending reproduces the success. ``parallelism`` spreads each
+    Monte Carlo candidate's paths over its executor
+    (:class:`~glidepath.core.montecarlo.PathParallelism` — results
+    identical to a serial search); pass one executor for the whole
+    search so candidates share it rather than paying process startup
+    per age.
 
     Raises:
         EngineError: If a probe is rejected by the engine — including a
@@ -144,7 +152,14 @@ def earliest_retirement_age(
             probe_with_spending(plan, search.target_income, config), age
         )
         if config.mode is RunMode.MONTE_CARLO:
-            result = run_paths(probe, assumptions, region, config, paths=search.paths)
+            result = run_paths(
+                probe,
+                assumptions,
+                region,
+                config,
+                paths=search.paths,
+                parallelism=parallelism,
+            )
             return result.success_rate >= search.target_success_rate
         return not _has_shortfall(run(probe, assumptions, region, config))
 

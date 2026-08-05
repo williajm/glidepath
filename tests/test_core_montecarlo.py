@@ -8,6 +8,7 @@ region: a retired person spending from one tax-free wrapper under zero
 tax, so every deterministic expectation is hand-computable.
 """
 
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -36,6 +37,7 @@ from glidepath.core import (
     Money,
     MonteCarloResult,
     PathOutcome,
+    PathParallelism,
     Period,
     Person,
     PlannedOutflow,
@@ -550,6 +552,101 @@ class TestRunPaths:
         config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2029, 12, 31))
         with pytest.raises(EngineError, match="MONTE_CARLO"):
             run_paths(household, assumptions, region, config, paths=2)
+
+
+class TestParallelRunPaths:
+    """The chunked parallel runner reproduces the serial run exactly."""
+
+    def test_a_thread_executor_reproduces_the_serial_run(self) -> None:
+        """Chunked execution changes nothing: same outcomes, provenance."""
+        serial = run_paths(
+            household_of(), assumptions_with(), stub_region(), mc_config(), paths=5
+        )
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            parallelism = PathParallelism(executor=executor, workers=3)
+            parallel = run_paths(
+                household_of(),
+                assumptions_with(),
+                stub_region(),
+                mc_config(),
+                paths=5,
+                parallelism=parallelism,
+            )
+        assert parallel == serial
+
+    def test_a_process_executor_reproduces_the_serial_run(self) -> None:
+        """The real pickling boundary: worker processes, identical result."""
+        serial = run_paths(
+            household_of(), assumptions_with(), stub_region(), mc_config(), paths=4
+        )
+        with ProcessPoolExecutor(max_workers=2) as executor:
+            parallelism = PathParallelism(executor=executor, workers=2)
+            parallel = run_paths(
+                household_of(),
+                assumptions_with(),
+                stub_region(),
+                mc_config(),
+                paths=4,
+                parallelism=parallelism,
+            )
+        assert parallel == serial
+
+    def test_more_workers_than_paths_still_orders_the_outcomes(self) -> None:
+        """Chunks never exceed the paths; outcomes stay 0 through N-1."""
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            parallelism = PathParallelism(executor=executor, workers=8)
+            result = run_paths(
+                household_of(),
+                assumptions_with(),
+                stub_region(),
+                mc_config(),
+                paths=3,
+                parallelism=parallelism,
+            )
+        assert [outcome.path for outcome in result.outcomes] == [0, 1, 2]
+
+    def test_a_single_worker_falls_back_to_the_serial_path(self) -> None:
+        """One worker gains nothing from an executor round-trip."""
+        serial = run_paths(
+            household_of(), assumptions_with(), stub_region(), mc_config(), paths=3
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            parallelism = PathParallelism(executor=executor, workers=1)
+            fallback = run_paths(
+                household_of(),
+                assumptions_with(),
+                stub_region(),
+                mc_config(),
+                paths=3,
+                parallelism=parallelism,
+            )
+        assert fallback == serial
+
+    def test_a_worker_side_engine_rejection_propagates(self) -> None:
+        """An unseeded config fails inside the worker and surfaces here."""
+        household = household_of()
+        assumptions = assumptions_with()
+        region = stub_region()
+        config = mc_config(seed=None)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            parallelism = PathParallelism(executor=executor, workers=2)
+            with pytest.raises(EngineError, match=r"requires RunConfig\.seed"):
+                run_paths(
+                    household,
+                    assumptions,
+                    region,
+                    config,
+                    paths=4,
+                    parallelism=parallelism,
+                )
+
+    def test_rejects_a_non_positive_worker_count(self) -> None:
+        """A pool of no workers runs nothing."""
+        with (
+            ThreadPoolExecutor(max_workers=1) as executor,
+            pytest.raises(ValueError, match="workers must be positive"),
+        ):
+            PathParallelism(executor=executor, workers=0)
 
 
 class TestPathOutcome:

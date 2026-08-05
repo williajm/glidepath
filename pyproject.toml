@@ -62,6 +62,12 @@ max-complexity = 10
 "src/glidepath/core/randomness.py" = [
     "S311", # Seeded Monte Carlo simulation draws, never security material (planning §4.6).
 ]
+"src/glidepath/core/montecarlo.py" = [
+    "PLR0913", # run_paths/sustainable_income take the §5.2 engine quartet plus keyword-only run knobs; bundling would obscure the run(plan, assumptions, region, config) shape.
+]
+"src/glidepath/core/retirement.py" = [
+    "PLR0913", # earliest_retirement_age mirrors the §5.2 runner signature (see core/montecarlo.py).
+]
 "tests/**" = [
     "S101",    # pytest tests use bare assert by design.
     "PLR2004", # Literal expected values in assertions are idiomatic in tests.

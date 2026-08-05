@@ -9,6 +9,7 @@ acceptance criterion is pinned directly: the answer is consistent with
 re-running the plan at that age, and the solver is deterministic.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -33,6 +34,7 @@ from glidepath.core import (
     MemberContributionOutcome,
     MemberContributionRequest,
     Money,
+    PathParallelism,
     Period,
     Person,
     Provenance,
@@ -544,3 +546,25 @@ class TestMonteCarloSolver:
         search = search_of(paths=2)
         with pytest.raises(EngineError, match=r"requires RunConfig\.seed"):
             earliest_retirement_age(household, assumptions, region, config, search)
+
+    def test_a_parallel_search_reproduces_the_serial_answer(self) -> None:
+        """One executor shared across candidates changes nothing (§4.6)."""
+        serial = earliest_retirement_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            mc_config(),
+            search_of(paths=4),
+        )
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            parallelism = PathParallelism(executor=executor, workers=2)
+            parallel = earliest_retirement_age(
+                household_of(),
+                flat_assumptions(),
+                stub_region(),
+                mc_config(),
+                search_of(paths=4),
+                parallelism=parallelism,
+            )
+        assert parallel == serial
+        assert parallel == 60

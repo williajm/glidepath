@@ -355,6 +355,51 @@ def test_indexation_compounds_once_from_the_base_year(
     assert extended.income_tax_ruk.personal_allowance == Money(Decimal(13878))
 
 
+def test_synthesis_is_memoized(
+    base: TaxYearFile, default_policy: FutureYearsPolicy
+) -> None:
+    """Identical lookups reuse the one synthesized file (planning §5.2).
+
+    Every projection date past the last shipped year resolves through
+    ``extend_tax_year``; re-synthesizing the same few dozen future
+    years dominated a Monte Carlo run's profile. The function is pure
+    over immutable inputs, so the memoized instance is the result.
+    """
+    first = extend_tax_year(base, 2040, policy=default_policy, cpi=CPI)
+    second = extend_tax_year(base, 2040, policy=default_policy, cpi=CPI)
+    assert second is first
+
+
+def test_the_cache_distinguishes_policy_and_cpi(
+    base: TaxYearFile, default_policy: FutureYearsPolicy
+) -> None:
+    """Same base and year under another policy synthesizes fresh figures."""
+    frozen = FutureYearsPolicy.from_assumption_value({"mode": "frozen"})
+    indexed_file = extend_tax_year(base, 2040, policy=default_policy, cpi=CPI)
+    frozen_file = extend_tax_year(base, 2040, policy=frozen, cpi=CPI)
+    assert frozen_file != indexed_file
+
+
+def test_tax_year_file_hashes_by_meta_alone(
+    base: TaxYearFile, default_policy: FutureYearsPolicy
+) -> None:
+    """The cheap hash contract behind the memoization (planning §5.2).
+
+    Two synthesized 2040 files share a meta but differ in every indexed
+    figure: they hash equal (a deliberate collision — equality still
+    decides) so the cache never walks the whole figure tree per lookup,
+    and equal files trivially hash equal.
+    """
+    frozen = FutureYearsPolicy.from_assumption_value({"mode": "frozen"})
+    indexed_file = extend_tax_year(base, 2040, policy=default_policy, cpi=CPI)
+    frozen_file = extend_tax_year(base, 2040, policy=frozen, cpi=CPI)
+    indexed_hash = hash(indexed_file)
+    frozen_hash = hash(frozen_file)
+    meta_hash = hash(indexed_file.meta)
+    assert indexed_hash == frozen_hash
+    assert indexed_hash == meta_hash
+
+
 def test_lapsed_freeze_end_indexes_from_the_base_year(base: TaxYearFile) -> None:
     """A freeze that ended at or before the base year is pure indexation.
 

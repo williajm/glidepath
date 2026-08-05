@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QProgressBar,
     QPushButton,
     QRadioButton,
     QTabWidget,
@@ -144,6 +145,7 @@ class ChartsPane(QWidget):
         monte_carlo_layout.addWidget(self.monte_carlo_message_label)
 
         self._build_retirement_box()
+        busy_row = self._build_busy_row()
 
         self.message_label = QLabel("", self)
         self.message_label.setWordWrap(True)
@@ -156,6 +158,7 @@ class ChartsPane(QWidget):
         controls.addWidget(self._monte_carlo_box, 1)
         layout.addLayout(controls)
         layout.addWidget(self._retirement_box)
+        layout.addLayout(busy_row)
         layout.addWidget(self.message_label)
         layout.addWidget(self.chart_tabs, 1)
 
@@ -185,6 +188,24 @@ class ChartsPane(QWidget):
             )
         if 0 <= selected_index < self.chart_tabs.count():
             self.chart_tabs.setCurrentIndex(selected_index)
+
+    def _build_busy_row(self) -> QHBoxLayout:
+        """Create the in-flight busy indicator's widgets (roadmap 9.16).
+
+        A zero-range progress bar animates indeterminately until a
+        range is set; both widgets start hidden until a run is launched.
+        """
+        self.busy_bar = QProgressBar(self)
+        self.busy_bar.setRange(0, 0)
+        self.busy_bar.setTextVisible(False)
+        self.busy_bar.setMaximumWidth(160)
+        self.busy_label = QLabel("", self)
+        self.busy_bar.setVisible(False)
+        self.busy_label.setVisible(False)
+        busy_row = QHBoxLayout()
+        busy_row.addWidget(self.busy_bar)
+        busy_row.addWidget(self.busy_label, 1)
+        return busy_row
 
     def _build_retirement_box(self) -> None:
         """Create the "When can I retire?" card's widgets (9.14)."""
@@ -247,6 +268,28 @@ class ChartsPane(QWidget):
         runs off the GUI thread and must not overlap itself.
         """
         self.retirement_button.setEnabled(not busy)
+
+    def show_busy(self, status: str) -> None:
+        """Show the busy animation with a status line naming the run (9.16).
+
+        Visible from run start until :meth:`clear_busy` — disabled
+        buttons alone are easy to miss, and a minutes-long retirement
+        search would otherwise look like a hang. ``status`` comes from
+        the app layer like all copy (planning §4.7).
+        """
+        self.busy_label.setText(status)
+        self.busy_bar.setVisible(True)
+        self.busy_label.setVisible(True)
+
+    def clear_busy(self) -> None:
+        """Hide the busy animation and its status line (9.16).
+
+        Called on completion, failure, and the staleness-discard path
+        alike — a discarded run must never leave a spinner running.
+        """
+        self.busy_bar.setVisible(False)
+        self.busy_label.setVisible(False)
+        self.busy_label.setText("")
 
     def _sync_basis_buttons(self, view_model: ChartsViewModel) -> None:
         """Create the basis radio buttons once; keep the selection bound."""

@@ -18,7 +18,6 @@ import tomllib
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from importlib import resources
-from types import MappingProxyType
 from typing import TYPE_CHECKING, NoReturn
 
 from glidepath.core import AssumptionKey, Money, Rate
@@ -31,6 +30,7 @@ from glidepath.regions.uk.schema import (
     DividendRate,
     DividendRules,
     FileMeta,
+    FrozenTable,
     IncomeTaxSchedule,
     IsaRules,
     LisaAges,
@@ -566,7 +566,7 @@ def _assumption_value(raw: object, context: str) -> AssumptionValue:
             key: _assumption_value(item, f"{context}.{key}")
             for key, item in raw.items()
         }
-        return MappingProxyType(items)
+        return FrozenTable(items)
     _fail(context, f"unsupported value type: {type(raw).__name__}")
 
 

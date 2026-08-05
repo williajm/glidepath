@@ -1,5 +1,6 @@
 """Direct invariant tests for the UK data-file dataclasses (issue 2.1)."""
 
+from copy import deepcopy
 from datetime import date
 from decimal import Decimal
 
@@ -20,6 +21,7 @@ from glidepath.regions.uk import (
     TaxBand,
     TaxYearMeta,
 )
+from glidepath.regions.uk.schema import FrozenTable
 
 START_2026 = date(2026, 4, 6)
 END_2027 = date(2027, 4, 5)
@@ -219,3 +221,47 @@ def test_assumptions_file_get_returns_entry() -> None:
     entries = tuple(make_assumption(key) for key in AssumptionKey)
     file = AssumptionsFile(schema_version=1, meta=FILE_META, defaults=entries)
     assert file.get(AssumptionKey.INFLATION_CPI).value == Decimal("0.1")
+
+
+def test_frozen_table_is_a_read_only_mapping() -> None:
+    """Lookup, iteration, and length read the copied entries."""
+    table = FrozenTable({"mode": "frozen", "rate": Decimal("0.02")})
+    assert table["mode"] == "frozen"
+    assert len(table) == 2
+    assert list(table) == ["mode", "rate"]
+    assert "rate" in table
+
+
+def test_frozen_table_equals_any_mapping_with_the_same_items() -> None:
+    """The ``Mapping`` mixin equality matches the proxy it replaced."""
+    entries = {"mode": "frozen"}
+    table = FrozenTable(entries)
+    assert table == entries
+    assert table == FrozenTable(entries)
+
+
+def test_frozen_table_copies_its_entries() -> None:
+    """Mutating the source mapping never reaches the table."""
+    entries: dict[str, Decimal | int | str] = {"mode": "frozen"}
+    table = FrozenTable(entries)
+    entries["mode"] = "indexed"
+    assert table["mode"] == "frozen"
+
+
+def test_frozen_table_survives_the_copy_protocol() -> None:
+    """The table round-trips ``__reduce_ex__`` — what pickling ships.
+
+    A Monte Carlo run pickles the assumption set to worker processes
+    (planning §5.2); ``types.MappingProxyType`` could not make that
+    trip, which is why this class exists.
+    """
+    table = FrozenTable({"mode": "frozen", "nested": FrozenTable({"rate": "cpi"})})
+    copied = deepcopy(table)
+    assert copied == table
+    assert copied["nested"] == {"rate": "cpi"}
+
+
+def test_frozen_table_repr_names_the_entries() -> None:
+    """The repr shows the class and its entries for diagnostics."""
+    table = FrozenTable({"mode": "frozen"})
+    assert repr(table) == "FrozenTable({'mode': 'frozen'})"

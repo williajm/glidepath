@@ -36,7 +36,6 @@ from glidepath.app import (
     DEFAULT_CHART_BASIS,
     DEFAULT_COMPARISON_METRIC_KEY,
     DEFAULT_RUN_MODE,
-    MONTE_CARLO_RUNNING_MESSAGE,
     MONTE_CARLO_STALE_MESSAGE,
     RETIREMENT_RUNNING_MESSAGE,
     RETIREMENT_STALE_MESSAGE,
@@ -58,6 +57,7 @@ from glidepath.app import (
     initial_plan_state,
     load_plan_state,
     metric_from_key,
+    monte_carlo_running_status,
     parse_facts_form,
     plan_entity_ids,
     record_last_plan_path,
@@ -483,7 +483,9 @@ class MainWindow(QMainWindow):
         self._monte_carlo_worker = worker
         self._monte_carlo_input = state
         self._set_transitions_busy(busy=True)
-        self.statusBar().showMessage(MONTE_CARLO_RUNNING_MESSAGE)
+        status = monte_carlo_running_status(paths_text)
+        self.statusBar().showMessage(status)
+        self.charts_pane.show_busy(status)
         self.monte_carlo_pool.start(worker)
 
     def _handle_monte_carlo_finished(self, state: PlanState) -> None:
@@ -496,6 +498,7 @@ class MainWindow(QMainWindow):
         """
         self._monte_carlo_worker = None
         self._set_transitions_busy(busy=False)
+        self.charts_pane.clear_busy()
         stale = self._state is not self._monte_carlo_input
         self._monte_carlo_input = None
         if stale:
@@ -536,6 +539,7 @@ class MainWindow(QMainWindow):
         self._retirement_input = state
         self._set_transitions_busy(busy=True)
         self.statusBar().showMessage(RETIREMENT_RUNNING_MESSAGE)
+        self.charts_pane.show_busy(RETIREMENT_RUNNING_MESSAGE)
         self.monte_carlo_pool.start(worker)
 
     def _handle_retirement_finished(self, state: PlanState) -> None:
@@ -547,6 +551,7 @@ class MainWindow(QMainWindow):
         """
         self._retirement_worker = None
         self._set_transitions_busy(busy=False)
+        self.charts_pane.clear_busy()
         stale = self._state is not self._retirement_input
         self._retirement_input = None
         if stale:

@@ -45,6 +45,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
+from functools import lru_cache
 from typing import TYPE_CHECKING, NoReturn
 
 from glidepath.core import Money
@@ -377,6 +378,7 @@ def _indexed_dividend(dividend: DividendRules, factor: Decimal) -> DividendRules
     )
 
 
+@lru_cache(maxsize=256)
 def extend_tax_year(
     base: TaxYearFile,
     target_start_year: int,
@@ -390,6 +392,14 @@ def extend_tax_year(
     forward, and shipped (legislated) data always beats extrapolation.
     The synthesized meta keeps the base file's ``verified_on`` and
     ``sources`` — they date the figures the extrapolation rests on.
+
+    The function is pure over immutable inputs, so it is memoized:
+    every projection date past the last shipped year resolves through
+    here (:meth:`~glidepath.regions.uk.years.TaxYearSeries.year_containing`),
+    which made re-synthesis the dominant cost of a Monte Carlo run
+    (planning §5.2). The cache bound comfortably holds a horizon's worth
+    of years for several concurrent policy/CPI variants (scenario
+    overrides build their own regions).
 
     Raises:
         ValueError: If ``target_start_year`` is not after the base year.
