@@ -1,10 +1,10 @@
 # UK tax year 2026/27 policy figures (docs/planning.md §5.3, §6).
-# Income tax, pension, ISA and state pension figures verified
-# 2026-08-01/02; savings, dividend, AA carry-forward and DB valuation
-# figures 2026-08-04 — all from the primary sources below; never edit a
-# figure without re-verifying and updating [meta].
+# Income tax, pension and ISA figures verified 2026-08-01/02; savings,
+# dividend, AA carry-forward and DB valuation figures 2026-08-04 — all
+# from the primary sources below; never edit a figure without
+# re-verifying and updating [meta].
 
-schema_version = 1
+schema_version = 2
 
 [meta]
 tax_year    = "2026/27"
@@ -28,8 +28,6 @@ sources = [
   "https://www.gov.uk/tax-on-dividends",
   "https://www.gov.uk/apply-tax-free-interest-on-savings",
   "https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar",
-  "https://www.gov.uk/new-state-pension/what-youll-get",
-  "https://www.gov.uk/government/publications/benefit-and-pension-rates-2026-to-2027/proposed-benefit-and-pension-rates-2026-to-2027",
 ]
 
 [income_tax.ruk]
@@ -95,8 +93,3 @@ rates = [
   { name = "upper", rate = "0.3575" },
   { name = "additional", rate = "0.3935" },
 ]
-
-[state_pension]
-new_full_weekly       = "241.30"
-qualifying_years_full = 35
-qualifying_years_min  = 10

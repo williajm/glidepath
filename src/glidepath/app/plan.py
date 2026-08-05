@@ -36,7 +36,6 @@ from glidepath.regions.uk import (
     FutureYearsPolicy,
     default_assumption_set,
     future_years_extension,
-    state_pension_uprating,
     uk_region,
 )
 
@@ -103,13 +102,11 @@ def region_for(assumptions: AssumptionSet) -> Region:
     """The region bundle one run's *effective* assumption set implies.
 
     Rebuilt per run rather than shared: the UK future-years tax
-    extension and state pension uprating are derived from assumptions
-    at build time, so a scenario overriding them needs its own region
-    (see :func:`~glidepath.core.run_scenarios`).
+    extension is derived from assumptions at build time, so a scenario
+    overriding those needs its own region (see
+    :func:`~glidepath.core.run_scenarios`).
     """
-    return uk_region(
-        future_years_extension(assumptions), state_pension_uprating(assumptions)
-    )
+    return uk_region(future_years_extension(assumptions))
 
 
 def _projected(

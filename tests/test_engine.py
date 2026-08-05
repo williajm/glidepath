@@ -357,10 +357,9 @@ class StubStatePension:
     uplift: Decimal = Decimal(0)
 
     def entitlement(
-        self, record: StatePensionRecord, date_of_birth: date, today: date
+        self, record: StatePensionRecord, date_of_birth: date
     ) -> StatePensionEntitlement:
         """The configured entitlement, deferral shifting the start."""
-        del today
         start = date_age_attained(date_of_birth, self.start_age)
         months = int(record.deferral_years.value * Decimal(12))
         return StatePensionEntitlement(
@@ -543,9 +542,6 @@ def sp_record(deferral: str = "0") -> StatePensionRecord:
     return StatePensionRecord(
         forecast_weekly_amount=money_fact("200"),
         protected_payment=None,
-        ni_record_start=None,
-        qualifying_years=None,
-        planned_extra_years=Decision(value=0, recorded_on=RECORDED),
         deferral_years=Decision(value=Decimal(deferral), recorded_on=RECORDED),
     )
 
@@ -2005,7 +2001,6 @@ class TestPensionIncome:
         assert "db_pension[db-1].taken_at_age" in decision_labels
         assert "db_pension[db-1].commuted_fraction" in decision_labels
         assert "db_pension[db-1].active_membership.active_until_age" in decision_labels
-        assert "person[person-1].state_pension.planned_extra_years" in decision_labels
         assert "person[person-1].state_pension.deferral_years" in decision_labels
 
 

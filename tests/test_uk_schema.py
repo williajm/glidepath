@@ -8,6 +8,7 @@ import pytest
 
 from glidepath.core import AssumptionKey, Money, Rate
 from glidepath.regions.uk import (
+    SCHEMA_VERSION,
     AssumptionDefault,
     AssumptionsFile,
     DataFileError,
@@ -17,7 +18,6 @@ from glidepath.regions.uk import (
     NmpaStep,
     SpaAgeBand,
     StatePensionDeferral,
-    StatePensionRules,
     TaxBand,
     TaxYearMeta,
 )
@@ -131,17 +131,6 @@ def test_schedule_requires_a_basic_band() -> None:
         make_schedule(bands)
 
 
-def test_state_pension_rules_reject_min_above_full() -> None:
-    """Qualifying-year counts must satisfy 0 < min <= full."""
-    weekly = Money(Decimal(200))
-    with pytest.raises(DataFileError, match="min <= full"):
-        StatePensionRules(
-            new_full_weekly=weekly,
-            qualifying_years_full=35,
-            qualifying_years_min=36,
-        )
-
-
 def test_nmpa_step_rejects_non_positive_age() -> None:
     """An NMPA age of zero is nonsense."""
     with pytest.raises(DataFileError, match="age must be positive"):
@@ -199,27 +188,35 @@ def test_assumptions_file_rejects_duplicate_keys() -> None:
     duplicated = (*entries, make_assumption(AssumptionKey.INFLATION_CPI))
     duplicate_message = r"duplicate assumption keys: inflation\.cpi"
     with pytest.raises(DataFileError, match=duplicate_message):
-        AssumptionsFile(schema_version=1, meta=FILE_META, defaults=duplicated)
+        AssumptionsFile(
+            schema_version=SCHEMA_VERSION, meta=FILE_META, defaults=duplicated
+        )
 
 
 def test_assumptions_file_rejects_missing_keys() -> None:
     """Every AssumptionKey must be present (completeness)."""
     entries = tuple(make_assumption(key) for key in AssumptionKey)
     with pytest.raises(DataFileError, match="missing assumption keys"):
-        AssumptionsFile(schema_version=1, meta=FILE_META, defaults=entries[:-1])
+        AssumptionsFile(
+            schema_version=SCHEMA_VERSION, meta=FILE_META, defaults=entries[:-1]
+        )
 
 
 def test_assumptions_file_rejects_wrong_schema_version() -> None:
     """Files written against another schema version must not load."""
     entries = tuple(make_assumption(key) for key in AssumptionKey)
     with pytest.raises(DataFileError, match="is not supported"):
-        AssumptionsFile(schema_version=2, meta=FILE_META, defaults=entries)
+        AssumptionsFile(
+            schema_version=SCHEMA_VERSION + 1, meta=FILE_META, defaults=entries
+        )
 
 
 def test_assumptions_file_get_returns_entry() -> None:
     """``get`` resolves a key to its shipped default."""
     entries = tuple(make_assumption(key) for key in AssumptionKey)
-    file = AssumptionsFile(schema_version=1, meta=FILE_META, defaults=entries)
+    file = AssumptionsFile(
+        schema_version=SCHEMA_VERSION, meta=FILE_META, defaults=entries
+    )
     assert file.get(AssumptionKey.INFLATION_CPI).value == Decimal("0.1")
 
 

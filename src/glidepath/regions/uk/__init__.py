@@ -47,7 +47,6 @@ from glidepath.regions.uk.loader import (
 from glidepath.regions.uk.region import (
     default_assumption_set,
     future_years_extension,
-    state_pension_uprating,
     uk_region,
 )
 from glidepath.regions.uk.schema import (
@@ -63,7 +62,6 @@ from glidepath.regions.uk.schema import (
     IncomeTaxSchedule,
     IsaRules,
     LisaAges,
-    NewStatePension,
     NmpaStep,
     PensionRules,
     SavingsRules,
@@ -71,7 +69,6 @@ from glidepath.regions.uk.schema import (
     SpaBand,
     SpaDateBand,
     StatePensionDeferral,
-    StatePensionRules,
     TaxBand,
     TaxYearFile,
     TaxYearMeta,
@@ -136,7 +133,6 @@ __all__ = [
     "IncomeTaxSchedule",
     "IsaRules",
     "LisaAges",
-    "NewStatePension",
     "NmpaStep",
     "PensionRules",
     "SavingsRules",
@@ -145,7 +141,6 @@ __all__ = [
     "SpaBand",
     "SpaDateBand",
     "StatePensionDeferral",
-    "StatePensionRules",
     "TaxBand",
     "TaxYearFile",
     "TaxYearMeta",
@@ -179,7 +174,6 @@ __all__ = [
     "parse_default_assumptions",
     "parse_tax_year",
     "roll_carry_forward",
-    "state_pension_uprating",
     "tapered_annual_allowance",
     "tax_year_filename",
     "threshold_income",

@@ -65,7 +65,6 @@ class DecisionTarget:
     whitelist:
 
     - person: ``target_retirement_age``,
-      ``state_pension.planned_extra_years``,
       ``state_pension.deferral_years``
     - wrapper: ``contributions.employee_amount``
     - DB pension: ``taken_at_age``, ``commuted_fraction``,
@@ -327,10 +326,9 @@ def _person_decision_target_labels(person: Person) -> dict[tuple[EntityId, str],
         f"person[{person.id}].target_retirement_age"
     )
     if person.state_pension is not None:
-        for field in ("planned_extra_years", "deferral_years"):
-            labels[(person.id, f"state_pension.{field}")] = (
-                f"person[{person.id}].state_pension.{field}"
-            )
+        labels[(person.id, "state_pension.deferral_years")] = (
+            f"person[{person.id}].state_pension.deferral_years"
+        )
     for wrapper in person.wrappers:
         if wrapper.contributions is not None:
             labels[(wrapper.id, "contributions.employee_amount")] = (
@@ -477,17 +475,16 @@ def _apply_to_person(
             f"person[{person.id}].target_retirement_age",
         )
     if person.state_pension is not None:
-        record_changes: dict[str, Any] = {}
-        for field in ("planned_extra_years", "deferral_years"):
-            override = picks.get((person.id, f"state_pension.{field}"))
-            if override is not None:
-                record_changes[field] = _resolved_decision(
-                    getattr(person.state_pension, field),
-                    override,
-                    f"person[{person.id}].state_pension.{field}",
-                )
-        if record_changes:
-            changes["state_pension"] = replace(person.state_pension, **record_changes)
+        override = picks.get((person.id, "state_pension.deferral_years"))
+        if override is not None:
+            deferral = _resolved_decision(
+                person.state_pension.deferral_years,
+                override,
+                f"person[{person.id}].state_pension.deferral_years",
+            )
+            changes["state_pension"] = replace(
+                person.state_pension, deferral_years=deferral
+            )
     wrappers = tuple(_apply_to_wrapper(wrapper, picks) for wrapper in person.wrappers)
     if wrappers != person.wrappers:
         changes["wrappers"] = wrappers

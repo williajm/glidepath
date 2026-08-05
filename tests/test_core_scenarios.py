@@ -137,9 +137,6 @@ def base_household(*, with_state_pension: bool = True) -> Household:
         state_pension = StatePensionRecord(
             forecast_weekly_amount=money_fact("230"),
             protected_payment=None,
-            ni_record_start=None,
-            qualifying_years=None,
-            planned_extra_years=decision(0),
             deferral_years=decision(Decimal(0)),
         )
     purchase = AnnuityPurchase(
@@ -476,12 +473,11 @@ class TestResolution:
         assert resolved.value == shape
         assert resolved.provenance is Provenance.SCENARIO_OVERRIDE
 
-    def test_state_pension_overrides(self) -> None:
-        """Both state pension decisions replace on the person's record."""
+    def test_state_pension_override(self) -> None:
+        """The deferral decision replaces on the person's record."""
         scenario = Scenario(
             name="defer-sp",
             overrides=(
-                decision_override(PERSON_ID, "state_pension.planned_extra_years", 3),
                 decision_override(
                     PERSON_ID, "state_pension.deferral_years", Decimal("1.5")
                 ),
@@ -490,7 +486,6 @@ class TestResolution:
         resolution = resolve_scenario(base_household(), base_assumptions(), scenario)
         record = resolution.household.persons[0].state_pension
         assert record is not None
-        assert record.planned_extra_years.value == 3
         assert record.deferral_years.value == Decimal("1.5")
 
     def test_planned_outflow_override(self) -> None:
@@ -619,7 +614,6 @@ class TestDecisionTargetCatalogue:
         assert keyed == {
             (OUTFLOW_ID, "amount_real"),
             (PERSON_ID, "target_retirement_age"),
-            (PERSON_ID, "state_pension.planned_extra_years"),
             (PERSON_ID, "state_pension.deferral_years"),
             (WRAPPER_ID, "contributions.employee_amount"),
             (DB_ID, "taken_at_age"),
@@ -631,7 +625,7 @@ class TestDecisionTargetCatalogue:
             (ANNUITY_ID, "annuity_type"),
             (ANNUITY_ID, "basis"),
         }
-        assert len(catalogue) == 13
+        assert len(catalogue) == 12
 
     def test_values_are_bare_with_decisions_unwrapped(self) -> None:
         """Each entry carries the current bare value an override replaces."""
@@ -667,5 +661,4 @@ class TestDecisionTargetCatalogue:
         """Paths through absent optional records never appear (§4.3)."""
         catalogue = decision_target_catalogue(base_household(with_state_pension=False))
         paths = {info.target.field_path for info in catalogue}
-        assert "state_pension.planned_extra_years" not in paths
         assert "state_pension.deferral_years" not in paths

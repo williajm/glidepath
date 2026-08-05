@@ -230,9 +230,6 @@ def full_person(
     state_pension = StatePensionRecord(
         forecast_weekly_amount=money_fact("230.25"),
         protected_payment=money_fact("20.10"),
-        ni_record_start=fact(date(2016, 4, 6)),
-        qualifying_years=fact(20),
-        planned_extra_years=decision(2),
         deferral_years=decision(Decimal(deferral)),
     )
     glide = GlidePathConfig(
@@ -595,6 +592,57 @@ class TestRoundTrip:
         ]
         assert len(pensions) == 3
         assert all(pension.active_membership is None for pension in pensions)
+
+    def test_v2_file_drops_the_qualifying_years_fields(self) -> None:
+        """The #97 migration retires the derivation-only fields on load."""
+        payload = payload_of(kitchen_sink_document())
+        record = payload["household"]["persons"][0]["state_pension"]
+        record["ni_record_start"] = {
+            "value": "2016-04-06",
+            "as_of": "2026-08-01",
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "note": None,
+        }
+        record["qualifying_years"] = {
+            "value": 20,
+            "as_of": "2026-08-01",
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "note": None,
+        }
+        record["planned_extra_years"] = {
+            "value": 2,
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "note": None,
+        }
+        payload["schema_version"] = 2
+        loaded = loads_plan(json.dumps(payload))
+        migrated = loaded.household.persons[0].state_pension
+        assert migrated is not None
+        assert migrated.forecast_weekly_amount is not None
+        assert migrated.deferral_years.value == Decimal("0.5")
+
+    def test_v2_record_without_a_forecast_still_loads(self) -> None:
+        """A derivation-only v2 record keeps its deferral choice (#97).
+
+        Projection later refuses it with a demand for a forecast — the
+        load itself must not lose the plan.
+        """
+        payload = payload_of(kitchen_sink_document())
+        record = payload["household"]["persons"][0]["state_pension"]
+        record["forecast_weekly_amount"] = None
+        record["protected_payment"] = None
+        record["qualifying_years"] = {
+            "value": 20,
+            "as_of": "2026-08-01",
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "note": None,
+        }
+        payload["schema_version"] = 2
+        loaded = loads_plan(json.dumps(payload))
+        migrated = loaded.household.persons[0].state_pension
+        assert migrated is not None
+        assert migrated.forecast_weekly_amount is None
+        assert migrated.deferral_years.value == Decimal("0.5")
 
     @given(
         balance=st.decimals(

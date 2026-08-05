@@ -656,13 +656,6 @@ def _state_pension(raw: object, path: str) -> StatePensionRecord:
     reader = _Reader(raw, path)
     forecast = _optional_fact(reader, "forecast_weekly_amount", parse_money)
     protected = _optional_fact(reader, "protected_payment", parse_money)
-    ni_start = _optional_fact(reader, "ni_record_start", parse_date)
-    qualifying = _optional_fact(reader, "qualifying_years", parse_int)
-    extra_years = _decision(
-        reader.take("planned_extra_years"),
-        reader.at("planned_extra_years"),
-        parse_int,
-    )
     deferral = _decision(
         reader.take("deferral_years"), reader.at("deferral_years"), parse_decimal
     )
@@ -671,9 +664,6 @@ def _state_pension(raw: object, path: str) -> StatePensionRecord:
         lambda: StatePensionRecord(
             forecast_weekly_amount=forecast,
             protected_payment=protected,
-            ni_record_start=ni_start,
-            qualifying_years=qualifying,
-            planned_extra_years=extra_years,
             deferral_years=deferral,
         ),
         path,

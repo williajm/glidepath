@@ -44,7 +44,31 @@ def _upgrade_v1_to_v2(raw: RawDocument) -> RawDocument:
     return raw
 
 
-UPGRADERS: Mapping[int, Upgrader] = MappingProxyType({1: _upgrade_v1_to_v2})
+def _upgrade_v2_to_v3(raw: RawDocument) -> RawDocument:
+    """v3 drops the state pension qualifying-years derivation (#97).
+
+    The official DWP forecast is the only route to a state pension
+    amount, so the fields that existed solely to feed the derivation —
+    the qualifying-years count, the NI record start date, and the
+    planned extra accrual years — are removed from the record. A
+    migrated record without a forecast still loads (the deferral
+    choice is kept); projecting it fails with a clear demand for a
+    forecast, and the facts form requires one on the next save.
+    """
+    household = raw.get("household")
+    persons = household.get("persons") if isinstance(household, dict) else []
+    for person in persons if isinstance(persons, list) else []:
+        record = person.get("state_pension") if isinstance(person, dict) else None
+        if isinstance(record, dict):
+            for key in ("ni_record_start", "qualifying_years", "planned_extra_years"):
+                record.pop(key, None)
+    raw[_VERSION_KEY] = 3
+    return raw
+
+
+UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
+    {1: _upgrade_v1_to_v2, 2: _upgrade_v2_to_v3}
+)
 """The registered upgraders, keyed by the version each reads."""
 
 _VERSION_KEY = "schema_version"

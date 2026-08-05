@@ -23,7 +23,7 @@ What it models today (single person, UK):
   UK contribution relief mechanics and dividend/savings taxation.
 - **Defined benefit pensions** — deferred entitlements or active
   CARE-style accrual, with revaluation, early/late factors and
-  commutation; **state pension** from your forecast or NI record,
+  commutation; **state pension** from your official DWP forecast,
   including deferral.
 - **Tax** — rUK and Scottish income tax from verified 2026/27 data
   files; pension allowances (AA/taper/MPAA, lump-sum allowance).

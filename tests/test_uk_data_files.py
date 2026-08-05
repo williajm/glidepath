@@ -132,14 +132,6 @@ def test_dividend_allowance_and_rates() -> None:
     ]
 
 
-def test_state_pension_figures() -> None:
-    """State pension figures match §6 (£241.30/week; 35 full, 10 min)."""
-    state_pension = load_tax_year(2026).state_pension
-    assert state_pension.new_full_weekly == Money(Decimal("241.30"))
-    assert state_pension.qualifying_years_full == 35
-    assert state_pension.qualifying_years_min == 10
-
-
 def test_nmpa_schedule() -> None:
     """NMPA is 55 now and 57 from 6 April 2028."""
     nmpa = load_age_rules().nmpa
@@ -208,12 +200,6 @@ def test_lisa_ages_and_deferral() -> None:
     assert rules.lisa.access_age == 60
     assert rules.deferral.increment_rate == Rate(Decimal("0.01"))
     assert rules.deferral.per_weeks == 9
-
-
-def test_new_state_pension_system_start() -> None:
-    """The new state pension began 6 April 2016 (the derivation gate)."""
-    rules = load_age_rules()
-    assert rules.new_state_pension.system_start == date(2016, 4, 6)
 
 
 def test_default_assumptions_cover_every_key() -> None:

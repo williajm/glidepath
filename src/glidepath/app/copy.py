@@ -61,8 +61,10 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "pension pot into lifetime income at an age you choose. "
             "Add one wrapper, DB, or annuity section per item. Dates can "
             "be typed or picked from the calendar assist, and the "
-            '"as of" dates on balances, your state pension forecast, and '
-            "your NI record default to today when left blank. "
+            '"as of" dates on balances and your state pension forecast '
+            "default to today when left blank. Your state pension needs "
+            "your official DWP forecast (gov.uk/check-state-pension) — "
+            "the app never re-derives what DWP has already computed. "
             'Press "Save facts and project" to run the '
             "projection — if anything cannot be read, the message under "
             "the buttons says which field to fix and nothing is saved "

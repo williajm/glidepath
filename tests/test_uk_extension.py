@@ -234,7 +234,6 @@ def test_frozen_mode_carries_every_figure_forward(base: TaxYearFile) -> None:
     assert extended.income_tax_scotland == base.income_tax_scotland
     assert extended.pension == base.pension
     assert extended.isa == base.isa
-    assert extended.state_pension == base.state_pension
 
 
 def test_default_policy_is_frozen_through_2030_31(
@@ -337,14 +336,6 @@ def test_rates_never_extrapolate(
     assert extended.isa.lisa_bonus_rate == base.isa.lisa_bonus_rate
     assert extended.isa.lisa_withdrawal_charge == base.isa.lisa_withdrawal_charge
     assert extended.dividend.rates == base.dividend.rates
-
-
-def test_state_pension_is_never_extrapolated(
-    base: TaxYearFile, default_policy: FutureYearsPolicy
-) -> None:
-    """State pension uprating belongs to its own §7 assumption, not this."""
-    extended = extend_tax_year(base, 2035, policy=default_policy, cpi=CPI)
-    assert extended.state_pension == base.state_pension
 
 
 def test_indexation_compounds_once_from_the_base_year(

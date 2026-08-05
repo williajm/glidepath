@@ -129,17 +129,13 @@ class TestFormSpec:
         keys = {spec.key for spec in form.annuity_purchase.fields}
         assert keys == {"at_age", "fraction_of_pot", "annuity_type"}
 
-    def test_state_pension_section_covers_forecast_and_ni_record(self) -> None:
-        """Forecast, protected payment, and the NI record are present."""
+    def test_state_pension_section_covers_the_forecast(self) -> None:
+        """The forecast facts and the deferral choice are present (#97)."""
         keys = {spec.key for spec in build_facts_form_view_model().state_pension.fields}
         assert keys == {
             "forecast_weekly_amount",
             "protected_payment",
             "forecast_as_of",
-            "ni_record_start",
-            "qualifying_years",
-            "ni_as_of",
-            "planned_extra_years",
             "deferral_years",
         }
 
@@ -157,8 +153,6 @@ class TestFormSpec:
             "mpaa_triggered_on",
             "balances_as_of",
             "forecast_as_of",
-            "ni_as_of",
-            "ni_record_start",
             "statement_date",
         }
 
@@ -704,8 +698,8 @@ class TestAnnuityPurchaseParsing:
 class TestStatePensionParsing:
     """The state pension section is optional as a whole."""
 
-    def test_forecast_and_ni_record(self) -> None:
-        """Forecast and NI facts parse with their shared as_of dates."""
+    def test_forecast_facts_parse(self) -> None:
+        """The forecast pair parses with its shared as_of date."""
         household = parse(
             FactsFormData(
                 person=person_values(),
@@ -713,9 +707,6 @@ class TestStatePensionParsing:
                     "forecast_weekly_amount": "230.25",
                     "protected_payment": "12.50",
                     "forecast_as_of": "2026-06-01",
-                    "ni_record_start": "2016-09-01",
-                    "qualifying_years": "18",
-                    "planned_extra_years": "9",
                     "deferral_years": "1.25",
                 },
             )
@@ -727,11 +718,6 @@ class TestStatePensionParsing:
         assert record.forecast_weekly_amount.as_of == date(2026, 6, 1)
         assert record.protected_payment is not None
         assert record.protected_payment.as_of == date(2026, 6, 1)
-        assert record.ni_record_start is not None
-        assert record.ni_record_start.value == date(2016, 9, 1)
-        assert record.qualifying_years is not None
-        assert record.qualifying_years.value == 18
-        assert record.planned_extra_years.value == 9
         assert record.deferral_years.value == Decimal("1.25")
 
     def test_blank_section_means_not_modelled(self) -> None:
@@ -739,13 +725,13 @@ class TestStatePensionParsing:
         household = parse(
             FactsFormData(
                 person=person_values(),
-                state_pension={"forecast_weekly_amount": "", "qualifying_years": " "},
+                state_pension={"forecast_weekly_amount": "", "deferral_years": " "},
             )
         )
         assert household.persons[0].state_pension is None
 
-    def test_decisions_default_to_zero(self) -> None:
-        """Extra years and deferral default to none when blank."""
+    def test_deferral_defaults_to_zero(self) -> None:
+        """Deferral defaults to none when blank."""
         household = parse(
             FactsFormData(
                 person=person_values(),
@@ -754,8 +740,23 @@ class TestStatePensionParsing:
         )
         record = household.persons[0].state_pension
         assert record is not None
-        assert record.planned_extra_years.value == 0
         assert record.deferral_years.value == Decimal(0)
+
+    def test_entered_section_without_a_forecast_is_refused(self) -> None:
+        """The DWP forecast is the only route (§5.1) — demanded by field."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                state_pension={"deferral_years": "1"},
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "state_pension"
+        assert error.field_key == "forecast_weekly_amount"
+        assert "check-state-pension" in error.message
 
 
 class TestSpendingParsing:
@@ -916,7 +917,7 @@ class TestValidationMessages:
         assert error.field_key == ""
 
     def test_protected_payment_without_forecast_is_rejected(self) -> None:
-        """The state pension record's cross-field rule surfaces (§5.1)."""
+        """A protected payment alone still demands the forecast (§5.1)."""
         result = parse_facts_form(
             FactsFormData(
                 person=person_values(),
@@ -928,17 +929,34 @@ class TestValidationMessages:
         assert result.household is None
         [error] = result.errors
         assert error.section == "state_pension"
-        assert error.field_key == ""
+        assert error.field_key == "forecast_weekly_amount"
 
-    def test_bad_ni_numbers_are_field_addressed(self) -> None:
-        """Unparsable NI-record numbers land on their fields."""
+    def test_protected_payment_beyond_the_forecast_is_rejected(self) -> None:
+        """The record's cross-field rule surfaces on the section (§5.1)."""
         result = parse_facts_form(
             FactsFormData(
                 person=person_values(),
                 state_pension={
-                    "qualifying_years": "eighteen",
+                    "forecast_weekly_amount": "200.00",
+                    "protected_payment": "250.00",
+                },
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "state_pension"
+        assert error.field_key == ""
+
+    def test_bad_state_pension_numbers_are_field_addressed(self) -> None:
+        """Unparsable state pension numbers land on their fields."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                state_pension={
+                    "forecast_weekly_amount": "two hundred",
                     "deferral_years": "a bit",
-                    "ni_record_start": "long ago",
                 },
             ),
             recorded_on=RECORDED,
@@ -946,7 +964,7 @@ class TestValidationMessages:
         )
         assert result.household is None
         by_field = {error.field_key for error in result.errors}
-        assert by_field == {"qualifying_years", "deferral_years", "ni_record_start"}
+        assert by_field == {"forecast_weekly_amount", "deferral_years"}
 
     @pytest.mark.parametrize("factor", ["NaN", "Infinity"])
     def test_non_finite_factors_are_rejected(self, factor: str) -> None:
@@ -1207,10 +1225,6 @@ def _maximal_submission() -> FactsFormData:
             "forecast_weekly_amount": "230.25",
             "protected_payment": "12.40",
             "forecast_as_of": "2026-05-01",
-            "ni_record_start": "2016-04-06",
-            "qualifying_years": "18",
-            "ni_as_of": "2026-04-06",
-            "planned_extra_years": "5",
             "deferral_years": "1.25",
         },
         wrappers=(
@@ -1398,20 +1412,6 @@ class TestFormCannotRepresent:
         assert (
             form_cannot_represent(household)
             == "state pension forecast facts dated on different days"
-        )
-
-    def test_split_dated_ni_record_is_flagged(self, base: Household) -> None:
-        """The form shares one as_of across the NI record pair."""
-        record = base.persons[0].state_pension
-        assert record is not None
-        assert record.qualifying_years is not None
-        moved = _altered(record.qualifying_years, as_of=date(2026, 6, 1))
-        household = _with_person(
-            base, state_pension=_altered(record, qualifying_years=moved)
-        )
-        assert (
-            form_cannot_represent(household)
-            == "NI record facts dated on different days"
         )
 
     def test_off_statement_db_fact_is_flagged(self, base: Household) -> None:
