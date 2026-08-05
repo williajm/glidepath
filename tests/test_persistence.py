@@ -290,9 +290,9 @@ def kitchen_sink_household(
     spending = SpendingPlan(
         annual_spending_real=money_fact("24000"),
         stage_multipliers={
-            LifeStage.EARLY_ACCUMULATION: Decimal("1.00"),
-            LifeStage.MID_ACCUMULATION: Decimal("1.05"),
-            LifeStage.PRE_RETIREMENT: Decimal("0.95"),
+            LifeStage.GO_GO: Decimal("1.20"),
+            LifeStage.SLOW_GO: Decimal("0.95"),
+            LifeStage.NO_GO: Decimal("0.85"),
             LifeStage.DECUMULATION: Decimal("1.10"),
         },
     )
@@ -859,7 +859,7 @@ def _bad_factor_age(payload: dict[str, Any]) -> None:
 
 def _bad_stage_token(payload: dict[str, Any]) -> None:
     """Use a token outside the life-stage vocabulary."""
-    payload["household"]["spending"]["stage_multipliers"] = {"go_go": "1.2"}
+    payload["household"]["spending"]["stage_multipliers"] = {"party_years": "1.2"}
 
 
 def _bad_relief_mechanic(payload: dict[str, Any]) -> None:
@@ -948,7 +948,7 @@ class TestDecodeErrors:
             (_negative_balance, "must be non-negative"),
             (_unbalanced_allocation, "sum to exactly 1"),
             (_bad_factor_age, "ages must be whole years"),
-            (_bad_stage_token, "unknown token 'go_go'"),
+            (_bad_stage_token, "unknown token 'party_years'"),
             (_bad_relief_mechanic, "unknown token 'magic'"),
             (_bad_revaluation_reference, "unknown token 'rpi'"),
             (_empty_entity_id, "entity ids must be non-empty"),

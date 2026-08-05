@@ -318,6 +318,14 @@ adjustment is reported in `RunProvenance.balance_roll_forwards`
 the inspector, so the deviation from the stated-fact principle (§1) is
 visible, attributable, and assumption-driven rather than silent.
 
+The state pension forecast follows the same convention (issue #117):
+its weekly rates roll forward from `forecast_as_of` — the main slice
+at the `policy.state_pension.uprating` assumption's annual rate, the
+protected slice by CPI only, both floored at zero like every statutory
+uprating step — with the adjustments reported through the same
+provenance record and a future-dated forecast likewise an engine
+error.
+
 **Why.** Silently treating a statement value as today's value was
 wrong for any stale statement (issue #72); DB entitlements already
 roll forward from their statement date, so this extends one documented
@@ -527,7 +535,11 @@ class StatePensionRecord:
 @dataclass(frozen=True)
 class SpendingPlan:
     annual_spending_real: Fact[Money]  # today's money
-    stage_multipliers: Mapping[LifeStage, Decimal] | None  # e.g. go-go years
+    stage_multipliers: Mapping[LifeStage, Decimal] | None
+    #   retirement keys only: go-go/slow-go/no-go sub-stages, with
+    #   DECUMULATION the whole-retirement fallback (issue #114);
+    #   spending is modelled only in retirement, so accumulation keys
+    #   are rejected rather than silently ignored
 
 
 @dataclass(frozen=True)
@@ -628,7 +640,13 @@ payment is recorded separately because it uprates by CPI only, not the
 full uprating policy. Conventions (roadmap 4.3): the forecast weekly
 amount is the DWP total, of which `protected_payment` is the CPI-only
 slice; amounts are annualised at 52 weeks and uprated by the engine
-from the run start. Because upratings take effect whole each 6 April —
+from the run start. The forecast is statement-dated (`forecast_as_of`),
+so a stale forecast first rolls forward from its `as_of` to `today`
+exactly like a stale balance fact (§4.8, issue #117): the main slice
+at the uprating assumption's annual rate, the protected slice by CPI
+only, over whole months with every adjustment reported in the run's
+provenance; a future-dated forecast is an engine error. Because
+upratings take effect whole each 6 April —
 exactly a UK period boundary — the state pension stream steps by a
 **full annual uprating at every period boundary**, never scaled by a
 partial period's active fraction (a deliberate deviation from the §5.2
@@ -690,6 +708,9 @@ Wrapper balances are facts dated by their statement (`as_of`); the
 engine rolls each one forward to `today` at the wrapper's expected
 nominal return net of its fee drag over whole months, reporting every
 non-zero adjustment in the run's provenance (decision record §4.8).
+The state pension forecast's weekly rates follow the same convention
+(above), so every statement-dated amount enters the run at today's
+level.
 
 Pre-existing pension access is likewise a set of facts:
 `crystallised_balance` (funds already designated to drawdown), `lsa_used`,
@@ -706,20 +727,25 @@ machinery (roadmap 9.5) read them straight off the result.
 
 **Life stages and glide path.** A person is not a snapshot: the projection
 moves them through `EARLY_ACCUMULATION → MID_ACCUMULATION → PRE_RETIREMENT
-(de-risking) → DECUMULATION`. Stage is *derived* each period from
-years-to-target-retirement, not stored. The glide path maps
+(de-risking) → GO_GO → SLOW_GO → NO_GO`. Stage is *derived* each period
+from years-to-target-retirement, not stored. The glide path maps
 years-to-retirement → asset allocation by interpolating a factor table;
 the default shape is an assumption (`glidepath.default_shape`),
-overridable per person. Stage boundaries (3.5): `DECUMULATION` once the
-target retirement age is attained by the period's first day
-(years-to-retirement ≤ 0, the §4.1 gate convention); `PRE_RETIREMENT`
-inside the table's de-risking window — the years at which the
-allocation starts changing (the lowest knot of the top
-constant-allocation plateau); the `EARLY`/`MID` accumulation split
-falls at twice that window — the split is presentational (only the
-allocation is mechanical), so a simple doubling rule suffices. A
-constant-allocation table has a zero window and never de-risks, so
-`PRE_RETIREMENT` is unreachable there.
+overridable per person. Stage boundaries (3.5): retirement — the target
+retirement age attained by the period's first day (years-to-retirement
+≤ 0, the §4.1 gate convention) — splits into the go-go/slow-go/no-go
+sub-stages one and two decades in (issue #114): for typical retirement
+ages that lands on the 75/85 boundaries the retirement-smile literature
+uses, and like the accumulation split only the spending multipliers
+bind to the result, so a simple decade rule suffices (`DECUMULATION`
+remains the sub-stages' umbrella: the whole-retirement spending
+multiplier key, never derived itself); `PRE_RETIREMENT` inside the
+table's de-risking window — the years at which the allocation starts
+changing (the lowest knot of the top constant-allocation plateau); the
+`EARLY`/`MID` accumulation split falls at twice that window — the
+split is presentational (only the allocation is mechanical), so a
+simple doubling rule suffices. A constant-allocation table has a zero
+window and never de-risks, so `PRE_RETIREMENT` is unreachable there.
 
 ### 5.2 Projection engine
 
@@ -1605,8 +1631,9 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   + rename, so a mid-write failure never truncates the last saved
   plan); a plan the v1 form cannot faithfully edit
   (`form_cannot_represent` — extra persons, planned outflows, joint-life
-  annuity purchases (since 9.12), personal glide paths, stage
-  multipliers, wrapper allocations/fees, independently dated fact
+  annuity purchases (since 9.12), personal glide paths, whole-retirement
+  spending multipliers (the sub-stage multipliers gained form fields
+  with issue #114), wrapper allocations/fees, independently dated fact
   pairs, notes on facts or decisions) is refused at open
   rather than silently reduced on the next save; stored table
   overrides (base and per-scenario) are vetted by their policy parsers

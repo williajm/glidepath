@@ -12,9 +12,17 @@ from decimal import Decimal
 from enum import Enum
 from typing import Final
 
-from glidepath.core import Money
+from glidepath.core import LifeStage, Money
 
 _MAX_STRUCTURED_LENGTH = 120
+
+_ENUM_LABELS: Final[Mapping[Enum, str]] = {
+    LifeStage.GO_GO: "Go-go",
+    LifeStage.SLOW_GO: "Slow-go",
+    LifeStage.NO_GO: "No-go",
+}
+"""Enum members whose copy the generic underscore rule would mangle
+("Go go"); the retirement sub-stages read hyphenated (issue #114)."""
 
 WRAPPER_KIND_NAMES: Final[Mapping[str, str]] = {
     "uk.workplace_dc": "Workplace DC",
@@ -133,7 +141,8 @@ def format_value(value: object) -> str:
     if isinstance(value, date):
         return format_date(value)
     if isinstance(value, Enum):
-        return str(value.name).replace("_", " ").capitalize()
+        generic = str(value.name).replace("_", " ").capitalize()
+        return _ENUM_LABELS.get(value, generic)
     if isinstance(value, Mapping):
         return _format_mapping(value)
     return str(value)

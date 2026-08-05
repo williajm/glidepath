@@ -6,7 +6,7 @@ from decimal import Decimal
 import pytest
 
 from glidepath.app import format_money, format_percent, format_recorded, format_value
-from glidepath.core import Money, Sex
+from glidepath.core import LifeStage, Money, Sex
 
 
 class TestFormatMoney:
@@ -57,6 +57,10 @@ class TestFormatValue:
             (61, "61"),
             ("triple_lock", "triple_lock"),
             (Sex.FEMALE, "Female"),
+            (LifeStage.DECUMULATION, "Decumulation"),
+            (LifeStage.GO_GO, "Go-go"),
+            (LifeStage.SLOW_GO, "Slow-go"),
+            (LifeStage.NO_GO, "No-go"),
             ({"a": 1, "b": 2}, "a=1; b=2"),
             ({"rule": "cpi", "floor": Decimal("0.025")}, "rule=cpi; floor=0.025"),
         ],

@@ -1,17 +1,20 @@
 """Life stages and glide-path allocation (roadmap 3.5; planning §5.1, §7).
 
 The projection moves a person through ``EARLY_ACCUMULATION →
-MID_ACCUMULATION → PRE_RETIREMENT → DECUMULATION``. Stage is *derived*
-each period from years-to-target-retirement — never stored — and the
-glide path maps years-to-retirement to an asset allocation by
+MID_ACCUMULATION → PRE_RETIREMENT → GO_GO → SLOW_GO → NO_GO``. Stage is
+*derived* each period from years-to-target-retirement — never stored —
+and the glide path maps years-to-retirement to an asset allocation by
 interpolating a factor table (:class:`GlidePathConfig`).
 
-Stage boundaries (planning §5.1): ``DECUMULATION`` once the target
-retirement age is attained by the period's first day (years-to-retirement
-≤ 0, matching the §4.1 gate convention); ``PRE_RETIREMENT`` inside the
-table's de-risking window — the years at which the allocation starts
-changing (zero for a constant table, which never de-risks); the
-``EARLY`` / ``MID`` split falls at twice that window.
+Stage boundaries (planning §5.1): retirement — the target retirement
+age attained by the period's first day (years-to-retirement ≤ 0,
+matching the §4.1 gate convention) — splits into the go-go/slow-go/no-go
+sub-stages at one and two decades in (the retirement-smile convention;
+``DECUMULATION`` remains their umbrella for whole-retirement spending
+multipliers); ``PRE_RETIREMENT`` inside the table's de-risking window —
+the years at which the allocation starts changing (zero for a constant
+table, which never de-risks); the ``EARLY`` / ``MID`` split falls at
+twice that window.
 
 The default shape ships as the ``glidepath.default_shape`` assumption
 (planning §7), overridable per person; :func:`glide_path_from_shape`
@@ -39,6 +42,9 @@ _ONE = Decimal(1)
 _SHAPE_LINEAR = "linear"
 _SHAPE_HOLD = "hold"
 
+_RETIREMENT_STAGE_YEARS = 10
+"""Decade width of the go-go/slow-go retirement sub-stages (planning §5.1)."""
+
 
 class LifeStage(Enum):
     """The stages a person moves through (planning §5.1); always derived."""
@@ -48,7 +54,17 @@ class LifeStage(Enum):
     PRE_RETIREMENT = auto()
     """Inside the glide path's de-risking window."""
     DECUMULATION = auto()
-    """Target retirement age attained by the period's first day."""
+    """Retirement as a whole — the go-go/slow-go/no-go umbrella.
+
+    Never derived (the sub-stages partition retirement); retained as
+    the whole-retirement spending-multiplier key (planning §5.1).
+    """
+    GO_GO = auto()
+    """The first decade with the retirement age attained (§4.1 gate)."""
+    SLOW_GO = auto()
+    """The second decade of retirement."""
+    NO_GO = auto()
+    """Retirement beyond its second decade."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,16 +148,33 @@ class GlidePathConfig:
         A constant-allocation table (a single knot, or knots all holding
         the same allocation) has a zero de-risking window, so
         ``PRE_RETIREMENT`` is unreachable and accumulation runs straight
-        into ``DECUMULATION``.
+        into retirement's go-go sub-stage.
         """
         if years_to_retirement <= 0:
-            return LifeStage.DECUMULATION
+            return _retirement_stage_at(years_to_retirement)
         window = self.derisk_window_years
         if years_to_retirement <= window:
             return LifeStage.PRE_RETIREMENT
         if years_to_retirement <= 2 * window:
             return LifeStage.MID_ACCUMULATION
         return LifeStage.EARLY_ACCUMULATION
+
+
+def _retirement_stage_at(years_to_retirement: int) -> LifeStage:
+    """The go-go/slow-go/no-go sub-stage once retirement is attained.
+
+    Sub-stage boundaries fall one and two decades into retirement —
+    for typical retirement ages this lands on the 75/85 boundaries the
+    retirement-smile literature uses. Like the ``EARLY``/``MID`` split,
+    only the spending multipliers bind to the result (planning §5.1),
+    so a simple decade rule suffices.
+    """
+    years_retired = -years_to_retirement
+    if years_retired < _RETIREMENT_STAGE_YEARS:
+        return LifeStage.GO_GO
+    if years_retired < 2 * _RETIREMENT_STAGE_YEARS:
+        return LifeStage.SLOW_GO
+    return LifeStage.NO_GO
 
 
 def _interpolate(

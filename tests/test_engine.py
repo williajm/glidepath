@@ -544,10 +544,10 @@ def membership_of(
     )
 
 
-def sp_record(deferral: str = "0") -> StatePensionRecord:
+def sp_record(deferral: str = "0", as_of: date = AS_OF) -> StatePensionRecord:
     """A forecast-backed record; the stub scheme reads only the deferral."""
     return StatePensionRecord(
-        forecast_weekly_amount=money_fact("200"),
+        forecast_weekly_amount=money_fact("200", as_of=as_of),
         protected_payment=None,
         deferral_years=Decision(value=Decimal(deferral), recorded_on=RECORDED),
     )
@@ -755,7 +755,7 @@ class TestContributions:
         )
         result = run(plan, assumptions_with(), stub_region(), one_period_config())
         [person_result] = result.snapshots[0].persons
-        assert person_result.stage is LifeStage.DECUMULATION
+        assert person_result.stage is LifeStage.GO_GO
         assert person_result.employment_income == ZERO
         assert person_result.wrappers[0].employee_contribution == ZERO
 
@@ -954,7 +954,7 @@ class TestWithdrawals:
             one_period_config(),
         )
         [person_result] = result.snapshots[0].persons
-        assert person_result.stage is LifeStage.DECUMULATION
+        assert person_result.stage is LifeStage.GO_GO
         assert person_result.wrappers[0].withdrawal_gross == ZERO
         assert person_result.net_withdrawn == ZERO
         assert person_result.shortfall == Money(Decimal("12000.00"))
@@ -1026,6 +1026,54 @@ class TestWithdrawals:
         [person_result] = result.snapshots[0].persons
         assert person_result.spending_need == Money(Decimal("18000.00"))
         assert person_result.net_withdrawn == Money(Decimal("18000.00"))
+
+    def test_sub_stage_multiplier_wins_in_its_decade(self) -> None:
+        """A go-go period takes the GO_GO key over the DECUMULATION one."""
+        free_account = wrapper_of(FREE, "100000")
+        person = person_of(
+            (free_account,), date_of_birth=date(1960, 1, 1), retire_at=60
+        )
+        spending = SpendingPlan(
+            annual_spending_real=money_fact("12000"),
+            stage_multipliers={
+                LifeStage.GO_GO: Decimal("1.25"),
+                LifeStage.DECUMULATION: Decimal("0.5"),
+            },
+        )
+        plan = Household(persons=(person,), spending=spending)
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.stage is LifeStage.GO_GO
+        assert person_result.spending_need == Money(Decimal("15000.00"))
+
+    def test_whole_retirement_key_covers_missing_sub_stages(self) -> None:
+        """A no-go period without its own key falls back to DECUMULATION."""
+        free_account = wrapper_of(FREE, "100000")
+        person = person_of(
+            (free_account,), date_of_birth=date(1940, 1, 1), retire_at=60
+        )
+        spending = SpendingPlan(
+            annual_spending_real=money_fact("12000"),
+            stage_multipliers={
+                LifeStage.GO_GO: Decimal("1.25"),
+                LifeStage.DECUMULATION: Decimal("0.5"),
+            },
+        )
+        plan = Household(persons=(person,), spending=spending)
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.stage is LifeStage.NO_GO
+        assert person_result.spending_need == Money(Decimal("6000.00"))
 
     def test_fee_is_charged_on_the_aggregate_wrapper_balance(self) -> None:
         """Emptying one sub-balance must not shrink the account's fee.
@@ -1795,7 +1843,7 @@ class TestPensionIncome:
                 (),
                 date_of_birth=date(1960, 1, 1),
                 retire_at=60,
-                state_pension=sp_record(),
+                state_pension=sp_record(as_of=date(2026, 7, 1)),
             )
         )
         scheme = StubStatePension(
@@ -1816,6 +1864,165 @@ class TestPensionIncome:
         first, second = result.snapshots
         assert first.persons[0].state_pension_income == Money(Decimal("5500.00"))
         assert second.persons[0].state_pension_income == Money(Decimal("11270.00"))
+
+    def test_stale_forecast_rolls_forward_to_today(self) -> None:
+        """A forecast dated a year back is uprated to the run start (#117).
+
+        Twelve stale months at CPI 2% under the cpi rule scale the
+        10,000 entitlement to 10,200 before the run's own uprating
+        begins, and the adjustment lands in the run's provenance in
+        the weekly rates the user stated (200 → 204).
+        """
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(as_of=date(2025, 1, 1)),
+            )
+        )
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("0.02"),
+                    "policy.state_pension.uprating": "cpi",
+                }
+            ),
+            stub_region(state_pension=scheme),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.state_pension_income == Money(Decimal("10200.00"))
+        [entry] = result.provenance.balance_roll_forwards
+        assert entry.label.endswith(".state_pension.forecast_weekly_amount")
+        assert entry.stated == Money(Decimal(200))
+        assert entry.as_of == date(2025, 1, 1)
+        assert entry.months == 12
+        assert entry.factor == Decimal("1.02")
+        assert entry.opening == Money(Decimal(204))
+
+    def test_stale_protected_slice_rolls_by_cpi_only(self) -> None:
+        """The main slice takes the policy rate; protected takes CPI (#117).
+
+        Triple lock (floor 2.5%) rolls the main 10,000 to 10,250 while
+        the protected 1,000 rolls by CPI 2% to 1,020 — and the weekly
+        provenance splits the same way: the 200 forecast (150 main +
+        50 protected) opens at 204.75, the 50 protected at 51.
+        """
+        record = StatePensionRecord(
+            forecast_weekly_amount=money_fact("200", as_of=date(2025, 1, 1)),
+            protected_payment=money_fact("50", as_of=date(2025, 1, 1)),
+            deferral_years=Decision(value=Decimal(0), recorded_on=RECORDED),
+        )
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=record,
+            )
+        )
+        scheme = StubStatePension(
+            annual=Money(Decimal(10000)), cpi_annual=Money(Decimal(1000)), start_age=66
+        )
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("0.02"),
+                    "policy.state_pension.uprating": TRIPLE_LOCK,
+                }
+            ),
+            stub_region(state_pension=scheme),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.state_pension_income == Money(Decimal("11270.00"))
+        forecast_entry, protected_entry = result.provenance.balance_roll_forwards
+        assert forecast_entry.label.endswith(".forecast_weekly_amount")
+        assert forecast_entry.opening == Money(Decimal("204.75"))
+        assert protected_entry.label.endswith(".protected_payment")
+        assert protected_entry.months == 12
+        assert protected_entry.factor == Decimal("1.02")
+        assert protected_entry.opening == Money(Decimal(51))
+
+    def test_zero_forecast_with_region_amounts_still_rolls(self) -> None:
+        """A zero weekly forecast has no blend divisor yet stays safe (#117).
+
+        Only a region answering a zero record with amounts of its own
+        can reach this; the roll still scales those amounts and the
+        provenance falls back to the main slice's factor.
+        """
+        record = StatePensionRecord(
+            forecast_weekly_amount=money_fact("0", as_of=date(2025, 1, 1)),
+            protected_payment=money_fact("0", as_of=date(2025, 1, 1)),
+            deferral_years=Decision(value=Decimal(0), recorded_on=RECORDED),
+        )
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=record,
+            )
+        )
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("0.02"),
+                    "policy.state_pension.uprating": "cpi",
+                }
+            ),
+            stub_region(state_pension=scheme),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.state_pension_income == Money(Decimal("10200.00"))
+        forecast_entry, _protected_entry = result.provenance.balance_roll_forwards
+        assert forecast_entry.factor == Decimal("1.02")
+        assert forecast_entry.opening == ZERO
+
+    def test_fresh_forecast_rolls_by_nothing(self) -> None:
+        """A forecast dated at the run start is used verbatim (#117)."""
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(as_of=date(2026, 1, 1)),
+            )
+        )
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        result = run(
+            plan,
+            assumptions_with({"policy.state_pension.uprating": "cpi"}),
+            stub_region(state_pension=scheme),
+            one_period_config(),
+        )
+        assert result.provenance.balance_roll_forwards == ()
+        [person_result] = result.snapshots[0].persons
+        assert person_result.state_pension_income == Money(Decimal("10000.00"))
+
+    def test_future_dated_forecast_is_an_engine_error(self) -> None:
+        """A forecast dated after today cannot state today's rates (#117)."""
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(as_of=date(2026, 2, 1)),
+            )
+        )
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        assumptions = assumptions_with({"policy.state_pension.uprating": "cpi"})
+        region = stub_region(state_pension=scheme)
+        config = one_period_config()
+        with pytest.raises(EngineError, match="after today"):
+            run(plan, assumptions, region, config)
 
     def test_deflation_freezes_the_state_pension(self) -> None:
         """A negative CPI leaves both slices unchanged, never cut.
@@ -2166,12 +2373,17 @@ class TestStagesAndAllocation:
     """Step 1: stage derivation and glide-path allocation resolution."""
 
     def test_stage_boundaries_follow_the_default_shape(self) -> None:
-        """31/20/10 years out map to early/mid/pre with a 15-year window."""
+        """31/20/10 years out map to early/mid/pre with a 15-year window.
+
+        Retirement splits into go-go/slow-go/no-go by decades (#114).
+        """
         cases = (
             (date(1990, 1, 1), 67, LifeStage.EARLY_ACCUMULATION),
             (date(1990, 1, 1), 56, LifeStage.MID_ACCUMULATION),
             (date(1990, 1, 1), 46, LifeStage.PRE_RETIREMENT),
-            (date(1960, 1, 1), 60, LifeStage.DECUMULATION),
+            (date(1960, 1, 1), 60, LifeStage.GO_GO),
+            (date(1950, 1, 1), 65, LifeStage.SLOW_GO),
+            (date(1940, 1, 1), 60, LifeStage.NO_GO),
         )
         for date_of_birth, retire_at, expected in cases:
             plan = household_of(

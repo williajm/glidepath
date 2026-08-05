@@ -17,6 +17,7 @@ from decimal import Decimal
 from enum import Enum, auto
 from typing import TYPE_CHECKING, NewType
 
+from glidepath.core.glide import LifeStage
 from glidepath.core.money import Money
 
 if TYPE_CHECKING:
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from glidepath.core.annuities import AnnuityPurchase
-    from glidepath.core.glide import GlidePathConfig, LifeStage
+    from glidepath.core.glide import GlidePathConfig
     from glidepath.core.pensions import DBPension
     from glidepath.core.provenance import Decision, Fact
     from glidepath.core.state_pension import StatePensionRecord
@@ -47,6 +48,10 @@ _MIN_PERSONS = 1
 _MAX_PERSONS = 2
 _ZERO = Money(Decimal(0))
 _ZERO_MULTIPLIER = Decimal(0)
+_RETIREMENT_STAGES = frozenset(
+    {LifeStage.DECUMULATION, LifeStage.GO_GO, LifeStage.SLOW_GO, LifeStage.NO_GO}
+)
+"""The spending-multiplier keys reachable in retirement (planning §5.1)."""
 
 
 def new_entity_id() -> EntityId:
@@ -135,21 +140,35 @@ class SpendingPlan:
     ``annual_spending_real`` is a *net* (after-tax) need in today's
     money — the engine inflates it by the run's CPI path and grosses
     withdrawals up against the tax system (planning §5.2 step 4).
-    ``stage_multipliers`` optionally scales the need per life stage
-    (e.g. go-go years); an absent stage means a multiplier of 1.
+    ``stage_multipliers`` optionally scales the need across retirement
+    (planning §5.1): the go-go/slow-go/no-go sub-stage keys bind to
+    their decades, ``DECUMULATION`` covers any sub-stage without its
+    own key, and an absent stage means a multiplier of 1. Spending is
+    modelled only in retirement, so accumulation-stage keys — which
+    could never bind — are rejected rather than silently ignored
+    (issue #114).
     """
 
     annual_spending_real: Fact[Money]
     stage_multipliers: Mapping[LifeStage, Decimal] | None = None
 
     def __post_init__(self) -> None:
-        """Reject negative spending and non-positive multipliers."""
+        """Reject negative spending and unusable multipliers."""
         if self.annual_spending_real.value < _ZERO:
             msg = "SpendingPlan.annual_spending_real must be non-negative"
             raise ValueError(msg)
         multipliers = self.stage_multipliers or {}
         if any(value <= _ZERO_MULTIPLIER for value in multipliers.values()):
             msg = "SpendingPlan.stage_multipliers must be positive"
+            raise ValueError(msg)
+        unusable = set(multipliers) - _RETIREMENT_STAGES
+        if unusable:
+            names = ", ".join(sorted(stage.name for stage in unusable))
+            msg = (
+                "SpendingPlan.stage_multipliers bind only in retirement"
+                " (GO_GO, SLOW_GO, NO_GO, or DECUMULATION for the whole);"
+                f" got {names}"
+            )
             raise ValueError(msg)
 
 

@@ -102,6 +102,9 @@ LIFE_STAGE_TOKENS = EnumTokens(
         LifeStage.MID_ACCUMULATION: "mid_accumulation",
         LifeStage.PRE_RETIREMENT: "pre_retirement",
         LifeStage.DECUMULATION: "decumulation",
+        LifeStage.GO_GO: "go_go",
+        LifeStage.SLOW_GO: "slow_go",
+        LifeStage.NO_GO: "no_go",
     }
 )
 

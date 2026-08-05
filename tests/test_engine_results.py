@@ -244,6 +244,31 @@ class TestSpendingPlanAndRegion:
         with pytest.raises(ValueError, match="positive"):
             SpendingPlan(annual_spending_real=fact, stage_multipliers=multipliers)
 
+    def test_spending_plan_rejects_accumulation_stage_keys(self) -> None:
+        """An accumulation key could never bind, so it is rejected (#114).
+
+        Spending is modelled only in retirement — a silent ignore is
+        exactly the defect the issue describes.
+        """
+        fact = Fact(value=Money(Decimal(1000)), as_of=AS_OF, recorded_on=RECORDED)
+        multipliers = {LifeStage.EARLY_ACCUMULATION: Decimal("1.1")}
+        with pytest.raises(ValueError, match="EARLY_ACCUMULATION"):
+            SpendingPlan(annual_spending_real=fact, stage_multipliers=multipliers)
+
+    def test_spending_plan_accepts_retirement_stage_keys(self) -> None:
+        """The go-go/slow-go/no-go keys and the DECUMULATION fallback bind."""
+        fact = Fact(value=Money(Decimal(1000)), as_of=AS_OF, recorded_on=RECORDED)
+        plan = SpendingPlan(
+            annual_spending_real=fact,
+            stage_multipliers={
+                LifeStage.GO_GO: Decimal("1.2"),
+                LifeStage.SLOW_GO: Decimal("0.9"),
+                LifeStage.NO_GO: Decimal("0.8"),
+                LifeStage.DECUMULATION: Decimal("1.0"),
+            },
+        )
+        assert plan.stage_multipliers is not None
+
     def test_region_requires_a_data_version(self) -> None:
         """The data version is part of the run manifest (planning §4.6)."""
         calendar = AnnualCalendar()
