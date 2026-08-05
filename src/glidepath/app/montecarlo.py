@@ -15,7 +15,7 @@ seeded path runner.
 """
 
 import os
-from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -53,6 +53,16 @@ PARALLEL_PATHS_MIN: Final = 100
 Spawning worker processes costs around a second (each re-imports the
 package); below this many paths the serial run finishes comparably
 fast, so small runs — and the app-layer test suite — stay in-process.
+"""
+
+MAX_POOL_WORKERS: Final = 61
+"""Most workers a pool may hold — Windows' wait-handle ceiling.
+
+``ProcessPoolExecutor`` rejects more than 61 workers on Windows (the
+64-object ``WaitForMultipleObjects`` limit minus bookkeeping handles);
+without the cap, every qualifying run on a 63+-logical-CPU Windows
+machine would fail at pool construction. Capped on every platform so
+the policy stays uniform.
 """
 
 NO_MONTE_CARLO_MESSAGE: Final = (
@@ -195,11 +205,13 @@ def path_pool(total_paths: int) -> Iterator[PathParallelism | None]:
     CPU-bound ``Decimal`` work, so a run big enough to amortize process
     startup (``PARALLEL_PATHS_MIN``) gets a process pool sized to the
     machine — every available core but one, so the GUI thread keeps a
-    core — and anything smaller runs serially (``None``). One pool
+    core, capped at ``MAX_POOL_WORKERS`` — and anything smaller runs
+    serially (``None``). One pool
     serves a whole transition: a retirement-age search passes it to
     every candidate's paths rather than re-spawning per age.
     """
-    workers = min(max(1, (os.process_cpu_count() or 1) - 1), total_paths)
+    spare_cores = max(1, (os.process_cpu_count() or 1) - 1)
+    workers = min(spare_cores, total_paths, MAX_POOL_WORKERS)
     if workers <= 1 or total_paths < PARALLEL_PATHS_MIN:
         yield None
         return
@@ -274,7 +286,12 @@ def state_with_monte_carlo(
                 paths=paths,
                 parallelism=parallelism,
             )
-    except (BrokenExecutor, ValueError) as exc:
+    except Exception as exc:
+        # Broad by design: beyond the engine's ValueErrors, the process
+        # pool can raise OSError at spawn, pickling TypeErrors, or a
+        # BrokenExecutor — an escape here would leave the shell's
+        # in-flight guard held (buttons disabled, spinner running)
+        # forever, so every failure folds into the state (§4.7).
         return _with_monte_carlo_error(base, MONTE_CARLO_FAILED_PREFIX + str(exc))
     changes: dict[str, Any] = {"monte_carlo": result, "monte_carlo_error": None}
     return replace(base, **changes) if changes else base

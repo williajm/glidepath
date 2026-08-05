@@ -1685,8 +1685,12 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   `sustainable_income` and `earliest_retirement_age` pass one executor
   through every probe. The app layer owns the policy (`path_pool`):
   runs of at least 100 path-projections get a process pool sized to
-  every core but one (the GUI keeps a core), anything smaller stays
-  serial, and the 9.13 worker-thread + staleness rules are untouched.
+  every core but one (the GUI keeps a core; capped at 61, the Windows
+  wait-handle ceiling `ProcessPoolExecutor` enforces), anything
+  smaller stays serial, the transitions fold *any* run failure into
+  state so a process-boundary error can never strand the shell's
+  in-flight guard, and the 9.13 worker-thread + staleness rules are
+  untouched.
   Structured shipped defaults now ride in a picklable `FrozenTable`
   instead of `MappingProxyType` so the assumption set survives the
   trip to worker processes (guard-tested).*

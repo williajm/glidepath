@@ -68,6 +68,12 @@ max-complexity = 10
 "src/glidepath/core/retirement.py" = [
     "PLR0913", # earliest_retirement_age mirrors the §5.2 runner signature (see core/montecarlo.py).
 ]
+"src/glidepath/app/montecarlo.py" = [
+    "BLE001", # The slow-run transition must fold ANY failure into state (§4.7): an exception escaping past the shell's worker thread holds the in-flight guard forever.
+]
+"src/glidepath/app/retirement.py" = [
+    "BLE001", # Same in-flight-guard rationale as app/montecarlo.py.
+]
 "tests/**" = [
     "S101",    # pytest tests use bare assert by design.
     "PLR2004", # Literal expected values in assertions are idiomatic in tests.

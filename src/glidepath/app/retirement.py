@@ -15,7 +15,6 @@ whole state through :func:`~glidepath.app.plan.replanned_state`, so a
 held answer can never go stale against a changed plan.
 """
 
-from concurrent.futures import BrokenExecutor
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
@@ -229,7 +228,11 @@ def state_with_retirement(
                 search,
                 parallelism=parallelism,
             )
-    except (BrokenExecutor, ValueError) as exc:
+    except Exception as exc:
+        # Broad by design, exactly as in state_with_monte_carlo: a
+        # process-pool failure escaping here would hold the shell's
+        # in-flight guard forever, so every failure folds into the
+        # state (§4.7).
         return _with_retirement_error(base, RETIREMENT_FAILED_PREFIX + str(exc))
     answer = RetirementAnswer(
         age=age,

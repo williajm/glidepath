@@ -325,6 +325,29 @@ class TestStateWithRetirement:
         assert state.retirement is None
         assert state.retirement_error == RETIREMENT_RATE_MESSAGE
 
+    def test_a_process_boundary_failure_folds_into_the_error(
+        self, projected: PlanState, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An OSError past the engine's ValueErrors must never escape.
+
+        An exception escaping the transition would hold the shell's
+        shared in-flight guard forever — buttons disabled, the 9.16
+        spinner running — so any failure folds into the state (§4.7).
+        """
+
+        def broken_solver(*_args: object, **_kwargs: object) -> int:
+            msg = "could not spawn worker processes"
+            raise OSError(msg)
+
+        monkeypatch.setattr(
+            "glidepath.app.retirement.earliest_retirement_age", broken_solver
+        )
+        state = state_with_retirement(projected, DETERMINISTIC_REQUEST, today=TODAY)
+        assert state.retirement is None
+        assert state.retirement_error is not None
+        assert state.retirement_error.startswith(RETIREMENT_FAILED_PREFIX)
+        assert "could not spawn worker processes" in state.retirement_error
+
     def test_a_success_clears_a_previous_error(self, projected: PlanState) -> None:
         """The error and the answer never show together."""
         request = replace(DETERMINISTIC_REQUEST, rate_text="nope")

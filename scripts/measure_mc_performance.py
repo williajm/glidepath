@@ -30,6 +30,7 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
+from glidepath.app.montecarlo import MAX_POOL_WORKERS
 from glidepath.core import (
     AssumptionReadRecorder,
     ContributionSchedule,
@@ -162,7 +163,7 @@ def _measure_parallel_runner() -> tuple[int, float, float]:
     region = uk_region(future_years_extension(assumptions))
     household = _household()
     config = RunConfig(today=TODAY, mode=RunMode.MONTE_CARLO, seed=20260803)
-    workers = max(1, (os.process_cpu_count() or 1) - 1)
+    workers = min(max(1, (os.process_cpu_count() or 1) - 1), MAX_POOL_WORKERS)
     started = time.perf_counter()
     with ProcessPoolExecutor(max_workers=workers) as executor:
         parallelism = PathParallelism(executor=executor, workers=workers)

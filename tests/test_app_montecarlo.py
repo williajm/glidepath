@@ -33,7 +33,11 @@ from glidepath.app import (
     state_with_monte_carlo,
     state_with_override,
 )
-from glidepath.app.montecarlo import MONTE_CARLO_FAILED_PREFIX, PARALLEL_PATHS_MIN
+from glidepath.app.montecarlo import (
+    MAX_POOL_WORKERS,
+    MONTE_CARLO_FAILED_PREFIX,
+    PARALLEL_PATHS_MIN,
+)
 from glidepath.app.plan import replanned_state
 from glidepath.core import (
     Decision,
@@ -183,6 +187,27 @@ class TestStateWithMonteCarlo:
         assert outcome.monte_carlo is None
         assert outcome.monte_carlo_error is not None
         assert outcome.monte_carlo_error.startswith(MONTE_CARLO_FAILED_PREFIX)
+
+    def test_a_process_boundary_failure_folds_into_the_error(
+        self, projected: PlanState, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An OSError past the engine's ValueErrors must never escape.
+
+        An exception escaping the transition would hold the shell's
+        shared in-flight guard forever — buttons disabled, the 9.16
+        spinner running — so any failure folds into the state (§4.7).
+        """
+
+        def broken_runner(*_args: object, **_kwargs: object) -> None:
+            msg = "could not spawn worker processes"
+            raise OSError(msg)
+
+        monkeypatch.setattr("glidepath.app.montecarlo.run_paths", broken_runner)
+        state = state_with_monte_carlo(projected, "7", "3", today=TODAY)
+        assert state.monte_carlo is None
+        assert state.monte_carlo_error is not None
+        assert state.monte_carlo_error.startswith(MONTE_CARLO_FAILED_PREFIX)
+        assert "could not spawn worker processes" in state.monte_carlo_error
 
     def test_a_failure_drops_the_held_result(self, mc_state: PlanState) -> None:
         """A rejected re-run never leaves stale metrics on screen."""
@@ -440,3 +465,17 @@ class TestPathPool:
         with path_pool(PARALLEL_PATHS_MIN) as parallelism:
             assert parallelism is not None
             assert parallelism.workers == 2
+
+    def test_a_many_core_machine_is_capped_at_the_windows_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """63+ logical CPUs must not ask for a pool Windows rejects.
+
+        ``ProcessPoolExecutor`` raises for more than 61 workers on
+        Windows; uncapped, every qualifying run on such a machine
+        would fail at pool construction.
+        """
+        monkeypatch.setattr(os, "process_cpu_count", lambda: 128)
+        with path_pool(10_000) as parallelism:
+            assert parallelism is not None
+            assert parallelism.workers == MAX_POOL_WORKERS
