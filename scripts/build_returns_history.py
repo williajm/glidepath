@@ -137,7 +137,7 @@ def world_equity_gbp(table: Table, year: int) -> float:
     uk_now = table[(year, "GBR")]["xrusd"]
     uk_prev = table[(year - 1, "GBR")]["xrusd"]
     weighted: list[tuple[float, float]] = []
-    for iso in sorted({country for (_, country) in table}):
+    for iso in sorted({key[1] for key in table}):
         now = table.get((year, iso), {})
         prev = table.get((year - 1, iso), {})
         if "eq_tr" not in now or "xrusd" not in now:
