@@ -7,6 +7,16 @@ layer and engine — no Qt imports (guard test), no assumption of a
 desktop — so a future web shell can reuse it unchanged.
 """
 
+from glidepath.app.backtest import (
+    BACKTEST_NO_PLAN_MESSAGE,
+    BACKTEST_RUNNING_MESSAGE,
+    BACKTEST_STALE_MESSAGE,
+    NO_BACKTEST_MESSAGE,
+    BacktestMetric,
+    BacktestPanelViewModel,
+    build_backtest_panel,
+    state_with_backtest,
+)
 from glidepath.app.charts import (
     DEFAULT_CHART_BASIS,
     NO_PROJECTION_MESSAGE,
@@ -168,6 +178,9 @@ from glidepath.core import ReportBasis
 __all__ = [
     "ABOUT_TITLE",
     "APP_NAME",
+    "BACKTEST_NO_PLAN_MESSAGE",
+    "BACKTEST_RUNNING_MESSAGE",
+    "BACKTEST_STALE_MESSAGE",
     "DATE_PICKER_TOOLTIP",
     "DEFAULT_CHART_BASIS",
     "DEFAULT_COMPARISON_METRIC_KEY",
@@ -188,6 +201,7 @@ __all__ = [
     "MONTE_CARLO_STALE_MESSAGE",
     "NOTHING_TO_EXPORT_MESSAGE",
     "NOTHING_TO_SAVE_MESSAGE",
+    "NO_BACKTEST_MESSAGE",
     "NO_MONTE_CARLO_MESSAGE",
     "NO_PROJECTION_MESSAGE",
     "NO_RETIREMENT_MESSAGE",
@@ -203,6 +217,8 @@ __all__ = [
     "RUN_FAILED_PREFIX",
     "AboutViewModel",
     "AssumptionRow",
+    "BacktestMetric",
+    "BacktestPanelViewModel",
     "ChartBand",
     "ChartBasisOption",
     "ChartSeries",
@@ -249,6 +265,7 @@ __all__ = [
     "TargetOption",
     "bar_tooltip",
     "basis_from_key",
+    "build_backtest_panel",
     "build_charts_view_model",
     "build_facts_form_view_model",
     "build_inspector_view_model",
@@ -288,6 +305,7 @@ __all__ = [
     "save_plan_state",
     "scenario_target_options",
     "should_show_disclaimer",
+    "state_with_backtest",
     "state_with_household",
     "state_with_monte_carlo",
     "state_with_override",

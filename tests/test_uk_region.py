@@ -108,7 +108,8 @@ class TestUkRegionBundle:
         assert "tax_year 2026/27 verified" in version
         assert "age_rules verified" in version
         assert "assumptions verified" in version
-        assert version.count("sha256=") == 3
+        assert "returns_history verified" in version
+        assert version.count("sha256=") == 4
         assert "future_years" not in version
 
     def test_data_version_records_the_full_extension_policy(self) -> None:

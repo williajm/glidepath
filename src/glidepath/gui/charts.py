@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from glidepath.app import (
+        BacktestPanelViewModel,
         ChartSeries,
         ChartSpec,
         ChartsViewModel,
@@ -67,13 +68,15 @@ class ChartsPaneCallbacks:
     ``run_retirement`` receives the raw replacement-rate and
     success-target text plus the Monte Carlo panel's raw seed and
     path-count text (its basis under that run mode) — the shell
-    parses, the pane only captures (planning §4.7).
+    parses, the pane only captures (planning §4.7). ``run_backtest``
+    carries nothing: the historical backtest has no inputs (9.18).
     """
 
     select_basis: Callable[[str], None]
     select_mode: Callable[[str], None]
     run_monte_carlo: Callable[[str, str], None]
     run_retirement: Callable[[str, str, str, str], None]
+    run_backtest: Callable[[], None]
 
 
 def _bar_hovered(
@@ -202,6 +205,7 @@ class ChartsPane(QWidget):
         monte_carlo_layout.addWidget(self.monte_carlo_message_label)
 
         self._build_retirement_box()
+        self._build_backtest_box()
         busy_row = self._build_busy_row()
 
         self.message_label = QLabel("", self)
@@ -215,6 +219,7 @@ class ChartsPane(QWidget):
         controls.addWidget(self._monte_carlo_box, 1)
         layout.addLayout(controls)
         layout.addWidget(self._retirement_box)
+        layout.addWidget(self._backtest_box)
         layout.addLayout(busy_row)
         layout.addWidget(self.message_label)
         layout.addWidget(self.chart_tabs, 1)
@@ -230,6 +235,7 @@ class ChartsPane(QWidget):
         self._sync_basis_buttons(view_model)
         self._sync_monte_carlo(view_model.monte_carlo)
         self._sync_retirement(view_model.retirement)
+        self._sync_backtest(view_model.backtest)
         self.message_label.setText(view_model.message)
         self.message_label.setVisible(bool(view_model.message))
         self.chart_tabs.setVisible(bool(view_model.charts))
@@ -292,9 +298,30 @@ class ChartsPane(QWidget):
         self.retirement_message_label.setWordWrap(True)
         retirement_layout.addWidget(self.retirement_message_label)
 
+    def _build_backtest_box(self) -> None:
+        """Create the historical-backtest card's widgets (9.18)."""
+        self._backtest_box = QGroupBox(self)
+        backtest_layout = QVBoxLayout(self._backtest_box)
+        backtest_controls = QHBoxLayout()
+        self.backtest_button = QPushButton("", self._backtest_box)
+        self.backtest_button.clicked.connect(self._backtest_clicked)
+        backtest_controls.addWidget(self.backtest_button)
+        backtest_controls.addStretch(1)
+        backtest_layout.addLayout(backtest_controls)
+        self.backtest_metrics_label = QLabel("", self._backtest_box)
+        self.backtest_metrics_label.setWordWrap(True)
+        backtest_layout.addWidget(self.backtest_metrics_label)
+        self.backtest_message_label = QLabel("", self._backtest_box)
+        self.backtest_message_label.setWordWrap(True)
+        backtest_layout.addWidget(self.backtest_message_label)
+
     def _run_clicked(self) -> None:
         """Forward the raw seed and path-count text to the shell."""
         self._callbacks.run_monte_carlo(self.seed_edit.text(), self.paths_edit.text())
+
+    def _backtest_clicked(self) -> None:
+        """Ask the shell to run the historical backtest (9.18)."""
+        self._callbacks.run_backtest()
 
     def _retirement_clicked(self) -> None:
         """Forward the card's raw text to the shell (roadmap 9.14).
@@ -325,6 +352,14 @@ class ChartsPane(QWidget):
         runs off the GUI thread and must not overlap itself.
         """
         self.retirement_button.setEnabled(not busy)
+
+    def set_backtest_busy(self, *, busy: bool) -> None:
+        """Disable the card's action while a backtest is in flight (9.18).
+
+        Same rationale as :meth:`set_monte_carlo_busy`: the windows
+        run off the GUI thread and must not overlap themselves.
+        """
+        self.backtest_button.setEnabled(not busy)
 
     def show_busy(self, status: str) -> None:
         """Show the busy animation with a status line naming the run (9.16).
@@ -398,6 +433,16 @@ class ChartsPane(QWidget):
             widget.setVisible(panel.controls_visible)
         self.metrics_label.setVisible(bool(metrics))
         self.monte_carlo_message_label.setVisible(bool(panel.message))
+
+    def _sync_backtest(self, panel: BacktestPanelViewModel) -> None:
+        """Re-render the historical-backtest card (roadmap 9.18)."""
+        self._backtest_box.setTitle(panel.heading)
+        self.backtest_button.setText(panel.run_label)
+        metrics = "\n".join(f"{row.label}: {row.value}" for row in panel.metrics)
+        self.backtest_metrics_label.setText(metrics)
+        self.backtest_metrics_label.setVisible(bool(metrics))
+        self.backtest_message_label.setText(panel.message)
+        self.backtest_message_label.setVisible(bool(panel.message))
 
     def _sync_retirement(self, panel: RetirementPanelViewModel) -> None:
         """Re-render the "When can I retire?" card (roadmap 9.14)."""

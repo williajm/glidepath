@@ -34,10 +34,12 @@ from glidepath.regions.uk.extension import FutureYearsExtension, FutureYearsPoli
 from glidepath.regions.uk.loader import (
     AGE_RULES_FILENAME,
     ASSUMPTIONS_FILENAME,
+    RETURNS_HISTORY_FILENAME,
     available_tax_years,
     data_file_digest,
     load_age_rules,
     load_default_assumptions,
+    load_returns_history,
     load_tax_year,
     tax_year_filename,
 )
@@ -137,6 +139,11 @@ def _data_version(future_years: FutureYearsExtension | None) -> str:
     parts.append(
         f"assumptions verified {assumptions.meta.verified_on}"
         f" sha256={assumptions_digest}"
+    )
+    history = load_returns_history()
+    history_digest = data_file_digest(RETURNS_HISTORY_FILENAME)
+    parts.append(
+        f"returns_history verified {history.meta.verified_on} sha256={history_digest}"
     )
     if future_years is not None:
         policy = future_years.policy

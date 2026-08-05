@@ -1036,9 +1036,13 @@ rather than succeeding vacuously.
 
 Location: `src/glidepath/regions/uk/data/`, loaded via
 `importlib.resources` + stdlib `tomllib`. One file per tax year
-(`tax_year_2026_27.toml`), plus effective-dated `age_rules.toml` and
+(`tax_year_2026_27.toml`), plus effective-dated `age_rules.toml`,
 `assumptions_default.toml` (machine mirror of §7; a doc-sync test keeps
-them aligned). Loader rules: money/rates are TOML **strings** parsed to
+them aligned), and `returns_history.toml` (the 9.18 historical return
+series: nominal annual rates per calendar year, contiguous, regenerated
+from its upstream dataset by `scripts/build_returns_history.py`;
+CC BY-NC-SA 4.0-licensed data, unlike the MIT code — see the file
+header). Loader rules: money/rates are TOML **strings** parsed to
 `Decimal` (bare floats in money positions are load errors); mandatory
 `[meta]` with `verified_on` + `sources`; `schema_version`; strict
 validation into frozen dataclasses, unknown keys error.
@@ -1709,16 +1713,49 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   fields, and a migrated record without a forecast keeps its deferral
   choice but fails projection with a clear demand for a forecast —
   the facts form requires one on the next save.*
-- [ ] 9.18 Historical backtesting — *run the plan over every rolling
-  historical window of an annual real-return series, as a complement to
-  Monte Carlo: rolling windows preserve the sequence-of-returns and
-  regime behaviour that independent lognormal draws miss. The return
-  series ships as a data file with `verified_on` + sources (the §5.3
-  provenance pattern) and must reflect how UK investors actually invest
-  today — globally diversified equities in GBP terms (currency effects
-  included), not a UK-only equity series — alongside GBP bond/gilt and
-  cash series. Success reporting mirrors the Monte Carlo metrics
-  (success rate over windows, worst-window identification).*
+- [x] 9.18 Historical backtesting (#103) — *run the plan over every
+  rolling historical window of an annual real-return series, as a
+  complement to Monte Carlo: rolling windows preserve the
+  sequence-of-returns and regime behaviour that independent lognormal
+  draws miss. The series ships as `returns_history.toml` (§5.3
+  provenance pattern): per year 1900–2020, nominal world equity total
+  returns in GBP terms, UK long-gilt total returns, UK bills, and UK
+  CPI inflation, derived from the JST Macrohistory Database R6 by
+  `scripts/build_returns_history.py` — the world equity series is the
+  GDP-weighted average of the 16-to-18 JST countries' local returns
+  converted into GBP (currency effects included), the JST papers' own
+  world-index convention; the file is CC BY-NC-SA 4.0 with attribution
+  (unlike the MIT code — noted in the file header and README), a
+  licence-clean source where MSCI/DMS/Barclays data could not be
+  redistributed. Sanity anchors at derivation: 1900–2020 geometric
+  real means of +5.9% equity / +1.3% gilts / +0.5% bills, with 2008,
+  1990, 1948, 1920, 1974 the worst real equity years. Engine:
+  `run_windows` projects window *w* through the ordinary deterministic
+  `run` with a `HistoricalWindowModel` factory — the same one step
+  function, no seed, fully reproducible; each observed year's real
+  return (nominal deflated by that year's CPI) is recomposed with the
+  run's assumed CPI, keeping the one-inflation-truth rule and making
+  windows comparable in today's money (the accepted cost — frozen tax
+  bands meet assumed, not historical, inflation — is exactly Monte
+  Carlo's). An M-year series over an N-period horizon runs M−N+1
+  windows; a horizon the series cannot cover fails with a pointed
+  error. `BacktestResult` mirrors the Monte Carlo metrics: success
+  rate over windows, ending-pot/balance percentiles by the same
+  interpolation, plus `worst_window` (ruined windows before survivors,
+  earliest shortfall first, then lowest ending pot, ties to the
+  earliest start year). GUI per §4.7: a charts-screen card next to the
+  Monte Carlo panel (Run backtest, success rate, window span, worst
+  starting year with the plan-calendar year the money ran out,
+  ending-pot percentiles) under the 9.13 worker-thread + staleness +
+  re-anchoring rules and the 9.16 busy indicator; a held backtest
+  draws the 10/50/90 bands over the balances chart in either run mode
+  (it can never coexist with a held Monte Carlo result — each slow-run
+  transition re-anchors and drops the other), and its metrics join the
+  9.19 PDF report. The run is serial by design: a full backtest is
+  ≈ 1 s of deterministic passes, under the 9.15 pool threshold. The
+  region data version gains the series file as a fourth
+  verified+digest part, and a guard test sweeps every figure string in
+  the series file out of source code.*
 - [x] 9.19 Exports and reports (#104) — *get the plan out of the app:
   File → "Export cash flow (CSV)" serialises the active run's report
   model exactly (header block: plan, run, scenario, money basis,

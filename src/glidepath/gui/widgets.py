@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
 )
 
 from glidepath.app import (
+    BACKTEST_RUNNING_MESSAGE,
+    BACKTEST_STALE_MESSAGE,
     DEFAULT_CHART_BASIS,
     DEFAULT_COMPARISON_METRIC_KEY,
     DEFAULT_RUN_MODE,
@@ -75,6 +77,7 @@ from glidepath.app import (
     report_exported_message,
     run_mode_from_key,
     save_plan_state,
+    state_with_backtest,
     state_with_household,
     state_with_monte_carlo,
     state_with_override,
@@ -268,6 +271,8 @@ class MainWindow(QMainWindow):
         self._monte_carlo_input: PlanState | None = None
         self._retirement_worker: _TransitionWorker | None = None
         self._retirement_input: PlanState | None = None
+        self._backtest_worker: _TransitionWorker | None = None
+        self._backtest_input: PlanState | None = None
         self.setWindowTitle(view_model.window_title)
         self.resize(1120, 780)
 
@@ -282,6 +287,7 @@ class MainWindow(QMainWindow):
                 select_mode=self._handle_charts_mode,
                 run_monte_carlo=self._handle_monte_carlo_run,
                 run_retirement=self._handle_retirement_run,
+                run_backtest=self._handle_backtest_run,
             )
         )
         self.scenarios_pane = ScenariosPane(
@@ -575,21 +581,24 @@ class MainWindow(QMainWindow):
         self._refresh_charts_pane()
 
     def _transition_in_flight(self) -> bool:
-        """Whether a Monte Carlo run or retirement search is running.
+        """Whether a slow run (Monte Carlo, retirement, backtest) is running.
 
-        The two transitions share one guard: both compute from the
+        The transitions share one guard: each computes from the
         session state captured at start, so a second launched while
         the first runs could only ever be discarded as stale after
         minutes of wasted compute.
         """
-        return self._monte_carlo_worker is not None or (
-            self._retirement_worker is not None
+        return (
+            self._monte_carlo_worker is not None
+            or self._retirement_worker is not None
+            or self._backtest_worker is not None
         )
 
     def _set_transitions_busy(self, *, busy: bool) -> None:
-        """Disable (or re-enable) both slow-run actions together."""
+        """Disable (or re-enable) every slow-run action together."""
         self.charts_pane.set_monte_carlo_busy(busy=busy)
         self.charts_pane.set_retirement_busy(busy=busy)
+        self.charts_pane.set_backtest_busy(busy=busy)
 
     def _handle_monte_carlo_run(self, seed_text: str, paths_text: str) -> None:
         """Start a Monte Carlo run off the GUI thread (9.13).
@@ -683,6 +692,46 @@ class MainWindow(QMainWindow):
         self._retirement_input = None
         if stale:
             self.statusBar().showMessage(RETIREMENT_STALE_MESSAGE)
+            return
+        self._state = state
+        self.statusBar().clearMessage()
+        self._refresh_result_panes()
+
+    def _handle_backtest_run(self) -> None:
+        """Start a historical backtest off the GUI thread (9.18).
+
+        One deterministic window per historical starting year — same
+        threading rules as the Monte Carlo run: the window stays
+        responsive, every slow-run action disables meanwhile, and a
+        request while any is in flight is ignored.
+        """
+        if self._transition_in_flight():
+            return
+        state = self._state
+        today = _today()
+        worker = _TransitionWorker(lambda: state_with_backtest(state, today=today))
+        worker.signals.finished.connect(self._handle_backtest_finished)
+        self._backtest_worker = worker
+        self._backtest_input = state
+        self._set_transitions_busy(busy=True)
+        self.statusBar().showMessage(BACKTEST_RUNNING_MESSAGE)
+        self.charts_pane.show_busy(BACKTEST_RUNNING_MESSAGE)
+        self.monte_carlo_pool.start(worker)
+
+    def _handle_backtest_finished(self, state: PlanState) -> None:
+        """Adopt a finished backtest unless the plan moved on (9.18).
+
+        Same staleness rule as the Monte Carlo delivery: a result
+        computed from a session state that was replaced mid-run
+        describes a plan no longer on screen and is discarded.
+        """
+        self._backtest_worker = None
+        self._set_transitions_busy(busy=False)
+        self.charts_pane.clear_busy()
+        stale = self._state is not self._backtest_input
+        self._backtest_input = None
+        if stale:
+            self.statusBar().showMessage(BACKTEST_STALE_MESSAGE)
             return
         self._state = state
         self.statusBar().clearMessage()

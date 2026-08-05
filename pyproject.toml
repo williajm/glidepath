@@ -65,6 +65,12 @@ max-complexity = 10
 "src/glidepath/core/montecarlo.py" = [
     "PLR0913", # run_paths/sustainable_income take the §5.2 engine quartet plus keyword-only run knobs; bundling would obscure the run(plan, assumptions, region, config) shape.
 ]
+"src/glidepath/core/backtest.py" = [
+    "PLR0913", # run_windows and its chunk worker mirror the §5.2 runner signature (see core/montecarlo.py).
+]
+"scripts/build_returns_history.py" = [
+    "S314", # xml.etree parses the JST workbook the developer supplies locally, never untrusted input.
+]
 "src/glidepath/core/retirement.py" = [
     "PLR0913", # earliest_retirement_age mirrors the §5.2 runner signature (see core/montecarlo.py).
 ]
@@ -72,6 +78,9 @@ max-complexity = 10
     "BLE001", # The slow-run transition must fold ANY failure into state (§4.7): an exception escaping past the shell's worker thread holds the in-flight guard forever.
 ]
 "src/glidepath/app/retirement.py" = [
+    "BLE001", # Same in-flight-guard rationale as app/montecarlo.py.
+]
+"src/glidepath/app/backtest.py" = [
     "BLE001", # Same in-flight-guard rationale as app/montecarlo.py.
 ]
 "tests/**" = [

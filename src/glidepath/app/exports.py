@@ -357,7 +357,7 @@ def _inputs_sections(state: PlanState) -> list[str]:
 
 
 def _results_sections(state: PlanState, request: ReportRequest) -> list[str]:
-    """The report's results: the three charts, Monte Carlo, retirement."""
+    """The report's results: charts, Monte Carlo, backtest, retirement."""
     charts = build_charts_view_model(state, request.basis, request.mode)
     parts = [
         f"<h2>{escape(_RESULTS_HEADING)}</h2>",
@@ -381,6 +381,15 @@ def _results_sections(state: PlanState, request: ReportRequest) -> list[str]:
                     (panel.paths_label, panel.paths_value),
                     *((row.label, row.value) for row in panel.metrics),
                 ),
+            )
+        )
+    backtest = charts.backtest
+    if backtest.metrics:
+        parts.append(f"<h3>{escape(backtest.heading)}</h3>")
+        parts.append(
+            _html_table(
+                _METRIC_COLUMNS,
+                tuple((row.label, row.value) for row in backtest.metrics),
             )
         )
     retirement = charts.retirement
@@ -420,9 +429,9 @@ def build_plan_report(state: PlanState, request: ReportRequest) -> PlanReport | 
     """The full printable plan report, or ``None`` without a projection.
 
     Inputs with their provenance first, then the projection results
-    with the three charts (plus Monte Carlo metrics and the retirement
-    answer when held), then the scenario comparison when scenarios
-    exist — the disclaimer leads the document (§1).
+    with the three charts (plus Monte Carlo metrics, backtest metrics,
+    and the retirement answer when held), then the scenario comparison
+    when scenarios exist — the disclaimer leads the document (§1).
     """
     if state.result is None:
         return None
