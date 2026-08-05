@@ -237,6 +237,19 @@ class WrapperRuleset(Protocol):
         """The relief mechanics ``kind`` may operate (empty: no relief)."""
         ...
 
+    def bears_default_fees(self, kind: WrapperKindId) -> bool:
+        """Whether ``kind`` bears the shipped default fee assumptions.
+
+        The ``fees.platform``/``fees.fund`` defaults describe
+        platform-administered investment accounts; a kind whose real
+        accounts price no such charges (e.g. a bare cash savings
+        account) answers ``False`` and, absent an explicit
+        :class:`~glidepath.core.investments.FeeSchedule` on the
+        wrapper, is charged no fees at all. A wrapper's own stated
+        schedule always applies regardless of this answer.
+        """
+        ...
+
     def lump_sum_allowance(self, period: Period) -> Money | None:
         """The lifetime cap on tax-free cash from pension kinds (§5.2).
 

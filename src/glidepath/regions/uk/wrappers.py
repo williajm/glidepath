@@ -17,7 +17,11 @@ operate) is scheme mechanics, not policy figures:
   contributions are age-windowed (18 to 50, pro-rated by whole months).
 - GIA and cash accounts are bare taxable accounts: paid from taxed
   income, growth taxable as it arises (dividends and interest feed the
-  §6 savings/dividend layers), withdrawals themselves tax-free.
+  §6 savings/dividend layers), withdrawals themselves tax-free. A cash
+  savings account prices no platform or fund charges, so the cash kind
+  alone is exempt from the shipped default fee assumptions
+  (``bears_default_fees``); the shipped cash return default is
+  therefore the account's whole return.
 - Pension money in is tax-relieved, grows tax-free, and comes out as
   taxable income after the tax-free lump-sum fraction (EET).
 
@@ -87,6 +91,7 @@ LISA_ALLOWANCE_GROUP = "uk.lisa"
 _PENSION_KINDS = frozenset({WORKPLACE_DC_KIND, SIPP_KIND})
 _TAX_FREE_SAVINGS_KINDS = frozenset({ISA_KIND, LISA_KIND})
 _TAXABLE_KINDS = frozenset({GIA_KIND, CASH_KIND})
+_ALL_KINDS = _PENSION_KINDS | _TAX_FREE_SAVINGS_KINDS | _TAXABLE_KINDS
 
 _RELIEF_MECHANICS: Mapping[WrapperKindId, frozenset[ReliefMechanic]] = {
     WORKPLACE_DC_KIND: frozenset(
@@ -219,6 +224,20 @@ class UkWrapperRuleset:
         if mechanics is None:
             _unknown_kind(kind)
         return mechanics
+
+    def bears_default_fees(self, kind: WrapperKindId) -> bool:
+        """Whether ``kind`` bears the default platform/fund fees (§7).
+
+        Cash savings accounts price no platform or fund charges — the
+        rate on the account is the whole deal — so the cash kind is
+        exempt from the shipped fee defaults (issue #118); every other
+        UK kind is a platform-administered account those defaults
+        describe. Cash *held inside* another wrapper (a SIPP or ISA
+        cash slice) still bears that wrapper's fees.
+        """
+        if kind not in _ALL_KINDS:
+            _unknown_kind(kind)
+        return kind != CASH_KIND
 
     def lump_sum_allowance(self, period: Period) -> Money | None:
         """The year's lump sum allowance (planning §6; roadmap 5.2).

@@ -157,11 +157,12 @@ class UpratingRule(Enum):
 class StatePensionUprating:
     """The parsed ``policy.state_pension.uprating`` assumption value.
 
-    In deterministic mode the triple lock — ``max(earnings, CPI,
-    floor)`` — is proxied as ``max(CPI + deterministic_cpi_margin,
-    floor)``, the margin standing in for the long-run earnings premium
-    (planning §7). Monte Carlo applies the true rule per path from its
-    own draws (roadmap 7.2), reusing the same floor.
+    The triple lock — ``max(earnings, CPI, floor)`` — is proxied as
+    ``max(CPI + deterministic_cpi_margin, floor)``, the margin
+    standing in for the long-run earnings premium (planning §7). The
+    proxy applies in *every* run mode: CPI is deterministic across
+    Monte Carlo paths by design and no earnings series is modelled,
+    so each path uprates the state pension identically (issue #112).
     """
 
     rule: UpratingRule

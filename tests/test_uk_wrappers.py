@@ -192,6 +192,23 @@ def test_pension_kinds_have_no_per_kind_cap(
     assert terms.caps == ()
 
 
+def test_only_the_cash_kind_is_exempt_from_default_fees(
+    ruleset: UkWrapperRuleset,
+) -> None:
+    """Cash savings accounts price no platform/fund charges (#118)."""
+    assert not ruleset.bears_default_fees(CASH_KIND)
+    for kind in (WORKPLACE_DC_KIND, SIPP_KIND, ISA_KIND, LISA_KIND, GIA_KIND):
+        assert ruleset.bears_default_fees(kind)
+
+
+def test_unknown_kind_rejected_by_default_fee_exemption(
+    ruleset: UkWrapperRuleset,
+) -> None:
+    """An unknown kind is an error, never a fee answer."""
+    with pytest.raises(UkWrapperError, match="unknown UK wrapper kind"):
+        ruleset.bears_default_fees(UNKNOWN_KIND)
+
+
 def test_relief_mechanics_per_kind(ruleset: UkWrapperRuleset) -> None:
     """Workplace DC may use either mechanic; SIPPs RAS; savings kinds none."""
     both = frozenset({ReliefMechanic.RELIEF_AT_SOURCE, ReliefMechanic.NET_PAY})

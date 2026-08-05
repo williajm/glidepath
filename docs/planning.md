@@ -290,19 +290,25 @@ under an offscreen platform (`QT_QPA_PLATFORM=offscreen`).
 date), but the run starts at `config.today`. The engine seeds each
 opening ledger by rolling the stated value forward over the **whole
 months** from `as_of` to `today` at the wrapper's **expected nominal
-return** — the deterministic composition of the real-return assumptions
-with CPI (`(1 + real)(1 + cpi) - 1`), weighted by the allocation the
-wrapper opens the first period with (its own stated allocation, else
-the glide path at the run-start years-to-retirement) — compounded by
-the same integer-exponent-plus-linear-remainder arithmetic the DB
-statement-date convention uses (`revaluation_factor_for_months`, §5.1,
-§4.6). Each sub-balance fact (`balance`, `crystallised_balance`) rolls
-by its own `as_of`. A balance dated in the future is an engine error,
-mirroring the DB statement-date check; so is an expected nominal
-return of -100% per year or worse — an expectation must keep a
-positive gross return (the stochastic model's existing invariant,
-applied to the deterministic composition), which keeps the
-roll-forward factor strictly positive. The expected (deterministic)
+return net of its fee drag** — the deterministic composition of the
+real-return assumptions with CPI (`(1 + real)(1 + cpi) - 1`), weighted
+by the allocation the wrapper opens the first period with (its own
+stated allocation, else the glide path at the run-start
+years-to-retirement), then netted against the wrapper's annual fee
+rate as `(1 + nominal)(1 - fees) - 1` — fees before growth, exactly
+as every modelled period charges them (§5.2 step 6; issue #111) —
+compounded by the same integer-exponent-plus-linear-remainder
+arithmetic the DB statement-date convention uses
+(`revaluation_factor_for_months`, §5.1, §4.6). The fee rate is the
+wrapper's own schedule, else the default fee assumptions unless the
+region exempts the kind (§5.1; issue #118). Each sub-balance fact
+(`balance`, `crystallised_balance`) rolls by its own `as_of`. A
+balance dated in the future is an engine error, mirroring the DB
+statement-date check; so is a fee-adjusted expected nominal return of
+-100% per year or worse — an expectation must keep a positive gross
+return (the stochastic model's existing invariant, applied to the
+deterministic composition), which keeps the roll-forward factor
+strictly positive. The expected (deterministic)
 rate applies in every run mode: the pre-`today` span is not
 path-modelled, exactly as CPI stays deterministic across Monte Carlo
 paths. The stated fact is never altered — the rolled-forward figure is
@@ -320,15 +326,15 @@ span period-by-period (the run never models time before `today` —
 §5.2 partial-period convention: elapsed months live in the facts, not
 the model); treating the balance as current (the bug being fixed);
 erroring on any stale balance (statements are routinely weeks old — a
-usability failure). **Accepted costs:** contributions and fees in the
-gap are *flows*, and only *level revaluations* compound over the
-unmodelled span (the DB precedent) — a long-stale statement therefore
-understates by the missed contributions and overstates by the unlevied
-fees, and restating a fresh balance is always better than relying on
-the roll-forward; the opening allocation stands in for the whole span;
-a span under one whole month rolls by nothing (the §4.1 whole-month
-convention), which keeps the common freshly-stated case an exact
-no-op.
+usability failure). **Accepted costs:** contributions in the
+gap are *flows*, and only *level revaluations* — the growth rate and
+the percentage fee drag — compound over the unmodelled span (the DB
+precedent) — a long-stale statement therefore understates by the
+missed contributions, and restating a fresh balance is always better
+than relying on the roll-forward; the opening allocation stands in
+for the whole span; a span under one whole month rolls by nothing
+(the §4.1 whole-month convention), which keeps the common
+freshly-stated case an exact no-op.
 
 ### 4.9 Launch example and form clearing
 
@@ -474,7 +480,9 @@ class Wrapper:
     balance: Fact[Money]  # pension kinds: uncrystallised value
     crystallised_balance: Fact[Money] | None  # pension kinds: already in drawdown
     allocation: AssetAllocation | None  # None: the glide path supplies it
-    fees: FeeSchedule | None  # platform + fund, annual %; None: fee assumptions
+    fees: FeeSchedule | None  # platform + fund, annual %; None: fee
+    # assumptions, unless the region exempts the kind (uk.cash) — a
+    # bare savings account prices no platform/fund charges (#118)
     contributions: ContributionSchedule | None
 
 
@@ -680,8 +688,8 @@ decumulation decision (§5.2).
 
 Wrapper balances are facts dated by their statement (`as_of`); the
 engine rolls each one forward to `today` at the wrapper's expected
-nominal return over whole months, reporting every non-zero adjustment
-in the run's provenance (decision record §4.8).
+nominal return net of its fee drag over whole months, reporting every
+non-zero adjustment in the run's provenance (decision record §4.8).
 
 Pre-existing pension access is likewise a set of facts:
 `crystallised_balance` (funds already designated to drawdown), `lsa_used`,
@@ -1351,7 +1359,7 @@ Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 | `earnings.growth.real` | 0.5%/yr | OBR EFO March 2026 medium-term real earnings growth |
 | `returns.equity.real` | 4.0%/yr | Below long-run global equity history (~5% real); above FCA intermediate (5% nominal − 2% CPI = 3% real) as conservative cross-check ([COBS 13 Annex 2](https://www.handbook.fca.org.uk/handbook/COBS/13/Annex2.html): 2/5/8% nominal maxima, tax-advantaged) |
 | `returns.bonds.real` | 0.5%/yr | Consistent with current gilt real-yield ballpark and FCA lower rate |
-| `returns.cash.real` | −0.5%/yr | Cash trails inflation after fees over long horizons |
+| `returns.cash.real` | −0.5%/yr | Cash trails inflation over long horizons; cash-kind accounts bear no default fees, so this is their whole return — a cash slice inside a platform wrapper bears that wrapper's fees on top |
 | `volatility.equity` | 18%/yr | Long-run global equity annual volatility (commonly cited 15–20%) |
 | `volatility.bonds` | 7%/yr | Long-run gilt/IG portfolio volatility |
 | `volatility.cash` | 1%/yr | Near-riskless nominal |
@@ -1370,7 +1378,7 @@ Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 | --- | --- | --- |
 | `horizon.planning_age` | 95 | ~1-in-4 longevity risk at 65 per ONS cohort life expectancy ([ONS calculator](https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07); exact values from 2024-based cohort tables at implementation) |
 | `glidepath.default_shape` | 80/20 equity/bonds until 15 years to retirement, then linear de-risk to 40/60 at retirement, held through drawdown | Typical UK target-date/lifestyling shape; a starting point only — per-person glide paths override it |
-| `policy.state_pension.uprating` | `triple_lock` (deterministic mode: CPI + 0.5% proxy for the long-run earnings premium) | Alternative scenario: `cpi`. In Monte Carlo the true rule — max(earnings, CPI, 2.5%) — is applied per path from the path's earnings and CPI draws; protected payments always uprate by CPI only (§5.1). Triple lock committed only to ~2029 (§6) |
+| `policy.state_pension.uprating` | `triple_lock` (proxied as max(CPI + 0.5%, floor); the margin stands in for the long-run earnings premium) | Alternative scenario: `cpi`. The proxy applies in every run mode — CPI is deterministic across Monte Carlo paths by design and no earnings series is modelled, so each path uprates identically; protected payments always uprate by CPI only (§5.1). Triple lock committed only to ~2029 (§6) |
 | `policy.tax.future_years` | rUK + reserved figures (PA/taper both regimes, pension/ISA allowances) frozen to 2030/31 (legislated), then CPI-indexed; Scottish lower-band uppers CPI-indexed past the shipped year (set annually — uprating proxy), Higher/Advanced/Top uppers frozen to 2028/29 (announced), then CPI-indexed | rUK/reserved freeze is fact (§6); Scottish freeze horizons are announced policy, not legislation (§6); post-freeze indexation is assumption. Alternative: frozen indefinitely |
 | `annuity.level.single.65` | 7.75%/yr per £ purchase | Which? market table, snapshot 2026-07-27, retrieved 2026-08-01 ([which.co.uk](https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm)); best rate 7.946% — volatile market snapshot, refresh before relying on |
 | `annuity.escalating3.single.65` | 5.47%/yr | same snapshot |
