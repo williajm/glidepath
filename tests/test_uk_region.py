@@ -36,7 +36,6 @@ from glidepath.regions.uk import (
     FutureYearsMode,
     default_assumption_set,
     future_years_extension,
-    state_pension_uprating,
     uk_region,
 )
 
@@ -78,9 +77,7 @@ class TestDefaultAssumptionSet:
         GUI's process pool (planning §5.2).
         """
         assumptions = default_assumption_set()
-        region = uk_region(
-            future_years_extension(assumptions), state_pension_uprating(assumptions)
-        )
+        region = uk_region(future_years_extension(assumptions))
         assert pickle.dumps(assumptions)
         assert pickle.dumps(region)
 
@@ -113,7 +110,6 @@ class TestUkRegionBundle:
         assert "assumptions verified" in version
         assert version.count("sha256=") == 3
         assert "future_years" not in version
-        assert "state_pension_uprating" not in version
 
     def test_data_version_records_the_full_extension_policy(self) -> None:
         """Mode, freeze end, and CPI all land in the version string.
@@ -128,17 +124,6 @@ class TestUkRegionBundle:
             "future_years frozen_then_cpi_indexed until=2030"
             " scot_lower_until=2026 scot_upper_until=2028 cpi=0.02"
         ) in version
-
-    def test_data_version_records_the_state_pension_uprating(self) -> None:
-        """The uprating policy is a region-build input like the extension.
-
-        It steps the shipped state pension rate forward for runs past
-        the last shipped file, so its rule and parameters must be
-        identifiable from the version string.
-        """
-        uprating = state_pension_uprating(default_assumption_set())
-        version = uk_region(uprating=uprating).data_version
-        assert "state_pension_uprating triple_lock floor=0.025 margin=0.005" in version
 
 
 def accumulator_household() -> Household:

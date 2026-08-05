@@ -98,12 +98,6 @@ rates = [
   { name = "additional", rate = "0.3935" },
 ]
 """
-TAX_STATE_PENSION = """
-[state_pension]
-new_full_weekly = "241.30"
-qualifying_years_full = 35
-qualifying_years_min = 10
-"""
 VALID_TAX_YEAR = (
     TAX_HEADER
     + TAX_META
@@ -113,7 +107,6 @@ VALID_TAX_YEAR = (
     + TAX_ISA
     + TAX_SAVINGS
     + TAX_DIVIDEND
-    + TAX_STATE_PENSION
 )
 
 VALID_AGE_RULES = """
@@ -147,9 +140,6 @@ access_age = 60
 [state_pension_deferral]
 increment_rate = "0.01"
 per_weeks = 9
-
-[new_state_pension]
-system_start = 2016-04-06
 """
 
 ASSUMPTIONS_HEADER = """schema_version = 1
@@ -190,7 +180,6 @@ def test_valid_tax_year_parses_into_typed_values() -> None:
     assert file.pension.mpaa == Money(Decimal(10000))
     assert file.savings.starting_rate_limit == Money(Decimal(5000))
     assert file.dividend.rates[0].rate == Rate(Decimal("0.1075"))
-    assert file.state_pension.qualifying_years_full == 35
 
 
 def test_descending_psa_tier_order_is_enforced_at_load() -> None:

@@ -34,11 +34,9 @@ the last shipped file and re-bases automatically when a newer file
 ships. Modelling conventions (planning §5.3): indexation scales the
 money figures of the income-tax schedules and the pension and ISA
 allowances, quantized to whole pounds with ``ROUND_HALF_EVEN`` (the
-core rounding mode); band and taper *rates* never extrapolate; the
-state pension rate is carried forward untouched because its uprating
-is governed by ``policy.state_pension.uprating`` (§7), not by this
-policy. A target year's figures compound once from the base file, so
-they do not depend on intermediate synthesized years.
+core rounding mode); band and taper *rates* never extrapolate. A
+target year's figures compound once from the base file, so they do
+not depend on intermediate synthesized years.
 """
 
 from collections.abc import Mapping
@@ -436,7 +434,6 @@ def extend_tax_year(
             isa=base.isa,
             savings=base.savings,
             dividend=base.dividend,
-            state_pension=base.state_pension,
         )
     factor = cpi.growth_factor**steps
     lower_steps = _indexation_steps(
@@ -476,5 +473,4 @@ def extend_tax_year(
         dividend=(
             base.dividend if steps == 0 else _indexed_dividend(base.dividend, factor)
         ),
-        state_pension=base.state_pension,
     )

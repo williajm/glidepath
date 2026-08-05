@@ -13,7 +13,6 @@ sources = [
   "https://www.gov.uk/lifetime-isa/who-can-open-a-lifetime-isa",
   "https://www.gov.uk/lifetime-isa/withdrawing-money-from-your-lifetime-isa",
   "https://www.gov.uk/deferring-state-pension/if-you-reach-state-pension-age-on-or-after-6-april-2016",
-  "https://www.gov.uk/new-state-pension",
 ]
 
 # Normal minimum pension age: 55 today, 57 from 6 April 2028. Protected
@@ -77,11 +76,3 @@ access_age = 60
 [state_pension_deferral]
 increment_rate = "0.01"
 per_weeks = 9
-
-# The new state pension began 6 April 2016. The /35 qualifying-years
-# derivation is valid only for NI records starting on or after this
-# date: earlier records are governed by transitional starting-amount
-# rules (contracting-out, possible protected payment) the model does
-# not compute, so they require an official forecast (planning §5.1).
-[new_state_pension]
-system_start = 2016-04-06

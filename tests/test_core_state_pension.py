@@ -39,22 +39,12 @@ def record_of(
     *,
     forecast: str | None = None,
     protected: str | None = None,
-    ni_start: date | None = None,
-    qualifying: int | None = None,
-    extra_years: int = 0,
     deferral: str = "0",
 ) -> StatePensionRecord:
     """A state pension record built from compact test parameters."""
     return StatePensionRecord(
         forecast_weekly_amount=None if forecast is None else money_fact(forecast),
         protected_payment=None if protected is None else money_fact(protected),
-        ni_record_start=None
-        if ni_start is None
-        else Fact(value=ni_start, as_of=AS_OF, recorded_on=RECORDED),
-        qualifying_years=None
-        if qualifying is None
-        else Fact(value=qualifying, as_of=AS_OF, recorded_on=RECORDED),
-        planned_extra_years=Decision(value=extra_years, recorded_on=RECORDED),
         deferral_years=Decision(value=Decimal(deferral), recorded_on=RECORDED),
     )
 
@@ -70,22 +60,12 @@ class TestStatePensionRecordValidation:
     def test_protected_payment_without_a_forecast_is_rejected(self) -> None:
         """A protected payment is a slice of the official forecast."""
         with pytest.raises(ValueError, match="protected_payment"):
-            record_of(protected="10", qualifying=35)
+            record_of(protected="10")
 
     def test_protected_payment_beyond_the_forecast_is_rejected(self) -> None:
         """The slice cannot exceed the forecast it comes from."""
         with pytest.raises(ValueError, match="protected_payment"):
             record_of(forecast="200", protected="250")
-
-    def test_negative_qualifying_years_are_rejected(self) -> None:
-        """A negative NI year count is a data error."""
-        with pytest.raises(ValueError, match="qualifying_years"):
-            record_of(qualifying=-1)
-
-    def test_negative_planned_extra_years_are_rejected(self) -> None:
-        """Years still to accrue cannot be negative."""
-        with pytest.raises(ValueError, match="planned_extra_years"):
-            record_of(forecast="200", extra_years=-1)
 
     def test_negative_deferral_is_rejected(self) -> None:
         """Deferral cannot run backwards."""

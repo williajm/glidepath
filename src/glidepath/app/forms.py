@@ -1,9 +1,9 @@
 """Facts entry forms (roadmap 8.2; planning §1, §4.7, §5.1).
 
 The form a shell renders to capture every §5.1 fact — DOB, balances
-with ``as_of`` dates, contributions, DB scheme parameters, the NI
-record / state pension forecast, and the pre-existing access facts —
-plus the decisions a projectable plan needs (retirement age,
+with ``as_of`` dates, contributions, DB scheme parameters, the state
+pension forecast, and the pre-existing access facts — plus the
+decisions a projectable plan needs (retirement age,
 contribution and commutation choices, planned annuity purchases). The
 shell binds
 :class:`FactsFormViewModel` to widgets and returns raw text via
@@ -202,6 +202,11 @@ _MEMBERSHIP_NEEDS_RATE = (
     "enter the accrual rate to record active membership; blank means deferred"
 )
 _MEMBERSHIP_NEEDS_SALARY = "active membership needs the pensionable salary"
+_FORECAST_REQUIRED = (
+    "an official DWP forecast is required — free and instant from "
+    "gov.uk/check-state-pension; leave the whole section blank to skip "
+    "the state pension"
+)
 
 _AS_OF_HINT = "YYYY-MM-DD; blank means today"
 
@@ -421,9 +426,9 @@ class _SectionReader:
     ) -> Fact[T] | None:
         """Wrap a parsed value as a fact dated by ``as_of_field``.
 
-        Only statement-dated facts (balances, the DWP forecast, the NI
-        record) offer an ``as_of`` field; every other fact passes no
-        field and is dated the day it was entered.
+        Only statement-dated facts (balances, the DWP forecast) offer
+        an ``as_of`` field; every other fact passes no field and is
+        dated the day it was entered.
         """
         if value is None:
             return None
@@ -459,22 +464,16 @@ def _state_pension_from(reader: _SectionReader) -> StatePensionRecord | None:
         return None
     forecast = reader.fact_of(reader.money("forecast_weekly_amount"), "forecast_as_of")
     protected = reader.fact_of(reader.money("protected_payment"), "forecast_as_of")
-    ni_start = reader.fact_of(reader.date_value("ni_record_start"), "ni_as_of")
-    qualifying = reader.fact_of(reader.int_value("qualifying_years"), "ni_as_of")
-    extra_years = reader.int_value("planned_extra_years")
     deferral = reader.decimal_value("deferral_years")
     if not reader.ok:
+        return None
+    if forecast is None:
+        reader.error("forecast_weekly_amount", _FORECAST_REQUIRED)
         return None
     try:
         return StatePensionRecord(
             forecast_weekly_amount=forecast,
             protected_payment=protected,
-            ni_record_start=ni_start,
-            qualifying_years=qualifying,
-            planned_extra_years=Decision(
-                value=0 if extra_years is None else extra_years,
-                recorded_on=reader.recorded_on,
-            ),
             deferral_years=Decision(
                 value=Decimal(0) if deferral is None else deferral,
                 recorded_on=reader.recorded_on,
@@ -936,12 +935,9 @@ def _state_pension_values(record: StatePensionRecord | None) -> dict[str, str]:
         return {}
     forecast = record.forecast_weekly_amount
     protected = record.protected_payment
-    ni_start = record.ni_record_start
-    qualifying = record.qualifying_years
-    # The form dates the forecast pair and the NI pair each from one
-    # shared as_of field, so either member of a pair can carry it back.
+    # The form dates the forecast pair from one shared as_of field, so
+    # either member of the pair can carry it back.
     forecast_dated = forecast if forecast is not None else protected
-    ni_dated = ni_start if ni_start is not None else qualifying
     return {
         "forecast_weekly_amount": (
             "" if forecast is None else str(forecast.value.amount)
@@ -950,10 +946,6 @@ def _state_pension_values(record: StatePensionRecord | None) -> dict[str, str]:
         "forecast_as_of": (
             "" if forecast_dated is None else forecast_dated.as_of.isoformat()
         ),
-        "ni_record_start": "" if ni_start is None else ni_start.value.isoformat(),
-        "qualifying_years": "" if qualifying is None else str(qualifying.value),
-        "ni_as_of": "" if ni_dated is None else ni_dated.as_of.isoformat(),
-        "planned_extra_years": str(record.planned_extra_years.value),
         "deferral_years": str(record.deferral_years.value),
     }
 
@@ -1073,14 +1065,6 @@ def _state_pension_cannot_represent(record: StatePensionRecord | None) -> str | 
         and forecast.as_of != protected.as_of
     ):
         return "state pension forecast facts dated on different days"
-    ni_start = record.ni_record_start
-    qualifying = record.qualifying_years
-    if (
-        ni_start is not None
-        and qualifying is not None
-        and ni_start.as_of != qualifying.as_of
-    ):
-        return "NI record facts dated on different days"
     return None
 
 
@@ -1172,7 +1156,7 @@ def facts_form_data_from_household(household: Household) -> FactsFormData:
 
     The inverse of :func:`parse_facts_form`, used to repopulate the
     facts form from a loaded plan. Statement-dated facts (wrapper
-    balances, the DWP forecast, the NI record, DB scheme facts) emit
+    balances, the DWP forecast, DB scheme facts) emit
     their ``as_of`` date explicitly; the other facts offer no ``as_of``
     field, and on resubmission :func:`parse_facts_form` carries their
     stored dates forward from ``previous`` wherever the value is
@@ -1337,16 +1321,15 @@ def _spending_section() -> SectionSpec:
 
 
 def _state_pension_section() -> SectionSpec:
-    """The state pension / NI record section."""
+    """The state pension section (official DWP forecast only, §5.1)."""
     return SectionSpec(
         key="state_pension",
         title="State pension",
         description=(
-            "An official DWP forecast wins when you have one. Without a "
-            "forecast, the NI record derivation applies only to records "
-            "starting after 5 April 2016 — earlier records need the "
-            "forecast. Leave the whole section blank to skip the state "
-            "pension."
+            "Your official DWP forecast is the fact — free and instant "
+            "from gov.uk/check-state-pension — and the only route to a "
+            "state pension amount. Leave the whole section blank to "
+            "skip the state pension."
         ),
         fields=(
             FieldSpec(
@@ -1360,23 +1343,6 @@ def _state_pension_section() -> SectionSpec:
                 hint="blank if none; uprates by CPI only",
             ),
             _as_of_field("forecast_as_of", "Forecast as of"),
-            FieldSpec(
-                key="ni_record_start",
-                label="NI record started",
-                kind=FieldKind.DATE,
-                hint="YYYY-MM-DD",
-            ),
-            FieldSpec(
-                key="qualifying_years",
-                label="Qualifying years so far",
-                hint="from your NI record, e.g. 18",
-            ),
-            _as_of_field("ni_as_of", "NI record as of"),
-            FieldSpec(
-                key="planned_extra_years",
-                label="Further years you plan to accrue (your choice)",
-                hint="blank means none",
-            ),
             FieldSpec(
                 key="deferral_years",
                 label="Years you plan to defer claiming (your choice)",
@@ -1632,10 +1598,10 @@ def build_facts_form_view_model() -> FactsFormViewModel:
         title="Your plan's facts",
         intro=(
             "Everything here is either a fact you state or a choice you "
-            "make — never a guess. Balances, your state pension "
-            'forecast, and your NI record carry an "as of" date that '
-            "defaults to today when blank; estimates and defaults live "
-            "in the assumptions inspector."
+            "make — never a guess. Balances and your state pension "
+            'forecast carry an "as of" date that defaults to today '
+            "when blank; estimates and defaults live in the "
+            "assumptions inspector."
         ),
         person=_person_section(),
         spending=_spending_section(),

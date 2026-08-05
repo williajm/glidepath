@@ -1,14 +1,13 @@
 """State pension records and the region boundary (roadmap 4.3; planning §5.1).
 
-The core holds the user's :class:`StatePensionRecord` — an official
-forecast, when present, is the fact and wins; otherwise the region may
-derive an entitlement from qualifying years — and the
-:class:`StatePensionScheme` protocol (planning §4.2) a region implements
-over its data files. The region answers with a
+The core holds the user's :class:`StatePensionRecord` — the official
+DWP forecast is the fact and the only route to an amount (planning
+§5.1); the model never re-derives what DWP has already computed — and
+the :class:`StatePensionScheme` protocol (planning §4.2) a region
+implements over its data files. The region answers with a
 :class:`StatePensionEntitlement`: an exact start date (state pension
 age plus any deferral, an income entitlement per §4.1) and annual
-amounts split by uprating treatment, in the rates current at the run's
-``today``.
+amounts split by uprating treatment, in the rates the forecast states.
 
 Uprating is the engine's concern, governed by the
 ``policy.state_pension.uprating`` assumption (planning §7) parsed here
@@ -42,21 +41,20 @@ _UPRATING_CONTEXT = "policy.state_pension.uprating"
 class StatePensionRecord:
     """One person's state pension position (planning §5.1).
 
-    An official forecast, when present, is the fact and wins;
+    The official DWP forecast is the fact and the only route to an
+    amount — free and instant from gov.uk/check-state-pension — so the
+    model never re-derives what DWP has already computed;
     ``protected_payment`` is the slice of that forecast that uprates by
     CPI only (a pre-2016 transitional amount), so it may not appear
-    without one. Without a forecast the region derives the entitlement
-    from ``qualifying_years`` plus ``planned_extra_years`` — gated by
-    ``ni_record_start`` (the region refuses pre-2016 records, §5.1).
-    ``deferral_years`` shifts the start past state pension age in whole
-    months and earns the region's deferral increments.
+    without one. ``forecast_weekly_amount`` is optional only so plans
+    saved before the forecast became mandatory still load; a region
+    refuses to answer for a record without one. ``deferral_years``
+    shifts the start past state pension age in whole months and earns
+    the region's deferral increments.
     """
 
     forecast_weekly_amount: Fact[Money] | None
     protected_payment: Fact[Money] | None
-    ni_record_start: Fact[date] | None
-    qualifying_years: Fact[int] | None
-    planned_extra_years: Decision[int]
     deferral_years: Decision[Decimal]
 
     def __post_init__(self) -> None:
@@ -79,12 +77,6 @@ class StatePensionRecord:
                     " zero and the forecast weekly amount"
                 )
                 raise ValueError(msg)
-        if self.qualifying_years is not None and self.qualifying_years.value < 0:
-            msg = "StatePensionRecord.qualifying_years must be non-negative"
-            raise ValueError(msg)
-        if self.planned_extra_years.value < 0:
-            msg = "StatePensionRecord.planned_extra_years must be non-negative"
-            raise ValueError(msg)
         deferral = self.deferral_years.value
         if deferral < _ZERO:
             msg = "StatePensionRecord.deferral_years must be non-negative"
@@ -104,7 +96,7 @@ def deferral_months(record: StatePensionRecord) -> int:
 
 @dataclass(frozen=True, slots=True)
 class StatePensionEntitlement:
-    """A region's answer for one record, in rates current at run start.
+    """A region's answer for one record, in the rates the forecast states.
 
     ``annual_amount`` uprates by the ``policy.state_pension.uprating``
     assumption; ``cpi_uprated_annual_amount`` (any protected payment)
@@ -139,15 +131,16 @@ class StatePensionEntitlement:
 class StatePensionScheme(Protocol):
     """Region-supplied state pension rules (planning §4.2).
 
-    Turns a record into an entitlement using the region's data: rates
-    and qualifying-year rules from the tax-year files, the state
-    pension age timetable and deferral increments from the age rules.
+    Turns a record into an entitlement using the region's data: the
+    state pension age timetable and deferral increments from the age
+    rules. The amount itself is the record's stated DWP forecast — the
+    region computes no rates of its own (planning §5.1).
     """
 
     def entitlement(
-        self, record: StatePensionRecord, date_of_birth: date, today: date
+        self, record: StatePensionRecord, date_of_birth: date
     ) -> StatePensionEntitlement:
-        """The record's entitlement in the rates current at ``today``."""
+        """The record's entitlement in the rates the forecast states."""
         ...
 
 

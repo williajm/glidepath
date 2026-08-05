@@ -34,7 +34,6 @@ from glidepath.regions.uk.schema import (
     IncomeTaxSchedule,
     IsaRules,
     LisaAges,
-    NewStatePension,
     NmpaStep,
     PensionRules,
     SavingsRules,
@@ -42,7 +41,6 @@ from glidepath.regions.uk.schema import (
     SpaBand,
     SpaDateBand,
     StatePensionDeferral,
-    StatePensionRules,
     TaxBand,
     TaxYearFile,
     TaxYearMeta,
@@ -382,28 +380,6 @@ def _parse_dividend(raw: object, context: str) -> DividendRules:
     return DividendRules(allowance=allowance, rates=rates)
 
 
-def _parse_state_pension(raw: object, context: str) -> StatePensionRules:
-    """Parse the ``[state_pension]`` table."""
-    table = _Table(raw, context)
-    rules = StatePensionRules(
-        new_full_weekly=_money(
-            table.take("new_full_weekly"), f"{context}.new_full_weekly"
-        ),
-        qualifying_years_full=_integer(
-            table.take("qualifying_years_full"),
-            f"{context}.qualifying_years_full",
-            minimum=1,
-        ),
-        qualifying_years_min=_integer(
-            table.take("qualifying_years_min"),
-            f"{context}.qualifying_years_min",
-            minimum=1,
-        ),
-    )
-    table.finish()
-    return rules
-
-
 def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFile:
     """Parse and strictly validate one tax-year TOML document."""
     root = _load_document(text, context)
@@ -421,9 +397,6 @@ def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFil
     isa = _parse_isa(root.take("isa"), f"{context}.isa")
     savings = _parse_savings(root.take("savings"), f"{context}.savings")
     dividend = _parse_dividend(root.take("dividend"), f"{context}.dividend")
-    state_pension = _parse_state_pension(
-        root.take("state_pension"), f"{context}.state_pension"
-    )
     root.finish()
     return TaxYearFile(
         schema_version=schema_version,
@@ -434,7 +407,6 @@ def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFil
         isa=isa,
         savings=savings,
         dividend=dividend,
-        state_pension=state_pension,
     )
 
 
@@ -503,14 +475,6 @@ def _parse_deferral(raw: object, context: str) -> StatePensionDeferral:
     return deferral
 
 
-def _parse_new_state_pension(raw: object, context: str) -> NewStatePension:
-    """Parse the ``[new_state_pension]`` table."""
-    table = _Table(raw, context)
-    system_start = _plain_date(table.take("system_start"), f"{context}.system_start")
-    table.finish()
-    return NewStatePension(system_start=system_start)
-
-
 def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRulesFile:
     """Parse and strictly validate an age-rules TOML document."""
     root = _load_document(text, context)
@@ -534,9 +498,6 @@ def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRules
     deferral = _parse_deferral(
         root.take("state_pension_deferral"), f"{context}.state_pension_deferral"
     )
-    new_state_pension = _parse_new_state_pension(
-        root.take("new_state_pension"), f"{context}.new_state_pension"
-    )
     root.finish()
     return AgeRulesFile(
         schema_version=schema_version,
@@ -545,7 +506,6 @@ def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRules
         spa_bands=spa_bands,
         lisa=lisa,
         deferral=deferral,
-        new_state_pension=new_state_pension,
     )
 
 

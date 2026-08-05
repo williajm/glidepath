@@ -189,10 +189,10 @@ class NoStatePension:
     """No entitlement for anyone."""
 
     def entitlement(
-        self, record: StatePensionRecord, date_of_birth: date, today: date
+        self, record: StatePensionRecord, date_of_birth: date
     ) -> StatePensionEntitlement:
         """A zero entitlement starting at SPA."""
-        del record, today
+        del record
         return StatePensionEntitlement(
             start_date=date_age_attained(date_of_birth, 67),
             annual_amount=ZERO,

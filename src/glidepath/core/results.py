@@ -394,8 +394,6 @@ def collect_plan_facts(household: Household) -> tuple[LabelledFact, ...]:
                 record.forecast_weekly_amount,
             )
             note(f"{record_prefix}.protected_payment", record.protected_payment)
-            note(f"{record_prefix}.ni_record_start", record.ni_record_start)
-            note(f"{record_prefix}.qualifying_years", record.qualifying_years)
         for wrapper in person.wrappers:
             wrapper_prefix = f"wrapper[{wrapper.id}]"
             note(f"{wrapper_prefix}.balance", wrapper.balance)
@@ -469,16 +467,9 @@ def collect_plan_decisions(household: Household) -> tuple[LabelledDecision, ...]
                 )
             )
         if person.state_pension is not None:
-            record_prefix = f"person[{person.id}].state_pension"
             decisions.append(
                 LabelledDecision(
-                    label=f"{record_prefix}.planned_extra_years",
-                    decision=person.state_pension.planned_extra_years,
-                )
-            )
-            decisions.append(
-                LabelledDecision(
-                    label=f"{record_prefix}.deferral_years",
+                    label=f"person[{person.id}].state_pension.deferral_years",
                     decision=person.state_pension.deferral_years,
                 )
             )

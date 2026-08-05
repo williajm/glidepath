@@ -299,9 +299,6 @@ def _state_pension(record: StatePensionRecord) -> dict[str, object]:
             record.forecast_weekly_amount, _money_value
         ),
         "protected_payment": _optional_fact(record.protected_payment, _money_value),
-        "ni_record_start": _optional_fact(record.ni_record_start, _date_value),
-        "qualifying_years": _optional_fact(record.qualifying_years, _int_value),
-        "planned_extra_years": _decision(record.planned_extra_years, _int_value),
         "deferral_years": _decision(record.deferral_years, _decimal_value),
     }
 

@@ -17,11 +17,16 @@ if TYPE_CHECKING:
 
     from glidepath.core import AssumptionKey, Household, Scenario
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 """The schema version this build reads and writes (planning §4.5).
 
 v2 (roadmap 9.6): every DB pension carries an ``active_membership``
 key — ``null`` for a deferred entitlement.
+
+v3 (#97): the state pension record loses the qualifying-years
+derivation fields (``ni_record_start``, ``qualifying_years``,
+``planned_extra_years``) — the official DWP forecast is the only
+route to an amount.
 """
 
 

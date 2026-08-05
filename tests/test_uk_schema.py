@@ -17,7 +17,6 @@ from glidepath.regions.uk import (
     NmpaStep,
     SpaAgeBand,
     StatePensionDeferral,
-    StatePensionRules,
     TaxBand,
     TaxYearMeta,
 )
@@ -129,17 +128,6 @@ def test_schedule_requires_a_basic_band() -> None:
     )
     with pytest.raises(DataFileError, match="named 'basic'"):
         make_schedule(bands)
-
-
-def test_state_pension_rules_reject_min_above_full() -> None:
-    """Qualifying-year counts must satisfy 0 < min <= full."""
-    weekly = Money(Decimal(200))
-    with pytest.raises(DataFileError, match="min <= full"):
-        StatePensionRules(
-            new_full_weekly=weekly,
-            qualifying_years_full=35,
-            qualifying_years_min=36,
-        )
 
 
 def test_nmpa_step_rejects_non_positive_age() -> None:

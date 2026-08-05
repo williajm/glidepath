@@ -824,7 +824,7 @@ class _Projection:
         if person.state_pension is None:
             return
         entitlement = self.region.state_pension.entitlement(
-            person.state_pension, person.date_of_birth.value, today
+            person.state_pension, person.date_of_birth.value
         )
         if (
             entitlement.annual_amount <= _ZERO

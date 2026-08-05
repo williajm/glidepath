@@ -22,7 +22,8 @@ decumulation — under explicit, inspectable inputs.
 
 1. **Facts vs assumptions is the product.** Every number is either a
    **fact** the user stated (DOB, balances, contributions, accrued DB
-   entitlement, NI record) or an **assumption** the app defaulted or
+   entitlement, state pension forecast) or an **assumption** the app
+   defaulted or
    estimated (returns, inflation, annuity rates, future tax rules,
    longevity). The distinction is first-class in the data model, flows
    through every projection, and is surfaceable in the UI: a user can
@@ -143,7 +144,7 @@ what-if automatically. **Rejected:** deep-copied plan per scenario (drift,
 needs structural diffing); event-sourced log (heavy, not human-readable);
 scenario DSL (unserialisable). **Accepted cost:** what-ifs outside the
 whitelist need a model change. The boundary is type-enforced: facts
-(`Fact[T]` — balances, DOB, NI record, accrued DB) are **never**
+(`Fact[T]` — balances, DOB, the DWP forecast, accrued DB) are **never**
 scenario-overridable — a different balance is a different plan — while
 decision variables (`Decision[T]`, §5.1) and assumptions are the only
 legal override targets, so nothing user-stated is ever silently replaced.
@@ -508,11 +509,9 @@ class DBPension:
 
 @dataclass(frozen=True)
 class StatePensionRecord:
-    forecast_weekly_amount: Fact[Money] | None  # official forecast wins
+    forecast_weekly_amount: Fact[Money] | None  # the official forecast IS the fact
+    #   (None only so pre-#97 plans load; a region refuses to project without one)
     protected_payment: Fact[Money] | None  # pre-2016 transition; CPI-only
-    ni_record_start: Fact[date] | None  # gates the derivation path below
-    qualifying_years: Fact[int] | None  # NI record, if no forecast
-    planned_extra_years: Decision[int]  # years still to accrue
     deferral_years: Decision[Decimal]
     # SPA derives from DOB via region AgeRules; uprating is an assumption key.
 
@@ -603,35 +602,30 @@ the deferred-member carve-out. The region function ships with 9.6;
 the engine reads it when the AA charge is wired (§5.2, roadmap 9.5
 note).
 
-State pension: an official forecast, when present, is the fact and wins.
-The qualifying-years derivation (÷35) is valid **only for NI records
-starting after 5 April 2016**: pre-2016 records are governed by a
-transitional *starting amount* (old/new-system comparison,
-contracting-out, possible protected payment) that the model does not
-compute — for those users an official forecast is **required**, and any
-protected payment is recorded separately because it uprates by CPI only,
-not the full uprating policy. Conventions (roadmap 4.3): the forecast
-weekly amount is the DWP total, of which `protected_payment` is the
-CPI-only slice; the derivation caps stated-plus-planned years at the
-full-rate count and pays nothing below the minimum; amounts are taken in
-the rates of the tax year containing `today` (annualised at 52 weeks)
-and uprated by the engine from the run start. Because upratings take
-effect whole each 6 April — exactly a UK period boundary — the state
-pension stream steps by a **full annual uprating at every period
-boundary**, never scaled by a partial period's active fraction (a
-deliberate deviation from the §5.2 linear convention, which models
-continuously growing price and earnings levels); uprating is never
-negative — a deflationary CPI freezes the rate, matching statute. A run
-starting past the last shipped tax-year file steps the shipped rate
-forward to `today` by one whole uprating per intervening tax year (the
-extension deliberately carries the rate untouched, §5.3); the uprating
-policy is read at region build like the future-years extension, so it
-lands in the region data version. Deferral shifts the start past SPA in
-whole months and earns one ninth of 1% per whole week deferred, payable
-only from nine weeks (~5.8%/52 weeks; shipped as data); the uplift
-fraction applies to the rate payable **at claim** — upratings earned
-during deferment included — and the resulting increment uprates by CPI
-only from then on (§6).
+State pension: the official DWP forecast **is the fact and the only
+route to an amount** (#97). It is authoritative, free, and instant to
+obtain from gov.uk/check-state-pension, so the model never re-computes
+what DWP has already computed: there is no qualifying-years derivation,
+and a record without a forecast is refused with a clear demand for one
+(the facts form requires the forecast whenever the section is filled
+in; pre-#97 plans that stored qualifying years migrate by dropping
+those fields and fail projection with the same demand). Any protected
+payment is recorded separately because it uprates by CPI only, not the
+full uprating policy. Conventions (roadmap 4.3): the forecast weekly
+amount is the DWP total, of which `protected_payment` is the CPI-only
+slice; amounts are annualised at 52 weeks and uprated by the engine
+from the run start. Because upratings take effect whole each 6 April —
+exactly a UK period boundary — the state pension stream steps by a
+**full annual uprating at every period boundary**, never scaled by a
+partial period's active fraction (a deliberate deviation from the §5.2
+linear convention, which models continuously growing price and
+earnings levels); uprating is never negative — a deflationary CPI
+freezes the rate, matching statute. Deferral shifts the start past SPA
+in whole months and earns one ninth of 1% per whole week deferred,
+payable only from nine weeks (~5.8%/52 weeks; shipped as data); the
+uplift fraction applies to the rate payable **at claim** — upratings
+earned during deferment included — and the resulting increment uprates
+by CPI only from then on (§6).
 
 Annuity purchases are decision records on the person (roadmap 5.5).
 Conventions: a purchase fires in the period containing the date the
@@ -1124,19 +1118,15 @@ rates = [  # aligned positionally with the rUK bands (dividends are UK-wide)
   { name = "upper", rate = "0.3575" },
   { name = "additional", rate = "0.3935" },
 ]
-
-[state_pension]
-new_full_weekly       = "241.30"
-qualifying_years_full = 35
-qualifying_years_min  = 10
 ```
+
+There is no `[state_pension]` table: the state pension amount is the
+user's stated DWP forecast, never a shipped rate (#97, §5.1).
 
 `age_rules.toml` holds the durable, effective-dated policy parameters that
 are not re-set each tax year: NMPA (55; 57 from 2028-04-06), the SPA
 DOB-band table (§6), LISA ages (open 18–39, contribute to 50, access 60),
-the state pension deferral increment (1% per 9 weeks), and the new state
-pension system start (2016-04-06 — the gate on the qualifying-years
-derivation, §5.1).
+and the state pension deferral increment (1% per 9 weeks).
 
 **Future years:** past the last shipped file, the region extends the final
 year per the `policy.tax.future_years` assumption (scenario-flippable):
@@ -1163,13 +1153,11 @@ pension/ISA allowances, and the savings/dividend nil-rate amounts (the
 starting-rate limit is legislated frozen with the rUK schedule, §6; the
 PSA and dividend allowance follow the same reserved policy), quantized
 to whole pounds (half-even); band, taper and dividend *rates* never
-extrapolate; the state pension rate is carried forward
-untouched because its uprating is governed by
-`policy.state_pension.uprating` (§7), never by this policy. **Recurring
-task** after each Budget: copy previous year's file, re-verify every
-figure, update `verified_on`/`sources`, update §6.
+extrapolate. **Recurring task** after each Budget: copy previous
+year's file, re-verify every figure, update `verified_on`/`sources`,
+update §6.
 
-### 5.4 Plan document format (`.glidepath.json` schema v2)
+### 5.4 Plan document format (`.glidepath.json` schema v3)
 
 Implements the §4.5 decision (`glidepath/persistence/`, roadmap 6.2/6.4;
 region-agnostic like the core — the region's shipped defaults and data
@@ -1177,7 +1165,7 @@ version are function inputs, never imports). Top level:
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "region": "uk",
   "assumptions_resolved_against": "<region data_version at last save>",
   "household": { "persons": [...], "spending": ..., "planned_outflows": [...] },
@@ -1217,7 +1205,11 @@ before strict decoding; a current-version file passes through untouched,
 and a newer-than-current file errors with an "upgrade glidepath"
 message. Registered upgraders: v1→v2 (roadmap 9.6) adds
 `"active_membership": null` to every DB pension — a v1 file's pensions
-all load deferred.
+all load deferred; v2→v3 (#97) drops the state pension
+qualifying-years fields (`ni_record_start`, `qualifying_years`,
+`planned_extra_years`) — a migrated record keeps its deferral choice,
+and one without a forecast fails projection with a clear demand for
+one (§5.1).
 
 ## 6. Verified UK policy figures (2026/27)
 
@@ -1319,7 +1311,7 @@ the GIA/cash wrappers bring these into the model).
 | Full new state pension | **£241.30/week** (£12,547.60/yr) 2026/27 | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [DWP rates 2026–27](https://www.gov.uk/government/publications/benefit-and-pension-rates-2026-to-2027/proposed-benefit-and-pension-rates-2026-to-2027) |
 | April 2026 uprating | 4.8%, earnings-driven (AWE 4.8% > CPI 3.8% > 2.5%) | [Government Actuary report, 2026 up-rating order](https://www.gov.uk/government/publications/report-to-parliament-on-the-2026-re-rating-and-up-rating-orders/report-by-the-government-actuary-on-the-draft-social-security-benefits-up-rating-order-2026-and-the-draft-social-security-contributions-regulation) |
 | Full basic (old) state pension | £184.90/week (context) | DWP rates page |
-| Qualifying years | 35 full (pre-2016 contracted-out caveats); 10 minimum | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [new state pension](https://www.gov.uk/new-state-pension) |
+| Qualifying years | 35 full (pre-2016 contracted-out caveats); 10 minimum — context only: the model never derives an amount from qualifying years (#97, §5.1) | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [new state pension](https://www.gov.uk/new-state-pension) |
 | Deferral | +1% per 9 weeks (~5.8%/yr); increments CPI-uprated | [deferring (post-2016)](https://www.gov.uk/deferring-state-pension/if-you-reach-state-pension-age-on-or-after-6-april-2016) |
 | SPA 66→67 | phased Apr 2026–Mar 2028: DOB 1960-04-06–1960-05-05 → 66y 1m, +1 month per DOB month to 1961-02-06–1961-03-05 → 66y 11m; DOB 1961-03-06–1977-04-05 → **67** | [SPA timetable](https://www.gov.uk/government/publications/state-pension-age-timetable/state-pension-age-timetable) |
 | SPA 67→68 | legislated 2044–2046: DOB 1977-04-06–1978-04-05 phased; DOB ≥ 1978-04-06 → 68 | same |
@@ -1436,10 +1428,10 @@ phase are mostly parallelisable; phases are dependency-ordered. Labels:
 - [x] 4.2 DB pension: revaluation in deferment, NPA, early/late factors,
   commutation — *scheme facts drive results; commutation trades pension for
   lump sum at the stated factor.*
-- [x] 4.3 State pension: forecast-as-fact, qualifying-years derivation, SPA,
-  deferral, uprating assumption — *forecast wins; the derivation refuses
-  pre-2016 NI records (forecast required, §5.1); protected payments uprate
-  by CPI only.*
+- [x] 4.3 State pension: forecast-as-fact, SPA, deferral, uprating
+  assumption — *protected payments uprate by CPI only. Originally also
+  shipped a ÷35 qualifying-years derivation; removed by 9.17 — the DWP
+  forecast is the only route (§5.1).*
 - [x] 4.4 Real/nominal reporting layer — *real default; nominal available;
   one CPI path per run.*
 - [x] 4.5 End-to-end golden scenario — *"35-year-old, DC + ISA, retires at
@@ -1502,7 +1494,7 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   Qt-import guard test.*
 - [x] 8.2 Facts entry forms — *every fact in §5.1 enterable; `as_of`
   fields offered only for statement-dated facts (wrapper balances, the
-  DWP forecast, the NI record, the DB statement date) — every other
+  DWP forecast, the DB statement date) — every other
   fact is dated the day it is entered, since its `as_of` carries no
   modelling meaning and the extra date inputs only cluttered the form
   (originally every fact had one). On resubmission the parse carries
@@ -1705,6 +1697,17 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   running copy; the status bar shows the same line. Disabled buttons
   alone were easy to miss — a minutes-long Monte Carlo retirement
   search looked like a hang.*
+- [x] 9.17 State pension: DWP forecast only (#97) — *the ÷35
+  qualifying-years derivation and its gates are deleted; the official
+  forecast (gov.uk/check-state-pension) is the only route to an
+  amount (§5.1). The record and facts form lose the qualifying-years,
+  NI-record-start and planned-extra-years fields; the tax-year files
+  lose the `[state_pension]` table and `age_rules.toml` the
+  `[new_state_pension]` system-start gate (nothing reads them);
+  document schema v3 migrates saved plans by dropping the retired
+  fields, and a migrated record without a forecast keeps its deferral
+  choice but fails projection with a clear demand for a forecast —
+  the facts form requires one on the next save.*
 
 ## 9. Open questions
 
