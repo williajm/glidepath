@@ -15,17 +15,22 @@ The projected Monte Carlo wall-clock is then
 ``paths x (engine pass + periods x draw)`` — and now that the path
 runner exists (roadmap 7.3), the same persona is also measured end to
 end through ``run_paths``, which is the number that gates any
-optimisation. Record the printed numbers in docs/planning.md §4.6
-whenever they are re-measured.
+optimisation. The 9.15 parallel runner is measured too: pool
+spawn-and-warm cost, then the steady per-path rate over a process pool
+sized like the app layer's (every core but one). Record the printed
+numbers in docs/planning.md §4.6 whenever they are re-measured.
 
 Run: ``uv run --locked python scripts/measure_mc_performance.py``
 """
 
+import os
 import platform
 import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
+from glidepath.app.montecarlo import MAX_POOL_WORKERS
 from glidepath.core import (
     AssumptionReadRecorder,
     ContributionSchedule,
@@ -34,6 +39,7 @@ from glidepath.core import (
     Fact,
     Household,
     Money,
+    PathParallelism,
     Person,
     ReliefMechanic,
     RunConfig,
@@ -64,6 +70,7 @@ ENGINE_RUNS = 10
 PROJECTED_PATHS = (100, 1_000, 10_000)
 PERIODS_PER_PATH = 60
 MEASURED_PATHS = 20
+PARALLEL_MEASURED_PATHS = 200
 
 
 def _money_fact(amount: str) -> Fact[Money]:
@@ -145,6 +152,43 @@ def _measure_path_runner_seconds() -> float:
     return (time.perf_counter() - started) / MEASURED_PATHS
 
 
+def _measure_parallel_runner() -> tuple[int, float, float]:
+    """Worker count, pool spawn-and-warm seconds, steady seconds per path.
+
+    The pool is sized like the app layer's (every core but one) and
+    warmed with one chunk per worker — spawn plus package import per
+    process — before the steady rate is timed.
+    """
+    assumptions = default_assumption_set()
+    region = uk_region(future_years_extension(assumptions))
+    household = _household()
+    config = RunConfig(today=TODAY, mode=RunMode.MONTE_CARLO, seed=20260803)
+    workers = min(max(1, (os.process_cpu_count() or 1) - 1), MAX_POOL_WORKERS)
+    started = time.perf_counter()
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        parallelism = PathParallelism(executor=executor, workers=workers)
+        run_paths(
+            household,
+            assumptions,
+            region,
+            config,
+            paths=max(2, workers),
+            parallelism=parallelism,
+        )
+        warmed = time.perf_counter() - started
+        started = time.perf_counter()
+        run_paths(
+            household,
+            assumptions,
+            region,
+            config,
+            paths=PARALLEL_MEASURED_PATHS,
+            parallelism=parallelism,
+        )
+        steady = (time.perf_counter() - started) / PARALLEL_MEASURED_PATHS
+    return workers, warmed, steady
+
+
 def main() -> None:
     """Time the components and print the projected Monte Carlo cost."""
     print(f"platform: {platform.platform()} / Python {platform.python_version()}")
@@ -166,6 +210,17 @@ def main() -> None:
     )
     for paths in PROJECTED_PATHS:
         print(f"measured-basis {paths:,}-path Monte Carlo: {measured * paths:,.1f} s")
+    workers, warmed, parallel = _measure_parallel_runner()
+    print(f"process pool spawn-and-warm ({workers} workers): {warmed:,.1f} s")
+    print(
+        f"measured parallel per-path cost ({PARALLEL_MEASURED_PATHS} paths):"
+        f" {parallel * 1e3:,.2f} ms"
+    )
+    for paths in PROJECTED_PATHS:
+        print(
+            f"parallel-basis {paths:,}-path Monte Carlo:"
+            f" {warmed + parallel * paths:,.1f} s incl. spawn"
+        )
 
 
 if __name__ == "__main__":

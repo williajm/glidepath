@@ -224,6 +224,24 @@ persona): ≈ 38 ms per path — ≈ 3.8 s per 100 paths, ≈ 38 s per 1,000
 paths, matching the 7.2 projection. Within the accepted envelope; any
 optimisation revisit starts from these recorded numbers.
 
+That revisit shipped as roadmap 9.15, measured before and after
+2026-08-05 (same machine and script). Profiling showed ≈ 60% of a
+Monte Carlo run was redundant tax-year synthesis — every lookup past
+the last shipped file re-derived the same few dozen future years — not
+the stochastic draws, so the fix was memoization plus process-level
+parallelism, never floats: the Decimal-money invariant and the
+one-step-function rule stand. After caching `extend_tax_year` (with a
+meta-only `TaxYearFile` hash so cache lookups stop walking the figure
+tree): engine pass ≈ 16.5 ms, serial per-path ≈ 30 ms on the golden
+persona (≈ 31 ms on the heavier launch-example plan, down from
+≈ 56 ms). With the chunked `run_paths` process pool (19 workers here;
+the app layer uses every core but one, spawn-and-warm ≈ 0.5 s):
+≈ 3.1 ms per path steady — ≈ 0.8 s per 100 paths, ≈ 3.6 s per 1,000
+paths, ≈ 32 s per 10,000 paths including spawn, and the 9.14 search's
+20,000 path-projection budget lands in ≈ 1 minute, down from ≈ 13.
+Results are bit-identical to the serial run (paths are pure functions
+of `(seed, i)`; chunks recombine in path order — pinned by test).
+
 ### 4.7 UI architecture: thin desktop shell over a UI-agnostic app layer
 
 **Decision.** v1 ships a PySide6 desktop GUI, but a web UI is a plausible
@@ -1654,6 +1672,39 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   thousands); and the Monte Carlo run and the search share one
   in-flight guard, since a second slow run launched mid-flight could
   only ever be discarded as stale.*
+- [x] 9.15 Monte Carlo performance: cached tax-year synthesis + parallel
+  paths — *the §4.6 optimisation revisit, gated on its measurements
+  (before/after numbers recorded there). `extend_tax_year` is memoized
+  (pure over immutable inputs; `TaxYearFile` hashes by meta alone so
+  the cache key never walks the figure tree), which alone roughly
+  halves every run sharing the tax-year lookup path — Monte Carlo,
+  deterministic, and the 9.14 solver. `run_paths` optionally spreads
+  its paths over a `PathParallelism` executor in contiguous chunks
+  (one argument pickle per worker, only reduced outcomes shipped
+  back), bit-identical to the serial run by construction and by test;
+  `sustainable_income` and `earliest_retirement_age` pass one executor
+  through every probe. The app layer owns the policy (`path_pool`):
+  runs of at least 100 path-projections get a process pool sized to
+  every core but one (the GUI keeps a core; capped at 61, the Windows
+  wait-handle ceiling `ProcessPoolExecutor` enforces), anything
+  smaller stays serial, the transitions fold *any* run failure into
+  state so a process-boundary error can never strand the shell's
+  in-flight guard, and the 9.13 worker-thread + staleness rules are
+  untouched.
+  Structured shipped defaults now ride in a picklable `FrozenTable`
+  instead of `MappingProxyType` so the assumption set survives the
+  trip to worker processes (guard-tested).*
+- [x] 9.16 Busy indicator for the slow runs — *an indeterminate
+  progress bar plus a status line on the charts tab, visible from run
+  start until the result is adopted, rejected, or discarded as stale
+  (the 9.13 discard path must never leave a spinner running — pinned
+  by test). The status copy comes from the app layer per §4.7:
+  `monte_carlo_running_status` names the path count ("Running Monte
+  Carlo — 1,000 paths…") when the raw text parses, falling back to the
+  plain running message, and the retirement search reuses its existing
+  running copy; the status bar shows the same line. Disabled buttons
+  alone were easy to miss — a minutes-long Monte Carlo retirement
+  search looked like a hang.*
 
 ## 9. Open questions
 

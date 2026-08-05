@@ -24,6 +24,7 @@ from glidepath.app.montecarlo import (
     MAX_PATHS,
     MONTE_CARLO_PATHS_MESSAGE,
     MONTE_CARLO_SEED_MESSAGE,
+    path_pool,
 )
 from glidepath.app.plan import PlanState, region_for, replanned_state
 from glidepath.core import (
@@ -216,10 +217,22 @@ def state_with_retirement(
     base = replanned_state(state.assumptions, household, state.scenarios, today=today)
     try:
         config, search = _config_and_search(inputs, request.mode, today)
-        age = earliest_retirement_age(
-            household, state.assumptions, region_for(state.assumptions), config, search
-        )
-    except ValueError as exc:
+        candidates = inputs.maximum_age - inputs.minimum_age + 1
+        total_paths = candidates * (inputs.paths or 0)
+        with path_pool(total_paths) as parallelism:
+            age = earliest_retirement_age(
+                household,
+                state.assumptions,
+                region_for(state.assumptions),
+                config,
+                search,
+                parallelism=parallelism,
+            )
+    except Exception as exc:
+        # Broad by design, exactly as in state_with_monte_carlo: a
+        # process-pool failure escaping here would hold the shell's
+        # in-flight guard forever, so every failure folds into the
+        # state (§4.7).
         return _with_retirement_error(base, RETIREMENT_FAILED_PREFIX + str(exc))
     answer = RetirementAnswer(
         age=age,

@@ -16,10 +16,10 @@ from PySide6.QtCharts import QBarSet, QChartView, QStackedBarSeries
 from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
 
 from glidepath.app import (
-    MONTE_CARLO_RUNNING_MESSAGE,
     MONTE_CARLO_STALE_MESSAGE,
     NO_MONTE_CARLO_MESSAGE,
     NO_RETIREMENT_MESSAGE,
+    RETIREMENT_RUNNING_MESSAGE,
     RETIREMENT_STALE_MESSAGE,
     ChartsViewModel,
     PlanState,
@@ -28,6 +28,7 @@ from glidepath.app import (
     build_charts_view_model,
     build_shell_view_model,
     initial_plan_state,
+    monte_carlo_running_status,
     state_with_household,
     state_with_monte_carlo,
     state_with_override,
@@ -445,10 +446,15 @@ class TestMainWindowChartsFlow:
         pane.paths_edit.setText("2")
         pane.run_button.click()
         # The run executes off the GUI thread; the button stays disabled
-        # until the finished state is delivered back.
+        # and the busy indicator shows until the finished state is
+        # delivered back (9.16).
         assert not pane.run_button.isEnabled()
+        assert not pane.busy_bar.isHidden()
+        assert pane.busy_label.text() == monte_carlo_running_status("2")
         wait_for_monte_carlo(window)
         assert pane.run_button.isEnabled()
+        assert pane.busy_bar.isHidden()
+        assert pane.busy_label.isHidden()
         assert "Success rate" in pane.metrics_label.text()
         assert pane.seed_edit.text() == "7"
         assert pane.paths_edit.text() == "2"
@@ -488,6 +494,8 @@ class TestMainWindowChartsFlow:
         assert window.statusBar().currentMessage() == MONTE_CARLO_STALE_MESSAGE
         assert pane.metrics_label.isHidden()
         assert pane.run_button.isEnabled()
+        # The staleness-discard path must not leave a spinner running.
+        assert pane.busy_bar.isHidden()
 
     def test_scenario_edits_clear_the_monte_carlo_charts(
         self, window: MainWindow, monkeypatch: pytest.MonkeyPatch
@@ -543,10 +551,14 @@ class TestMainWindowRetirementFlow:
         pane.rate_edit.setText("10")
         pane.retirement_button.click()
         # The search executes off the GUI thread; the button stays
-        # disabled until the finished state is delivered back.
+        # disabled and the busy indicator names the search until the
+        # finished state is delivered back (9.16).
         assert not pane.retirement_button.isEnabled()
+        assert not pane.busy_bar.isHidden()
+        assert pane.busy_label.text() == RETIREMENT_RUNNING_MESSAGE
         wait_for_monte_carlo(window)
         assert pane.retirement_button.isEnabled()
+        assert pane.busy_bar.isHidden()
         assert pane.retirement_answer_label.text().startswith(RETIREMENT_ANSWER_PREFIX)
         assert not pane.retirement_detail_label.isHidden()
         assert pane.rate_edit.text() == "10"
@@ -563,6 +575,7 @@ class TestMainWindowRetirementFlow:
         assert window.statusBar().currentMessage() == RETIREMENT_STALE_MESSAGE
         assert pane.retirement_message_label.text() == NO_RETIREMENT_MESSAGE
         assert pane.retirement_button.isEnabled()
+        assert pane.busy_bar.isHidden()
 
     def test_the_slow_runs_share_one_in_flight_guard(self, window: MainWindow) -> None:
         """A search request during a Monte Carlo run is ignored.
@@ -581,7 +594,8 @@ class TestMainWindowRetirementFlow:
         assert not pane.run_button.isEnabled()
         assert not pane.retirement_button.isEnabled()
         pane.retirement_button.click()
-        assert window.statusBar().currentMessage() == MONTE_CARLO_RUNNING_MESSAGE
+        assert window.statusBar().currentMessage() == monte_carlo_running_status("2")
+        assert pane.busy_label.text() == monte_carlo_running_status("2")
         wait_for_monte_carlo(window)
         assert pane.run_button.isEnabled()
         assert pane.retirement_button.isEnabled()

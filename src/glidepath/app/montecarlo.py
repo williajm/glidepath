@@ -5,25 +5,28 @@ planning §4.7: a run-mode control (deterministic | Monte Carlo with
 paths + seed), the success-metrics readout, and the percentile-band
 specs the balances chart draws (the bands themselves are composed in
 :mod:`glidepath.app.charts`). The Monte Carlo run is an explicit user
-action — at the recorded ≈38 ms per path (planning §4.6) it is far too
-slow to re-run on every keystroke — and every plan-changing transition
-routes through :func:`~glidepath.app.plan.replanned_state`, which
+action — even at the recorded 9.15 per-path cost (planning §4.6) it is
+far too slow to re-run on every keystroke — and every plan-changing
+transition routes through :func:`~glidepath.app.plan.replanned_state`, which
 drops the held result, so a stale Monte Carlo surface can never be
 shown against a changed plan. Same seed + inputs reproduce identical
 results (§4.6): the transition passes the parsed seed straight to the
 seeded path runner.
 """
 
+import os
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from glidepath.app.display import format_money, format_percent
 from glidepath.app.plan import PlanState, region_for, replanned_state
-from glidepath.core import Money, RunConfig, RunMode, run_paths
+from glidepath.core import Money, PathParallelism, RunConfig, RunMode, run_paths
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
     from datetime import date
 
     from glidepath.core import MonteCarloResult
@@ -44,6 +47,24 @@ DEFAULT_PATHS_VALUE: Final = "100"
 
 MAX_PATHS: Final = 10_000
 
+PARALLEL_PATHS_MIN: Final = 100
+"""Fewest path-projections a run must total before a pool pays off.
+
+Spawning worker processes costs around a second (each re-imports the
+package); below this many paths the serial run finishes comparably
+fast, so small runs — and the app-layer test suite — stay in-process.
+"""
+
+MAX_POOL_WORKERS: Final = 61
+"""Most workers a pool may hold — Windows' wait-handle ceiling.
+
+``ProcessPoolExecutor`` rejects more than 61 workers on Windows (the
+64-object ``WaitForMultipleObjects`` limit minus bookkeeping handles);
+without the cap, every qualifying run on a 63+-logical-CPU Windows
+machine would fail at pool construction. Capped on every platform so
+the policy stays uniform.
+"""
+
 NO_MONTE_CARLO_MESSAGE: Final = (
     "No Monte Carlo run yet — choose the paths and seed, then press Run Monte Carlo."
 )
@@ -61,6 +82,25 @@ MONTE_CARLO_PATHS_MESSAGE: Final = (
 MONTE_CARLO_FAILED_PREFIX: Final = "The Monte Carlo run failed: "
 
 MONTE_CARLO_RUNNING_MESSAGE: Final = "Running Monte Carlo…"
+
+
+def monte_carlo_running_status(paths_text: str) -> str:
+    """The busy status line for a Monte Carlo run just started (9.16).
+
+    Names the path count when the raw text the shell captured parses
+    to a usable one — "Running Monte Carlo — 1,000 paths…" — and falls
+    back to the plain running message otherwise; the transition itself
+    reports unusable input when it delivers (planning §4.7: the shell
+    never parses).
+    """
+    try:
+        paths = int(paths_text.strip(), 10)
+    except ValueError:
+        return MONTE_CARLO_RUNNING_MESSAGE
+    if not 1 <= paths <= MAX_PATHS:
+        return MONTE_CARLO_RUNNING_MESSAGE
+    return f"Running Monte Carlo — {paths:,} paths…"
+
 
 MONTE_CARLO_STALE_MESSAGE: Final = (
     "Monte Carlo result discarded — the plan changed while it ran."
@@ -157,6 +197,28 @@ class MonteCarloPanelViewModel:
     message: str
 
 
+@contextmanager
+def path_pool(total_paths: int) -> Iterator[PathParallelism | None]:
+    """A worker-process pool for ``total_paths`` path-projections, or ``None``.
+
+    The app layer's parallelism policy (planning §5.2): paths are pure
+    CPU-bound ``Decimal`` work, so a run big enough to amortize process
+    startup (``PARALLEL_PATHS_MIN``) gets a process pool sized to the
+    machine — every available core but one, so the GUI thread keeps a
+    core, capped at ``MAX_POOL_WORKERS`` — and anything smaller runs
+    serially (``None``). One pool
+    serves a whole transition: a retirement-age search passes it to
+    every candidate's paths rather than re-spawning per age.
+    """
+    spare_cores = max(1, (os.process_cpu_count() or 1) - 1)
+    workers = min(spare_cores, total_paths, MAX_POOL_WORKERS)
+    if workers <= 1 or total_paths < PARALLEL_PATHS_MIN:
+        yield None
+        return
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        yield PathParallelism(executor=executor, workers=workers)
+
+
 def run_mode_from_key(key: str) -> RunMode:
     """The run mode a shell-selected option key denotes.
 
@@ -215,14 +277,21 @@ def state_with_monte_carlo(
     )
     config = RunConfig(today=today, mode=RunMode.MONTE_CARLO, seed=seed)
     try:
-        result = run_paths(
-            state.household,
-            state.assumptions,
-            region_for(state.assumptions),
-            config,
-            paths=paths,
-        )
-    except ValueError as exc:
+        with path_pool(paths) as parallelism:
+            result = run_paths(
+                state.household,
+                state.assumptions,
+                region_for(state.assumptions),
+                config,
+                paths=paths,
+                parallelism=parallelism,
+            )
+    except Exception as exc:
+        # Broad by design: beyond the engine's ValueErrors, the process
+        # pool can raise OSError at spawn, pickling TypeErrors, or a
+        # BrokenExecutor — an escape here would leave the shell's
+        # in-flight guard held (buttons disabled, spinner running)
+        # forever, so every failure folds into the state (§4.7).
         return _with_monte_carlo_error(base, MONTE_CARLO_FAILED_PREFIX + str(exc))
     changes: dict[str, Any] = {"monte_carlo": result, "monte_carlo_error": None}
     return replace(base, **changes) if changes else base

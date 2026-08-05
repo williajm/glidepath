@@ -7,6 +7,7 @@ results (§4.6). The tests keep runs fast by shrinking the horizon —
 a just-retired saver with the planning age overridden down to 65.
 """
 
+import os
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -16,6 +17,7 @@ import pytest
 from glidepath.app import (
     MONTE_CARLO_NO_PLAN_MESSAGE,
     MONTE_CARLO_PATHS_MESSAGE,
+    MONTE_CARLO_RUNNING_MESSAGE,
     MONTE_CARLO_SEED_MESSAGE,
     NO_MONTE_CARLO_MESSAGE,
     ChartsViewModel,
@@ -23,13 +25,19 @@ from glidepath.app import (
     ReportBasis,
     build_charts_view_model,
     initial_plan_state,
+    monte_carlo_running_status,
+    path_pool,
     run_mode_from_key,
     run_mode_key,
     state_with_household,
     state_with_monte_carlo,
     state_with_override,
 )
-from glidepath.app.montecarlo import MONTE_CARLO_FAILED_PREFIX
+from glidepath.app.montecarlo import (
+    MAX_POOL_WORKERS,
+    MONTE_CARLO_FAILED_PREFIX,
+    PARALLEL_PATHS_MIN,
+)
 from glidepath.app.plan import replanned_state
 from glidepath.core import (
     Decision,
@@ -179,6 +187,27 @@ class TestStateWithMonteCarlo:
         assert outcome.monte_carlo is None
         assert outcome.monte_carlo_error is not None
         assert outcome.monte_carlo_error.startswith(MONTE_CARLO_FAILED_PREFIX)
+
+    def test_a_process_boundary_failure_folds_into_the_error(
+        self, projected: PlanState, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An OSError past the engine's ValueErrors must never escape.
+
+        An exception escaping the transition would hold the shell's
+        shared in-flight guard forever — buttons disabled, the 9.16
+        spinner running — so any failure folds into the state (§4.7).
+        """
+
+        def broken_runner(*_args: object, **_kwargs: object) -> None:
+            msg = "could not spawn worker processes"
+            raise OSError(msg)
+
+        monkeypatch.setattr("glidepath.app.montecarlo.run_paths", broken_runner)
+        state = state_with_monte_carlo(projected, "7", "3", today=TODAY)
+        assert state.monte_carlo is None
+        assert state.monte_carlo_error is not None
+        assert state.monte_carlo_error.startswith(MONTE_CARLO_FAILED_PREFIX)
+        assert "could not spawn worker processes" in state.monte_carlo_error
 
     def test_a_failure_drops_the_held_result(self, mc_state: PlanState) -> None:
         """A rejected re-run never leaves stale metrics on screen."""
@@ -377,3 +406,76 @@ class TestBalanceBands:
         state = replace(mc_state, monte_carlo=mismatched)
         view_model = build_charts_view_model(state, mode=RunMode.MONTE_CARLO)
         assert view_model.charts[0].bands == ()
+
+
+class TestMonteCarloRunningStatus:
+    """The busy status line for a run just started (issue 9.16)."""
+
+    def test_names_the_path_count(self) -> None:
+        """A parseable count lands in the copy, grouped for reading."""
+        status = monte_carlo_running_status("1000")
+        assert status == "Running Monte Carlo — 1,000 paths…"
+
+    def test_unparseable_text_falls_back_to_the_plain_message(self) -> None:
+        """The transition, not the status line, reports unusable input."""
+        status = monte_carlo_running_status("many")
+        assert status == MONTE_CARLO_RUNNING_MESSAGE
+
+    def test_an_out_of_range_count_falls_back_to_the_plain_message(self) -> None:
+        """A count the transition will reject is never echoed as running."""
+        status = monte_carlo_running_status("20000")
+        assert status == MONTE_CARLO_RUNNING_MESSAGE
+
+
+class TestPathPool:
+    """The app layer's parallelism policy (planning §5.2)."""
+
+    def test_small_runs_stay_serial(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Below the threshold, process startup would outweigh the run."""
+        monkeypatch.setattr(os, "process_cpu_count", lambda: 8)
+        with path_pool(PARALLEL_PATHS_MIN - 1) as parallelism:
+            assert parallelism is None
+
+    def test_a_single_spare_core_stays_serial(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With one core left for the GUI there is no pool to fill."""
+        monkeypatch.setattr(os, "process_cpu_count", lambda: 2)
+        with path_pool(10_000) as parallelism:
+            assert parallelism is None
+
+    def test_an_unknown_cpu_count_stays_serial(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No core count to size a pool from means no pool."""
+        monkeypatch.setattr(os, "process_cpu_count", lambda: None)
+        with path_pool(10_000) as parallelism:
+            assert parallelism is None
+
+    def test_a_big_run_gets_a_pool_of_the_spare_cores(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """At the threshold the pool sizes to every core but one.
+
+        The executor spawns workers lazily on first submit, so entering
+        and leaving the context without work keeps this test cheap; the
+        core suite drives real submissions.
+        """
+        monkeypatch.setattr(os, "process_cpu_count", lambda: 3)
+        with path_pool(PARALLEL_PATHS_MIN) as parallelism:
+            assert parallelism is not None
+            assert parallelism.workers == 2
+
+    def test_a_many_core_machine_is_capped_at_the_windows_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """63+ logical CPUs must not ask for a pool Windows rejects.
+
+        ``ProcessPoolExecutor`` raises for more than 61 workers on
+        Windows; uncapped, every qualifying run on such a machine
+        would fail at pool construction.
+        """
+        monkeypatch.setattr(os, "process_cpu_count", lambda: 128)
+        with path_pool(10_000) as parallelism:
+            assert parallelism is not None
+            assert parallelism.workers == MAX_POOL_WORKERS

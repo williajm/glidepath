@@ -53,7 +53,8 @@ from glidepath.core.money import Money
 from glidepath.core.provenance import Fact
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
+    from concurrent.futures import Executor
 
     from glidepath.core.config import RunConfig
     from glidepath.core.entities import Household
@@ -188,6 +189,34 @@ class MonteCarloResult:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class PathParallelism:
+    """How :func:`run_paths` spreads its paths over workers (§5.2).
+
+    ``executor`` runs path chunks — a ``ProcessPoolExecutor`` for real
+    speedup (the engine is CPU-bound ``Decimal`` work), or any executor
+    in tests. ``workers`` is the executor's worker count: paths are
+    split into that many contiguous chunks, so every submitted argument
+    tuple (plan, assumptions, region, config) is pickled once per
+    worker, not once per path. Paths are pure and order-independent
+    (planning §4.6), and chunk results are recombined in path order, so
+    the result is identical to a serial run whatever the executor.
+
+    The caller owns the executor's lifecycle: reuse one across the many
+    :func:`run_paths` calls of a retirement-age search rather than
+    paying process startup per candidate.
+    """
+
+    executor: Executor
+    workers: int
+
+    def __post_init__(self) -> None:
+        """Reject a worker count below one."""
+        if self.workers < 1:
+            msg = f"workers must be positive, got {self.workers}"
+            raise ValueError(msg)
+
+
 def run_paths(
     plan: Household,
     assumptions: AssumptionSet,
@@ -195,6 +224,7 @@ def run_paths(
     config: RunConfig,
     *,
     paths: int,
+    parallelism: PathParallelism | None = None,
 ) -> MonteCarloResult:
     """Project ``plan`` over ``paths`` seeded paths (planning §5.2).
 
@@ -203,6 +233,11 @@ def run_paths(
     ``config.path`` says: paths are order-independent and individually
     re-runnable from the seed alone (planning §4.6). The provenance is
     the union across paths in first-read order (class docstring).
+
+    With ``parallelism`` the paths run as contiguous chunks on its
+    executor; the result is identical to the serial run — same
+    outcomes in path order, same provenance union — because every path
+    is exactly determined by ``(config.seed, i)`` (§4.6).
 
     Raises:
         EngineError: If ``paths`` is not positive, ``config.mode`` is
@@ -215,17 +250,68 @@ def run_paths(
     if config.mode is not RunMode.MONTE_CARLO:
         msg = "run_paths requires RunMode.MONTE_CARLO (planning §5.2)"
         raise EngineError(msg)
+    if parallelism is None or parallelism.workers == 1 or paths == 1:
+        outcomes, provenance = _run_path_range(
+            plan, assumptions, region, config, (0, paths)
+        )
+    else:
+        futures = [
+            parallelism.executor.submit(
+                _run_path_range, plan, assumptions, region, config, chunk
+            )
+            for chunk in _path_chunks(paths, parallelism.workers)
+        ]
+        chunk_results = [future.result() for future in futures]
+        outcomes = tuple(
+            outcome for chunk_outcomes, _ in chunk_results for outcome in chunk_outcomes
+        )
+        provenance = _merged_provenance(
+            [chunk_provenance for _, chunk_provenance in chunk_results]
+        )
+    return MonteCarloResult(outcomes=outcomes, config=config, provenance=provenance)
+
+
+def _run_path_range(
+    plan: Household,
+    assumptions: AssumptionSet,
+    region: Region,
+    config: RunConfig,
+    chunk: tuple[int, int],
+) -> tuple[tuple[PathOutcome, ...], RunProvenance]:
+    """Project the ``(start, stop)`` half-open ``chunk`` of path indices.
+
+    The unit of work one executor worker runs: a module-level function
+    over picklable arguments, returning only the reduced outcomes and
+    the chunk's provenance union — never the paths' full ledgers, so a
+    parallel run ships back kilobytes per chunk, not the projections.
+    Merging the chunk unions in chunk order reproduces the serial
+    provenance exactly: the union operation is associative over ordered
+    concatenation, and this chunk's merged base is its first path's.
+    """
+    start, stop = chunk
     outcomes: list[PathOutcome] = []
     provenances: list[RunProvenance] = []
-    for index in range(paths):
+    for index in range(start, stop):
         result = run(plan, assumptions, region, _path_config(config, index))
         outcomes.append(_path_outcome(index, result))
         provenances.append(result.provenance)
-    return MonteCarloResult(
-        outcomes=tuple(outcomes),
-        config=config,
-        provenance=_merged_provenance(provenances),
-    )
+    return tuple(outcomes), _merged_provenance(provenances)
+
+
+def _path_chunks(paths: int, workers: int) -> Iterator[tuple[int, int]]:
+    """Split ``range(paths)`` into up to ``workers`` contiguous chunks.
+
+    Chunk sizes differ by at most one, larger chunks first — a
+    deterministic tiling, so the parallel path order never depends on
+    scheduling.
+    """
+    chunk_count = min(workers, paths)
+    size, extra = divmod(paths, chunk_count)
+    start = 0
+    for index in range(chunk_count):
+        stop = start + size + (1 if index < extra else 0)
+        yield start, stop
+        start = stop
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,6 +367,8 @@ def sustainable_income(
     region: Region,
     config: RunConfig,
     search: SustainableIncomeSearch,
+    *,
+    parallelism: PathParallelism | None = None,
 ) -> Money | None:
     """The highest starting withdrawal meeting the target (scan + bisect).
 
@@ -305,6 +393,9 @@ def sustainable_income(
     plan with no spending plan is probed with a bare one. Probes reuse
     ``config`` unchanged (same seed: common random numbers), keeping
     the §4.6 reproducibility guarantee over the whole search.
+    ``parallelism`` spreads each probe's paths over its executor
+    (:class:`PathParallelism` — results identical to a serial search);
+    pass one executor for the whole search so probes share it.
 
     Raises:
         EngineError: If ``config`` is not a seeded ``MONTE_CARLO``
@@ -314,7 +405,14 @@ def sustainable_income(
     def meets(amount: Money) -> bool:
         """Whether spending ``amount`` meets the target success rate."""
         probe = probe_with_spending(plan, amount, config)
-        result = run_paths(probe, assumptions, region, config, paths=search.paths)
+        result = run_paths(
+            probe,
+            assumptions,
+            region,
+            config,
+            paths=search.paths,
+            parallelism=parallelism,
+        )
         return result.success_rate >= search.target_success_rate
 
     high = search.maximum
