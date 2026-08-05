@@ -139,7 +139,9 @@ class ReportRequest:
     """One plan report's presentation choices, as the shell holds them.
 
     ``basis`` and ``mode`` are the charts screen's selections and drive
-    the report's charts and metrics; ``comparison_basis`` and
+    the report's charts and metrics; ``backtest_year`` is the backtest
+    card's starting-year picker, so a trajectory on screen is a
+    trajectory in the report; ``comparison_basis`` and
     ``comparison_metric_key`` are the scenarios screen's and drive the
     comparison table.
     """
@@ -149,6 +151,7 @@ class ReportRequest:
     mode: RunMode
     comparison_basis: ReportBasis
     comparison_metric_key: str
+    backtest_year: str = ""
 
 
 @dataclass(frozen=True)
@@ -358,7 +361,9 @@ def _inputs_sections(state: PlanState) -> list[str]:
 
 def _results_sections(state: PlanState, request: ReportRequest) -> list[str]:
     """The report's results: charts, Monte Carlo, backtest, retirement."""
-    charts = build_charts_view_model(state, request.basis, request.mode)
+    charts = build_charts_view_model(
+        state, request.basis, request.mode, backtest_year=request.backtest_year
+    )
     parts = [
         f"<h2>{escape(_RESULTS_HEADING)}</h2>",
         f"<p>Money basis: {escape(_basis_label(request.basis))}</p>",
@@ -437,7 +442,9 @@ def build_plan_report(state: PlanState, request: ReportRequest) -> PlanReport | 
     """
     if state.result is None:
         return None
-    charts = build_charts_view_model(state, request.basis, request.mode)
+    charts = build_charts_view_model(
+        state, request.basis, request.mode, backtest_year=request.backtest_year
+    )
     inspector_summary = build_inspector_view_model(state)
     parts = [
         f"<h1>{escape(APP_NAME)} plan report — {escape(request.plan_name)}</h1>",

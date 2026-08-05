@@ -363,6 +363,14 @@ class TestAllocationNote:
         note = build_charts_view_model(state).allocation_note
         assert "100% equity throughout (your override)" in note
 
+    def test_a_wrapperless_household_has_no_note(self) -> None:
+        """DB/state-pension-only plans invest nothing — no dangling prefix."""
+        state = state_with_household(
+            initial_plan_state(), household((), employment="42000"), today=TODAY
+        )
+        assert state.result is not None
+        assert build_charts_view_model(state).allocation_note == ""
+
     def test_no_projection_no_note(self) -> None:
         """The empty state carries no allocation line."""
         view_model = build_charts_view_model(initial_plan_state())

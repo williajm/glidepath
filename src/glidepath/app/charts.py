@@ -382,7 +382,9 @@ def _allocation_note(
     explains. A stated equity split reads ``(stated)``; a cash
     account's pinned allocation is a rule and carries no suffix; a
     wrapper with nothing stated names the glide path and whether it
-    is the shipped default or an override.
+    is the shipped default or an override. A household holding no
+    wrappers at all (DB and state pension income only) has nothing to
+    invest, so the note is empty rather than a dangling prefix.
     """
     household = state.household
     if household is None:
@@ -400,6 +402,8 @@ def _allocation_note(
                 parts.append(f"{label}: {_allocation_text(allocation)}")
             else:
                 parts.append(f"{label}: {_allocation_text(allocation)} (stated)")
+    if not parts:
+        return ""
     return "Invested as — " + "; ".join(parts)
 
 
@@ -546,21 +550,24 @@ def _backtest_trajectories(
     starting year's real trajectory: the worst and best windows
     always, plus whichever starting year the picker's raw text names
     (:func:`~glidepath.app.backtest.selected_window`; a miss draws
-    nothing and the card says why). A held result whose period count
-    differs from the projection's draws no lines rather than lines
-    against the wrong periods.
+    nothing and the card says why). Any drawn outcome whose period
+    count differs from the projection's (the runs straddled a
+    calendar day, or a hand-built result misaligned its windows)
+    draws no lines rather than lines against the wrong periods.
     """
     deflators = tuple(rows[0].balance_deflator for rows in grouped.values())
-    if len(result.outcomes[0].closing_balances) != len(deflators):
-        return ()
-    bands = [
-        _trajectory_band(result.worst_window, "Worst start", deflators),
-        _trajectory_band(result.best_window, "Best start", deflators),
-    ]
     picked, _ = selected_window(result, year_text)
+    lines = [
+        (result.worst_window, "Worst start"),
+        (result.best_window, "Best start"),
+    ]
     if picked is not None:
-        bands.append(_trajectory_band(picked, "Start", deflators))
-    return tuple(bands)
+        lines.append((picked, "Start"))
+    if any(len(outcome.closing_balances) != len(deflators) for outcome, _ in lines):
+        return ()
+    return tuple(
+        _trajectory_band(outcome, prefix, deflators) for outcome, prefix in lines
+    )
 
 
 def _balances_chart(

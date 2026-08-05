@@ -450,6 +450,7 @@ class MainWindow(QMainWindow):
                 mode=self._charts_mode,
                 comparison_basis=self._comparison_basis,
                 comparison_metric_key=self._comparison_metric,
+                backtest_year=self._backtest_year,
             ),
         )
         if report is None:

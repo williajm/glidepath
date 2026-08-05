@@ -35,14 +35,20 @@ from glidepath.app.backtest import (
 from glidepath.app.montecarlo import SUCCESS_RATE_LABEL
 from glidepath.app.plan import replanned_state
 from glidepath.core import (
+    BacktestResult,
     Decision,
     EntityId,
     Fact,
+    HistoricalSeries,
+    HistoricalYear,
     Household,
     Money,
     Person,
+    RunConfig,
     RunMode,
+    RunProvenance,
     SpendingPlan,
+    WindowOutcome,
     Wrapper,
 )
 from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY, load_returns_history
@@ -357,6 +363,66 @@ class TestBacktestBands:
         """With no Monte Carlo run held, the backtest paths still draw."""
         view_model = build_charts_view_model(bt_state, mode=RunMode.MONTE_CARLO)
         assert len(view_model.charts[0].bands) == 2
+
+    def test_misaligned_hand_built_outcomes_draw_no_lines(
+        self, projected: PlanState
+    ) -> None:
+        """A drawn outcome with the wrong period count draws nothing.
+
+        ``BacktestResult`` permits hand-built outcomes with differing
+        balance counts; only the runner guarantees alignment. Every
+        drawn trajectory is validated, so a misaligned best window
+        can never crash view-model construction.
+        """
+        assert projected.result is not None
+        periods = len(projected.result.snapshots)
+        aligned = tuple(Money(Decimal(0)) for _ in range(periods))
+        worst = WindowOutcome(
+            window=0,
+            start_year=1900,
+            first_shortfall_period=projected.result.snapshots[0].period,
+            ending_balance=aligned[-1],
+            closing_balances=aligned,
+        )
+        best = WindowOutcome(
+            window=1,
+            start_year=1901,
+            first_shortfall_period=None,
+            ending_balance=Money(Decimal(100)),
+            closing_balances=(Money(Decimal(100)),),
+        )
+        result = BacktestResult(
+            outcomes=(worst, best),
+            config=RunConfig(today=TODAY),
+            provenance=RunProvenance(
+                facts=(),
+                decisions=(),
+                assumptions=(),
+                region_data_version="test",
+                seed=None,
+            ),
+            series=HistoricalSeries(
+                years=(
+                    HistoricalYear(
+                        year=1900,
+                        equity=Decimal(0),
+                        bonds=Decimal(0),
+                        cash=Decimal(0),
+                        cpi=Decimal(0),
+                    ),
+                    HistoricalYear(
+                        year=1901,
+                        equity=Decimal(0),
+                        bonds=Decimal(0),
+                        cash=Decimal(0),
+                        cpi=Decimal(0),
+                    ),
+                )
+            ),
+        )
+        state = replace(projected, backtest=result)
+        view_model = build_charts_view_model(state)
+        assert view_model.charts[0].bands == ()
 
     def test_no_backtest_no_bands(self, projected: PlanState) -> None:
         """Without a held result the balances chart draws bars alone."""

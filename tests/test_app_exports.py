@@ -7,6 +7,7 @@ the §1 disclaimer; both fold every failure into a status message.
 """
 
 import csv
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from html import escape
@@ -28,6 +29,7 @@ from glidepath.app import (
     initial_plan_state,
     parse_facts_form,
     plan_display_name,
+    state_with_backtest,
     state_with_household,
     state_with_monte_carlo,
     state_with_override,
@@ -320,6 +322,25 @@ class TestPlanReport:
         # The seed and path count attribute the metrics to their run (§4.6).
         assert "<td>Seed</td><td>1</td>" in report.html
         assert "<td>Paths</td><td>3</td>" in report.html
+
+    def test_a_picked_backtest_year_prints_its_trajectory(self) -> None:
+        """The report draws exactly what is on screen (9.18).
+
+        The starting-year picker's selection rides on the request, so
+        an exported PDF never silently drops a trajectory the user is
+        looking at.
+        """
+        state = state_with_backtest(projected_state(), today=TODAY)
+        assert state.backtest is not None
+        outcomes = state.backtest.outcomes
+        picked_year = outcomes[len(outcomes) // 2].start_year
+        report = build_plan_report(
+            state, replace(_request(), backtest_year=str(picked_year))
+        )
+        assert report is not None
+        labels = [band.label for band in report.charts[0].bands]
+        assert f"Start · {picked_year}" in labels
+        assert labels[0].startswith("Worst start · ")
 
     def test_deterministic_mode_omits_monte_carlo(self) -> None:
         """Under the deterministic mode a held run stays off the report."""
