@@ -11,6 +11,10 @@
 [![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
 [![License: MIT](https://img.shields.io/github/license/williajm/glidepath)](LICENSE)
 
+<p align="center">
+  <a href="https://williajm.github.io/glidepath/"><b>williajm.github.io/glidepath</b></a>
+</p>
+
 A desktop retirement and investment planner. UK-first, built so other
 regions can be added later. Every number in a plan is a **fact** you
 stated, a **decision** you made, or an **assumption** the app defaulted

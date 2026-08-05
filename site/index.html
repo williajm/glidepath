@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>glidepath — a desktop retirement planner for the UK</title>
+<meta name="description" content="A free, open-source desktop retirement and investment planner. UK-first. Every number is a fact you stated, a decision you made, or an assumption the app defaulted — always inspectable, never silently guessed. All data stays local.">
+<meta property="og:title" content="glidepath — a desktop retirement planner for the UK">
+<meta property="og:description" content="Facts, decisions and assumptions — always inspectable, never silently guessed. Monte Carlo, historical backtesting and UK tax modelling, all local.">
+<meta property="og:image" content="https://williajm.github.io/glidepath/screenshots/charts.png">
+<meta property="og:url" content="https://williajm.github.io/glidepath/">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+<style>
+  :root {
+    --green: #21795a;
+    --green-strong: #1b6349;
+    --green-soft: #e7f2ed;
+    --ink: #1d2733;
+    --body: #3c4854;
+    --muted: #67737f;
+    --bg: #fbfbf9;
+    --surface: #ffffff;
+    --border: #e3e7e4;
+    --code-bg: #1d2733;
+    --code-ink: #d9e2ea;
+    --code-accent: #7fd4ae;
+    --shadow: 0 1px 2px rgba(29, 39, 51, .06), 0 12px 32px rgba(29, 39, 51, .08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --green: #45a97e;
+      --green-strong: #5cbb91;
+      --green-soft: #17332a;
+      --ink: #e8edf1;
+      --body: #b9c3cc;
+      --muted: #8b96a1;
+      --bg: #10161d;
+      --surface: #171f28;
+      --border: #29323c;
+      --code-bg: #0c1117;
+      --code-ink: #ccd6de;
+      --code-accent: #6fcaa2;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 32px rgba(0, 0, 0, .35);
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--body);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--green); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1, h2, h3 { color: var(--ink); line-height: 1.2; }
+
+  /* ---- header ---- */
+  header {
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; max-width: 1060px; margin: 0 auto;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.25rem; color: var(--ink); letter-spacing: -.02em; }
+  .brand:hover { text-decoration: none; }
+  .nav-links { display: flex; gap: 22px; align-items: center; font-size: .95rem; }
+  .nav-links a { color: var(--body); }
+  .nav-links a:hover { color: var(--green); text-decoration: none; }
+  .nav-links .gh { color: var(--green); font-weight: 600; }
+  @media (max-width: 640px) { .nav-links a:not(.gh) { display: none; } }
+
+  /* ---- hero ---- */
+  .hero { padding: 72px 0 40px; text-align: center; }
+  .hero h1 {
+    font-size: clamp(1.9rem, 4.5vw, 3rem);
+    letter-spacing: -.03em;
+    max-width: 21em; margin: 0 auto 20px;
+  }
+  .hero h1 em { font-style: normal; color: var(--green); }
+  .hero .sub { max-width: 44em; margin: 0 auto 14px; font-size: 1.12rem; }
+  .hero .local { font-size: .95rem; color: var(--muted); margin-bottom: 32px; }
+  .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 56px; }
+  .btn {
+    display: inline-block; padding: 11px 22px; border-radius: 8px;
+    font-weight: 600; font-size: .98rem; transition: transform .1s ease;
+  }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); }
+  .btn-primary { background: var(--green); color: #fff; }
+  .btn-primary:hover { background: var(--green-strong); }
+  @media (prefers-color-scheme: dark) { .btn-primary { color: #08130e; } }
+  .btn-secondary { border: 1px solid var(--border); color: var(--ink); background: var(--surface); }
+
+  .shot-frame {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .shot-frame .bar {
+    display: flex; gap: 6px; padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .shot-frame .bar span { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+  .shot-frame img { display: block; width: 100%; height: auto; }
+
+  /* ---- sections ---- */
+  section { padding: 64px 0; }
+  section h2 {
+    font-size: clamp(1.5rem, 3vw, 2rem); letter-spacing: -.02em;
+    text-align: center; margin-bottom: 12px;
+  }
+  .section-sub { text-align: center; max-width: 46em; margin: 0 auto 44px; }
+
+  /* ---- provenance trio ---- */
+  .trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 760px) { .trio { grid-template-columns: 1fr; } }
+  .trio .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 26px 24px;
+  }
+  .trio .tag {
+    display: inline-block; font-size: .78rem; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase;
+    color: var(--green); background: var(--green-soft);
+    padding: 3px 10px; border-radius: 99px; margin-bottom: 14px;
+  }
+  .trio h3 { font-size: 1.1rem; margin-bottom: 8px; }
+  .trio p { font-size: .95rem; }
+
+  /* ---- features ---- */
+  .features { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .feature {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px;
+  }
+  .feature svg { width: 26px; height: 26px; stroke: var(--green); margin-bottom: 12px; }
+  .feature h3 { font-size: 1.02rem; margin-bottom: 6px; }
+  .feature p { font-size: .92rem; }
+
+  /* ---- screenshots ---- */
+  .shots { display: grid; gap: 40px; }
+  .shots figure { margin: 0; }
+  .shots figcaption { margin-top: 14px; text-align: center; font-size: .95rem; color: var(--muted); max-width: 52em; margin-left: auto; margin-right: auto; }
+
+  /* ---- get started ---- */
+  .steps { max-width: 640px; margin: 0 auto; }
+  .steps p { margin-bottom: 18px; }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    border-radius: 10px; padding: 18px 20px; overflow-x: auto;
+    font-size: .9rem; line-height: 1.7; margin-bottom: 18px;
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  }
+  pre .c { color: #7d8b97; }
+  pre .p { color: var(--code-accent); user-select: none; }
+  code.inline {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+    font-size: .88em; background: var(--green-soft); color: var(--green-strong);
+    padding: 1px 6px; border-radius: 5px;
+  }
+
+  /* ---- disclaimer + footer ---- */
+  .disclaimer {
+    border: 1px solid var(--border); border-left: 4px solid var(--green);
+    background: var(--surface); border-radius: 10px;
+    padding: 20px 24px; max-width: 760px; margin: 0 auto;
+    font-size: .95rem;
+  }
+  .disclaimer strong { color: var(--ink); }
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 36px 0 44px; font-size: .88rem; color: var(--muted);
+    text-align: center;
+  }
+  footer p { max-width: 56em; margin: 0 auto 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <nav class="nav" aria-label="Main">
+    <a class="brand" href="#">
+      <svg width="30" height="30" viewBox="0 0 48 48" aria-hidden="true">
+        <rect x="1" y="1" width="46" height="46" rx="11" fill="#21795a"/>
+        <path d="M9 10 C 12 25, 22 35, 37 38" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>
+        <circle cx="37" cy="38" r="4" fill="#fff"/>
+      </svg>
+      glidepath
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#get-started">Get started</a>
+      <a class="gh" href="https://github.com/williajm/glidepath">GitHub &rarr;</a>
+    </div>
+  </nav>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <h1>A retirement planner that <em>shows its working</em></h1>
+    <p class="sub">
+      Glidepath is a free, open-source desktop app for planning retirement and
+      investments, built UK-first. Every number in your plan is a <strong>fact</strong> you
+      stated, a <strong>decision</strong> you made, or an <strong>assumption</strong> the app
+      defaulted &mdash; always inspectable, never silently guessed.
+    </p>
+    <p class="local">All data stays local on your machine; nothing is transmitted.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#get-started">Get started</a>
+      <a class="btn btn-secondary" href="https://github.com/williajm/glidepath">View on GitHub</a>
+    </div>
+    <div class="shot-frame">
+      <div class="bar" aria-hidden="true"><span></span><span></span><span></span></div>
+      <img src="screenshots/charts.png" width="1280" height="980"
+           alt="The charts tab: wrapper balances stacked by tax year with Monte Carlo percentile bands over them, the success-rate readout, and the retirement-age and backtest cards">
+    </div>
+  </section>
+
+  <section class="wrap" id="principle">
+    <h2>Facts, decisions, assumptions</h2>
+    <p class="section-sub">
+      The core principle: you can always see where a number came from.
+      A provenance view lists everything each projection used &mdash; with its
+      value, source, date, and whether it was defaulted or overridden.
+    </p>
+    <div class="trio">
+      <div class="card">
+        <span class="tag">Fact</span>
+        <h3>What you stated</h3>
+        <p>Your date of birth, salary, balances, pension forecasts. Entered by
+           you, dated, and never altered by the app.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Decision</span>
+        <h3>What you chose</h3>
+        <p>Retirement age, contributions, planned outflows. The only fields a
+           what-if scenario is allowed to override.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Assumption</span>
+        <h3>What was estimated</h3>
+        <p>Returns, inflation, longevity, uprating policy. Each carries its
+           value, source and date &mdash; and you can override any of them.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="wrap">
+      <h2>What it models</h2>
+      <p class="section-sub">Single person, UK, from verified 2026/27 tax-year data files &mdash; policy figures are never hardcoded.</p>
+      <div class="grid">
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 12h18"/></svg>
+          <h3>Tax wrappers</h3>
+          <p>Workplace DC, SIPP, S&amp;S ISA, LISA, GIA and cash &mdash; with UK
+             contribution-relief mechanics and dividend and savings taxation.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M5 8c0-2 3-3 7-3s7 1 7 3-3 3-7 3-7-1-7-3z"/><path d="M5 8v8c0 2 3 3 7 3s7-1 7-3V8"/></svg>
+          <h3>DB &amp; state pension</h3>
+          <p>Deferred or actively accruing CARE-style defined benefit pensions with
+             revaluation, early/late factors and commutation; state pension from
+             your official DWP forecast, including deferral.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
+          <h3>UK tax, verified</h3>
+          <p>rUK and Scottish income tax, pension annual allowance with taper and
+             MPAA, and the lump-sum allowance &mdash; all from dated, sourced data files.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l4-6 4 3 5-8 5 7"/><path d="M3 21h18"/></svg>
+          <h3>Monte Carlo projection</h3>
+          <p>Deterministic or Monte Carlo runs: success rate, probability of ruin,
+             ending-pot percentiles and chart bands &mdash; reproducible from a seed,
+             with a de-risking glide path and tax-aware decumulation.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          <h3>&ldquo;When can I retire?&rdquo;</h3>
+          <p>A solver for the earliest retirement age that sustains a target income
+             &mdash; a replacement rate you choose, met deterministically or at a
+             Monte Carlo success target.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/></svg>
+          <h3>Historical backtesting</h3>
+          <p>Replays your plan over every rolling window of world market history
+             since 1900 &mdash; sequence-of-returns risk that independent Monte
+             Carlo draws miss.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
+          <h3>Scenarios</h3>
+          <p>Named what-ifs over your decisions and assumptions, compared
+             side-by-side. Plans are saved as a local JSON file you own.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          <h3>Local and private</h3>
+          <p>A desktop app, not a web service. Your plan lives in a file wherever
+             you choose, and nothing ever leaves your machine.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="screenshots">
+    <h2>A closer look</h2>
+    <p class="section-sub">All screenshots show example data, not anyone's real finances.</p>
+    <div class="shots">
+      <figure>
+        <div class="shot-frame">
+          <div class="bar" aria-hidden="true"><span></span><span></span><span></span></div>
+          <img src="screenshots/facts.png" width="1280" height="860" loading="lazy"
+               alt="The facts tab: the About you, Household spending, and State pension cards of the entry form, with the example plan's values filled in">
+        </div>
+        <figcaption>Facts entry &mdash; everything on this screen is either a fact
+          you state or a choice you make; anything estimated lives in the
+          assumptions inspector instead.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot-frame">
+          <div class="bar" aria-hidden="true"><span></span><span></span><span></span></div>
+          <img src="screenshots/stated_vs_assumed.png" width="1280" height="860" loading="lazy"
+               alt="The stated-vs-assumed tab: tables of stated facts, choices in effect, assumptions used with sources, and the plan structure">
+        </div>
+        <figcaption>Stated vs assumed &mdash; the provenance view: the facts you
+          stated, the choices in effect, and every assumption the run used with
+          its value, default/overridden status, source, and date.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="wrap" id="get-started">
+    <h2>Get started</h2>
+    <p class="section-sub">
+      Requires <a href="https://docs.astral.sh/uv/">uv</a> and GNU Make;
+      uv manages the Python toolchain for you.
+    </p>
+    <div class="steps">
+<pre><code><span class="p">$</span> git clone https://github.com/williajm/glidepath.git
+<span class="p">$</span> cd glidepath
+<span class="p">$</span> make sync      <span class="c"># create the venv and install locked dependencies</span>
+<span class="p">$</span> uv run glidepath</code></pre>
+      <p>
+        The app launches with an example plan already projected, so every tab has
+        something to show &mdash; replace its values with your own facts, or clear
+        the form and start blank. Save your plan from the File menu as a
+        <code class="inline">.glidepath.json</code> file stored wherever you
+        choose; the next launch reopens it automatically.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap" id="disclaimer-section">
+    <div class="disclaimer">
+      <strong>Disclaimer.</strong> Glidepath is a personal modelling tool for
+      exploring retirement scenarios. It is not financial advice and is not
+      regulated; its outputs depend on assumptions that will not match reality.
+      Do not make financial decisions based solely on this tool.
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      Code is <a href="https://github.com/williajm/glidepath/blob/main/LICENSE">MIT-licensed</a>.
+      The historical return series is derived from the
+      <a href="https://www.macrohistory.net/database/">JST Macrohistory Database</a>
+      (Jord&agrave;, Schularick &amp; Taylor; return series per Jord&agrave;, Knoll,
+      Kuvshinov, Schularick &amp; Taylor 2019), distributed under
+      <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>.
+    </p>
+    <p><a href="https://github.com/williajm/glidepath">github.com/williajm/glidepath</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
