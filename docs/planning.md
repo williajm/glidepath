@@ -1915,6 +1915,17 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   so every projection surface names its allocation. Percent copy
   trims trailing zeros (`format_share`); a stated "62.5" round-trips
   through the form exactly.*
+- [ ] 9.21 Fund the annual-allowance charge (Scheme Pays / cash) — *the
+  #116 wiring measures the year's pension inputs and reports the AA
+  charge in the period's assessment, but per the §5.2 convention the
+  charge — like the rest of an accumulation period's assessed tax — is
+  never funded from modelled balances, so a persistent breach raises
+  `tax_due` without touching the balance path the roadmap-7.3 ruin
+  metrics read. Model the funding route: Scheme Pays (charge deducted
+  from the pension pot, mandatory over £2,000 when conditions are met)
+  and/or payment from a taxable account alongside the portfolio-tax
+  charge. Needs a §5.2 decision record on the default route and its
+  interaction with the fee/growth order before code.*
 
 ## 9. Open questions
 

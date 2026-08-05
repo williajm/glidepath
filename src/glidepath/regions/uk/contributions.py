@@ -232,6 +232,11 @@ class UkContributionRuleset:
         paid before an in-period trigger are measured against the full
         allowance, matching the statute's pre/post-trigger split at
         the engine's own event order (HS345; planning §5.2).
+
+        A pool longer than this year's statutory window — possible
+        only if a data file ever shrinks ``aa_carry_forward_years``
+        between years — keeps its most recent years, the oldest
+        expiring, rather than failing the run.
         """
         pension = self._year_for(period).pension
         db_total = _ZERO
@@ -263,7 +268,9 @@ class UkContributionRuleset:
             other_inputs=db_total,
             mpaa_active=is_mpaa_active(measurement.mpaa_triggered_on, period),
         )
-        set_off = apply_carry_forward(pension, assessment, measurement.carry_forward)
+        window = pension.aa_carry_forward_years
+        pool = measurement.carry_forward[-window:] if window else ()
+        set_off = apply_carry_forward(pension, assessment, pool)
         generated = carry_forward_generated(
             assessment, scheme_member=measurement.scheme_member
         )

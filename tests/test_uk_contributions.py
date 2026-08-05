@@ -951,3 +951,25 @@ def test_no_scheme_membership_generates_no_carry_forward(
     )
     assert outcome.chargeable_excess == money("0")
     assert outcome.carry_forward == (money("0"),)
+
+
+def test_a_pool_beyond_a_shrunken_window_expires_oldest_first(
+    rules: UkContributionRuleset,
+) -> None:
+    """A pool longer than the year's window keeps its most recent years.
+
+    Only possible if a data file ever shrinks the window between
+    years; the four-entry pool trims to its three most recent, so the
+    40,000 oldest year expires and 5,000 + 3,000 + 0 set against the
+    10,000 excess leaves 2,000 charged — never a failed run.
+    """
+    outcome = rules.annual_allowance(
+        measurement_of(
+            member="70000",
+            total_income="80000",
+            carry_forward=("40000", "5000", "3000", "0"),
+        ),
+        TAX_YEAR_2026_27,
+    )
+    assert outcome.chargeable_excess == money("2000")
+    assert outcome.carry_forward == (money("0"), money("0"), money("0"))
