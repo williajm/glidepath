@@ -331,10 +331,10 @@ gap are *flows*, and only *level revaluations* — the growth rate and
 the percentage fee drag — compound over the unmodelled span (the DB
 precedent) — a long-stale statement therefore understates by the
 missed contributions, and restating a fresh balance is always better
-than relying on the roll-forward; the opening allocation stands in for the whole span;
-a span under one whole month rolls by nothing (the §4.1 whole-month
-convention), which keeps the common freshly-stated case an exact
-no-op.
+than relying on the roll-forward; the opening allocation stands in
+for the whole span; a span under one whole month rolls by nothing
+(the §4.1 whole-month convention), which keeps the common
+freshly-stated case an exact no-op.
 
 ### 4.9 Launch example and form clearing
 

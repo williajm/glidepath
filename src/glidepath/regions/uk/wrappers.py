@@ -91,6 +91,7 @@ LISA_ALLOWANCE_GROUP = "uk.lisa"
 _PENSION_KINDS = frozenset({WORKPLACE_DC_KIND, SIPP_KIND})
 _TAX_FREE_SAVINGS_KINDS = frozenset({ISA_KIND, LISA_KIND})
 _TAXABLE_KINDS = frozenset({GIA_KIND, CASH_KIND})
+_ALL_KINDS = _PENSION_KINDS | _TAX_FREE_SAVINGS_KINDS | _TAXABLE_KINDS
 
 _RELIEF_MECHANICS: Mapping[WrapperKindId, frozenset[ReliefMechanic]] = {
     WORKPLACE_DC_KIND: frozenset(
@@ -234,7 +235,7 @@ class UkWrapperRuleset:
         describe. Cash *held inside* another wrapper (a SIPP or ISA
         cash slice) still bears that wrapper's fees.
         """
-        if kind not in _PENSION_KINDS | _TAX_FREE_SAVINGS_KINDS | _TAXABLE_KINDS:
+        if kind not in _ALL_KINDS:
             _unknown_kind(kind)
         return kind != CASH_KIND
 

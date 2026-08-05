@@ -2698,6 +2698,35 @@ class TestBalanceRollForward:
         assert AssumptionKey.FEES_PLATFORM not in keys_read
         assert AssumptionKey.FEES_FUND not in keys_read
 
+    def test_stated_fee_schedule_beats_the_kind_exemption(self) -> None:
+        """A wrapper's own schedule applies even on a fee-exempt kind.
+
+        The exemption only governs the *default* fee assumptions: an
+        explicit 1% platform schedule still nets the roll-forward
+        (factor 1.089) and still charges the modelled period — here 1%
+        of the 10,890 opening balance, 108.90.
+        """
+        pension = Wrapper(
+            id=EntityId("wrapper-exempt-own-fees"),
+            kind=PENSION,
+            balance=money_fact("10000", as_of=date(2025, 1, 1)),
+            allocation=EQUITY_ONLY,
+            fees=FeeSchedule(platform=Rate(Decimal("0.01")), fund=Rate(Decimal(0))),
+        )
+        plan = household_of(person_of((pension,)))
+        result = run(
+            plan,
+            assumptions_with(),
+            stub_region(fee_free_kinds=frozenset({PENSION})),
+            one_period_config(),
+        )
+        [record] = result.provenance.balance_roll_forwards
+        assert record.factor == Decimal("1.089")
+        [person_result] = result.snapshots[0].persons
+        [wrapper_result] = person_result.wrappers
+        assert wrapper_result.opening_uncrystallised == Money(Decimal("10890.00"))
+        assert wrapper_result.fee == Money(Decimal("108.90"))
+
 
 @dataclass(frozen=True)
 class OrderedNetStrategy:
