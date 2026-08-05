@@ -62,7 +62,14 @@ v1 engine conventions, superseded as later phases land:
   price level. They join the period's net need: in decumulation the
   configured strategy funds them after the income offset; before
   decumulation they are funded net-defined in the default tax-aware
-  order, since the strategy is a decumulation decision.
+  order, since the strategy is a decumulation decision. The income
+  offset applies in both phases: retirement income already in payment
+  before the target retirement age (an early DB start, a purchased
+  annuity, the state pension alongside work) meets the period's
+  outflows net of the marginal tax it adds on top of employment
+  income, and the remainder banks per roadmap 9.2. Employment income
+  itself never offsets or banks — net pay funds working-life
+  spending, which the model does not track.
 - DB revaluation for the span before ``today`` — which the run never
   models period-by-period — compounds the scheme basis over the whole
   months from the statement date at the assumed CPI (planning §5.1);
@@ -331,6 +338,24 @@ class _DrawTranche:
     taxable_share: Decimal
     max_gross: Money
     from_crystallised: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _PeriodIncome:
+    """One person's step-2 income amounts for one period (§5.2).
+
+    The gross entitlements the income step priced — employment,
+    DB/state-pension/annuity income in payment, and the period's
+    commutation and annuity-purchase lump sums — feeding the income
+    offset of steps 3-4 and the period result.
+    """
+
+    employment: Money
+    db_income: Money
+    db_lump_sum: Money
+    annuity_income: Money
+    annuity_lump_sum: Money
+    state_pension: Money
 
 
 class _NominalFactors:
@@ -1003,37 +1028,23 @@ class _Projection:
             self._contribution_step(ledgers, period, employment, factors, fraction)
         need = _ZERO
         outflows = self._outflows_due(period, inflation)
-        wrapper_need = _ZERO
-        delivered = _ZERO
         pension_lump_sum = _ZERO
-        banked = _ZERO
+        income = _PeriodIncome(
+            employment=employment,
+            db_income=db_income,
+            db_lump_sum=db_lump_sum,
+            annuity_income=annuity_income,
+            annuity_lump_sum=annuity_lump_sum,
+            state_pension=state_pension,
+        )
         if retired:
             if self.plan.spending is not None:
                 need = _spending_need(self.plan.spending, stage, inflation) * fraction
             if self.config.tax_free_cash is TaxFreeCashStrategy.UP_FRONT_LUMP_SUM:
                 pension_lump_sum = self._up_front_lump_sums(ledgers, period)
-            # Net-of-tax pension and annuity income, any commutation
-            # lump sum (gross here; the tax on its over-headroom
-            # excess is in the assessment), and any up-front or
-            # annuity-purchase tax-free cash meet the net need —
-            # spending plus planned outflows — first; only the
-            # remainder is drawn from wrappers. The offset excludes
-            # the portfolio-income layers: their tax is charged to
-            # the taxable wrappers at close, never to the need.
-            income_tax = self.region.tax.assess(
-                period, self._tax_input(include_portfolio=False)
-            ).tax_due
-            income_net = (
-                db_income
-                + state_pension
-                + annuity_income
-                + db_lump_sum
-                + annuity_lump_sum
-                + pension_lump_sum
-                - income_tax
-            )
+            income_net = self._decumulation_income_net(period, income, pension_lump_sum)
             wrapper_need = max(need + outflows - income_net, _ZERO)
-            delivered = self._withdrawal_step(
+            delivered, spend_target = self._withdrawal_step(
                 ledgers,
                 period,
                 wrapper_need,
@@ -1043,17 +1054,16 @@ class _Projection:
             # Income and gross draws beyond the need bank into the
             # first uncapped taxable wrapper when one exists (roadmap
             # 9.2); with none they are spent, the pre-9.2 behaviour.
+            # A net-defined strategy's adjusted target (a guardrails
+            # prosperity rise) is spending, never swept back: only
+            # delivery beyond that target is surplus.
             surplus = max(income_net - need - outflows, _ZERO) + max(
-                delivered - wrapper_need, _ZERO
+                delivered - spend_target, _ZERO
             )
             banked = self._bank_surplus(ledgers, surplus)
-        elif outflows > _ZERO:
-            # An outflow due while still accumulating is a net cash
-            # need met in the default tax-aware order — the configured
-            # strategy governs decumulation only (module docstring).
-            wrapper_need = outflows
-            delivered = self._withdrawal_step(
-                ledgers, period, wrapper_need, fraction, _OUTFLOW_FUNDING
+        else:
+            wrapper_need, delivered, banked = self._accumulation_spending(
+                ledgers, period, income, outflows, fraction
             )
         # Step 5 — final tax assessment on the full income picture,
         # then the portfolio-income slice charged to its wrappers.
@@ -1522,6 +1532,77 @@ class _Projection:
             )
             raise EngineError(msg)
 
+    def _decumulation_income_net(
+        self, period: Period, income: _PeriodIncome, pension_lump_sum: Money
+    ) -> Money:
+        """The §5.2 decumulation income offset: net cash before draws.
+
+        Net-of-tax pension, state-pension and annuity income, any
+        commutation lump sum (gross here; the tax on its over-headroom
+        excess is in the assessment), and any up-front or
+        annuity-purchase tax-free cash meet the net need — spending
+        plus planned outflows — first; only the remainder is drawn
+        from wrappers. The offset excludes the portfolio-income
+        layers: their tax is charged to the taxable wrappers at
+        close, never to the need.
+        """
+        income_tax = self.region.tax.assess(
+            period, self._tax_input(include_portfolio=False)
+        ).tax_due
+        return (
+            income.db_income
+            + income.state_pension
+            + income.annuity_income
+            + income.db_lump_sum
+            + income.annuity_lump_sum
+            + pension_lump_sum
+            - income_tax
+        )
+
+    def _accumulation_spending(
+        self,
+        ledgers: list[_WrapperLedger],
+        period: Period,
+        income: _PeriodIncome,
+        outflows: Money,
+        fraction: Decimal,
+    ) -> tuple[Money, Money, Money]:
+        """Steps 3-4 before retirement: fund outflows, bank the rest.
+
+        Retirement income already in payment before the target
+        retirement age — an early DB start or annuity purchase, the
+        state pension alongside work — is real cash: net of the
+        marginal tax it adds on top of employment income
+        (:meth:`_pre_retirement_income_tax`) it meets the period's
+        planned outflows first, and the remainder banks like
+        decumulation surplus (roadmap 9.2). Employment income itself
+        never offsets or banks — net pay funds working-life spending,
+        which the model does not track (planning §5.2). An outflow
+        beyond the offset is a net cash need met in the default
+        tax-aware order; the configured strategy governs decumulation
+        only (module docstring). Returns the wrapper need, the net
+        cash delivered toward it, and the surplus banked.
+        """
+        income_net = (
+            income.db_income
+            + income.state_pension
+            + income.annuity_income
+            + income.db_lump_sum
+            + income.annuity_lump_sum
+            - self._pre_retirement_income_tax(period, income.employment)
+        )
+        wrapper_need = max(outflows - income_net, _ZERO)
+        delivered = _ZERO
+        spend_target = wrapper_need
+        if wrapper_need > _ZERO:
+            delivered, spend_target = self._withdrawal_step(
+                ledgers, period, wrapper_need, fraction, _OUTFLOW_FUNDING
+            )
+        surplus = max(income_net - outflows, _ZERO) + max(
+            delivered - spend_target, _ZERO
+        )
+        return wrapper_need, delivered, self._bank_surplus(ledgers, surplus)
+
     def _withdrawal_step(
         self,
         ledgers: list[_WrapperLedger],
@@ -1529,7 +1610,7 @@ class _Projection:
         need: Money,
         fraction: Decimal,
         strategy: WithdrawalStrategy,
-    ) -> Money:
+    ) -> tuple[Money, Money]:
         """Step 4: run the withdrawal strategy over the drawable sources.
 
         The strategy sees every sub-balance — gate-closed ones flagged
@@ -1541,7 +1622,12 @@ class _Projection:
         wrapper allocation's weighted ``yield.*`` assumptions, scaled
         by the period's active fraction; the yield keys are read only
         then, so other runs' provenance never lists them. Returns the
-        net cash delivered toward the need.
+        net cash delivered and the plan's net spending target — the
+        strategy-adjusted need for a net-defined plan (a guardrails
+        rise or cut), the caller's need for a gross-defined one, which
+        sets no net target. Delivery toward the target is spending;
+        only delivery beyond it is surplus for the caller to bank
+        (roadmap 9.2).
         """
         sources = self._withdrawal_sources(ledgers, period)
         # Opt-in marker, deliberately not a protocol member: a strategy
@@ -1562,8 +1648,8 @@ class _Projection:
         )
         plan = strategy.withdraw(state, need)
         if isinstance(plan, NetWithdrawalPlan):
-            return self._execute_net_plan(sources, period, plan)
-        return self._execute_gross_plan(sources, period, plan)
+            return self._execute_net_plan(sources, period, plan), plan.target
+        return self._execute_gross_plan(sources, period, plan), need
 
     def _portfolio_yield(self, allocation: AssetAllocation) -> Decimal:
         """The allocation-weighted annual natural yield (roadmap 5.3).
@@ -1942,6 +2028,27 @@ class _Projection:
         if self._mpaa_triggered_on is None:
             self._mpaa_triggered_on = max(period.start, self.config.today)
 
+    def _pre_retirement_income_tax(self, period: Period, employment: Money) -> Money:
+        """The tax the pre-retirement income offset bears (planning §5.2).
+
+        Employment income keeps its own tax — net pay funds
+        working-life spending outside the model — so the offset's
+        DB/state-pension/annuity income (and any commutation excess)
+        is netted of only the marginal tax those layers add on top of
+        it: the no-portfolio assessment less one of employment income
+        alone. The portfolio layers' interaction stays with the
+        wrapper charge, exactly as in decumulation
+        (:meth:`_incremental_tax`).
+        """
+        if self._taxable_income <= employment:
+            return _ZERO
+        full = self.region.tax.assess(period, self._tax_input(include_portfolio=False))
+        base = self.region.tax.assess(
+            period,
+            self._tax_input(non_savings_override=employment, include_portfolio=False),
+        )
+        return full.tax_due - base.tax_due
+
     def _incremental_tax(self, period: Period, taxable: Money) -> Money:
         """The extra tax ``taxable`` adds on top of the period's income.
 
@@ -1969,7 +2076,11 @@ class _Projection:
         return with_draw.tax_due - base.tax_due
 
     def _tax_input(
-        self, extra_income: Money = _ZERO, *, include_portfolio: bool = True
+        self,
+        extra_income: Money = _ZERO,
+        *,
+        include_portfolio: bool = True,
+        non_savings_override: Money | None = None,
     ) -> TaxInput:
         """The person's categorised income picture for assessment.
 
@@ -1978,10 +2089,18 @@ class _Projection:
         the growth-tax attribution both need the picture without those
         top-of-ladder layers, whose tax is charged to the wrappers
         (:meth:`_charge_portfolio_tax`), never to the spending need.
+        ``non_savings_override`` replaces the accumulated non-savings
+        income — the employment-only baseline of the pre-retirement
+        income offset (:meth:`_pre_retirement_income_tax`).
         """
+        non_savings = (
+            self._taxable_income
+            if non_savings_override is None
+            else non_savings_override
+        )
         return TaxInput(
             residency=self.person.tax_residency,
-            non_savings_income=self._taxable_income + extra_income,
+            non_savings_income=non_savings + extra_income,
             savings_income=self._savings_income if include_portfolio else _ZERO,
             dividend_income=self._dividend_income if include_portfolio else _ZERO,
             relief_at_source_contributions=self._relief_at_source,

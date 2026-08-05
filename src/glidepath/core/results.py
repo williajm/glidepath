@@ -168,18 +168,27 @@ class PersonPeriodResult:
 
     Tax-free cash tracking (roadmap 5.2): ``pension_lump_sum`` is
     up-front tax-free cash delivered by a whole-pot crystallisation
-    this period (the ``UP_FRONT_LUMP_SUM`` event — phased tax-free
-    elements appear in the wrappers' ``withdrawal_tax_free`` instead);
+    this period (the ``UP_FRONT_LUMP_SUM`` event). Like
+    ``annuity_lump_sum``, it is a column view of cash the paying
+    wrapper also records in ``withdrawal_tax_free`` — and so inside
+    its gross withdrawals — never an addition to them: summing either
+    with the wrapper withdrawals double-counts the tax-free cash.
+    Phased (as-needed or split-payment) tax-free elements appear only
+    in ``withdrawal_tax_free``.
     ``lsa_used`` is the person's cumulative tax-free cash at period
     end, including the pre-plan ``lsa_used`` fact;
     ``mpaa_triggered_on`` is the flexible-access trigger date in
     effect at period end — the pre-plan fact or the in-run first
     taxable pension draw — or ``None`` if never triggered.
 
-    ``banked`` is the period's decumulation surplus swept into a
-    taxable wrapper (roadmap 9.2): income and gross draws beyond the
-    net need land in the first uncapped taxable account rather than
-    being spent — zero when the person holds none (planning §5.2).
+    ``banked`` is the period's surplus swept into a taxable wrapper
+    (roadmap 9.2): in decumulation, income and gross draws beyond the
+    net need; before retirement, non-employment income already in
+    payment (an early DB start, a purchased annuity, the state
+    pension alongside work) net of its marginal tax and beyond the
+    period's planned outflows. The sweep lands in the first uncapped
+    taxable account rather than being spent — zero when the person
+    holds none (planning §5.2).
     """
 
     person_id: EntityId

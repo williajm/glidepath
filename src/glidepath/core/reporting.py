@@ -86,7 +86,9 @@ class PeriodReportRow:
     capital that left the wrappers to buy annuity income this period
     (roadmap 5.5). ``growth_tax`` totals the portfolio-income tax
     charged to taxable-growth wrappers and ``banked`` is the
-    decumulation surplus swept into one (roadmap 9.2).
+    period's surplus — decumulation income and draws beyond the need,
+    or pre-retirement non-employment income beyond the planned
+    outflows — swept into one (roadmap 9.2).
     """
 
     period: Period

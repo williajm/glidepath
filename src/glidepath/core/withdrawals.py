@@ -387,7 +387,9 @@ class GuardrailsWithdrawalStrategy:
     adjustments never compound across periods (planning §5.2). A cut's
     unspent remainder is reported as shortfall, exactly as a
     gross-defined under-draw is: the roadmap-7.3 metrics read spending
-    cuts from there.
+    cuts from there. A rise is genuinely spent: the engine treats the
+    adjusted target as the period's net need, so the roadmap-9.2
+    sweep banks only delivery beyond it — never the rise itself.
     """
 
     upper_guardrail: Rate = _DEFAULT_UPPER_GUARDRAIL

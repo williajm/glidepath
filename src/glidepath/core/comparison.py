@@ -53,7 +53,11 @@ class PeriodMetrics:
     ``income_total`` is income in payment (employment, DB, state
     pension, annuity); ``lump_sums`` the one-off tax-advantaged cash
     (DB commutation, up-front pension lump sums, annuity-purchase
-    tax-free cash). The rest carry the reporting layer's meanings.
+    tax-free cash). The pension and annuity elements of ``lump_sums``
+    are column views of tax-free cash the wrappers already carry in
+    ``withdrawals_gross`` — only the DB commutation arrives from
+    outside the wrappers — so the two metrics overlap and must never
+    be summed. The rest carry the reporting layer's meanings.
     Amounts follow the report's basis; a delta's amounts may be
     negative.
     """
