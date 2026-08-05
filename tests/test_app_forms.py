@@ -925,6 +925,24 @@ class TestSpendingParsing:
         assert error.section == "spending"
         assert error.field_key == "annual_spending_real"
 
+    def test_unparsable_spending_with_a_multiplier_errors_once(self) -> None:
+        """Bad amount text keeps its own message; no second prompt piles on."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                spending={
+                    "annual_spending_real": "lots",
+                    "go_go_multiplier": "1.2",
+                },
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.field_key == "annual_spending_real"
+        assert "amount of money" in error.message
+
     def test_non_positive_multiplier_surfaces_the_core_message(self) -> None:
         """The spending plan's own multiplier validation lands on the section."""
         result = parse_facts_form(

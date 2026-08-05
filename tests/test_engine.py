@@ -1948,6 +1948,44 @@ class TestPensionIncome:
         assert protected_entry.factor == Decimal("1.02")
         assert protected_entry.opening == Money(Decimal(51))
 
+    def test_zero_forecast_with_region_amounts_still_rolls(self) -> None:
+        """A zero weekly forecast has no blend divisor yet stays safe (#117).
+
+        Only a region answering a zero record with amounts of its own
+        can reach this; the roll still scales those amounts and the
+        provenance falls back to the main slice's factor.
+        """
+        record = StatePensionRecord(
+            forecast_weekly_amount=money_fact("0", as_of=date(2025, 1, 1)),
+            protected_payment=money_fact("0", as_of=date(2025, 1, 1)),
+            deferral_years=Decision(value=Decimal(0), recorded_on=RECORDED),
+        )
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=record,
+            )
+        )
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "inflation.cpi": Decimal("0.02"),
+                    "policy.state_pension.uprating": "cpi",
+                }
+            ),
+            stub_region(state_pension=scheme),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
+        assert person_result.state_pension_income == Money(Decimal("10200.00"))
+        forecast_entry, _protected_entry = result.provenance.balance_roll_forwards
+        assert forecast_entry.factor == Decimal("1.02")
+        assert forecast_entry.opening == ZERO
+
     def test_fresh_forecast_rolls_by_nothing(self) -> None:
         """A forecast dated at the run start is used verbatim (#117)."""
         plan = household_of(

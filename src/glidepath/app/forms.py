@@ -474,7 +474,9 @@ def _spending_from(reader: _SectionReader) -> SpendingPlan | None:
         if (value := reader.decimal_value(field_key)) is not None
     }
     if spending_fact is None:
-        if multipliers:
+        # An unparsable amount already carries its own field error; only
+        # a genuinely blank one needs the "enter the need" prompt.
+        if multipliers and not reader.raw("annual_spending_real"):
             reader.error("annual_spending_real", _MULTIPLIERS_NEED_SPENDING)
         return None
     try:

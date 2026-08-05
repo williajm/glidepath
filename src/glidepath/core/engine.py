@@ -992,9 +992,12 @@ class _Projection:
         main_weekly = forecast.value - protected_weekly
         if forecast_months > 0:
             rolled_weekly = main_weekly * main_factor + protected_weekly * cpi_factor
+            # The blend needs a divisor; a zero forecast (possible only
+            # when a region answers a zero record with its own amounts)
+            # has no protected slice to blend in anyway.
             blended = (
                 main_factor
-                if protected is None
+                if protected is None or forecast.value <= _ZERO
                 else rolled_weekly.amount / forecast.value.amount
             )
             self._roll_forwards.append(
@@ -1037,10 +1040,7 @@ class _Projection:
         """
         today = self.config.today
         if fact.as_of > today:
-            msg = (
-                f"{label}: forecast as_of {fact.as_of} is after today"
-                f" {today} (planning §4.8)"
-            )
+            msg = f"{label}: as_of {fact.as_of} is after today {today} (planning §4.8)"
             raise EngineError(msg)
         return whole_months_between(fact.as_of, today)
 
