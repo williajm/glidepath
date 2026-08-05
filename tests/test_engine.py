@@ -3876,6 +3876,43 @@ class TestSurplusBanking:
         assert taxable_result.banked_in == Money(Decimal(1500))
         assert person_result.shortfall == ZERO
 
+    def test_outflow_beyond_the_offset_draws_only_the_remainder(self) -> None:
+        """Wrappers fund only the outflow the income offset leaves.
+
+        Working at 68 with the state pension in payment: 10,000 gross
+        less its 2,500 marginal tax leaves 7,500 net against a 10,000
+        outflow, so the free account delivers exactly the 2,500
+        remainder and nothing banks.
+        """
+        free_account = wrapper_of(FREE, "50000")
+        taxable_account = wrapper_of(TAXABLE, "0")
+        person = person_of(
+            (free_account, taxable_account),
+            date_of_birth=date(1958, 1, 1),
+            retire_at=70,
+            employment="30000",
+            state_pension=sp_record(),
+        )
+        plan = Household(persons=(person,), planned_outflows=(outflow_at(68),))
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        region = stub_region(state_pension=scheme)
+        assumptions = assumptions_with(
+            {
+                "policy.state_pension.uprating": "cpi",
+                "returns.equity.real": Decimal(0),
+            }
+        )
+        result = run(plan, assumptions, region, one_period_config())
+        [person_result] = result.snapshots[0].persons
+        free_result, taxable_result = person_result.wrappers
+        assert person_result.planned_outflows == Money(Decimal(10000))
+        assert person_result.net_withdrawn == Money(Decimal(2500))
+        assert free_result.withdrawal_tax_free == Money(Decimal(2500))
+        assert free_result.closing_uncrystallised == Money(Decimal(47500))
+        assert person_result.banked == ZERO
+        assert taxable_result.banked_in == ZERO
+        assert person_result.shortfall == ZERO
+
     def test_employment_income_alone_never_banks(self) -> None:
         """Working-age net pay stays outside the model (planning §5.2)."""
         taxable_account = wrapper_of(TAXABLE, "0")
