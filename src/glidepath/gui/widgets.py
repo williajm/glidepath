@@ -16,8 +16,10 @@ from PySide6.QtCore import (
     QStandardPaths,
     Qt,
     QThreadPool,
+    QUrl,
     Signal,
 )
+from PySide6.QtGui import QPdfWriter, QTextDocument
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -37,20 +39,28 @@ from glidepath.app import (
     DEFAULT_COMPARISON_METRIC_KEY,
     DEFAULT_RUN_MODE,
     MONTE_CARLO_STALE_MESSAGE,
+    NOTHING_TO_EXPORT_MESSAGE,
+    REPORT_EXPORT_FAILED_PREFIX,
+    REPORT_NOT_WRITTEN_MESSAGE,
     RETIREMENT_RUNNING_MESSAGE,
     RETIREMENT_STALE_MESSAGE,
     AboutViewModel,
     DisclaimerViewModel,
     FactsFormData,
     HelpGuideViewModel,
+    PlanReport,
     PlanState,
+    ReportRequest,
     RetirementRequest,
     ShellViewModel,
     basis_from_key,
     build_charts_view_model,
     build_inspector_view_model,
+    build_plan_report,
     build_scenarios_view_model,
+    chart_resource_name,
     example_facts_form_data,
+    export_cash_flow_csv,
     facts_form_data_from_household,
     facts_saved_message,
     format_form_errors,
@@ -59,8 +69,10 @@ from glidepath.app import (
     metric_from_key,
     monte_carlo_running_status,
     parse_facts_form,
+    plan_display_name,
     plan_entity_ids,
     record_last_plan_path,
+    report_exported_message,
     run_mode_from_key,
     save_plan_state,
     state_with_household,
@@ -72,7 +84,7 @@ from glidepath.app import (
     state_without_scenario,
     state_without_scenario_override,
 )
-from glidepath.gui.charts import ChartsPane, ChartsPaneCallbacks
+from glidepath.gui.charts import ChartsPane, ChartsPaneCallbacks, chart_image
 from glidepath.gui.forms import FactsEntryPane
 from glidepath.gui.inspector import InspectorPane
 from glidepath.gui.scenarios import ScenariosPane, ScenariosPaneCallbacks
@@ -80,6 +92,13 @@ from glidepath.gui.style import wordmark_pixmap
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+_REPORT_DPI = 96
+"""The PDF paint device's resolution.
+
+Matches the CSS reference pixel, so the report HTML's pixel-sized
+chart images print at the size the app layer specified.
+"""
 
 
 def _today() -> date:
@@ -293,6 +312,15 @@ class MainWindow(QMainWindow):
         save_action.triggered.connect(self.save_plan)
         save_as_action = file_menu.addAction(view_model.file_menu.save_as_label)
         save_as_action.triggered.connect(self.save_plan_as_dialog)
+        file_menu.addSeparator()
+        self.export_cash_flow_action = file_menu.addAction(
+            view_model.file_menu.export_cash_flow_label
+        )
+        self.export_cash_flow_action.triggered.connect(self.export_cash_flow_dialog)
+        self.export_report_action = file_menu.addAction(
+            view_model.file_menu.export_report_label
+        )
+        self.export_report_action.triggered.connect(self.export_report_dialog)
         help_menu = self.menuBar().addMenu(f"&{view_model.help_menu_label}")
         self.help_guide_action = help_menu.addAction(view_model.help_guide.title)
         self.help_guide_action.triggered.connect(self.show_help_guide)
@@ -360,6 +388,92 @@ class MainWindow(QMainWindow):
         if not filename.endswith(menu.file_suffix):
             filename += menu.file_suffix
         self._write_plan(Path(filename))
+
+    def export_cash_flow_dialog(self) -> None:
+        """Ask where to export the cash-flow CSV and write it there (9.19).
+
+        The CSV presents the active run in the charts screen's money
+        basis; the app layer builds and writes it — the shell only
+        contributes the dialog.
+        """
+        menu = self._view_model.file_menu
+        filename, _selected = QFileDialog.getSaveFileName(
+            self,
+            menu.export_cash_flow_dialog_title,
+            self._dialog_dir(),
+            menu.export_cash_flow_filter,
+        )
+        if not filename:
+            return
+        if not filename.endswith(menu.export_cash_flow_suffix):
+            filename += menu.export_cash_flow_suffix
+        outcome = export_cash_flow_csv(
+            self._state,
+            Path(filename),
+            basis=self._charts_basis,
+            plan_name=plan_display_name(self._plan_path),
+        )
+        self.statusBar().showMessage(outcome.message)
+
+    def export_report_dialog(self) -> None:
+        """Ask where to export the plan report and print it there (9.19).
+
+        The report presents the charts screen's basis and run mode and
+        the scenarios screen's comparison selections — exactly what is
+        on screen. The app layer builds the document; the shell
+        contributes the chart images and the PDF paint device (§4.7).
+        """
+        menu = self._view_model.file_menu
+        filename, _selected = QFileDialog.getSaveFileName(
+            self,
+            menu.export_report_dialog_title,
+            self._dialog_dir(),
+            menu.export_report_filter,
+        )
+        if not filename:
+            return
+        if not filename.endswith(menu.export_report_suffix):
+            filename += menu.export_report_suffix
+        report = build_plan_report(
+            self._state,
+            ReportRequest(
+                plan_name=plan_display_name(self._plan_path),
+                basis=self._charts_basis,
+                mode=self._charts_mode,
+                comparison_basis=self._comparison_basis,
+                comparison_metric_key=self._comparison_metric,
+            ),
+        )
+        if report is None:
+            self.statusBar().showMessage(NOTHING_TO_EXPORT_MESSAGE)
+            return
+        self.statusBar().showMessage(self._write_report_pdf(report, Path(filename)))
+
+    def _write_report_pdf(self, report: PlanReport, path: Path) -> str:
+        """Print the report to a PDF at ``path``; the status line to show.
+
+        Every chart spec renders to an image registered under the
+        resource name the report's HTML references, then the laid-out
+        document prints to the PDF device. A failure folds into the
+        returned message, matching the app-layer transitions' rule.
+        """
+        document = QTextDocument()
+        for index, chart in enumerate(report.charts):
+            document.addResource(
+                QTextDocument.ResourceType.ImageResource,
+                QUrl(chart_resource_name(index)),
+                chart_image(chart, report.categories),
+            )
+        document.setHtml(report.html)
+        writer = QPdfWriter(str(path))
+        writer.setResolution(_REPORT_DPI)
+        try:
+            document.print_(writer)
+        except OSError as exc:
+            return f"{REPORT_EXPORT_FAILED_PREFIX}{exc}"
+        if not path.exists() or path.stat().st_size == 0:
+            return REPORT_NOT_WRITTEN_MESSAGE
+        return report_exported_message(path)
 
     def _write_plan(self, path: Path) -> None:
         """Write the session's plan to ``path`` and report the outcome."""

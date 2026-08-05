@@ -1,0 +1,153 @@
+"""Export flow tests, offscreen (roadmap 9.19; planning §4.7).
+
+The shell is thin by policy: the File menu's export actions route
+through the app layer's builders, the shell contributing only the
+dialog, the chart images, and the PDF paint device.
+"""
+
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
+
+from glidepath.app import (
+    DISCLAIMER_BODY,
+    NOTHING_TO_EXPORT_MESSAGE,
+    build_shell_view_model,
+)
+from glidepath.gui import widgets
+from glidepath.gui.widgets import MainWindow
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
+
+
+def _window_with_example() -> MainWindow:
+    """A window whose launch example is already submitted and projected."""
+    return MainWindow(build_shell_view_model())
+
+
+class TestExportMenu:
+    """The File menu offers both exports (the 9.19 acceptance)."""
+
+    def test_file_menu_offers_both_exports(self) -> None:
+        """Both export actions appear with the app layer's labels."""
+        window = _window_with_example()
+        menu = build_shell_view_model().file_menu
+        assert window.export_cash_flow_action.text() == menu.export_cash_flow_label
+        assert window.export_report_action.text() == menu.export_report_label
+
+
+class TestExportCashFlowFlow:
+    """The CSV export writes through the app layer."""
+
+    def test_export_writes_the_csv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The exported file carries the header block and the table."""
+        target = tmp_path / "cash-flow.csv"
+        window = _window_with_example()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(target), "")),
+        )
+        window.export_cash_flow_dialog()
+        assert target.exists()
+        text = target.read_text(encoding="utf-8")
+        assert DISCLAIMER_BODY in text
+        assert "Unsaved plan" in text
+        assert str(target) in window.statusBar().currentMessage()
+
+    def test_export_appends_the_csv_suffix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bare filename gains the .csv suffix."""
+        window = _window_with_example()
+        bare = tmp_path / "cash-flow"
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(bare), "")),
+        )
+        window.export_cash_flow_dialog()
+        assert (tmp_path / "cash-flow.csv").exists()
+
+    def test_cancelled_dialog_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cancelling the export dialog leaves the disk untouched."""
+        window = _window_with_example()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: ("", "")),
+        )
+        window.export_cash_flow_dialog()
+        assert list(tmp_path.iterdir()) == []
+
+    def test_cleared_session_reports_nothing_to_export(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without a projection the export declines with the copy."""
+        target = tmp_path / "cash-flow.csv"
+        window = _window_with_example()
+        window.facts_pane.clear_button.click()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(target), "")),
+        )
+        window.export_cash_flow_dialog()
+        assert not target.exists()
+        assert window.statusBar().currentMessage() == NOTHING_TO_EXPORT_MESSAGE
+
+
+class TestExportReportFlow:
+    """The report export prints the app layer's document to a PDF."""
+
+    def test_export_writes_the_pdf(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The exported file is a real PDF and the status names it."""
+        target = tmp_path / "report.pdf"
+        window = _window_with_example()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(target), "")),
+        )
+        window.export_report_dialog()
+        assert target.exists()
+        assert target.read_bytes().startswith(b"%PDF")
+        assert str(target) in window.statusBar().currentMessage()
+
+    def test_export_appends_the_pdf_suffix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bare filename gains the .pdf suffix."""
+        window = _window_with_example()
+        bare = tmp_path / "report"
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(bare), "")),
+        )
+        window.export_report_dialog()
+        assert (tmp_path / "report.pdf").exists()
+
+    def test_cleared_session_reports_nothing_to_export(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without a projection the report declines with the copy."""
+        target = tmp_path / "report.pdf"
+        window = _window_with_example()
+        window.facts_pane.clear_button.click()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(target), "")),
+        )
+        window.export_report_dialog()
+        assert not target.exists()
+        assert window.statusBar().currentMessage() == NOTHING_TO_EXPORT_MESSAGE

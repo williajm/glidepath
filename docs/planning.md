@@ -1719,12 +1719,17 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   included), not a UK-only equity series — alongside GBP bond/gilt and
   cash series. Success reporting mirrors the Monte Carlo metrics
   (success rate over windows, worst-window identification).*
-- [ ] 9.19 Exports and reports — *get the plan out of the app: per-year
-  cash-flow table export (CSV) and a printable plan report (PDF or
-  print-ready HTML) covering inputs with provenance (facts vs
-  assumptions vs decisions), projection results and charts. Every
-  export carries the product disclaimer — a stated §1 requirement that
-  currently has no export to live on.*
+- [x] 9.19 Exports and reports (#104) — *get the plan out of the app:
+  File → "Export cash flow (CSV)" serialises the active run's report
+  model exactly (header block: plan, run, scenario, money basis,
+  disclaimer; then one row per person per period with every amount as
+  the report's exact decimal, pinned by a round-trip test), and
+  File → "Export report (PDF)" prints inputs with their
+  facts/assumptions/decisions provenance, the three charts, Monte
+  Carlo metrics when held, and the scenario comparison when scenarios
+  exist. Generation is app-layer (§4.7) — the shell contributes the
+  dialogs, the chart raster, and the QPdfWriter device (no new
+  runtime dependency). Every export carries the §1 disclaimer.*
 
 ## 9. Open questions
 
