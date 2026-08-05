@@ -1709,6 +1709,22 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   fields, and a migrated record without a forecast keeps its deferral
   choice but fails projection with a clear demand for a forecast —
   the facts form requires one on the next save.*
+- [ ] 9.18 Historical backtesting — *run the plan over every rolling
+  historical window of an annual real-return series, as a complement to
+  Monte Carlo: rolling windows preserve the sequence-of-returns and
+  regime behaviour that independent lognormal draws miss. The return
+  series ships as a data file with `verified_on` + sources (the §5.3
+  provenance pattern) and must reflect how UK investors actually invest
+  today — globally diversified equities in GBP terms (currency effects
+  included), not a UK-only equity series — alongside GBP bond/gilt and
+  cash series. Success reporting mirrors the Monte Carlo metrics
+  (success rate over windows, worst-window identification).*
+- [ ] 9.19 Exports and reports — *get the plan out of the app: per-year
+  cash-flow table export (CSV) and a printable plan report (PDF or
+  print-ready HTML) covering inputs with provenance (facts vs
+  assumptions vs decisions), projection results and charts. Every
+  export carries the product disclaimer — a stated §1 requirement that
+  currently has no export to live on.*
 
 ## 9. Open questions
 
