@@ -38,6 +38,7 @@ from glidepath.app import (
     state_with_override,
     state_with_retirement,
 )
+from glidepath.app.backtest import BACKTEST_YEAR_LABEL
 from glidepath.app.retirement import RETIREMENT_ANSWER_PREFIX
 from glidepath.core import (
     Decision,
@@ -311,6 +312,26 @@ class TestBacktestCard:
         series = view.chart().series()
         assert len(series) == 1 + len(view_model.charts[0].bands)
         assert len(view_model.charts[0].bands) == 2
+
+    def test_the_year_picker_is_labelled_and_explained(self) -> None:
+        """The picker must say what it is for and what it expects.
+
+        The label names the control, the tooltip explains what an
+        entry draws, and — once a result is held — the placeholder
+        shows the valid span greyed inside the empty box. Pinned
+        because an unsynced label renders as a bare unexplained box.
+        """
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        assert pane.backtest_year_label.text() == BACKTEST_YEAR_LABEL
+        assert pane.backtest_year_edit.toolTip()
+        state = state_with_backtest(projected_state(), today=TODAY)
+        pane.refresh(build_charts_view_model(state))
+        assert state.backtest is not None
+        first = state.backtest.outcomes[0].start_year
+        last = state.backtest.outcomes[-1].start_year
+        assert pane.backtest_year_edit.placeholderText() == f"{first}-{last}"
+        assert str(first) in pane.backtest_year_edit.toolTip()
 
     def test_year_picker_forwards_the_raw_text(self) -> None:
         """The shell parses; the picker only captures and forwards."""

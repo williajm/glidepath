@@ -454,6 +454,13 @@ class ChartsPane(QWidget):
         """Re-render the historical-backtest card (roadmap 9.18)."""
         self._backtest_box.setTitle(panel.heading)
         self.backtest_button.setText(panel.run_label)
+        self.backtest_year_label.setText(panel.year_label)
+        self.backtest_year_edit.setText(panel.year_value)
+        self.backtest_year_edit.setPlaceholderText(panel.year_placeholder)
+        self.backtest_year_label.setToolTip(panel.year_tooltip)
+        self.backtest_year_edit.setToolTip(panel.year_tooltip)
+        self.backtest_year_message_label.setText(panel.year_message)
+        self.backtest_year_message_label.setVisible(bool(panel.year_message))
         metrics = "\n".join(f"{row.label}: {row.value}" for row in panel.metrics)
         self.backtest_metrics_label.setText(metrics)
         self.backtest_metrics_label.setVisible(bool(metrics))

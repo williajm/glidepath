@@ -58,6 +58,11 @@ BEST_WINDOW_LABEL: Final = "Best starting year"
 
 BACKTEST_YEAR_LABEL: Final = "Show starting year"
 
+BACKTEST_YEAR_TOOLTIP_NO_RUN: Final = (
+    "Run the backtest first, then enter a historical starting year to"
+    " draw its balance path on the balances chart."
+)
+
 
 @dataclass(frozen=True)
 class BacktestMetric:
@@ -74,15 +79,20 @@ class BacktestPanelViewModel:
     ``message`` carries the no-run or failure copy; it is blank
     whenever ``metrics`` is populated. The card's one input is the
     starting-year picker: ``year_value`` echoes the raw text the shell
-    captured (presentation state, not part of any run), and
-    ``year_message`` says why a non-blank entry drew no trajectory —
-    it never displaces the metrics.
+    captured (presentation state, not part of any run),
+    ``year_placeholder`` shows the valid span greyed inside the empty
+    box (what input is expected), ``year_tooltip`` explains what an
+    entry will draw (what the control is for), and ``year_message``
+    says why a non-blank entry drew no trajectory — it never displaces
+    the metrics.
     """
 
     heading: str
     run_label: str
     year_label: str
     year_value: str
+    year_placeholder: str
+    year_tooltip: str
     year_message: str
     metrics: tuple[BacktestMetric, ...]
     message: str
@@ -177,6 +187,8 @@ def build_backtest_panel(
     result = state.backtest
     metrics: tuple[BacktestMetric, ...] = ()
     message = ""
+    year_placeholder = ""
+    year_tooltip = BACKTEST_YEAR_TOOLTIP_NO_RUN
     year_message = ""
     if state.backtest_error is not None:
         message = state.backtest_error
@@ -184,12 +196,22 @@ def build_backtest_panel(
         message = NO_BACKTEST_MESSAGE
     else:
         metrics = _metrics(result, ending_pot_deflator, basis_suffix)
+        first = result.outcomes[0].start_year
+        last = result.outcomes[-1].start_year
+        year_placeholder = f"{first}-{last}"
+        year_tooltip = (
+            "Draw one historical starting year's balance path on the"
+            " balances chart, alongside the worst and best starting"
+            f" years. Enter a year from {first} to {last}."
+        )
         _, year_message = selected_window(result, year_text)
     return BacktestPanelViewModel(
         heading=BACKTEST_HEADING,
         run_label=RUN_BACKTEST_LABEL,
         year_label=BACKTEST_YEAR_LABEL,
         year_value=year_text,
+        year_placeholder=year_placeholder,
+        year_tooltip=year_tooltip,
         year_message=year_message,
         metrics=metrics,
         message=message,

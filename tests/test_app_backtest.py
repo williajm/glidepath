@@ -270,6 +270,27 @@ class TestBacktestPanel:
         assert len(pots) == 3
         assert all(row.label.endswith("(nominal)") for row in pots)
 
+    def test_the_year_picker_carries_its_explanation(
+        self, bt_state: PlanState, bt_view_model: ChartsViewModel
+    ) -> None:
+        """The picker names its expected input and what it will draw."""
+        assert bt_state.backtest is not None
+        first = bt_state.backtest.outcomes[0].start_year
+        last = bt_state.backtest.outcomes[-1].start_year
+        panel = bt_view_model.backtest
+        assert panel.year_label
+        assert panel.year_placeholder == f"{first}-{last}"
+        assert f"{first} to {last}" in panel.year_tooltip
+        assert "balances chart" in panel.year_tooltip
+
+    def test_without_a_result_the_picker_says_to_run_first(
+        self, projected: PlanState
+    ) -> None:
+        """Before any run the tooltip explains the prerequisite."""
+        panel = build_charts_view_model(projected).backtest
+        assert panel.year_placeholder == ""
+        assert "Run the backtest first" in panel.year_tooltip
+
     def test_no_run_shows_the_empty_state_copy(self, projected: PlanState) -> None:
         """Before any run the card carries the no-backtest message."""
         view_model = build_charts_view_model(projected)
