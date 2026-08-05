@@ -561,7 +561,13 @@ balances. In decumulation, net-of-tax DB/state-pension income and any
 commutation lump sum meet the net spending need before wrappers are
 drawn; income beyond the need banks into the person's first uncapped
 taxable wrapper (GIA/cash, roadmap 9.2) and is spent only when they
-hold none.
+hold none. Before decumulation the same offset meets the period's
+planned outflows: retirement income already in payment ahead of the
+target retirement age (an early DB start, a purchased annuity, the
+state pension alongside work) — net of the marginal tax it adds on
+top of employment income — funds them first, and the remainder banks
+per the 9.2 sweep. Employment income itself never offsets or banks:
+net pay funds working-life spending, which the model does not track.
 
 **Active DB membership (roadmap 9.6).** `active_membership` on a
 `DBPension` turns the entitlement from a frozen deferred amount into a
@@ -849,7 +855,10 @@ lower rail (prosperity); defaults are the conventional 6%/4% rails
 with 10% adjustments. The protocol is pure — same state and need,
 same plan — so each period is judged afresh and adjustments do not
 compound across periods; a cut's unspent remainder is reported as
-shortfall, exactly like a gross-defined under-draw. *Natural yield*
+shortfall, exactly like a gross-defined under-draw, and a rise is
+genuinely spent — the engine treats the adjusted target as the
+period's net need, so the 9.2 sweep banks only delivery beyond it,
+never the rise itself. *Natural yield*
 is gross-defined: each accessible source is drawn by exactly the
 income its balance throws off — the wrapper allocation weighted over
 the `yield.*` assumptions (§7), scaled by the period's active
@@ -966,11 +975,15 @@ and cash kinds activate the deferred wrapper mechanics:
   cash, never the glide path); GIAs default to the glide path like
   any invested wrapper. Capital gains tax is out of scope (§2):
   income only, never disposals.
-- *Sweep*: decumulation income and gross draws beyond the period's
-  need bank into the first wrapper in plan order whose treatment is
-  a bare taxable account (GIA or cash) — banking is not a
-  contribution (no caps, relief, or bonus). The spending need never
-  pays a wrapper's portfolio-income tax: the decumulation income
+- *Sweep*: income and gross draws beyond the period's need bank into
+  the first wrapper in plan order whose treatment is a bare taxable
+  account (GIA or cash) — banking is not a contribution (no caps,
+  relief, or bonus). The need a net-defined strategy adjusted (a
+  guardrails rise) counts as spending, so only delivery beyond the
+  adjusted target is swept. Before decumulation the sweep takes
+  non-employment income net of its marginal tax beyond the period's
+  planned outflows — employment income never banks. The spending
+  need never pays a wrapper's portfolio-income tax: the income
   offset is assessed without the portfolio layers.
 
 **Return model and Monte Carlo.** `ReturnModel.returns_for(period, path)`:

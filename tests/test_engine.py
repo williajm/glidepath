@@ -3040,6 +3040,34 @@ class TestGuardrailsStrategy:
         assert person_result.net_withdrawn == Money(Decimal("13200.00"))
         assert person_result.shortfall == ZERO
 
+    def test_the_prosperity_rise_survives_a_taxable_wrapper(self) -> None:
+        """The rise is spent, never swept back into a GIA (roadmap 9.2).
+
+        12,000 over 1,000,000 is 1.2%: the target rises to 13,200.
+        The adjusted target is the period's net need, so an empty
+        taxable account must not reclaim the extra 1,200 as surplus.
+        """
+        free_account = wrapper_of(FREE, "1000000")
+        taxable_account = wrapper_of(TAXABLE, "0")
+        plan = retiree_plan((free_account, taxable_account))
+        config = RunConfig(
+            today=date(2026, 1, 1),
+            horizon_end=date(2026, 12, 31),
+            withdrawal_strategy=GuardrailsWithdrawalStrategy(),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            config,
+        )
+        [person_result] = result.snapshots[0].persons
+        free_result, taxable_result = person_result.wrappers
+        assert person_result.net_withdrawn == Money(Decimal("13200.00"))
+        assert person_result.banked == ZERO
+        assert taxable_result.banked_in == ZERO
+        assert free_result.withdrawal_tax_free == Money(Decimal("13200.00"))
+
 
 NATURAL_YIELDS = {
     "yield.equity": Decimal("0.03"),
@@ -3774,4 +3802,89 @@ class TestSurplusBanking:
         )
         result = run(plan, assumptions_with(), stub_region(), config)
         person_result = result.snapshots[0].persons[0]
+        assert person_result.banked == ZERO
+
+    def test_pre_retirement_lump_sum_proceeds_bank(self) -> None:
+        """An accumulation-phase purchase's net proceeds are kept.
+
+        Half of a 40,000 + 20,000 pension pot annuitises at 67, two
+        years before retirement at 69: 5,000 arrives as tax-free cash
+        and 2,500 as annuity income bearing 625 of flat tax, so 6,875
+        banks into the taxable account instead of vanishing while the
+        tax and lump-sum allowance were still charged.
+        """
+        pension = wrapper_of(PENSION, "40000", crystallised="20000")
+        taxable_account = wrapper_of(TAXABLE, "0")
+        person = person_of(
+            (pension, taxable_account),
+            date_of_birth=date(1960, 1, 1),
+            retire_at=69,
+            annuity_purchases=(annuity_purchase_of(),),
+        )
+        result = run(
+            household_of(person),
+            annuity_assumptions(),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        [at_purchase] = result.snapshots[1].persons
+        pension_result, taxable_result = at_purchase.wrappers
+        assert at_purchase.annuity_lump_sum == Money(Decimal("5000.00"))
+        assert at_purchase.annuity_income == Money(Decimal("2500.00"))
+        assert at_purchase.tax.tax_due == Money(Decimal("625.00"))
+        assert at_purchase.banked == Money(Decimal("6875.00"))
+        assert taxable_result.banked_in == Money(Decimal("6875.00"))
+        assert taxable_result.closing_uncrystallised == Money(Decimal("6875.00"))
+        assert pension_result.closing_uncrystallised == Money(Decimal("20000.00"))
+        assert at_purchase.lsa_used == Money(Decimal("5000.00"))
+
+    def test_pre_retirement_income_offsets_a_planned_outflow(self) -> None:
+        """Non-employment income meets an outflow; only its surplus banks.
+
+        Working at 68 with the state pension in payment: 10,000 gross
+        less its 2,500 marginal tax leaves 7,500 net against a 6,000
+        outflow, so no wrapper is drawn and 1,500 banks. Employment
+        income keeps its own tax and never banks — net pay funds
+        working-life spending outside the model.
+        """
+        free_account = wrapper_of(FREE, "50000")
+        taxable_account = wrapper_of(TAXABLE, "0")
+        person = person_of(
+            (free_account, taxable_account),
+            date_of_birth=date(1958, 1, 1),
+            retire_at=70,
+            employment="30000",
+            state_pension=sp_record(),
+        )
+        plan = Household(persons=(person,), planned_outflows=(outflow_at(68, "6000"),))
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        region = stub_region(state_pension=scheme)
+        assumptions = assumptions_with(
+            {
+                "policy.state_pension.uprating": "cpi",
+                "returns.equity.real": Decimal(0),
+            }
+        )
+        result = run(plan, assumptions, region, one_period_config())
+        [person_result] = result.snapshots[0].persons
+        free_result, taxable_result = person_result.wrappers
+        assert person_result.tax.tax_due == Money(Decimal(10000))
+        assert person_result.planned_outflows == Money(Decimal(6000))
+        assert person_result.net_withdrawn == ZERO
+        assert free_result.withdrawal_gross == ZERO
+        assert person_result.banked == Money(Decimal(1500))
+        assert taxable_result.banked_in == Money(Decimal(1500))
+        assert person_result.shortfall == ZERO
+
+    def test_employment_income_alone_never_banks(self) -> None:
+        """Working-age net pay stays outside the model (planning §5.2)."""
+        taxable_account = wrapper_of(TAXABLE, "0")
+        person = person_of((taxable_account,), employment="30000")
+        result = run(
+            household_of(person),
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        [person_result] = result.snapshots[0].persons
         assert person_result.banked == ZERO
