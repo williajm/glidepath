@@ -65,6 +65,7 @@ from decimal import ROUND_DOWN, Decimal
 from typing import TYPE_CHECKING
 
 from glidepath.core import (
+    AnnualAllowanceOutcome,
     MemberContributionOutcome,
     Money,
     ReliefMechanic,
@@ -77,7 +78,11 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import date
 
-    from glidepath.core import MemberContributionRequest, Period
+    from glidepath.core import (
+        AnnualAllowanceMeasurement,
+        MemberContributionRequest,
+        Period,
+    )
     from glidepath.regions.uk.extension import FutureYearsExtension
     from glidepath.regions.uk.schema import PensionRules, TaxYearFile
 
@@ -205,6 +210,75 @@ class UkContributionRuleset:
             unrelieved_excess=request.gross - relievable,
         )
 
+    def annual_allowance(
+        self, measurement: AnnualAllowanceMeasurement, period: Period
+    ) -> AnnualAllowanceOutcome:
+        """Measure a period's pension inputs against the UK allowances.
+
+        The full module-docstring pipeline for one tax year: DB
+        entitlements value into pension input amounts
+        (:func:`db_pension_input_amount`), the taper measures resolve
+        (:func:`threshold_income`, :func:`adjusted_income` — every DB
+        input counts as employer-funded, since the model has no member
+        DB contributions), the tapered allowance measures the inputs
+        (:func:`assess_annual_allowance`), and prior years' unused
+        allowance offsets the excess before this year's own unused
+        allowance joins the rolled pool (:func:`apply_carry_forward`,
+        :func:`roll_carry_forward`).
+
+        The MPAA is active from the period containing the trigger date
+        (:func:`is_mpaa_active`) — the measurement's trigger is the one
+        standing when the period's contributions were made, so inputs
+        paid before an in-period trigger are measured against the full
+        allowance, matching the statute's pre/post-trigger split at
+        the engine's own event order (HS345; planning §5.2).
+
+        A pool longer than this year's statutory window — possible
+        only if a data file ever shrinks ``aa_carry_forward_years``
+        between years — keeps its most recent years, the oldest
+        expiring, rather than failing the run.
+        """
+        pension = self._year_for(period).pension
+        db_total = _ZERO
+        for arrangement in measurement.db_arrangements:
+            db_total = db_total + db_pension_input_amount(
+                pension,
+                opening_annual=arrangement.opening_annual,
+                closing_annual=arrangement.closing_annual,
+                cpi=measurement.cpi,
+            )
+        threshold = threshold_income(
+            total_income=measurement.total_income,
+            net_pay_contributions=measurement.net_pay_contributions,
+            relief_at_source_gross=measurement.relief_at_source_gross,
+        )
+        adjusted = adjusted_income(
+            total_income=measurement.total_income,
+            employer_pension_inputs=measurement.employer_money_purchase + db_total,
+        )
+        allowance = tapered_annual_allowance(
+            pension, threshold=threshold, adjusted=adjusted
+        )
+        assessment = assess_annual_allowance(
+            pension,
+            annual_allowance=allowance,
+            money_purchase_inputs=(
+                measurement.member_money_purchase + measurement.employer_money_purchase
+            ),
+            other_inputs=db_total,
+            mpaa_active=is_mpaa_active(measurement.mpaa_triggered_on, period),
+        )
+        window = pension.aa_carry_forward_years
+        pool = measurement.carry_forward[-window:] if window else ()
+        set_off = apply_carry_forward(pension, assessment, pool)
+        generated = carry_forward_generated(
+            assessment, scheme_member=measurement.scheme_member
+        )
+        return AnnualAllowanceOutcome(
+            chargeable_excess=set_off.chargeable_excess,
+            carry_forward=roll_carry_forward(pension, set_off.remaining, generated),
+        )
+
     def _series(self) -> TaxYearSeries:
         """The shared year-resolution series over this ruleset's files."""
         return TaxYearSeries(tax_years=self.tax_years, future_years=self.future_years)
@@ -253,8 +327,9 @@ def adjusted_income(*, total_income: Money, employer_pension_inputs: Money) -> M
     DB arrangements, the pension input amount net of the member's own
     contributions (PTM057100) — the whole of
     :func:`db_pension_input_amount`, since the model has no member DB
-    contributions (planning §5.1). The engine supplies both when the
-    AA charge is wired (planning §5.2).
+    contributions (planning §5.1). The engine supplies both through
+    each period's :meth:`UkContributionRuleset.annual_allowance`
+    measurement (planning §5.2).
     """
     _require_non_negative(total_income, "total_income")
     _require_non_negative(employer_pension_inputs, "employer_pension_inputs")
@@ -278,9 +353,10 @@ def db_pension_input_amount(
     the September before the tax year; the run's CPI path stands in,
     planning §5.1/§6), never reduced by deflation, and a negative
     difference is nil (PTM053301) — so a deferred arrangement whose
-    revaluation never outruns CPI generates nothing. The engine calls
-    this per arrangement when the AA charge is wired (planning §5.2);
-    amounts feed :func:`assess_annual_allowance` ``other_inputs`` and
+    revaluation never outruns CPI generates nothing.
+    :meth:`UkContributionRuleset.annual_allowance` calls this per
+    arrangement each period (planning §5.2); amounts feed
+    :func:`assess_annual_allowance` ``other_inputs`` and
     :func:`adjusted_income` ``employer_pension_inputs``.
     """
     _require_non_negative(opening_annual, "opening_annual")

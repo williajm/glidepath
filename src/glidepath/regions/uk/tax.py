@@ -38,6 +38,15 @@ it is used, so savings and dividend band positions move with it too
 (SI 2018/459 extends the limits for Scottish taxpayers likewise).
 Net-pay contributions need no assessment adjustment: they leave pay
 before tax, so the caller excludes them from the assessed income.
+
+The annual-allowance charge (roadmap 3.3) prices separately from the
+assessment: the chargeable excess a period's pension inputs produced
+(:meth:`~glidepath.regions.uk.contributions.UkContributionRuleset.annual_allowance`)
+is charged as the top slice of the taxpayer's income at their own
+schedule's rates (FA 2004 s227B) via
+:meth:`UkTaxSystem.annual_allowance_charge`, whose lines the engine
+appends to the period's final result — never fed back through
+``assess``, since the excess is a charge, not income.
 """
 
 from dataclasses import dataclass
@@ -131,6 +140,44 @@ class UkTaxSystem:
     def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:
         """Assess one period's categorised income (planning §4.2)."""
         return _assess_year(self._tax_year_for(period), tax_input)
+
+    def annual_allowance_charge(
+        self, period: Period, tax_input: TaxInput, excess: Money
+    ) -> tuple[TaxLine, ...]:
+        """Price the annual-allowance charge on a pension-input excess.
+
+        FA 2004 s227B: the chargeable amount is treated as the top
+        slice of the individual's reduced net income and charged at
+        the income-tax rates it falls into — a freestanding charge,
+        not income, so the personal allowance and its taper never
+        move. The lines stack from the assessment's total taxable
+        income (the s23 step-3 position) up the taxpayer's own
+        schedule — Scottish rates for Scottish taxpayers — with the
+        rate limits extended by any relief-at-source gross exactly as
+        the assessment extends them (FA 2004 s192(4) applies for all
+        income-tax purposes). Known simplification: savings and
+        dividend income consume width on the taxpayer's schedule here
+        even though the assessment positions those layers on the rUK
+        ladder — the divergence only affects Scottish taxpayers with
+        portfolio income, and only the charge's band boundaries. Each
+        line's tax is rounded down to the penny like every band line
+        (module docstring).
+        """
+        if excess <= _ZERO:
+            return ()
+        year = self._tax_year_for(period)
+        position = _assess_year(year, tax_input).taxable_income
+        bands = _extended_bands(
+            _schedule_for(year, tax_input.residency).bands,
+            tax_input.relief_at_source_contributions,
+        )
+        return _ladder_lines(
+            bands,
+            start=position,
+            amount=excess,
+            line_name=_aa_charge_band_name,
+            line_rate=_band_own_rate,
+        )
 
     def _series(self) -> TaxYearSeries:
         """The shared year-resolution series over this system's files."""
@@ -250,6 +297,11 @@ def _band_own_rate(_index: int, band: TaxBand) -> Rate:
 def _savings_band_name(_index: int, band: TaxBand) -> str:
     """A savings line label: the band name under the layer prefix."""
     return f"savings_{band.name}"
+
+
+def _aa_charge_band_name(_index: int, band: TaxBand) -> str:
+    """An annual-allowance-charge line label under the layer prefix."""
+    return f"aa_charge_{band.name}"
 
 
 def _nil_line(name: str, taxed: Money) -> TaxLine:

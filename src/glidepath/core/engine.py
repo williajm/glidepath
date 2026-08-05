@@ -118,16 +118,30 @@ v1 engine conventions, superseded as later phases land:
   convention: its weekly rates roll forward from ``forecast_as_of``
   to ``today`` — the main slice at the uprating assumption's rate,
   the protected slice by CPI only — and a future-dated forecast is an
-  engine error. Annual-allowance measurement joins the loop when the
-  AA charge is modelled — the in-run MPAA trigger is recorded now,
-  and the region's assessment and carry-forward machinery (roadmap
-  9.5) is ready for it.
+  engine error.
+- Annual allowance (roadmap 3.3, 9.5): each period the year's pension
+  input amounts — member gross plus employer contributions into
+  pension wrappers, and each not-yet-in-payment DB stream's
+  opening/closing entitlement — are measured against the region's
+  allowances (taper, money-purchase cap, carry-forward), and any
+  chargeable excess is priced by the region as top-slice tax lines
+  appended to the period's final assessment. The measurement takes
+  the MPAA trigger standing when the contributions were made, so
+  inputs paid before an in-period step-4 trigger stay pre-trigger;
+  the carry-forward pool starts empty at the run start (pre-run
+  years' unused allowance is unknown — §4.1 conservative) and rolls
+  forward each period. The charge is reported in the assessment,
+  never funded from modelled balances — the accumulation-phase tax
+  convention (employment tax likewise settles outside the model).
 - Partial first and last periods (roadmap 4.6, planning §5.2): the run
   models only the window from ``config.today`` through the horizon end.
   A period partly outside that window has its flows (employment income,
   contributions, spending need) pro-rated by whole months per §4.1, and
-  its annual growth and fee rates scaled linearly by the same fraction —
-  exact ``Decimal`` arithmetic, so §4.6 reproducibility holds. The
+  its annual fee rate and expected growth scaled linearly by the same
+  fraction — exact ``Decimal`` arithmetic, so §4.6 reproducibility
+  holds — while a stochastic return's deviation from the expectation
+  scales by the square root of the fraction (sigma times root-f, issue
+  #115; ``Decimal.sqrt`` is correctly rounded and deterministic). The
   cumulative CPI and escalation factors likewise advance between
   periods by the completed period's fraction, so later price and
   earnings levels reflect the time actually modelled. Annual
@@ -147,14 +161,18 @@ from glidepath.core.annuities import (
     annuity_start_date,
 )
 from glidepath.core.config import EngineError, RunConfig, RunMode
-from glidepath.core.contributions import MemberContributionRequest
+from glidepath.core.contributions import (
+    AnnualAllowanceMeasurement,
+    DbArrangementInput,
+    MemberContributionRequest,
+)
 from glidepath.core.entities import validate_household_v1
 from glidepath.core.glide import (
     LifeStage,
     glide_path_from_shape,
     years_to_target_retirement,
 )
-from glidepath.core.investments import FeeSchedule, period_fee
+from glidepath.core.investments import AssetReturns, FeeSchedule, period_fee
 from glidepath.core.money import Money, Rate
 from glidepath.core.pensions import (
     db_early_late_factor,
@@ -217,7 +235,10 @@ if TYPE_CHECKING:
     from datetime import date
 
     from glidepath.core.annuities import AnnuityPurchase
-    from glidepath.core.contributions import ContributionSchedule
+    from glidepath.core.contributions import (
+        AnnualAllowanceOutcome,
+        ContributionSchedule,
+    )
     from glidepath.core.entities import Household, Person, SpendingPlan
     from glidepath.core.glide import GlidePathConfig
     from glidepath.core.investments import AssetAllocation
@@ -655,6 +676,11 @@ class _Projection:
     _savings_income: Money = _ZERO
     _dividend_income: Money = _ZERO
     _relief_at_source: Money = _ZERO
+    _net_pay_deductions: Money = _ZERO
+    _aa_carry_forward: tuple[Money, ...] = ()
+    _db_openings: tuple[Money, ...] = ()
+    _mpaa_at_contributions: date | None = None
+    _expected_returns: AssetReturns | None = None
     _db_streams: list[_DbStream] = field(default_factory=list)
     _sp_stream: _StatePensionStream | None = None
     _annuity_streams: list[_AnnuityStream] = field(default_factory=list)
@@ -804,6 +830,33 @@ class _Projection:
             real = decimal_assumption_value(self.tracked.get(key))
             weighted += weight * nominal_rate(real, cpi).value
         return weighted
+
+    def _expected_asset_returns(self) -> AssetReturns:
+        """The return model's per-class expectation, read once on first use.
+
+        The Fisher composition of each class's real-return assumption
+        with CPI — exactly the rates ``DeterministicReturnModel``
+        returns and the mean the stochastic model's lognormal draws
+        are matched to — so a period return's deviation from these is
+        the pure stochastic shock (:meth:`_close_wrapper`, issue
+        #115), identically zero in a deterministic run. Both models
+        read the same keys, so no new assumption enters the run's
+        provenance here.
+        """
+        if self._expected_returns is None:
+            cpi = decimal_assumption_value(
+                self.tracked.get(AssumptionKey.INFLATION_CPI)
+            )
+            equity, bonds, cash = (
+                nominal_rate(decimal_assumption_value(self.tracked.get(key)), cpi)
+                for key in (
+                    AssumptionKey.RETURNS_EQUITY_REAL,
+                    AssumptionKey.RETURNS_BONDS_REAL,
+                    AssumptionKey.RETURNS_CASH_REAL,
+                )
+            )
+            self._expected_returns = AssetReturns(equity=equity, bonds=bonds, cash=cash)
+        return self._expected_returns
 
     def _opening_allocation(self, wrapper: Wrapper) -> AssetAllocation:
         """The allocation the wrapper opens the first period with (§4.8).
@@ -1139,6 +1192,9 @@ class _Projection:
         ]
         # Step 2 — income. Active DB accrual credits at the period open,
         # gated by retirement like employment income (planning §5.1).
+        # The pre-credit entitlements are the year's DB opening values
+        # for the annual-allowance measurement (§5.2 step 5).
+        self._db_openings = tuple(stream.accrued_annual for stream in self._db_streams)
         if not retired:
             self._accrue_db_step(period, factors)
         employment = _ZERO
@@ -1159,8 +1215,14 @@ class _Projection:
             employment + db_income + state_pension + db_lump_sum_excess + annuity_income
         )
         self._relief_at_source = _ZERO
+        self._net_pay_deductions = _ZERO
         if not retired:
             self._contribution_step(ledgers, period, employment, factors, fraction)
+        # The annual-allowance measurement takes the trigger standing
+        # when the contributions were made: a trigger a step-4 draw
+        # records later this period leaves them pre-trigger inputs
+        # (planning §5.2).
+        self._mpaa_at_contributions = self._mpaa_triggered_on
         need = _ZERO
         outflows = self._outflows_due(period, inflation)
         pension_lump_sum = _ZERO
@@ -1200,10 +1262,9 @@ class _Projection:
             wrapper_need, delivered, banked = self._accumulation_spending(
                 ledgers, period, income, outflows, fraction
             )
-        # Step 5 — final tax assessment on the full income picture,
-        # then the portfolio-income slice charged to its wrappers.
-        tax = self.region.tax.assess(period, self._tax_input())
-        self._charge_portfolio_tax(ledgers, period, tax)
+        # Step 5 — allowance measurement, final assessment, wrapper
+        # charge, and any annual-allowance charge, together.
+        tax = self._tax_step(ledgers, period, returns, fraction)
         # Steps 6-8 — fees, growth, close.
         wrapper_results = tuple(
             self._close_wrapper(ledger, returns, fraction) for ledger in ledgers
@@ -1606,6 +1667,9 @@ class _Projection:
                 relieved_so_far = relieved_so_far + outcome.gross_to_pot
             self._taxable_income = max(
                 self._taxable_income - outcome.taxable_pay_deduction, _ZERO
+            )
+            self._net_pay_deductions = (
+                self._net_pay_deductions + outcome.taxable_pay_deduction
             )
             self._relief_at_source = (
                 self._relief_at_source + outcome.assessment_relief_gross
@@ -2319,6 +2383,130 @@ class _Projection:
             charged = charged + share
         taxable[-1].growth_tax = total_tax - charged
 
+    def _tax_step(
+        self,
+        ledgers: list[_WrapperLedger],
+        period: Period,
+        returns: PeriodReturns,
+        fraction: Decimal,
+    ) -> TaxResult:
+        """Step 5: the period's whole tax picture, in order (§5.2).
+
+        The year's pension inputs are measured against the region's
+        allowances first (the rolled carry-forward pool feeds the next
+        period), then the final assessment prices the full categorised
+        income, the portfolio-income slice is charged to its wrappers
+        against that pre-charge result, and any annual-allowance
+        charge is appended last — so the wrapper charge never absorbs
+        it.
+        """
+        outcome = self._annual_allowance_step(ledgers, period, returns, fraction)
+        self._aa_carry_forward = outcome.carry_forward
+        tax = self.region.tax.assess(period, self._tax_input())
+        self._charge_portfolio_tax(ledgers, period, tax)
+        return self._with_annual_allowance_charge(
+            period, tax, outcome.chargeable_excess
+        )
+
+    def _annual_allowance_step(
+        self,
+        ledgers: list[_WrapperLedger],
+        period: Period,
+        returns: PeriodReturns,
+        fraction: Decimal,
+    ) -> AnnualAllowanceOutcome:
+        """Measure the year's pension inputs (§5.2 step 5, roadmap 3.3).
+
+        Money-purchase inputs are the period's member gross (provider
+        relief included) and employer contributions landed in pension
+        (partially-tax-free) wrappers at step 3. Each DB stream not
+        yet in payment contributes its opening entitlement (pre-credit,
+        captured at the period open) and its closing entitlement — the
+        credited value carried to the period end at the same
+        revaluation the next boundary's advance applies — for the
+        region to value (planning §5.2); a stream whose benefits start
+        by the period end has crystallised and generates no input.
+        ``total_income`` is the period's full taxable picture before
+        member pension deductions — net-pay amounts added back, the
+        portfolio-income layers included — so the region's income
+        measures see what HMRC's would. The carry-forward pool starts
+        empty at the run start (§4.1 conservative: pre-run years'
+        unused allowance is unknown, so none is assumed) and rolls
+        forward with each period's outcome. Whole-year convention
+        (§5.2): a partial period's pro-rated inputs meet the full
+        year's allowances, and a DB opening value takes the full
+        year's inflation uplift.
+        """
+        member = _ZERO
+        employer = _ZERO
+        pension_wrapper = False
+        for ledger in ledgers:
+            partial = (
+                ledger.treatment.withdrawals
+                is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+            )
+            if not partial:
+                continue
+            pension_wrapper = True
+            member = member + ledger.employee_in
+            employer = employer + ledger.employer_in
+        cpi = returns.cpi.value
+        arrangements: list[DbArrangementInput] = []
+        for stream, opening in zip(self._db_streams, self._db_openings, strict=True):
+            if stream.start <= period.end:
+                continue
+            closing = stream.accrued_annual * (
+                _ONE + stream.basis.annual_rate(cpi) * fraction
+            )
+            arrangements.append(
+                DbArrangementInput(opening_annual=opening, closing_annual=closing)
+            )
+        measurement = AnnualAllowanceMeasurement(
+            member_money_purchase=member,
+            employer_money_purchase=employer,
+            db_arrangements=tuple(arrangements),
+            total_income=(
+                self._taxable_income
+                + self._net_pay_deductions
+                + self._savings_income
+                + self._dividend_income
+            ),
+            net_pay_contributions=self._net_pay_deductions,
+            relief_at_source_gross=self._relief_at_source,
+            cpi=cpi,
+            mpaa_triggered_on=self._mpaa_at_contributions,
+            scheme_member=pension_wrapper or bool(self._db_streams),
+            carry_forward=self._aa_carry_forward,
+        )
+        return self.region.contributions.annual_allowance(measurement, period)
+
+    def _with_annual_allowance_charge(
+        self, period: Period, tax: TaxResult, excess: Money
+    ) -> TaxResult:
+        """Append the priced annual-allowance charge to the final result.
+
+        The region prices the excess against the period's full income
+        picture as separate lines (a charge, not income — it never
+        feeds back through ``assess``, so income-measured allowances
+        and the step-4/5 decomposition are untouched), and the final
+        result carries them: the snapshot's ``tax_due`` is the
+        period's whole liability. Like the rest of an accumulation
+        period's assessed tax, the charge is reported, not funded
+        from modelled balances (planning §5.2).
+        """
+        if excess <= _ZERO:
+            return tax
+        lines = self.region.tax.annual_allowance_charge(
+            period, self._tax_input(), excess
+        )
+        charge = sum((line.tax for line in lines), start=_ZERO)
+        return TaxResult(
+            tax_due=tax.tax_due + charge,
+            taxable_income=tax.taxable_income,
+            tax_free_allowance=tax.tax_free_allowance,
+            lines=(*tax.lines, *lines),
+        )
+
     def _bank_surplus(self, ledgers: list[_WrapperLedger], surplus: Money) -> Money:
         """Sweep decumulation surplus into the first taxable wrapper.
 
@@ -2355,8 +2543,18 @@ class _Projection:
         then allocated across the sub-balances pro rata to their
         post-flow values. Growth (step 7) applies to each post-fee
         sub-balance; fees before growth per the §5.2 order. In a
-        partial first/last period both annual rates are scaled linearly
-        by ``fraction`` (the §5.2 roadmap-4.6 convention). A
+        partial first/last period the annual fee rate scales linearly
+        by ``fraction`` (the §5.2 roadmap-4.6 convention), and growth
+        splits at the return model's expectation (issue #115): the
+        expected component scales linearly, keeping the mean on the
+        deterministic path, while the deviation from it — the
+        stochastic shock — scales by ``sqrt(fraction)``, so a partial
+        period's return standard deviation is sigma times root-f, not
+        sigma times f (``Decimal.sqrt`` is correctly rounded, preserving §4.6
+        reproducibility). Under the deterministic model the deviation
+        is exactly zero — the expectation below is the same Fisher
+        composition it returns — so that mode's linear scaling is
+        bit-for-bit unchanged. A
         taxable-growth wrapper's attributed portfolio-income tax
         (:meth:`_charge_portfolio_tax`) leaves the balance last —
         settled at the period's close like a real self-assessment
@@ -2372,9 +2570,20 @@ class _Projection:
                 fee_total.amount * ledger.uncrystallised.amount / after_total.amount
             )
         fee_crystallised = fee_total - fee_uncrystallised
-        growth_rate = (
-            returns.assets.portfolio_growth_factor(ledger.allocation) - _ONE
-        ) * fraction
+        annual_rate = returns.assets.portfolio_growth_factor(ledger.allocation) - _ONE
+        if fraction == _ONE:
+            growth_rate = annual_rate
+        else:
+            expected_rate = (
+                self._expected_asset_returns().portfolio_growth_factor(
+                    ledger.allocation
+                )
+                - _ONE
+            )
+            growth_rate = (
+                expected_rate * fraction
+                + (annual_rate - expected_rate) * fraction.sqrt()
+            )
         post_fee_uncrystallised = ledger.uncrystallised - fee_uncrystallised
         post_fee_crystallised = ledger.crystallised - fee_crystallised
         growth_uncrystallised = Money(post_fee_uncrystallised.amount * growth_rate)

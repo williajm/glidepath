@@ -143,6 +143,103 @@ class MemberContributionOutcome:
             raise ValueError(msg)
 
 
+@dataclass(frozen=True, slots=True)
+class DbArrangementInput:
+    """One DB arrangement's annual entitlement over a measured year.
+
+    ``opening_annual`` is the accrued annual pension at the period's
+    open (before the year's accrual credit); ``closing_annual`` is the
+    entitlement at the period's close, the year's accrual and
+    revaluation included. How the pair values into a pension input
+    amount — valuation factor, inflation uplift, flooring — is wholly
+    the region's concern (planning §4.2).
+    """
+
+    opening_annual: Money
+    closing_annual: Money
+
+    def __post_init__(self) -> None:
+        """Reject negative entitlements."""
+        if self.opening_annual < _ZERO or self.closing_annual < _ZERO:
+            msg = "DbArrangementInput amounts must be non-negative"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class AnnualAllowanceMeasurement:
+    """One person's pension inputs and income for one period (§5.2 step 5).
+
+    The engine's region-agnostic record of everything a region needs
+    to measure a year's pension savings against its cross-pension
+    allowances (roadmap 3.3): ``member_money_purchase`` is the gross
+    member contribution landed in pension wrappers (provider relief
+    included), ``employer_money_purchase`` the employer contributions
+    alongside them, and ``db_arrangements`` the DB entitlements the
+    region values into pension input amounts. ``total_income`` is the
+    period's taxable income *before* any member pension deduction;
+    ``net_pay_contributions`` and ``relief_at_source_gross`` are the
+    member amounts each mechanic relieved, for the region's income
+    measures. ``cpi`` is the period's inflation rate (a region may
+    uprate DB opening values by it). ``mpaa_triggered_on`` is the
+    flexible-access trigger date *as it stood when the period's
+    contributions were made* — inputs paid before an in-period trigger
+    are measured pre-trigger (planning §5.2). ``scheme_member`` marks
+    membership of at least one pension arrangement this year, and
+    ``carry_forward`` is the unused-allowance pool prior years left,
+    earliest first.
+    """
+
+    member_money_purchase: Money
+    employer_money_purchase: Money
+    db_arrangements: tuple[DbArrangementInput, ...]
+    total_income: Money
+    net_pay_contributions: Money
+    relief_at_source_gross: Money
+    cpi: Decimal
+    mpaa_triggered_on: date | None
+    scheme_member: bool
+    carry_forward: tuple[Money, ...]
+
+    def __post_init__(self) -> None:
+        """Reject negative monetary inputs."""
+        amounts = (
+            self.member_money_purchase,
+            self.employer_money_purchase,
+            self.total_income,
+            self.net_pay_contributions,
+            self.relief_at_source_gross,
+            *self.carry_forward,
+        )
+        if any(amount < _ZERO for amount in amounts):
+            msg = "AnnualAllowanceMeasurement amounts must be non-negative"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class AnnualAllowanceOutcome:
+    """A region's annual-allowance answer for one period (roadmap 3.3).
+
+    ``chargeable_excess`` is the pension input beyond every allowance
+    the region operates — taper, money-purchase cap and carry-forward
+    already applied — for the tax assessment to charge at the region's
+    rates (:meth:`~glidepath.core.tax.TaxSystem.annual_allowance_charge`);
+    ``carry_forward`` is the pool rolled forward one year for the next
+    period's measurement. A region without such machinery returns a
+    zero excess and an empty pool.
+    """
+
+    chargeable_excess: Money
+    carry_forward: tuple[Money, ...]
+
+    def __post_init__(self) -> None:
+        """Reject negative amounts."""
+        if self.chargeable_excess < _ZERO or any(
+            amount < _ZERO for amount in self.carry_forward
+        ):
+            msg = "AnnualAllowanceOutcome amounts must be non-negative"
+            raise ValueError(msg)
+
+
 class ContributionRuleset(Protocol):
     """Region-supplied contribution relief mechanics (planning §4.2).
 
@@ -150,13 +247,20 @@ class ContributionRuleset(Protocol):
     relief rules — gross-up at source, pre-tax deduction, and the
     region's member relief limits. Which mechanics a wrapper kind may
     operate is the wrapper ruleset's call
-    (:meth:`~glidepath.core.wrappers.WrapperRuleset.permitted_relief_mechanics`);
-    cross-wrapper contribution measures (e.g. a pension annual
-    allowance) are a separate regional concern (roadmap 3.3).
+    (:meth:`~glidepath.core.wrappers.WrapperRuleset.permitted_relief_mechanics`).
+    Cross-wrapper contribution measures — the pension annual allowance,
+    its taper, and any money-purchase cap — are the per-period
+    :meth:`annual_allowance` measurement (roadmap 3.3).
     """
 
     def member_contribution(
         self, request: MemberContributionRequest, period: Period
     ) -> MemberContributionOutcome:
         """Resolve one gross member contribution for ``period``."""
+        ...
+
+    def annual_allowance(
+        self, measurement: AnnualAllowanceMeasurement, period: Period
+    ) -> AnnualAllowanceOutcome:
+        """Measure a period's pension inputs against the region's allowances."""
         ...

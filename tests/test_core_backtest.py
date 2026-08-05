@@ -17,6 +17,8 @@ from decimal import Decimal
 import pytest
 
 from glidepath.core import (
+    AnnualAllowanceMeasurement,
+    AnnualAllowanceOutcome,
     AnnualCalendar,
     AssetAllocation,
     Assumption,
@@ -53,6 +55,7 @@ from glidepath.core import (
     StatePensionEntitlement,
     StatePensionRecord,
     TaxInput,
+    TaxLine,
     TaxResidencyId,
     TaxResult,
     TrackedAssumptions,
@@ -100,6 +103,13 @@ class ZeroTaxSystem:
             tax_free_allowance=ZERO,
             lines=(),
         )
+
+    def annual_allowance_charge(
+        self, period: Period, tax_input: TaxInput, excess: Money
+    ) -> tuple[TaxLine, ...]:
+        """No annual-allowance charge in this region."""
+        del period, tax_input, excess
+        return ()
 
 
 @dataclass(frozen=True)
@@ -177,6 +187,13 @@ class PassThroughContributions:
             assessment_relief_gross=ZERO,
             unrelieved_excess=ZERO,
         )
+
+    def annual_allowance(
+        self, measurement: AnnualAllowanceMeasurement, period: Period
+    ) -> AnnualAllowanceOutcome:
+        """No allowance machinery: zero excess, empty pool."""
+        del measurement, period
+        return AnnualAllowanceOutcome(chargeable_excess=ZERO, carry_forward=())
 
 
 @dataclass(frozen=True)

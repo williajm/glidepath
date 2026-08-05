@@ -33,8 +33,11 @@ from glidepath.core.comparison import (
 )
 from glidepath.core.config import EngineError, RunConfig, RunMode
 from glidepath.core.contributions import (
+    AnnualAllowanceMeasurement,
+    AnnualAllowanceOutcome,
     ContributionRuleset,
     ContributionSchedule,
+    DbArrangementInput,
     MemberContributionOutcome,
     MemberContributionRequest,
 )
@@ -209,6 +212,8 @@ from glidepath.core.wrappers import (
 __all__ = [
     "BASE_RUN_NAME",
     "AgeRules",
+    "AnnualAllowanceMeasurement",
+    "AnnualAllowanceOutcome",
     "AnnualCalendar",
     "AnnuityBasis",
     "AnnuityPurchase",
@@ -232,6 +237,7 @@ __all__ = [
     "ContributionTerms",
     "DBActiveMembership",
     "DBPension",
+    "DbArrangementInput",
     "Decision",
     "DecisionTarget",
     "DecisionTargetInfo",

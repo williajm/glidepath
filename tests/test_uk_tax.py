@@ -465,3 +465,89 @@ def test_uk_system_satisfies_core_protocol(system: UkTaxSystem) -> None:
     protocol_typed: TaxSystem = system
     result = protocol_typed.assess(TAX_YEAR_2026_27, ruk_income("20000"))
     assert result.tax_due == Money(Decimal("1486.00"))
+
+
+# --- annual-allowance charge (roadmap 3.3) ----------------------------------
+
+
+def test_aa_charge_stacks_from_total_taxable_income(system: UkTaxSystem) -> None:
+    """£40,000 income, £20,000 excess: the charge straddles the bands.
+
+    Taxable income is 27,430, so 10,270 of the excess fills the rest
+    of the basic band at 20% (2,054.00) and the remaining 9,730 falls
+    to the higher band at 40% (3,892.00) — FA 2004 s227B's top-slice
+    positioning.
+    """
+    lines = system.annual_allowance_charge(
+        TAX_YEAR_2026_27, ruk_income("40000"), Money(Decimal(20000))
+    )
+    assert [line.band for line in lines] == ["aa_charge_basic", "aa_charge_higher"]
+    assert [line.taxed for line in lines] == [
+        Money(Decimal(10270)),
+        Money(Decimal(9730)),
+    ]
+    assert [line.tax for line in lines] == [
+        Money(Decimal("2054.00")),
+        Money(Decimal("3892.00")),
+    ]
+
+
+def test_aa_charge_never_moves_the_personal_allowance(system: UkTaxSystem) -> None:
+    """The excess is a charge, not income: no personal-allowance taper.
+
+    £90,000 income leaves taxable income at 77,430; a £20,000 excess
+    prices wholly in the higher band — 8,000.00 — even though £110,000
+    of *income* would have tapered the allowance and cost more.
+    """
+    lines = system.annual_allowance_charge(
+        TAX_YEAR_2026_27, ruk_income("90000"), Money(Decimal(20000))
+    )
+    total = sum((line.tax for line in lines), start=Money(Decimal(0)))
+    assert [line.band for line in lines] == ["aa_charge_higher"]
+    assert total == Money(Decimal("8000.00"))
+
+
+def test_aa_charge_uses_relief_extended_bands(system: UkTaxSystem) -> None:
+    """A relief-at-source gross extends the charge's rate limits too.
+
+    FA 2004 s192(4) extends the basic rate limit for all income-tax
+    purposes: with a £5,000 gross the basic limit is 42,700, so
+    15,270 of the excess stays at 20% (3,054.00) and 4,730 reaches
+    40% (1,892.00).
+    """
+    with_relief = TaxInput(
+        residency=RUK_RESIDENCY,
+        non_savings_income=Money(Decimal(40000)),
+        relief_at_source_contributions=Money(Decimal(5000)),
+    )
+    lines = system.annual_allowance_charge(
+        TAX_YEAR_2026_27, with_relief, Money(Decimal(20000))
+    )
+    assert [line.tax for line in lines] == [
+        Money(Decimal("3054.00")),
+        Money(Decimal("1892.00")),
+    ]
+
+
+def test_aa_charge_zero_excess_prices_nothing(system: UkTaxSystem) -> None:
+    """No excess, no lines."""
+    lines = system.annual_allowance_charge(
+        TAX_YEAR_2026_27, ruk_income("40000"), Money(Decimal(0))
+    )
+    assert lines == ()
+
+
+def test_scottish_aa_charge_uses_scottish_bands(system: UkTaxSystem) -> None:
+    """A Scottish taxpayer's charge prices at the Scottish rates.
+
+    With no income the excess starts at the foot of the Scottish
+    ladder: £1,000 wholly in the 19% starter band — 190.00.
+    """
+    scottish = TaxInput(
+        residency=SCOTLAND_RESIDENCY, non_savings_income=Money(Decimal(0))
+    )
+    lines = system.annual_allowance_charge(
+        TAX_YEAR_2026_27, scottish, Money(Decimal(1000))
+    )
+    assert [line.band for line in lines] == ["aa_charge_starter"]
+    assert lines[0].tax == Money(Decimal("190.00"))
