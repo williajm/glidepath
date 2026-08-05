@@ -323,7 +323,12 @@ def result_of(*outcomes: WindowOutcome) -> BacktestResult:
         region_data_version="stub region v1",
         seed=None,
     )
-    return BacktestResult(outcomes=outcomes, config=config_of(), provenance=provenance)
+    return BacktestResult(
+        outcomes=outcomes,
+        config=config_of(),
+        provenance=provenance,
+        series=series_of("0"),
+    )
 
 
 class TestHistoricalYear:
@@ -507,6 +512,22 @@ class TestRunWindows:
         )
         assert first.outcomes == second.outcomes
 
+    def test_the_result_carries_the_series_it_replayed(self) -> None:
+        """The §4.6 manifest side: any caller-supplied series is named.
+
+        Two backtests over different series with the same plan and
+        config must not be indistinguishable from their results.
+        """
+        series = series_of("0", "0", "0", "0")
+        result = run_windows(
+            household_of(),
+            assumptions_with(),
+            stub_region(),
+            config_of(years=4),
+            series=series,
+        )
+        assert result.series == series
+
     def test_provenance_records_the_cpi_but_no_expected_returns(self) -> None:
         """The manifest carries assumed CPI; series figures are data."""
         result = run_windows(
@@ -673,6 +694,23 @@ class TestBacktestMetrics:
         assert median == (Money(Decimal(200)), Money(Decimal(150)))
         assert floor == (Money(Decimal(100)), Money(Decimal(50)))
 
+    def test_balance_percentiles_reject_mismatched_period_counts(self) -> None:
+        """Bands over unaligned windows would chart the wrong periods."""
+        result = result_of(
+            outcome_of(0, "50", balances=("100", "50")),
+            outcome_of(1, "150", balances=("150",)),
+        )
+        median = Decimal(50)
+        with pytest.raises(ValueError, match="same periods"):
+            result.balance_percentile(median)
+
+    def test_balance_percentiles_validate_before_iterating(self) -> None:
+        """Outcomes with no balance series must not swallow the check."""
+        result = result_of(outcome_of(0, "50"))
+        excessive = Decimal(101)
+        with pytest.raises(ValueError, match="between 0 and 100"):
+            result.balance_percentile(excessive)
+
     def test_rejects_an_empty_outcome_set(self) -> None:
         """Metrics over no windows are undefined."""
         config = config_of()
@@ -683,5 +721,8 @@ class TestBacktestMetrics:
             region_data_version="stub region v1",
             seed=None,
         )
+        series = series_of("0")
         with pytest.raises(ValueError, match="at least one window"):
-            BacktestResult(outcomes=(), config=config, provenance=provenance)
+            BacktestResult(
+                outcomes=(), config=config, provenance=provenance, series=series
+            )

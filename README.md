@@ -108,6 +108,8 @@ the [JST Macrohistory Database](https://www.macrohistory.net/database/)
 (Jordà, Schularick & Taylor; return series per Jordà, Knoll, Kuvshinov,
 Schularick & Taylor 2019) and is distributed under
 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) —
-attribution required, non-commercial use only, share-alike. The file's
-header carries the full notice; `scripts/build_returns_history.py`
-regenerates it from the upstream dataset.
+attribution required, non-commercial use only, share-alike. The package
+metadata declares `MIT AND CC-BY-NC-SA-4.0` accordingly; `LICENSE-DATA`
+and the file's own header carry the full notice, and
+`scripts/build_returns_history.py` regenerates the file from the
+upstream dataset.

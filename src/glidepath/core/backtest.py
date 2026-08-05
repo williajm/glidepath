@@ -40,6 +40,7 @@ from glidepath.core.investments import AssetReturns
 from glidepath.core.money import Money, Rate
 from glidepath.core.montecarlo import (
     PathParallelism,
+    _check_percentile,
     _interpolated_percentile,
     _merged_provenance,
     _path_chunks,
@@ -99,10 +100,10 @@ class HistoricalSeries:
     """A contiguous run of :class:`HistoricalYear` observations.
 
     The region ships one as a §5.3 data file
-    (``returns_history.toml``); its provenance (``verified_on``,
-    sources, content digest) travels in the region data version, so
-    every result already names the series content it was computed
-    from.
+    (``returns_history.toml``) with ``verified_on`` + sources in its
+    meta; the runner records the series it actually replayed on the
+    :class:`BacktestResult`, so the manifest names the real input
+    whatever series a caller supplies.
     """
 
     years: tuple[HistoricalYear, ...]
@@ -266,14 +267,19 @@ class BacktestResult:
     """Every window's outcome with the success metrics over them (§5.2).
 
     Mirrors :class:`~glidepath.core.montecarlo.MonteCarloResult` so
-    the GUI can present the two side by side. ``config`` and
-    ``provenance`` are the §4.6 manifest side; the series content
-    itself is named by the region data version inside ``provenance``.
+    the GUI can present the two side by side. ``config``,
+    ``provenance``, and ``series`` are the §4.6 manifest side:
+    :func:`run_windows` accepts any :class:`HistoricalSeries`, so the
+    result must carry the series it actually replayed — two backtests
+    over different series are otherwise indistinguishable from their
+    manifests — and any window is re-runnable from this result plus
+    the plan.
     """
 
     outcomes: tuple[WindowOutcome, ...]
     config: RunConfig
     provenance: RunProvenance
+    series: HistoricalSeries
 
     def __post_init__(self) -> None:
         """Require at least one window."""
@@ -337,21 +343,29 @@ class BacktestResult:
     def balance_percentile(self, percentile: Decimal) -> tuple[Money, ...]:
         """The per-period closing-balance percentile over windows.
 
-        One entry per projected period, in period order — every
-        window covers the same periods by construction, so the
-        percentile is well defined; CPI is the run's one assumed path,
-        so deflating each entry by the period's price level presents
-        the band in today's money (module docstring).
+        One entry per projected period, in period order — the same
+        order-statistic interpolation as the Monte Carlo bands; CPI is
+        the run's one assumed path, so deflating each entry by the
+        period's price level presents the band in today's money
+        (module docstring). :func:`run_windows` outcomes always cover
+        the same periods, but hand-built ones may not, so the
+        alignment is validated like the Monte Carlo counterpart's.
 
         Raises:
-            ValueError: If ``percentile`` lies outside [0, 100].
+            ValueError: If ``percentile`` lies outside [0, 100], or
+                the outcomes carry differing period counts.
         """
+        _check_percentile(percentile)
+        lengths = {len(outcome.closing_balances) for outcome in self.outcomes}
+        if len(lengths) != 1:
+            msg = "balance_percentile needs every window to cover the same periods"
+            raise ValueError(msg)
         return tuple(
             _interpolated_percentile(
                 [outcome.closing_balances[index] for outcome in self.outcomes],
                 percentile,
             )
-            for index in range(len(self.outcomes[0].closing_balances))
+            for index in range(lengths.pop())
         )
 
 
@@ -435,7 +449,9 @@ def run_windows(
             [first_provenance]
             + [chunk_provenance for _, chunk_provenance in chunk_results]
         )
-    return BacktestResult(outcomes=outcomes, config=config, provenance=provenance)
+    return BacktestResult(
+        outcomes=outcomes, config=config, provenance=provenance, series=series
+    )
 
 
 def _run_window_range(

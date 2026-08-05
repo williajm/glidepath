@@ -3,8 +3,10 @@ name = "glidepath"
 version = "0.1.0"
 description = "Desktop retirement and investment planner (UK-first, region-extensible)."
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+# MIT code plus one CC BY-NC-SA 4.0 data file (returns_history.toml —
+# scope and attribution in LICENSE-DATA).
+license = "MIT AND CC-BY-NC-SA-4.0"
+license-files = ["LICENSE", "LICENSE-DATA"]
 requires-python = ">=3.14"
 dependencies = [
     "pyside6>=6.11.1",

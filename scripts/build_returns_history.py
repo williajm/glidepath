@@ -5,10 +5,14 @@ Derives ``src/glidepath/regions/uk/data/returns_history.toml`` (roadmap
 (``JSTdatasetR6.xlsx``, downloaded from https://www.macrohistory.net/database/
 — not committed to this repository). Stdlib only; run it as::
 
-    uv run --locked python scripts/build_returns_history.py JSTdatasetR6.xlsx
+    uv run --locked python scripts/build_returns_history.py \
+        JSTdatasetR6.xlsx 2026-08-05
 
-and redirect stdout over the data file, then re-verify the figures and
-update ``verified_on`` before committing.
+and redirect stdout over the data file. The second argument is the
+``verified_on`` date and must be the day you completed re-verifying the
+derived figures against the upstream dataset — it is required, never
+defaulted from the clock, so an unreviewed regeneration cannot stamp
+itself verified.
 
 Per year, the series carries four nominal annual rates (TOML strings, the
 §5.3 convention):
@@ -38,7 +42,7 @@ import io
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
-from datetime import UTC, datetime
+from datetime import date
 from math import isnan
 from pathlib import Path
 
@@ -53,7 +57,7 @@ FIRST_YEAR = 1900
 LAST_YEAR = 2020
 
 _COLUMNS = ("eq_tr", "bond_tr", "bill_rate", "cpi", "xrusd", "gdp")
-_EXPECTED_ARGC = 2
+_EXPECTED_ARGC = 3
 
 Table = dict[tuple[int, str], dict[str, float]]
 
@@ -171,9 +175,13 @@ def series_lines(table: Table) -> list[str]:
     return lines
 
 
-def render(table: Table) -> str:
-    """Render the complete returns_history.toml text."""
-    today = datetime.now(tz=UTC).date().isoformat()
+def render(table: Table, verified_on: date) -> str:
+    """Render the complete returns_history.toml text.
+
+    ``verified_on`` is the caller-stated date the derived figures were
+    re-verified against the upstream dataset — never the clock (module
+    docstring).
+    """
     header = f"""\
 # Historical annual return series for the backtest engine (roadmap 9.18;
 # conventions per docs/planning.md §5.3): world equity total returns in
@@ -194,7 +202,7 @@ def render(table: Table) -> str:
 schema_version = 2
 
 [meta]
-verified_on = {today}
+verified_on = {verified_on.isoformat()}
 sources = [
   "https://www.macrohistory.net/database/",
   "https://doi.org/10.1093/qje/qjz012",
@@ -207,15 +215,22 @@ sources = [
 
 
 def main(argv: list[str]) -> int:
-    """Render the data file for the workbook path given on the CLI."""
+    """Render the data file for the workbook path and verification date."""
+    usage = "usage: build_returns_history.py JSTdatasetR6.xlsx YYYY-MM-DD"
     if len(argv) != _EXPECTED_ARGC:
-        print("usage: build_returns_history.py JSTdatasetR6.xlsx", file=sys.stderr)
+        print(usage, file=sys.stderr)
+        return 2
+    try:
+        verified_on = date.fromisoformat(argv[2])
+    except ValueError:
+        print(usage, file=sys.stderr)
+        print("the second argument is the re-verification date", file=sys.stderr)
         return 2
     # The file text is UTF-8 regardless of the console code page (Windows
     # consoles otherwise mangle the header's accented names).
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(encoding="utf-8")
-    print(render(load_table(Path(argv[1]))), end="")
+    print(render(load_table(Path(argv[1])), verified_on), end="")
     return 0
 
 

@@ -1752,10 +1752,19 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   (it can never coexist with a held Monte Carlo result — each slow-run
   transition re-anchors and drops the other), and its metrics join the
   9.19 PDF report. The run is serial by design: a full backtest is
-  ≈ 1 s of deterministic passes, under the 9.15 pool threshold. The
-  region data version gains the series file as a fourth
-  verified+digest part, and a guard test sweeps every figure string in
-  the series file out of source code.*
+  ≈ 1 s of deterministic passes, under the 9.15 pool threshold.
+  Provenance: `BacktestResult` carries the series it replayed —
+  `run_windows` accepts any series, so the §4.6 manifest must name the
+  actual input — while the region data version deliberately excludes
+  the series file: that string doubles as the saved-plan
+  `assumptions_resolved_against` fingerprint, and the series prices no
+  assumption and no base projection, so a history-only refresh must
+  not flag every saved plan's defaults as changed (guard-tested). The
+  generator takes the `verified_on` date as an explicit argument — an
+  unreviewed regeneration can never stamp itself verified — the
+  package metadata declares `MIT AND CC-BY-NC-SA-4.0` with the data
+  licence scoped in `LICENSE-DATA`, and a guard test sweeps every
+  figure string in the series file out of source code.*
 - [x] 9.19 Exports and reports (#104) — *get the plan out of the app:
   File → "Export cash flow (CSV)" serialises the active run's report
   model exactly (header block: plan, run, scenario, money basis,
