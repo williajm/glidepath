@@ -20,7 +20,7 @@ from decimal import Decimal, InvalidOperation
 from importlib import resources
 from typing import TYPE_CHECKING, NoReturn
 
-from glidepath.core import AssumptionKey, Money, Rate
+from glidepath.core import AssumptionKey, HistoricalSeries, HistoricalYear, Money, Rate
 from glidepath.regions.uk.schema import (
     SCHEMA_VERSION,
     AgeRulesFile,
@@ -36,6 +36,7 @@ from glidepath.regions.uk.schema import (
     LisaAges,
     NmpaStep,
     PensionRules,
+    ReturnsHistoryFile,
     SavingsRules,
     SpaAgeBand,
     SpaBand,
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
 
 AGE_RULES_FILENAME = "age_rules.toml"
 ASSUMPTIONS_FILENAME = "assumptions_default.toml"
+RETURNS_HISTORY_FILENAME = "returns_history.toml"
 
 _DATA_ANCHOR = "glidepath.regions.uk"
 _TAX_YEAR_FILE = re.compile(r"tax_year_(\d{4})_(\d{2})\.toml")
@@ -509,6 +511,55 @@ def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRules
     )
 
 
+def _signed_rate(raw: object, context: str) -> Decimal:
+    """Parse an annual rate that may be negative but must exceed -100%.
+
+    Historical returns and inflation are frequently negative and can
+    exceed +100%, so neither ``_fraction`` nor ``_money`` fits; -100%
+    or worse can never be recomposed into a real rate
+    (:mod:`glidepath.core.backtest`).
+    """
+    value = _decimal_string(raw, context)
+    if value <= Decimal(-1):
+        _fail(context, "rates must be greater than -1 (-100%)")
+    return value
+
+
+def _parse_history_year(raw: object, context: str) -> HistoricalYear:
+    """Parse one observed year of the return series."""
+    table = _Table(raw, context)
+    year = _integer(table.take("year"), f"{context}.year", minimum=1)
+    equity = _signed_rate(table.take("equity"), f"{context}.equity")
+    bonds = _signed_rate(table.take("bonds"), f"{context}.bonds")
+    cash = _signed_rate(table.take("cash"), f"{context}.cash")
+    cpi = _signed_rate(table.take("cpi"), f"{context}.cpi")
+    table.finish()
+    return HistoricalYear(year=year, equity=equity, bonds=bonds, cash=cash, cpi=cpi)
+
+
+def parse_returns_history(
+    text: str, *, context: str = "<returns-history data>"
+) -> ReturnsHistoryFile:
+    """Parse and strictly validate a returns-history TOML document."""
+    root = _load_document(text, context)
+    schema_version = _take_schema_version(root, context)
+    meta = _parse_file_meta(root.take("meta"), f"{context}.meta")
+    returns_table = _Table(root.take("returns"), f"{context}.returns")
+    series_context = f"{context}.returns.series"
+    entries_raw = _array(returns_table.take("series"), series_context)
+    years = tuple(
+        _parse_history_year(item, f"{series_context}[{index}]")
+        for index, item in enumerate(entries_raw)
+    )
+    returns_table.finish()
+    root.finish()
+    try:
+        series = HistoricalSeries(years=years)
+    except ValueError as error:
+        _fail(series_context, str(error))
+    return ReturnsHistoryFile(schema_version=schema_version, meta=meta, series=series)
+
+
 def _assumption_value(raw: object, context: str) -> AssumptionValue:
     """Parse a default's value: Decimal string, integer, tag, or table."""
     if isinstance(raw, bool):
@@ -639,4 +690,11 @@ def load_default_assumptions() -> AssumptionsFile:
     """Load the shipped ``assumptions_default.toml``."""
     return parse_default_assumptions(
         _read_data_file(ASSUMPTIONS_FILENAME), context=ASSUMPTIONS_FILENAME
+    )
+
+
+def load_returns_history() -> ReturnsHistoryFile:
+    """Load the shipped ``returns_history.toml``."""
+    return parse_returns_history(
+        _read_data_file(RETURNS_HISTORY_FILENAME), context=RETURNS_HISTORY_FILENAME
     )

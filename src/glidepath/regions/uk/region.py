@@ -120,6 +120,14 @@ def _data_version(future_years: FutureYearsExtension | None) -> str:
     ends incl. the Scottish band groups, CPI): a region-build input
     whose effect must be identifiable from the version string, not the
     assumption read list.
+
+    ``returns_history.toml`` is deliberately absent: it prices no
+    assumption and no base projection, and this string doubles as the
+    saved-plan ``assumptions_resolved_against`` fingerprint
+    (:mod:`glidepath.app.files`) — including it would warn "shipped
+    defaults have changed" on every saved plan after a history-only
+    refresh. A backtest names its series by carrying it on the result
+    (:class:`glidepath.core.BacktestResult`).
     """
     parts = [f"uk schema={SCHEMA_VERSION}"]
     for start_year in available_tax_years():

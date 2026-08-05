@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
+from glidepath.app.backtest import BacktestPanelViewModel, build_backtest_panel
 from glidepath.app.display import format_money, format_wrapper_kind
 from glidepath.app.montecarlo import (
     BAND_SPECS,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 
     from glidepath.app.plan import PlanState
     from glidepath.core import (
+        BacktestResult,
         EntityId,
         MonteCarloResult,
         Period,
@@ -159,6 +161,7 @@ class ChartsViewModel:
     message: str
     monte_carlo: MonteCarloPanelViewModel
     retirement: RetirementPanelViewModel
+    backtest: BacktestPanelViewModel
 
 
 def basis_from_key(key: str) -> ReportBasis:
@@ -235,13 +238,12 @@ def build_charts_view_model(
                 state, mode, ending_pot_deflator=None, basis_suffix=suffix
             ),
             retirement=build_retirement_panel(state, mode),
+            backtest=build_backtest_panel(
+                state, ending_pot_deflator=None, basis_suffix=suffix
+            ),
         )
     grouped = _rows_by_period(build_report(state.result, basis))
-    bands = (
-        _balance_bands(state.monte_carlo, grouped)
-        if mode is RunMode.MONTE_CARLO and state.monte_carlo is not None
-        else ()
-    )
+    bands = _chart_bands(state, mode, grouped)
     final_rows = next(reversed(grouped.values()))
     return ChartsViewModel(
         basis_heading=BASIS_HEADING,
@@ -263,7 +265,33 @@ def build_charts_view_model(
             basis_suffix=suffix,
         ),
         retirement=build_retirement_panel(state, mode),
+        backtest=build_backtest_panel(
+            state,
+            ending_pot_deflator=final_rows[0].balance_deflator,
+            basis_suffix=suffix,
+        ),
     )
+
+
+def _chart_bands(
+    state: PlanState,
+    mode: RunMode,
+    grouped: dict[Period, list[PeriodReportRow]],
+) -> tuple[ChartBand, ...]:
+    """The percentile bands the balances chart draws, if any.
+
+    A held Monte Carlo run supplies them under the Monte Carlo mode
+    (roadmap 9.13); a held backtest supplies them in either mode
+    (roadmap 9.18) — the two can never be held together, since each
+    slow-run transition re-anchors through
+    :func:`~glidepath.app.plan.replanned_state` and so drops the
+    other's result.
+    """
+    if mode is RunMode.MONTE_CARLO and state.monte_carlo is not None:
+        return _balance_bands(state.monte_carlo, grouped)
+    if state.backtest is not None:
+        return _balance_bands(state.backtest, grouped)
+    return ()
 
 
 def _category_label(period: Period, rows: list[PeriodReportRow]) -> str:
@@ -351,13 +379,16 @@ def wrapper_display_labels(rows: Iterable[PeriodReportRow]) -> dict[EntityId, st
 
 
 def _balance_bands(
-    result: MonteCarloResult, grouped: dict[Period, list[PeriodReportRow]]
+    result: MonteCarloResult | BacktestResult,
+    grouped: dict[Period, list[PeriodReportRow]],
 ) -> tuple[ChartBand, ...]:
-    """The 10/50/90 percentile bands over the balances chart (9.13).
+    """The 10/50/90 percentile bands over the balances chart (9.13, 9.18).
 
-    The Monte Carlo balances are nominal; CPI is deterministic across
-    paths (planning §5.2), so each period's band value deflates by the
-    same balance deflator the deterministic report rows carry — 1
+    Both slow-run results answer the same ``balance_percentile``
+    reduction, so one composition serves paths and windows alike. The
+    balances are nominal; CPI is deterministic across paths and
+    windows (planning §5.2), so each period's band value deflates by
+    the same balance deflator the deterministic report rows carry — 1
     under the nominal basis. A held result whose period count differs
     from the projection's (the runs straddled a calendar day) draws no
     bands rather than bands against the wrong periods.

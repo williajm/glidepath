@@ -16,7 +16,10 @@ from PySide6.QtCharts import QBarSet, QChartView, QStackedBarSeries
 from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
 
 from glidepath.app import (
+    BACKTEST_RUNNING_MESSAGE,
+    BACKTEST_STALE_MESSAGE,
     MONTE_CARLO_STALE_MESSAGE,
+    NO_BACKTEST_MESSAGE,
     NO_MONTE_CARLO_MESSAGE,
     NO_RETIREMENT_MESSAGE,
     RETIREMENT_RUNNING_MESSAGE,
@@ -29,6 +32,7 @@ from glidepath.app import (
     build_shell_view_model,
     initial_plan_state,
     monte_carlo_running_status,
+    state_with_backtest,
     state_with_household,
     state_with_monte_carlo,
     state_with_override,
@@ -64,6 +68,7 @@ def callbacks(
     select_mode: Callable[[str], None] | None = None,
     run_monte_carlo: Callable[[str, str], None] | None = None,
     run_retirement: Callable[[str, str, str, str], None] | None = None,
+    run_backtest: Callable[[], None] | None = None,
 ) -> ChartsPaneCallbacks:
     """Pane callbacks defaulting to no-ops for uninvolved actions."""
     return ChartsPaneCallbacks(
@@ -71,6 +76,7 @@ def callbacks(
         select_mode=select_mode or (lambda _key: None),
         run_monte_carlo=run_monte_carlo or (lambda _seed, _paths: None),
         run_retirement=run_retirement or (lambda _rate, _success, _seed, _paths: None),
+        run_backtest=run_backtest or (lambda: None),
     )
 
 
@@ -267,6 +273,41 @@ class TestMonteCarloControls:
         assert len(series) == 1 + len(view_model.charts[0].bands)
         band_names = [entry.name() for entry in series[1:]]
         assert band_names == [band.label for band in view_model.charts[0].bands]
+
+
+class TestBacktestCard:
+    """The historical-backtest card bindings (9.18)."""
+
+    def test_no_run_shows_the_empty_state_copy(self) -> None:
+        """Before any run the card carries the no-backtest message."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        assert pane.backtest_metrics_label.isHidden()
+        assert pane.backtest_message_label.text() == NO_BACKTEST_MESSAGE
+
+    def test_run_button_forwards_the_click(self) -> None:
+        """The card has no inputs; the click alone reaches the shell."""
+        runs: list[bool] = []
+        pane = ChartsPane(callbacks(run_backtest=lambda: runs.append(True)))
+        pane.refresh(projected_view_model())
+        assert not pane.backtest_button.isHidden()
+        pane.backtest_button.click()
+        assert runs == [True]
+
+    def test_a_run_renders_metrics_and_band_lines(self) -> None:
+        """The readout fills and the balances chart gains line series."""
+        pane = ChartsPane(callbacks())
+        state = state_with_backtest(projected_state(), today=TODAY)
+        view_model = build_charts_view_model(state)
+        pane.refresh(view_model)
+        assert "Success rate" in pane.backtest_metrics_label.text()
+        assert not pane.backtest_metrics_label.isHidden()
+        assert pane.backtest_message_label.isHidden()
+        view = pane.chart_tabs.widget(0)
+        assert isinstance(view, QChartView)
+        series = view.chart().series()
+        assert len(series) == 1 + len(view_model.charts[0].bands)
+        assert len(view_model.charts[0].bands) == 3
 
 
 class TestRetirementCard:
@@ -601,3 +642,82 @@ class TestMainWindowRetirementFlow:
         assert pane.retirement_button.isEnabled()
         assert "Success rate" in pane.metrics_label.text()
         assert pane.retirement_message_label.text() == NO_RETIREMENT_MESSAGE
+
+
+class TestMainWindowBacktestFlow:
+    """The historical backtest runs through the window (9.18)."""
+
+    @pytest.fixture(name="window")
+    def window_fixture(self) -> MainWindow:
+        """A window with a just-retired saver's plan already saved.
+
+        Born 1966, so each rolling window projects a few decades at
+        most and the full backtest stays quick.
+        """
+        window = MainWindow(build_shell_view_model())
+        facts = window.facts_pane
+        facts.person_form.set_value("date_of_birth", "1966-02-01")
+        facts.person_form.set_value("tax_residency", str(RUK_RESIDENCY))
+        facts.person_form.set_value("target_retirement_age", "60")
+        facts.spending_form.set_value("annual_spending_real", "12000")
+        wrapper_form = facts.wrappers.add_entry()
+        wrapper_form.set_value("kind", str(ISA_KIND))
+        wrapper_form.set_value("balance", "50000")
+        facts.submit_button.click()
+        return window
+
+    def test_backtest_run_through_the_window(self, window: MainWindow) -> None:
+        """Acceptance criterion: press Run backtest, read the metrics.
+
+        The shell reports the share of historical starting years the
+        plan survives, the worst window, and the outcome range as
+        bands over the balances chart.
+        """
+        pane = window.charts_pane
+        pane.backtest_button.click()
+        # The run executes off the GUI thread; the button stays
+        # disabled and the busy indicator shows until the finished
+        # state is delivered back (9.16).
+        assert not pane.backtest_button.isEnabled()
+        assert not pane.busy_bar.isHidden()
+        assert pane.busy_label.text() == BACKTEST_RUNNING_MESSAGE
+        wait_for_monte_carlo(window)
+        assert pane.backtest_button.isEnabled()
+        assert pane.busy_bar.isHidden()
+        text = pane.backtest_metrics_label.text()
+        assert "Success rate" in text
+        assert "Worst starting year" in text
+        view = pane.chart_tabs.widget(0)
+        assert isinstance(view, QChartView)
+        assert len(view.chart().series()) == 4
+
+    def test_a_plan_change_discards_an_in_flight_backtest(
+        self, window: MainWindow
+    ) -> None:
+        """A result computed from a replaced state never lands (9.18)."""
+        pane = window.charts_pane
+        pane.backtest_button.click()
+        window.facts_pane.submit_button.click()
+        wait_for_monte_carlo(window)
+        assert window.statusBar().currentMessage() == BACKTEST_STALE_MESSAGE
+        assert pane.backtest_metrics_label.isHidden()
+        assert pane.backtest_button.isEnabled()
+        # The staleness-discard path must not leave a spinner running.
+        assert pane.busy_bar.isHidden()
+
+    def test_the_backtest_shares_the_in_flight_guard(self, window: MainWindow) -> None:
+        """A Monte Carlo request during a backtest is ignored (9.16).
+
+        Every slow-run action disables together, and the ignored click
+        leaves the status line on the running backtest.
+        """
+        pane = window.charts_pane
+        pane.backtest_button.click()
+        assert not pane.run_button.isEnabled()
+        assert not pane.retirement_button.isEnabled()
+        pane.run_button.click()
+        assert window.statusBar().currentMessage() == BACKTEST_RUNNING_MESSAGE
+        wait_for_monte_carlo(window)
+        assert pane.backtest_button.isEnabled()
+        assert pane.run_button.isEnabled()
+        assert "Success rate" in pane.backtest_metrics_label.text()

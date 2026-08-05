@@ -39,6 +39,12 @@ What it models today (single person, UK):
   that sustains a target income (a replacement rate you choose, 66% of
   employment income by default), met deterministically or at a Monte
   Carlo success target.
+- **Historical backtesting** — replays the plan over every rolling
+  window of world market history since 1900 (global equities in
+  sterling terms, UK gilts and cash, deflated by UK inflation):
+  the share of historical starting years the plan survives, the worst
+  starting year, and the range of outcomes as chart bands —
+  sequence-of-returns risk that independent Monte Carlo draws miss.
 - **Scenarios** — named what-ifs over your decisions and assumptions,
   with a side-by-side comparison; plans saved as a local JSON file.
 
@@ -92,3 +98,18 @@ so the 7-day supply-chain cooldown is applied. CI runs every `make check`
 gate plus `make audit` and the SonarCloud quality gate on each PR — so a
 clean `make check` locally does not quite guarantee a green pipeline. See
 `CLAUDE.md` for the full policies.
+
+## Data licences
+
+The code is MIT-licensed (see `LICENSE`). One data file is not: the
+historical return series
+(`src/glidepath/regions/uk/data/returns_history.toml`) is derived from
+the [JST Macrohistory Database](https://www.macrohistory.net/database/)
+(Jordà, Schularick & Taylor; return series per Jordà, Knoll, Kuvshinov,
+Schularick & Taylor 2019) and is distributed under
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) —
+attribution required, non-commercial use only, share-alike. The package
+metadata declares `MIT AND CC-BY-NC-SA-4.0` accordingly; `LICENSE-DATA`
+and the file's own header carry the full notice, and
+`scripts/build_returns_history.py` regenerates the file from the
+upstream dataset.

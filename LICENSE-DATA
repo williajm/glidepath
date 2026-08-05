@@ -1,0 +1,28 @@
+Data licence notice
+===================
+
+Everything in this repository is MIT-licensed (see LICENSE) EXCEPT the
+following bundled data file:
+
+    src/glidepath/regions/uk/data/returns_history.toml
+
+That file is a derived work of the JST Macrohistory Database
+(https://www.macrohistory.net/database/) — © Òscar Jordà, Moritz
+Schularick, Alan M. Taylor and co-authors — and is distributed under the
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+licence (CC BY-NC-SA 4.0):
+
+    https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+In particular, the figures in that file may be used and redistributed
+only non-commercially, with attribution, and under the same licence
+terms. Cite Jordà, Schularick & Taylor (2017), "Macrofinancial History
+and the New Business Cycle Facts", and — for the return series — Jordà,
+Knoll, Kuvshinov, Schularick & Taylor (2019), "The Rate of Return on
+Everything, 1870-2015", The Quarterly Journal of Economics
+(https://doi.org/10.1093/qje/qjz012).
+
+The MIT licence grant does not extend to that file. To obtain a
+distribution free of CC BY-NC-SA material, delete the file and
+regenerate a replacement from a source of your choosing with
+scripts/build_returns_history.py as a starting point.

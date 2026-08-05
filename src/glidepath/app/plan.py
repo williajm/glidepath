@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from datetime import date, datetime
 
     from glidepath.app.retirement import RetirementAnswer
-    from glidepath.core import MonteCarloResult, Region
+    from glidepath.core import BacktestResult, MonteCarloResult, Region
     from glidepath.regions.uk import AssumptionValue
 
 OVERRIDE_SOURCE = "User override (assumptions inspector)"
@@ -67,9 +67,11 @@ class PlanState:
     over the same plan (roadmap 9.13), with ``monte_carlo_error``
     mirroring ``run_error``; ``retirement`` holds the explicit "When
     can I retire?" answer (roadmap 9.14), with ``retirement_error``
-    alongside. All of them reset whenever the state is recomputed
-    through :func:`replanned_state`, so a held result can never go
-    stale against a changed plan.
+    alongside; ``backtest`` holds the explicit historical backtest
+    (roadmap 9.18), with ``backtest_error`` alongside. All of them
+    reset whenever the state is recomputed through
+    :func:`replanned_state`, so a held result can never go stale
+    against a changed plan.
     """
 
     assumptions: AssumptionSet
@@ -83,6 +85,8 @@ class PlanState:
     monte_carlo_error: str | None = None
     retirement: RetirementAnswer | None = None
     retirement_error: str | None = None
+    backtest: BacktestResult | None = None
+    backtest_error: str | None = None
 
 
 @dataclass(frozen=True)

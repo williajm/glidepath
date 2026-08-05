@@ -109,6 +109,10 @@ class TestUkRegionBundle:
         assert "age_rules verified" in version
         assert "assumptions verified" in version
         assert version.count("sha256=") == 3
+        # The returns-history file must stay out: this string doubles as
+        # the saved-plan assumptions fingerprint, and the series prices
+        # no assumption (a backtest result carries its series itself).
+        assert "returns_history" not in version
         assert "future_years" not in version
 
     def test_data_version_records_the_full_extension_policy(self) -> None:

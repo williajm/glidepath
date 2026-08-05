@@ -23,6 +23,7 @@ from glidepath.regions.uk import (
     loader,
     parse_age_rules,
     parse_default_assumptions,
+    parse_returns_history,
     parse_tax_year,
     tax_year_filename,
 )
@@ -646,3 +647,78 @@ def test_available_tax_years_matches_shipped_files(
         (tmp_path / name).write_text("", encoding="utf-8")
     monkeypatch.setattr(loader, "_data_directory", lambda: tmp_path)
     assert loader.available_tax_years() == (2025, 2026)
+
+
+# --- returns_history.toml (issue 9.18) ---------------------------------------
+
+VALID_RETURNS_HISTORY = """
+schema_version = 2
+
+[meta]
+verified_on = 2026-08-05
+sources = ["https://example.test/returns"]
+
+[returns]
+series = [
+  { year = 1900, equity = "0.04", bonds = "-0.004", cash = "0.036", cpi = "0.051" },
+  { year = 1901, equity = "-0.0145", bonds = "-0.016", cash = "0.031", cpi = "0.005" },
+  { year = 1902, equity = "0.0876", bonds = "0.019", cash = "0.029", cpi = "0.0" },
+]
+"""
+
+
+def test_valid_returns_history_parses_into_typed_values() -> None:
+    """The series arrives as core historical years with exact Decimals."""
+    parsed = parse_returns_history(VALID_RETURNS_HISTORY)
+    assert parsed.meta.verified_on == date(2026, 8, 5)
+    assert parsed.series.first_year == 1900
+    assert parsed.series.last_year == 1902
+    assert parsed.series.length == 3
+    assert parsed.series.years[0].equity == Decimal("0.04")
+    assert parsed.series.years[1].bonds == Decimal("-0.016")
+    assert parsed.series.years[0].cpi == Decimal("0.051")
+
+
+def test_returns_history_gap_is_an_error() -> None:
+    """A non-contiguous series would splice unrelated history together."""
+    gapped = _mutated(VALID_RETURNS_HISTORY, "year = 1901", "year = 1911")
+    with pytest.raises(DataFileError, match=r"returns\.series.*contiguous"):
+        parse_returns_history(gapped)
+
+
+def test_returns_history_rate_at_minus_one_is_an_error() -> None:
+    """-100% can never be recomposed into a real rate."""
+    ruinous = _mutated(VALID_RETURNS_HISTORY, 'equity = "0.04"', 'equity = "-1"')
+    with pytest.raises(DataFileError, match="greater than -1"):
+        parse_returns_history(ruinous)
+
+
+def test_returns_history_float_typed_rate_is_an_error() -> None:
+    """Rates are TOML strings, never floats (planning §5.3)."""
+    floaty = _mutated(VALID_RETURNS_HISTORY, 'equity = "0.04"', "equity = 0.04")
+    with pytest.raises(DataFileError, match="float-typed"):
+        parse_returns_history(floaty)
+
+
+def test_returns_history_unknown_series_key_is_an_error() -> None:
+    """Unknown keys anywhere are load errors."""
+    extended = _mutated(
+        VALID_RETURNS_HISTORY, 'cpi = "0.051"', 'cpi = "0.051", gold = "0.02"'
+    )
+    with pytest.raises(DataFileError, match="unknown keys: gold"):
+        parse_returns_history(extended)
+
+
+def test_returns_history_missing_returns_table_is_an_error() -> None:
+    """The [returns] table is mandatory."""
+    stripped = VALID_RETURNS_HISTORY.partition("[returns]")[0]
+    with pytest.raises(DataFileError, match="missing required key 'returns'"):
+        parse_returns_history(stripped)
+
+
+def test_shipped_returns_history_loads_and_spans_the_series() -> None:
+    """The shipped file parses; roadmap 9.18 promises 1900-2020 coverage."""
+    parsed = loader.load_returns_history()
+    assert parsed.series.first_year == 1900
+    assert parsed.series.last_year == 2020
+    assert parsed.series.length == 121

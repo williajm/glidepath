@@ -16,6 +16,8 @@ import ast
 import re
 from pathlib import Path
 
+from glidepath.regions.uk import load_returns_history
+
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "glidepath"
 CORE_ROOT = SRC_ROOT / "core"
 
@@ -127,4 +129,36 @@ def test_no_policy_figures_outside_region_data() -> None:
             assert match is None, (
                 f"policy figure {figure!r} found in {path.relative_to(SRC_ROOT)}"
                 " — policy figures belong in regions/*/data/ TOML files"
+            )
+
+
+def test_no_return_series_figures_outside_region_data() -> None:
+    """Historical series figures live in the data file, never in code (9.18).
+
+    Reads every figure string of the shipped ``returns_history.toml``
+    and asserts none appears as a literal in source. The 6-decimal
+    strings are distinctive by construction, so — unlike the
+    hand-curated ``POLICY_FIGURES`` list — the whole series can be
+    swept without false positives, and the guard tracks the data file
+    as it is regenerated.
+    """
+    series = load_returns_history().series
+    figures = sorted(
+        {
+            str(rate)
+            for year in series.years
+            for rate in (year.equity, year.bonds, year.cash, year.cpi)
+        }
+    )
+    assert figures, "shipped series is empty — guard would pass vacuously"
+    source_files = _python_files(SRC_ROOT)
+    for path in source_files:
+        relative_parts = path.relative_to(SRC_ROOT).parts
+        if "regions" in relative_parts and "data" in relative_parts:
+            continue  # the shipped data file itself carries the figures
+        text = path.read_text(encoding="utf-8")
+        for figure in figures:
+            assert figure not in text, (
+                f"series figure {figure!r} found in {path.relative_to(SRC_ROOT)}"
+                " — historical return figures belong in returns_history.toml"
             )

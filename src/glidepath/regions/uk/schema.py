@@ -15,7 +15,7 @@ from datetime import date, timedelta
 from itertools import pairwise
 from typing import TYPE_CHECKING, NoReturn
 
-from glidepath.core import AssumptionKey, Money, Rate
+from glidepath.core import AssumptionKey, HistoricalSeries, Money, Rate
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -461,6 +461,26 @@ class AgeRulesFile:
         _require_schema_version(self.schema_version, "AgeRulesFile")
         _validate_nmpa_steps(self.nmpa)
         _validate_spa_bands(self.spa_bands)
+
+
+@dataclass(frozen=True, slots=True)
+class ReturnsHistoryFile:
+    """The fully validated ``returns_history.toml`` data file (9.18).
+
+    ``series`` is the core historical-return series the backtest
+    engine replays (:mod:`glidepath.core.backtest`) — the series'
+    own invariants (contiguous ascending years, rates above -100%)
+    are enforced by its type; this wrapper adds the §5.3 provenance
+    side (``verified_on`` + sources).
+    """
+
+    schema_version: int
+    meta: FileMeta
+    series: HistoricalSeries
+
+    def __post_init__(self) -> None:
+        """Validate the version."""
+        _require_schema_version(self.schema_version, "ReturnsHistoryFile")
 
 
 type AssumptionValue = Decimal | int | str | Mapping[str, AssumptionValue]
