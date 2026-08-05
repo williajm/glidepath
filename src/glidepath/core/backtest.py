@@ -327,6 +327,29 @@ class BacktestResult:
 
         return min(self.outcomes, key=badness)
 
+    @property
+    def best_window(self) -> WindowOutcome:
+        """The best starting year's outcome — :attr:`worst_window` mirrored.
+
+        A surviving window always ranks better than a ruined one;
+        among surviving windows the higher ending balance is better;
+        among ruined windows, falling short later, then the higher
+        ending balance. Ties resolve to the earliest starting year, so
+        the answer is deterministic.
+        """
+
+        def goodness(outcome: WindowOutcome) -> tuple[int, date, Money, int]:
+            shortfall = outcome.first_shortfall_period
+            ruin_start = date.max if shortfall is None else shortfall.start
+            return (
+                0 if outcome.ruined else 1,
+                ruin_start,
+                outcome.ending_balance,
+                -outcome.start_year,
+            )
+
+        return max(self.outcomes, key=goodness)
+
     def ending_pot_percentile(self, percentile: Decimal) -> Money:
         """The ending-balance percentile over windows, in [0, 100].
 

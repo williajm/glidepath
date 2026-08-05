@@ -15,19 +15,19 @@ plan.
 """
 
 from dataclasses import dataclass, replace
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from glidepath.app.display import format_money, format_percent
-from glidepath.app.montecarlo import BAND_SPECS, SUCCESS_RATE_LABEL, BandSpec
+from glidepath.app.montecarlo import BAND_SPECS, SUCCESS_RATE_LABEL
 from glidepath.app.plan import PlanState, region_for, replanned_state
 from glidepath.core import Money, RunConfig, run_windows
 from glidepath.regions.uk import load_returns_history
 
 if TYPE_CHECKING:
     from datetime import date
+    from decimal import Decimal
 
-    from glidepath.core import BacktestResult
+    from glidepath.core import BacktestResult, WindowOutcome
 
 BACKTEST_HEADING: Final = "Historical backtest"
 
@@ -54,29 +54,9 @@ WINDOWS_LABEL: Final = "Windows"
 
 WORST_WINDOW_LABEL: Final = "Worst starting year"
 
-BACKTEST_BAND_SPECS: Final[tuple[BandSpec, ...]] = (
-    BandSpec(
-        band_label="Worst",
-        ending_pot_label="Ending pot, worst",
-        percentile=Decimal(0),
-    ),
-    *BAND_SPECS,
-    BandSpec(
-        band_label="Best",
-        ending_pot_label="Ending pot, best",
-        percentile=Decimal(100),
-    ),
-)
-"""The backtest's chart bands: the 9.13 trio wrapped in the envelope.
+BEST_WINDOW_LABEL: Final = "Best starting year"
 
-Unlike Monte Carlo — whose path extremes are sampling noise that
-widens with the path count, hence its 10/90 clip — a window extreme
-is an actual historical outcome over a bounded window set, so the
-worst and best lines carry real meaning ("this is what starting in
-1907 did"). The mean is deliberately absent: ending-pot distributions
-are right-skewed, so a mean line reads optimistic against the median
-the trio already carries.
-"""
+BACKTEST_YEAR_LABEL: Final = "Show starting year"
 
 
 @dataclass(frozen=True)
@@ -92,14 +72,18 @@ class BacktestPanelViewModel:
     """The historical-backtest card on the charts screen (roadmap 9.18).
 
     ``message`` carries the no-run or failure copy; it is blank
-    whenever ``metrics`` is populated. The card has no inputs — the
-    windows are however many complete horizons the shipped series
-    holds — so unlike the Monte Carlo panel there is nothing to echo
-    back.
+    whenever ``metrics`` is populated. The card's one input is the
+    starting-year picker: ``year_value`` echoes the raw text the shell
+    captured (presentation state, not part of any run), and
+    ``year_message`` says why a non-blank entry drew no trajectory —
+    it never displaces the metrics.
     """
 
     heading: str
     run_label: str
+    year_label: str
+    year_value: str
+    year_message: str
     metrics: tuple[BacktestMetric, ...]
     message: str
 
@@ -144,11 +128,39 @@ def state_with_backtest(state: PlanState, *, today: date) -> PlanState:
     return replace(base, **changes) if changes else base
 
 
+def selected_window(
+    result: BacktestResult, year_text: str
+) -> tuple[WindowOutcome | None, str]:
+    """The window the raw starting-year text picks, or why none does.
+
+    A blank entry picks nothing silently; anything else must name one
+    of the result's starting years. The message names the valid span,
+    so a miss teaches the range.
+    """
+    text = year_text.strip()
+    if not text:
+        return None, ""
+    first = result.outcomes[0].start_year
+    last = result.outcomes[-1].start_year
+    miss = f"No window starts in {text} — starting years run {first} to {last}."
+    try:
+        year = int(text, 10)
+    except ValueError:
+        return None, miss
+    outcome = next(
+        (entry for entry in result.outcomes if entry.start_year == year), None
+    )
+    if outcome is None:
+        return None, miss
+    return outcome, ""
+
+
 def build_backtest_panel(
     state: PlanState,
     *,
     ending_pot_deflator: Decimal | None,
     basis_suffix: str,
+    year_text: str = "",
 ) -> BacktestPanelViewModel:
     """The historical-backtest card for the charts screen (9.18).
 
@@ -157,43 +169,48 @@ def build_backtest_panel(
     run's one assumed CPI path (planning §5.2), so the deterministic
     report's deflator presents the window pots too; ``None`` (no
     projection to read it from) leaves the metrics unbuilt.
-    ``basis_suffix`` names the basis on the money labels.
+    ``basis_suffix`` names the basis on the money labels. ``year_text``
+    is the starting-year picker's raw text; with a held result it is
+    vetted through :func:`selected_window` so the card can say why a
+    miss drew nothing.
     """
     result = state.backtest
     metrics: tuple[BacktestMetric, ...] = ()
     message = ""
+    year_message = ""
     if state.backtest_error is not None:
         message = state.backtest_error
     elif result is None or ending_pot_deflator is None:
         message = NO_BACKTEST_MESSAGE
     else:
         metrics = _metrics(result, ending_pot_deflator, basis_suffix)
+        _, year_message = selected_window(result, year_text)
     return BacktestPanelViewModel(
         heading=BACKTEST_HEADING,
         run_label=RUN_BACKTEST_LABEL,
+        year_label=BACKTEST_YEAR_LABEL,
+        year_value=year_text,
+        year_message=year_message,
         metrics=metrics,
         message=message,
     )
 
 
-def _worst_window_value(
-    result: BacktestResult, ending_pot_deflator: Decimal, basis_suffix: str
+def _window_value(
+    outcome: WindowOutcome, ending_pot_deflator: Decimal, basis_suffix: str
 ) -> str:
-    """The worst starting year with what went wrong there.
+    """One starting year with how its window ended.
 
-    A ruined worst window names the plan-calendar year the money ran
-    out — the year the charts' x axis carries — and a surviving one
-    the lowest ending pot, so the row reads against the chart either
-    way.
+    A ruined window names the plan-calendar year the money ran out —
+    the year the charts' x axis carries — and a surviving one its
+    ending pot, so the row reads against the chart either way.
     """
-    worst = result.worst_window
-    shortfall = worst.first_shortfall_period
+    shortfall = outcome.first_shortfall_period
     if shortfall is not None:
-        return f"{worst.start_year} — money ran out in {shortfall.start.year}"
-    presented = Money(worst.ending_balance.amount / ending_pot_deflator).quantized()
+        return f"{outcome.start_year} — money ran out in {shortfall.start.year}"
+    presented = Money(outcome.ending_balance.amount / ending_pot_deflator).quantized()
     return (
-        f"{worst.start_year} — lowest ending pot"
-        f" {format_money(presented)} ({basis_suffix})"
+        f"{outcome.start_year} — ending pot {format_money(presented)} ({basis_suffix})"
     )
 
 
@@ -213,7 +230,11 @@ def _metrics(
         ),
         BacktestMetric(
             label=WORST_WINDOW_LABEL,
-            value=_worst_window_value(result, ending_pot_deflator, basis_suffix),
+            value=_window_value(result.worst_window, ending_pot_deflator, basis_suffix),
+        ),
+        BacktestMetric(
+            label=BEST_WINDOW_LABEL,
+            value=_window_value(result.best_window, ending_pot_deflator, basis_suffix),
         ),
     ]
     for spec in BAND_SPECS:

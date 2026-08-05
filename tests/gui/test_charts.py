@@ -64,11 +64,13 @@ AS_OF = date(2026, 8, 1)
 
 
 def callbacks(
+    *,
     select_basis: Callable[[str], None] | None = None,
     select_mode: Callable[[str], None] | None = None,
     run_monte_carlo: Callable[[str, str], None] | None = None,
     run_retirement: Callable[[str, str, str, str], None] | None = None,
     run_backtest: Callable[[], None] | None = None,
+    select_backtest_year: Callable[[str], None] | None = None,
 ) -> ChartsPaneCallbacks:
     """Pane callbacks defaulting to no-ops for uninvolved actions."""
     return ChartsPaneCallbacks(
@@ -77,6 +79,7 @@ def callbacks(
         run_monte_carlo=run_monte_carlo or (lambda _seed, _paths: None),
         run_retirement=run_retirement or (lambda _rate, _success, _seed, _paths: None),
         run_backtest=run_backtest or (lambda: None),
+        select_backtest_year=select_backtest_year or (lambda _year: None),
     )
 
 
@@ -307,7 +310,16 @@ class TestBacktestCard:
         assert isinstance(view, QChartView)
         series = view.chart().series()
         assert len(series) == 1 + len(view_model.charts[0].bands)
-        assert len(view_model.charts[0].bands) == 5
+        assert len(view_model.charts[0].bands) == 2
+
+    def test_year_picker_forwards_the_raw_text(self) -> None:
+        """The shell parses; the picker only captures and forwards."""
+        picked: list[str] = []
+        pane = ChartsPane(callbacks(select_backtest_year=picked.append))
+        pane.refresh(projected_view_model())
+        pane.backtest_year_edit.setText("1973")
+        pane.backtest_year_edit.editingFinished.emit()
+        assert picked == ["1973"]
 
 
 class TestRetirementCard:
@@ -687,9 +699,18 @@ class TestMainWindowBacktestFlow:
         text = pane.backtest_metrics_label.text()
         assert "Success rate" in text
         assert "Worst starting year" in text
+        assert "Best starting year" in text
         view = pane.chart_tabs.widget(0)
         assert isinstance(view, QChartView)
-        assert len(view.chart().series()) == 6
+        assert len(view.chart().series()) == 3
+        # Picking a starting year draws its own trajectory and the
+        # selection survives the refresh.
+        pane.backtest_year_edit.setText("1973")
+        pane.backtest_year_edit.editingFinished.emit()
+        picked_view = pane.chart_tabs.widget(0)
+        assert isinstance(picked_view, QChartView)
+        assert len(picked_view.chart().series()) == 4
+        assert pane.backtest_year_edit.text() == "1973"
 
     def test_a_plan_change_discards_an_in_flight_backtest(
         self, window: MainWindow

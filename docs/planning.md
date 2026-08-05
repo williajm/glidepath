@@ -1748,12 +1748,17 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   starting year with the plan-calendar year the money ran out,
   ending-pot percentiles) under the 9.13 worker-thread + staleness +
   re-anchoring rules and the 9.16 busy indicator; a held backtest
-  draws worst/10th/median/90th/best bands over the balances chart in
-  either run mode: the envelope is drawn for windows where Monte
-  Carlo clips to 10/90, because a window extreme is an actual
-  historical outcome rather than sampling noise, and the mean is
-  deliberately omitted (right-skewed pots read optimistic against the
-  median). A held backtest can never coexist with a held Monte Carlo
+  draws the worst and best starting years' *actual balance
+  trajectories* over the balances chart in either run mode, each line
+  labelled with its year, plus whichever starting year the card's
+  picker names ("show me 1973") — real window paths rather than
+  pointwise percentile bands, because a window is a genuine
+  historical outcome where a Monte Carlo extreme is sampling noise;
+  the 10/50/90 ending-pot percentiles stay on the card, and the mean
+  is deliberately omitted (right-skewed pots read optimistic against
+  the median). The picker is presentation state like the basis and
+  mode selections — no run happens; a miss names the valid span. A
+  held backtest can never coexist with a held Monte Carlo
   result — each slow-run
   transition re-anchors and drops the other — and its metrics join the
   9.19 PDF report. The run is serial by design: a full backtest is

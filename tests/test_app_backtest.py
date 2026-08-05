@@ -28,6 +28,7 @@ from glidepath.app import (
 )
 from glidepath.app.backtest import (
     BACKTEST_FAILED_PREFIX,
+    BEST_WINDOW_LABEL,
     WINDOWS_LABEL,
     WORST_WINDOW_LABEL,
 )
@@ -252,6 +253,16 @@ class TestBacktestPanel:
         )
         assert worst.value.startswith(str(bt_state.backtest.worst_window.start_year))
 
+    def test_identifies_the_best_starting_year(
+        self, bt_state: PlanState, bt_view_model: ChartsViewModel
+    ) -> None:
+        """The best window is named alongside the worst."""
+        assert bt_state.backtest is not None
+        best = next(
+            r for r in bt_view_model.backtest.metrics if r.label == BEST_WINDOW_LABEL
+        )
+        assert best.value.startswith(str(bt_state.backtest.best_window.start_year))
+
     def test_ending_pot_labels_carry_the_basis(self, bt_state: PlanState) -> None:
         """The nominal basis names itself on the pot rows."""
         view_model = build_charts_view_model(bt_state, basis=ReportBasis.NOMINAL)
@@ -274,31 +285,57 @@ class TestBacktestPanel:
 
 
 class TestBacktestBands:
-    """The range of outcomes charts as bands over the balances chart."""
+    """The outcome range charts as actual window trajectories."""
 
-    def test_a_held_backtest_draws_bands_in_the_default_mode(
-        self, bt_view_model: ChartsViewModel
+    def test_a_held_backtest_draws_the_worst_and_best_paths(
+        self, bt_state: PlanState, bt_view_model: ChartsViewModel
     ) -> None:
-        """Acceptance criterion: the outcome range charts as bands.
+        """Acceptance criterion: the range charts as real trajectories.
 
-        The 9.13 percentile trio wrapped in the worst/best envelope —
-        window extremes are real historical outcomes, so the envelope
-        is drawn for a backtest where Monte Carlo clips to 10/90.
+        The worst and best starting years' actual balance paths, each
+        labelled with its year — not pointwise percentile bands, which
+        follow no single history.
         """
-        balances = bt_view_model.charts[0]
-        labels = [band.label for band in balances.bands]
+        assert bt_state.backtest is not None
+        worst_year = bt_state.backtest.worst_window.start_year
+        best_year = bt_state.backtest.best_window.start_year
+        labels = [band.label for band in bt_view_model.charts[0].bands]
         assert labels == [
-            "Worst",
-            "10th percentile",
-            "Median",
-            "90th percentile",
-            "Best",
+            f"Worst start · {worst_year}",
+            f"Best start · {best_year}",
         ]
 
-    def test_bands_survive_the_monte_carlo_mode(self, bt_state: PlanState) -> None:
-        """With no Monte Carlo run held, the backtest bands still draw."""
+    def test_a_picked_starting_year_adds_its_path(self, bt_state: PlanState) -> None:
+        """Typing a starting year draws that window's own trajectory."""
+        view_model = build_charts_view_model(bt_state, backtest_year="1973")
+        labels = [band.label for band in view_model.charts[0].bands]
+        assert labels[2] == "Start · 1973"
+        assert view_model.backtest.year_value == "1973"
+        assert view_model.backtest.year_message == ""
+
+    def test_a_missed_starting_year_says_the_range(self, bt_state: PlanState) -> None:
+        """A year outside the windows draws nothing and names the span."""
+        assert bt_state.backtest is not None
+        first = bt_state.backtest.outcomes[0].start_year
+        last = bt_state.backtest.outcomes[-1].start_year
+        view_model = build_charts_view_model(bt_state, backtest_year="1066")
+        assert len(view_model.charts[0].bands) == 2
+        message = view_model.backtest.year_message
+        assert "1066" in message
+        assert f"{first} to {last}" in message
+
+    def test_an_unparseable_year_says_the_range_too(self, bt_state: PlanState) -> None:
+        """Non-numeric text is a miss, not an error."""
+        view_model = build_charts_view_model(bt_state, backtest_year="dunkirk")
+        assert len(view_model.charts[0].bands) == 2
+        assert "dunkirk" in view_model.backtest.year_message
+
+    def test_trajectories_survive_the_monte_carlo_mode(
+        self, bt_state: PlanState
+    ) -> None:
+        """With no Monte Carlo run held, the backtest paths still draw."""
         view_model = build_charts_view_model(bt_state, mode=RunMode.MONTE_CARLO)
-        assert len(view_model.charts[0].bands) == 5
+        assert len(view_model.charts[0].bands) == 2
 
     def test_no_backtest_no_bands(self, projected: PlanState) -> None:
         """Without a held result the balances chart draws bars alone."""
