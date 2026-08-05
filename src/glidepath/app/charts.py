@@ -14,8 +14,12 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
-from glidepath.app.backtest import BacktestPanelViewModel, build_backtest_panel
-from glidepath.app.display import format_money, format_wrapper_kind
+from glidepath.app.backtest import (
+    BacktestPanelViewModel,
+    build_backtest_panel,
+    selected_window,
+)
+from glidepath.app.display import format_money, format_share, format_wrapper_kind
 from glidepath.app.montecarlo import (
     BAND_SPECS,
     DEFAULT_RUN_MODE,
@@ -26,19 +30,29 @@ from glidepath.app.retirement import (
     RetirementPanelViewModel,
     build_retirement_panel,
 )
-from glidepath.core import Money, ReportBasis, RunMode, build_report
+from glidepath.core import (
+    AssumptionKey,
+    Money,
+    Provenance,
+    ReportBasis,
+    RunMode,
+    build_report,
+    mapping_assumption_value,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
     from glidepath.app.plan import PlanState
     from glidepath.core import (
+        AssetAllocation,
         BacktestResult,
         EntityId,
         MonteCarloResult,
         Period,
         PeriodReportRow,
         ProjectionReport,
+        WindowOutcome,
     )
 
 _ZERO = Money(Decimal(0))
@@ -150,7 +164,11 @@ class ChartsViewModel:
     start alongside (roadmap 9.11; year alone until couples activate,
     9.4 — a two-person period has no single age to show). ``message``
     carries the empty-state copy when there is nothing to chart; it
-    is blank whenever ``charts`` is populated.
+    is blank whenever ``charts`` is populated. ``allocation_note``
+    states the asset allocation each wrapper actually ran — stated
+    equity split, pinned cash, or the glide path with its provenance —
+    so a projection can never silently model a mix the user does not
+    hold.
     """
 
     basis_heading: str
@@ -159,6 +177,7 @@ class ChartsViewModel:
     categories: tuple[str, ...]
     charts: tuple[ChartSpec, ...]
     message: str
+    allocation_note: str
     monte_carlo: MonteCarloPanelViewModel
     retirement: RetirementPanelViewModel
     backtest: BacktestPanelViewModel
@@ -207,6 +226,8 @@ def build_charts_view_model(
     state: PlanState,
     basis: ReportBasis = DEFAULT_CHART_BASIS,
     mode: RunMode = DEFAULT_RUN_MODE,
+    *,
+    backtest_year: str = "",
 ) -> ChartsViewModel:
     """The charts screen for ``state``, presented in ``basis``.
 
@@ -214,9 +235,14 @@ def build_charts_view_model(
     run's own CPI path via the core reporting layer (planning §5.2).
     ``mode`` is the screen's run-mode selection (roadmap 9.13): under
     ``MONTE_CARLO`` a held Monte Carlo run adds its percentile bands
-    to the balances chart and its metrics to the panel. Without a
-    projection the screen carries only the empty-state message — the
-    no-run copy, or the run failure held on the state.
+    to the balances chart and its metrics to the panel.
+    ``backtest_year`` is the backtest card's starting-year picker as
+    raw text (presentation state the shell holds, like the basis and
+    mode): with a held backtest it adds that starting year's actual
+    trajectory to the balances chart alongside the worst and best
+    ones. Without a projection the screen carries only the
+    empty-state message — the no-run copy, or the run failure held on
+    the state.
     """
     selected_key = basis_key(basis)
     options = basis_options()
@@ -234,16 +260,20 @@ def build_charts_view_model(
             categories=(),
             charts=(),
             message=message,
+            allocation_note="",
             monte_carlo=build_monte_carlo_panel(
                 state, mode, ending_pot_deflator=None, basis_suffix=suffix
             ),
             retirement=build_retirement_panel(state, mode),
             backtest=build_backtest_panel(
-                state, ending_pot_deflator=None, basis_suffix=suffix
+                state,
+                ending_pot_deflator=None,
+                basis_suffix=suffix,
+                year_text=backtest_year,
             ),
         )
     grouped = _rows_by_period(build_report(state.result, basis))
-    bands = _chart_bands(state, mode, grouped)
+    bands = _chart_bands(state, mode, grouped, backtest_year)
     final_rows = next(reversed(grouped.values()))
     return ChartsViewModel(
         basis_heading=BASIS_HEADING,
@@ -258,6 +288,7 @@ def build_charts_view_model(
             _tax_chart(grouped, suffix),
         ),
         message="",
+        allocation_note=_allocation_note(state, grouped),
         monte_carlo=build_monte_carlo_panel(
             state,
             mode,
@@ -269,6 +300,7 @@ def build_charts_view_model(
             state,
             ending_pot_deflator=final_rows[0].balance_deflator,
             basis_suffix=suffix,
+            year_text=backtest_year,
         ),
     )
 
@@ -277,21 +309,102 @@ def _chart_bands(
     state: PlanState,
     mode: RunMode,
     grouped: dict[Period, list[PeriodReportRow]],
+    backtest_year: str,
 ) -> tuple[ChartBand, ...]:
-    """The percentile bands the balances chart draws, if any.
+    """The overlay lines the balances chart draws, if any.
 
-    A held Monte Carlo run supplies them under the Monte Carlo mode
-    (roadmap 9.13); a held backtest supplies them in either mode
-    (roadmap 9.18) — the two can never be held together, since each
-    slow-run transition re-anchors through
-    :func:`~glidepath.app.plan.replanned_state` and so drops the
-    other's result.
+    A held Monte Carlo run supplies its percentile bands under the
+    Monte Carlo mode (roadmap 9.13); a held backtest supplies actual
+    window trajectories in either mode (roadmap 9.18) — the two can
+    never be held together, since each slow-run transition re-anchors
+    through :func:`~glidepath.app.plan.replanned_state` and so drops
+    the other's result.
     """
     if mode is RunMode.MONTE_CARLO and state.monte_carlo is not None:
         return _balance_bands(state.monte_carlo, grouped)
     if state.backtest is not None:
-        return _balance_bands(state.backtest, grouped)
+        return _backtest_trajectories(state.backtest, grouped, backtest_year)
     return ()
+
+
+def _glide_note(state: PlanState) -> str:
+    """The glide path summarised with its provenance (planning §5.1).
+
+    The flat-shape check compares the shape's raw values — numeric
+    equality, so an overridden ``1`` and ``1.0`` are the same
+    allocation whatever their text.
+    """
+    assumption = state.assumptions.get(AssumptionKey.GLIDEPATH_DEFAULT_SHAPE)
+    shape = mapping_assumption_value(assumption)
+    start = shape["equity_start"]
+    at_retirement = shape["equity_at_retirement"]
+    years = shape["derisk_years_before_retirement"]
+    provenance = (
+        "shipped default"
+        if assumption.provenance is Provenance.DEFAULT_ASSUMPTION
+        else "your override"
+    )
+    if start == at_retirement:
+        return (
+            f"glide path — {format_share(Decimal(str(start)))} equity"
+            f" throughout ({provenance})"
+        )
+    return (
+        f"glide path — {format_share(Decimal(str(start)))} equity de-risking"
+        f" to {format_share(Decimal(str(at_retirement)))} over the {years}"
+        f" years before retirement ({provenance})"
+    )
+
+
+def _allocation_text(allocation: AssetAllocation) -> str:
+    """One stated allocation as copy: ``70% equity, 30% bonds``.
+
+    Zero slices are dropped — the weights sum to one, so at least one
+    always remains.
+    """
+    slices = (
+        (allocation.equity, "equity"),
+        (allocation.bonds, "bonds"),
+        (allocation.cash, "cash"),
+    )
+    return ", ".join(
+        f"{format_share(value)} {name}" for value, name in slices if value != Decimal(0)
+    )
+
+
+def _allocation_note(
+    state: PlanState, grouped: dict[Period, list[PeriodReportRow]]
+) -> str:
+    """What each wrapper is invested in, as one status line (§5.1).
+
+    Every projection surface — deterministic, Monte Carlo, backtest —
+    runs this allocation, so the line sits with the charts it
+    explains. A stated equity split reads ``(stated)``; a cash
+    account's pinned allocation is a rule and carries no suffix; a
+    wrapper with nothing stated names the glide path and whether it
+    is the shipped default or an override. A household holding no
+    wrappers at all (DB and state pension income only) has nothing to
+    invest, so the note is empty rather than a dangling prefix.
+    """
+    household = state.household
+    if household is None:
+        return ""
+    labels = wrapper_display_labels(row for rows in grouped.values() for row in rows)
+    glide = _glide_note(state)
+    parts = []
+    for person in household.persons:
+        for wrapper in person.wrappers:
+            label = labels.get(wrapper.id, format_wrapper_kind(wrapper.kind))
+            allocation = wrapper.allocation
+            if allocation is None:
+                parts.append(f"{label}: {glide}")
+            elif allocation.cash == Decimal(1):
+                parts.append(f"{label}: {_allocation_text(allocation)}")
+            else:
+                parts.append(f"{label}: {_allocation_text(allocation)} (stated)")
+    if not parts:
+        return ""
+    return "Invested as — " + "; ".join(parts)
 
 
 def _category_label(period: Period, rows: list[PeriodReportRow]) -> str:
@@ -379,16 +492,13 @@ def wrapper_display_labels(rows: Iterable[PeriodReportRow]) -> dict[EntityId, st
 
 
 def _balance_bands(
-    result: MonteCarloResult | BacktestResult,
-    grouped: dict[Period, list[PeriodReportRow]],
+    result: MonteCarloResult, grouped: dict[Period, list[PeriodReportRow]]
 ) -> tuple[ChartBand, ...]:
-    """The 10/50/90 percentile bands over the balances chart (9.13, 9.18).
+    """The 10/50/90 percentile bands over the balances chart (9.13).
 
-    Both slow-run results answer the same ``balance_percentile``
-    reduction, so one composition serves paths and windows alike. The
-    balances are nominal; CPI is deterministic across paths and
-    windows (planning §5.2), so each period's band value deflates by
-    the same balance deflator the deterministic report rows carry — 1
+    The Monte Carlo balances are nominal; CPI is deterministic across
+    paths (planning §5.2), so each period's band value deflates by the
+    same balance deflator the deterministic report rows carry — 1
     under the nominal basis. A held result whose period count differs
     from the projection's (the runs straddled a calendar day) draws no
     bands rather than bands against the wrong periods.
@@ -407,6 +517,56 @@ def _balance_bands(
             ),
         )
         for spec in BAND_SPECS
+    )
+
+
+def _trajectory_band(
+    outcome: WindowOutcome, label_prefix: str, deflators: tuple[Decimal, ...]
+) -> ChartBand:
+    """One window's actual balance path as a chart line (9.18).
+
+    Labelled with its starting year (`Worst start · 1907`), so the
+    legend names the history being replayed; the nominal balances
+    deflate by the report rows' own deflators like every band.
+    """
+    return ChartBand(
+        label=f"{label_prefix} · {outcome.start_year}",
+        values=tuple(
+            Money(value.amount / deflator).quantized().amount
+            for value, deflator in zip(outcome.closing_balances, deflators, strict=True)
+        ),
+    )
+
+
+def _backtest_trajectories(
+    result: BacktestResult,
+    grouped: dict[Period, list[PeriodReportRow]],
+    year_text: str,
+) -> tuple[ChartBand, ...]:
+    """The worst, best, and picked starting years' actual paths (9.18).
+
+    Unlike the Monte Carlo percentile bands — pointwise order
+    statistics that follow no single path — each backtest line is one
+    starting year's real trajectory: the worst and best windows
+    always, plus whichever starting year the picker's raw text names
+    (:func:`~glidepath.app.backtest.selected_window`; a miss draws
+    nothing and the card says why). Any drawn outcome whose period
+    count differs from the projection's (the runs straddled a
+    calendar day, or a hand-built result misaligned its windows)
+    draws no lines rather than lines against the wrong periods.
+    """
+    deflators = tuple(rows[0].balance_deflator for rows in grouped.values())
+    picked, _ = selected_window(result, year_text)
+    lines = [
+        (result.worst_window, "Worst start"),
+        (result.best_window, "Best start"),
+    ]
+    if picked is not None:
+        lines.append((picked, "Start"))
+    if any(len(outcome.closing_balances) != len(deflators) for outcome, _ in lines):
+        return ()
+    return tuple(
+        _trajectory_band(outcome, prefix, deflators) for outcome, prefix in lines
     )
 
 

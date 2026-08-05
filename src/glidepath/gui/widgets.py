@@ -273,6 +273,7 @@ class MainWindow(QMainWindow):
         self._retirement_input: PlanState | None = None
         self._backtest_worker: _TransitionWorker | None = None
         self._backtest_input: PlanState | None = None
+        self._backtest_year = ""
         self.setWindowTitle(view_model.window_title)
         self.resize(1120, 780)
 
@@ -288,6 +289,7 @@ class MainWindow(QMainWindow):
                 run_monte_carlo=self._handle_monte_carlo_run,
                 run_retirement=self._handle_retirement_run,
                 run_backtest=self._handle_backtest_run,
+                select_backtest_year=self._handle_backtest_year,
             )
         )
         self.scenarios_pane = ScenariosPane(
@@ -448,6 +450,7 @@ class MainWindow(QMainWindow):
                 mode=self._charts_mode,
                 comparison_basis=self._comparison_basis,
                 comparison_metric_key=self._comparison_metric,
+                backtest_year=self._backtest_year,
             ),
         )
         if report is None:
@@ -697,6 +700,19 @@ class MainWindow(QMainWindow):
         self.statusBar().clearMessage()
         self._refresh_result_panes()
 
+    def _handle_backtest_year(self, text: str) -> None:
+        """Re-present the charts with the picked starting year (9.18).
+
+        Presentation state like the basis and mode selections — no
+        run happens; the trajectory comes from the held result. Qt
+        fires ``editingFinished`` on every focus-out, so an unchanged
+        text skips the rebuild.
+        """
+        if text == self._backtest_year:
+            return
+        self._backtest_year = text
+        self._refresh_charts_pane()
+
     def _handle_backtest_run(self) -> None:
         """Start a historical backtest off the GUI thread (9.18).
 
@@ -741,7 +757,10 @@ class MainWindow(QMainWindow):
         """Re-render the charts tab in its selected basis and run mode."""
         self.charts_pane.refresh(
             build_charts_view_model(
-                self._state, basis=self._charts_basis, mode=self._charts_mode
+                self._state,
+                basis=self._charts_basis,
+                mode=self._charts_mode,
+                backtest_year=self._backtest_year,
             )
         )
 

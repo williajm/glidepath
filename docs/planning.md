@@ -1748,9 +1748,19 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   starting year with the plan-calendar year the money ran out,
   ending-pot percentiles) under the 9.13 worker-thread + staleness +
   re-anchoring rules and the 9.16 busy indicator; a held backtest
-  draws the 10/50/90 bands over the balances chart in either run mode
-  (it can never coexist with a held Monte Carlo result — each slow-run
-  transition re-anchors and drops the other), and its metrics join the
+  draws the worst and best starting years' *actual balance
+  trajectories* over the balances chart in either run mode, each line
+  labelled with its year, plus whichever starting year the card's
+  picker names ("show me 1973") — real window paths rather than
+  pointwise percentile bands, because a window is a genuine
+  historical outcome where a Monte Carlo extreme is sampling noise;
+  the 10/50/90 ending-pot percentiles stay on the card, and the mean
+  is deliberately omitted (right-skewed pots read optimistic against
+  the median). The picker is presentation state like the basis and
+  mode selections — no run happens; a miss names the valid span. A
+  held backtest can never coexist with a held Monte Carlo
+  result — each slow-run
+  transition re-anchors and drops the other — and its metrics join the
   9.19 PDF report. The run is serial by design: a full backtest is
   ≈ 1 s of deterministic passes, under the 9.15 pool threshold.
   Provenance: `BacktestResult` carries the series it replayed —
@@ -1776,6 +1786,26 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   exist. Generation is app-layer (§4.7) — the shell contributes the
   dialogs, the chart raster, and the QPdfWriter device (no new
   runtime dependency). Every export carries the §1 disclaimer.*
+
+- [x] 9.20 Allocation transparency and per-wrapper allocation entry —
+  *the modelled asset mix must never be a silent assumption (a user
+  holding 100% equity was being projected on the default 80/20→40/60
+  glide path with nothing on screen saying so). Two parts. **Facts
+  form:** each savings wrapper gains an optional "Equity allocation,
+  %" field — one number, the remainder in bonds, blank follows the
+  glide path — parsed to the engine's existing `Wrapper.allocation`
+  (which already persisted; only the form refused it). Cash accounts
+  stay pinned all-cash and reject an entry rather than ignore it;
+  `form_cannot_represent` now refuses only cash-bearing allocations
+  (hand-edited files), not equity/bond splits. **Charts:** an
+  "Invested as" line on the charts tab (and the 9.19 PDF report)
+  states what each wrapper actually ran — a stated split as
+  "100% equity (stated)", pinned cash, or the glide path summarised
+  with its provenance ("80% equity de-risking to 40% over the 15
+  years before retirement (shipped default)" vs "(your override)") —
+  so every projection surface names its allocation. Percent copy
+  trims trailing zeros (`format_share`); a stated "62.5" round-trips
+  through the form exactly.*
 
 ## 9. Open questions
 

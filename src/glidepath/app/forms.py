@@ -231,6 +231,9 @@ _WRAPPER_KINDS: Mapping[str, WrapperKindId] = {
 _PENSION_KINDS = frozenset({WORKPLACE_DC_KIND, SIPP_KIND})
 """Kinds whose wrappers may carry a crystallised (drawdown) balance."""
 _CASH_ALLOCATION = AssetAllocation(equity=Decimal(0), bonds=Decimal(0), cash=Decimal(1))
+_HUNDRED = Decimal(100)
+_CASH_EQUITY_MESSAGE = "Cash accounts always hold cash — leave blank."
+_EQUITY_PERCENT_MESSAGE = "Enter a percentage from 0 to 100."
 """A cash account holds cash — never the glide path (roadmap 9.2)."""
 _RELIEF_MECHANICS: Mapping[str, ReliefMechanic] = {
     "relief_at_source": ReliefMechanic.RELIEF_AT_SOURCE,
@@ -529,6 +532,7 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
             "Only pension wrappers hold a crystallised balance — leave blank.",
         )
     contributions = _contributions_from(reader)
+    allocation = _allocation_from(reader, kind)
     if kind is None or balance is None or not reader.ok:
         return None
     try:
@@ -538,11 +542,35 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
             balance=balance,
             crystallised_balance=crystallised,
             contributions=contributions,
-            allocation=_CASH_ALLOCATION if kind == CASH_KIND else None,
+            allocation=allocation,
         )
     except ValueError as exc:
         reader.error("", str(exc))
         return None
+
+
+def _allocation_from(
+    reader: _SectionReader, kind: WrapperKindId | None
+) -> AssetAllocation | None:
+    """A wrapper's stated allocation, or ``None`` to follow the glide path.
+
+    The form takes one number — the equity share as a percentage, the
+    remainder in bonds — because that is the decision the glide path
+    itself models; a cash account is always 100% cash and rejects an
+    entry rather than silently ignoring it (roadmap 9.2).
+    """
+    equity_percent = reader.decimal_value("equity_percent")
+    if kind == CASH_KIND:
+        if equity_percent is not None:
+            reader.error("equity_percent", _CASH_EQUITY_MESSAGE)
+        return _CASH_ALLOCATION
+    if equity_percent is None:
+        return None
+    if not Decimal(0) <= equity_percent <= _HUNDRED:
+        reader.error("equity_percent", _EQUITY_PERCENT_MESSAGE)
+        return None
+    equity = equity_percent / _HUNDRED
+    return AssetAllocation(equity=equity, bonds=Decimal(1) - equity)
 
 
 def _active_membership_from(
@@ -961,6 +989,7 @@ def _wrapper_values(wrapper: Wrapper) -> dict[str, str]:
             "" if crystallised is None else str(crystallised.value.amount)
         ),
         "balances_as_of": wrapper.balance.as_of.isoformat(),
+        "equity_percent": _equity_percent_text(wrapper),
         "employee_contribution": "",
         "employer_contribution": "",
         "relief_mechanic": "",
@@ -1031,15 +1060,48 @@ def _annuity_purchase_values(purchase: AnnuityPurchase) -> dict[str, str]:
     }
 
 
+def _equity_percent_text(wrapper: Wrapper) -> str:
+    """The stated equity share as the percent text the form echoes.
+
+    Blank for a glide-path follower and for cash accounts (whose
+    pinned allocation is a rule, not an entry); trailing zeros are
+    trimmed so a submitted "62.5" round-trips as "62.5".
+    """
+    allocation = wrapper.allocation
+    if allocation is None or wrapper.kind == CASH_KIND:
+        return ""
+    text = format(allocation.equity * _HUNDRED, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def _allocation_cannot_represent(wrapper: Wrapper) -> str | None:
+    """Why the equity-percent field cannot express ``wrapper.allocation``.
+
+    The field states an equity share with the remainder in bonds, so a
+    cash-bearing allocation (possible only in a hand-edited plan file)
+    has no faithful text; a cash account must carry exactly its pinned
+    all-cash allocation.
+    """
+    if wrapper.kind == CASH_KIND:
+        if wrapper.allocation != _CASH_ALLOCATION:
+            return "a non-cash allocation on a cash account"
+        return None
+    if wrapper.allocation is not None and wrapper.allocation.cash != Decimal(0):
+        return "an asset allocation holding cash"
+    return None
+
+
 def _wrapper_cannot_represent(wrapper: Wrapper) -> str | None:
     """Why the form cannot faithfully edit ``wrapper``; ``None`` if it can."""
     if str(wrapper.kind) not in _WRAPPER_KINDS:
         return f"the wrapper kind {str(wrapper.kind)!r}"
     if wrapper.fees is not None:
         return "a wrapper fee schedule"
-    expected_allocation = _CASH_ALLOCATION if wrapper.kind == CASH_KIND else None
-    if wrapper.allocation != expected_allocation:
-        return "a per-wrapper asset allocation"
+    allocation_reason = _allocation_cannot_represent(wrapper)
+    if allocation_reason is not None:
+        return allocation_reason
     crystallised = wrapper.crystallised_balance
     if crystallised is not None and crystallised.as_of != wrapper.balance.as_of:
         return "wrapper balances dated on different days"
@@ -1400,6 +1462,15 @@ def _wrapper_section() -> SectionSpec:
                 hint="pensions only; blank if none",
             ),
             _as_of_field("balances_as_of", "Balances as of"),
+            FieldSpec(
+                key="equity_percent",
+                label="Equity allocation, % (your choice)",
+                hint=(
+                    "e.g. 100 for all-equity; the rest is bonds. Blank "
+                    "follows the de-risking glide path; cash accounts "
+                    "are always cash"
+                ),
+            ),
             FieldSpec(
                 key="employee_contribution",
                 label="Your contribution (gross, per year — your choice)",

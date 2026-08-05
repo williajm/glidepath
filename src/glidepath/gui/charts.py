@@ -69,7 +69,9 @@ class ChartsPaneCallbacks:
     success-target text plus the Monte Carlo panel's raw seed and
     path-count text (its basis under that run mode) — the shell
     parses, the pane only captures (planning §4.7). ``run_backtest``
-    carries nothing: the historical backtest has no inputs (9.18).
+    carries nothing — the run itself has no inputs (9.18) — and
+    ``select_backtest_year`` forwards the starting-year picker's raw
+    text, presentation state like the basis and mode selections.
     """
 
     select_basis: Callable[[str], None]
@@ -77,6 +79,7 @@ class ChartsPaneCallbacks:
     run_monte_carlo: Callable[[str, str], None]
     run_retirement: Callable[[str, str, str, str], None]
     run_backtest: Callable[[], None]
+    select_backtest_year: Callable[[str], None]
 
 
 def _bar_hovered(
@@ -208,6 +211,9 @@ class ChartsPane(QWidget):
         self._build_backtest_box()
         busy_row = self._build_busy_row()
 
+        self.allocation_label = QLabel("", self)
+        self.allocation_label.setWordWrap(True)
+
         self.message_label = QLabel("", self)
         self.message_label.setWordWrap(True)
 
@@ -221,6 +227,7 @@ class ChartsPane(QWidget):
         layout.addWidget(self._retirement_box)
         layout.addWidget(self._backtest_box)
         layout.addLayout(busy_row)
+        layout.addWidget(self.allocation_label)
         layout.addWidget(self.message_label)
         layout.addWidget(self.chart_tabs, 1)
 
@@ -236,6 +243,8 @@ class ChartsPane(QWidget):
         self._sync_monte_carlo(view_model.monte_carlo)
         self._sync_retirement(view_model.retirement)
         self._sync_backtest(view_model.backtest)
+        self.allocation_label.setText(view_model.allocation_note)
+        self.allocation_label.setVisible(bool(view_model.allocation_note))
         self.message_label.setText(view_model.message)
         self.message_label.setVisible(bool(view_model.message))
         self.chart_tabs.setVisible(bool(view_model.charts))
@@ -306,8 +315,17 @@ class ChartsPane(QWidget):
         self.backtest_button = QPushButton("", self._backtest_box)
         self.backtest_button.clicked.connect(self._backtest_clicked)
         backtest_controls.addWidget(self.backtest_button)
+        self.backtest_year_label = QLabel("", self._backtest_box)
+        self.backtest_year_edit = QLineEdit(self._backtest_box)
+        self.backtest_year_edit.setMaximumWidth(80)
+        self.backtest_year_edit.editingFinished.connect(self._backtest_year_changed)
+        backtest_controls.addWidget(self.backtest_year_label)
+        backtest_controls.addWidget(self.backtest_year_edit)
         backtest_controls.addStretch(1)
         backtest_layout.addLayout(backtest_controls)
+        self.backtest_year_message_label = QLabel("", self._backtest_box)
+        self.backtest_year_message_label.setWordWrap(True)
+        backtest_layout.addWidget(self.backtest_year_message_label)
         self.backtest_metrics_label = QLabel("", self._backtest_box)
         self.backtest_metrics_label.setWordWrap(True)
         backtest_layout.addWidget(self.backtest_metrics_label)
@@ -322,6 +340,10 @@ class ChartsPane(QWidget):
     def _backtest_clicked(self) -> None:
         """Ask the shell to run the historical backtest (9.18)."""
         self._callbacks.run_backtest()
+
+    def _backtest_year_changed(self) -> None:
+        """Forward the starting-year picker's raw text to the shell."""
+        self._callbacks.select_backtest_year(self.backtest_year_edit.text())
 
     def _retirement_clicked(self) -> None:
         """Forward the card's raw text to the shell (roadmap 9.14).
@@ -438,6 +460,13 @@ class ChartsPane(QWidget):
         """Re-render the historical-backtest card (roadmap 9.18)."""
         self._backtest_box.setTitle(panel.heading)
         self.backtest_button.setText(panel.run_label)
+        self.backtest_year_label.setText(panel.year_label)
+        self.backtest_year_edit.setText(panel.year_value)
+        self.backtest_year_edit.setPlaceholderText(panel.year_placeholder)
+        self.backtest_year_label.setToolTip(panel.year_tooltip)
+        self.backtest_year_edit.setToolTip(panel.year_tooltip)
+        self.backtest_year_message_label.setText(panel.year_message)
+        self.backtest_year_message_label.setVisible(bool(panel.year_message))
         metrics = "\n".join(f"{row.label}: {row.value}" for row in panel.metrics)
         self.backtest_metrics_label.setText(metrics)
         self.backtest_metrics_label.setVisible(bool(metrics))

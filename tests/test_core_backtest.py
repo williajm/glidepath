@@ -664,6 +664,34 @@ class TestBacktestMetrics:
         result = result_of(outcome_of(0, "100"), outcome_of(1, "100"))
         assert result.worst_window.start_year == 1900
 
+    def test_a_survivor_outranks_every_ruined_window_as_best(self) -> None:
+        """Any window that survived beats any that fell short."""
+        result = result_of(
+            outcome_of(0, "500", shortfall_year=2029),
+            outcome_of(1, "1"),
+        )
+        assert result.best_window.start_year == 1901
+
+    def test_the_highest_ending_balance_is_the_best_survivor(self) -> None:
+        """Among survivors, the fattest ending pot is best."""
+        result = result_of(
+            outcome_of(0, "300"), outcome_of(1, "100"), outcome_of(2, "200")
+        )
+        assert result.best_window.start_year == 1900
+
+    def test_the_latest_shortfall_is_the_best_ruin(self) -> None:
+        """With every window ruined, lasting longest is best."""
+        result = result_of(
+            outcome_of(0, "0", shortfall_year=2027),
+            outcome_of(1, "0", shortfall_year=2029),
+        )
+        assert result.best_window.start_year == 1901
+
+    def test_best_ties_resolve_to_the_earliest_starting_year(self) -> None:
+        """Identical outcomes name the earliest start, deterministically."""
+        result = result_of(outcome_of(0, "100"), outcome_of(1, "100"))
+        assert result.best_window.start_year == 1900
+
     def test_percentiles_interpolate_between_order_statistics(self) -> None:
         """Fractional ranks interpolate linearly (the Monte Carlo rule)."""
         result = result_of(

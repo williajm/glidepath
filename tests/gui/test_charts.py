@@ -38,6 +38,7 @@ from glidepath.app import (
     state_with_override,
     state_with_retirement,
 )
+from glidepath.app.backtest import BACKTEST_YEAR_LABEL
 from glidepath.app.retirement import RETIREMENT_ANSWER_PREFIX
 from glidepath.core import (
     Decision,
@@ -64,11 +65,13 @@ AS_OF = date(2026, 8, 1)
 
 
 def callbacks(
+    *,
     select_basis: Callable[[str], None] | None = None,
     select_mode: Callable[[str], None] | None = None,
     run_monte_carlo: Callable[[str, str], None] | None = None,
     run_retirement: Callable[[str, str, str, str], None] | None = None,
     run_backtest: Callable[[], None] | None = None,
+    select_backtest_year: Callable[[str], None] | None = None,
 ) -> ChartsPaneCallbacks:
     """Pane callbacks defaulting to no-ops for uninvolved actions."""
     return ChartsPaneCallbacks(
@@ -77,6 +80,7 @@ def callbacks(
         run_monte_carlo=run_monte_carlo or (lambda _seed, _paths: None),
         run_retirement=run_retirement or (lambda _rate, _success, _seed, _paths: None),
         run_backtest=run_backtest or (lambda: None),
+        select_backtest_year=select_backtest_year or (lambda _year: None),
     )
 
 
@@ -197,6 +201,17 @@ class TestChartsPane:
         pane.refresh(view_model)
         assert pane.chart_tabs.count() == len(view_model.charts)
 
+    def test_the_allocation_note_renders(self) -> None:
+        """The "Invested as" line shows with a projection, hides without."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(build_charts_view_model(initial_plan_state()))
+        assert pane.allocation_label.isHidden()
+        view_model = projected_view_model()
+        pane.refresh(view_model)
+        assert not pane.allocation_label.isHidden()
+        assert pane.allocation_label.text() == view_model.allocation_note
+        assert view_model.allocation_note.startswith("Invested as")
+
     def test_refresh_keeps_the_selected_chart(self) -> None:
         """Rebuilding the sub-tabs must not move the user off a chart."""
         pane = ChartsPane(callbacks())
@@ -307,7 +322,36 @@ class TestBacktestCard:
         assert isinstance(view, QChartView)
         series = view.chart().series()
         assert len(series) == 1 + len(view_model.charts[0].bands)
-        assert len(view_model.charts[0].bands) == 3
+        assert len(view_model.charts[0].bands) == 2
+
+    def test_the_year_picker_is_labelled_and_explained(self) -> None:
+        """The picker must say what it is for and what it expects.
+
+        The label names the control, the tooltip explains what an
+        entry draws, and — once a result is held — the placeholder
+        shows the valid span greyed inside the empty box. Pinned
+        because an unsynced label renders as a bare unexplained box.
+        """
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        assert pane.backtest_year_label.text() == BACKTEST_YEAR_LABEL
+        assert pane.backtest_year_edit.toolTip()
+        state = state_with_backtest(projected_state(), today=TODAY)
+        pane.refresh(build_charts_view_model(state))
+        assert state.backtest is not None
+        first = state.backtest.outcomes[0].start_year
+        last = state.backtest.outcomes[-1].start_year
+        assert pane.backtest_year_edit.placeholderText() == f"{first}-{last}"
+        assert str(first) in pane.backtest_year_edit.toolTip()
+
+    def test_year_picker_forwards_the_raw_text(self) -> None:
+        """The shell parses; the picker only captures and forwards."""
+        picked: list[str] = []
+        pane = ChartsPane(callbacks(select_backtest_year=picked.append))
+        pane.refresh(projected_view_model())
+        pane.backtest_year_edit.setText("1973")
+        pane.backtest_year_edit.editingFinished.emit()
+        assert picked == ["1973"]
 
 
 class TestRetirementCard:
@@ -687,9 +731,18 @@ class TestMainWindowBacktestFlow:
         text = pane.backtest_metrics_label.text()
         assert "Success rate" in text
         assert "Worst starting year" in text
+        assert "Best starting year" in text
         view = pane.chart_tabs.widget(0)
         assert isinstance(view, QChartView)
-        assert len(view.chart().series()) == 4
+        assert len(view.chart().series()) == 3
+        # Picking a starting year draws its own trajectory and the
+        # selection survives the refresh.
+        pane.backtest_year_edit.setText("1973")
+        pane.backtest_year_edit.editingFinished.emit()
+        picked_view = pane.chart_tabs.widget(0)
+        assert isinstance(picked_view, QChartView)
+        assert len(picked_view.chart().series()) == 4
+        assert pane.backtest_year_edit.text() == "1973"
 
     def test_a_plan_change_discards_an_in_flight_backtest(
         self, window: MainWindow

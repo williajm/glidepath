@@ -28,20 +28,27 @@ from glidepath.app import (
 )
 from glidepath.app.backtest import (
     BACKTEST_FAILED_PREFIX,
+    BEST_WINDOW_LABEL,
     WINDOWS_LABEL,
     WORST_WINDOW_LABEL,
 )
 from glidepath.app.montecarlo import SUCCESS_RATE_LABEL
 from glidepath.app.plan import replanned_state
 from glidepath.core import (
+    BacktestResult,
     Decision,
     EntityId,
     Fact,
+    HistoricalSeries,
+    HistoricalYear,
     Household,
     Money,
     Person,
+    RunConfig,
     RunMode,
+    RunProvenance,
     SpendingPlan,
+    WindowOutcome,
     Wrapper,
 )
 from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY, load_returns_history
@@ -252,12 +259,43 @@ class TestBacktestPanel:
         )
         assert worst.value.startswith(str(bt_state.backtest.worst_window.start_year))
 
+    def test_identifies_the_best_starting_year(
+        self, bt_state: PlanState, bt_view_model: ChartsViewModel
+    ) -> None:
+        """The best window is named alongside the worst."""
+        assert bt_state.backtest is not None
+        best = next(
+            r for r in bt_view_model.backtest.metrics if r.label == BEST_WINDOW_LABEL
+        )
+        assert best.value.startswith(str(bt_state.backtest.best_window.start_year))
+
     def test_ending_pot_labels_carry_the_basis(self, bt_state: PlanState) -> None:
         """The nominal basis names itself on the pot rows."""
         view_model = build_charts_view_model(bt_state, basis=ReportBasis.NOMINAL)
         pots = [row for row in view_model.backtest.metrics if "Ending pot" in row.label]
         assert len(pots) == 3
         assert all(row.label.endswith("(nominal)") for row in pots)
+
+    def test_the_year_picker_carries_its_explanation(
+        self, bt_state: PlanState, bt_view_model: ChartsViewModel
+    ) -> None:
+        """The picker names its expected input and what it will draw."""
+        assert bt_state.backtest is not None
+        first = bt_state.backtest.outcomes[0].start_year
+        last = bt_state.backtest.outcomes[-1].start_year
+        panel = bt_view_model.backtest
+        assert panel.year_label
+        assert panel.year_placeholder == f"{first}-{last}"
+        assert f"{first} to {last}" in panel.year_tooltip
+        assert "balances chart" in panel.year_tooltip
+
+    def test_without_a_result_the_picker_says_to_run_first(
+        self, projected: PlanState
+    ) -> None:
+        """Before any run the tooltip explains the prerequisite."""
+        panel = build_charts_view_model(projected).backtest
+        assert panel.year_placeholder == ""
+        assert "Run the backtest first" in panel.year_tooltip
 
     def test_no_run_shows_the_empty_state_copy(self, projected: PlanState) -> None:
         """Before any run the card carries the no-backtest message."""
@@ -274,19 +312,117 @@ class TestBacktestPanel:
 
 
 class TestBacktestBands:
-    """The range of outcomes charts as bands over the balances chart."""
+    """The outcome range charts as actual window trajectories."""
 
-    def test_a_held_backtest_draws_bands_in_the_default_mode(
-        self, bt_view_model: ChartsViewModel
+    def test_a_held_backtest_draws_the_worst_and_best_paths(
+        self, bt_state: PlanState, bt_view_model: ChartsViewModel
     ) -> None:
-        """Acceptance criterion: the outcome range charts as 10/50/90 bands."""
-        balances = bt_view_model.charts[0]
-        assert len(balances.bands) == 3
+        """Acceptance criterion: the range charts as real trajectories.
 
-    def test_bands_survive_the_monte_carlo_mode(self, bt_state: PlanState) -> None:
-        """With no Monte Carlo run held, the backtest bands still draw."""
+        The worst and best starting years' actual balance paths, each
+        labelled with its year — not pointwise percentile bands, which
+        follow no single history.
+        """
+        assert bt_state.backtest is not None
+        worst_year = bt_state.backtest.worst_window.start_year
+        best_year = bt_state.backtest.best_window.start_year
+        labels = [band.label for band in bt_view_model.charts[0].bands]
+        assert labels == [
+            f"Worst start · {worst_year}",
+            f"Best start · {best_year}",
+        ]
+
+    def test_a_picked_starting_year_adds_its_path(self, bt_state: PlanState) -> None:
+        """Typing a starting year draws that window's own trajectory."""
+        view_model = build_charts_view_model(bt_state, backtest_year="1973")
+        labels = [band.label for band in view_model.charts[0].bands]
+        assert labels[2] == "Start · 1973"
+        assert view_model.backtest.year_value == "1973"
+        assert view_model.backtest.year_message == ""
+
+    def test_a_missed_starting_year_says_the_range(self, bt_state: PlanState) -> None:
+        """A year outside the windows draws nothing and names the span."""
+        assert bt_state.backtest is not None
+        first = bt_state.backtest.outcomes[0].start_year
+        last = bt_state.backtest.outcomes[-1].start_year
+        view_model = build_charts_view_model(bt_state, backtest_year="1066")
+        assert len(view_model.charts[0].bands) == 2
+        message = view_model.backtest.year_message
+        assert "1066" in message
+        assert f"{first} to {last}" in message
+
+    def test_an_unparseable_year_says_the_range_too(self, bt_state: PlanState) -> None:
+        """Non-numeric text is a miss, not an error."""
+        view_model = build_charts_view_model(bt_state, backtest_year="dunkirk")
+        assert len(view_model.charts[0].bands) == 2
+        assert "dunkirk" in view_model.backtest.year_message
+
+    def test_trajectories_survive_the_monte_carlo_mode(
+        self, bt_state: PlanState
+    ) -> None:
+        """With no Monte Carlo run held, the backtest paths still draw."""
         view_model = build_charts_view_model(bt_state, mode=RunMode.MONTE_CARLO)
-        assert len(view_model.charts[0].bands) == 3
+        assert len(view_model.charts[0].bands) == 2
+
+    def test_misaligned_hand_built_outcomes_draw_no_lines(
+        self, projected: PlanState
+    ) -> None:
+        """A drawn outcome with the wrong period count draws nothing.
+
+        ``BacktestResult`` permits hand-built outcomes with differing
+        balance counts; only the runner guarantees alignment. Every
+        drawn trajectory is validated, so a misaligned best window
+        can never crash view-model construction.
+        """
+        assert projected.result is not None
+        periods = len(projected.result.snapshots)
+        aligned = tuple(Money(Decimal(0)) for _ in range(periods))
+        worst = WindowOutcome(
+            window=0,
+            start_year=1900,
+            first_shortfall_period=projected.result.snapshots[0].period,
+            ending_balance=aligned[-1],
+            closing_balances=aligned,
+        )
+        best = WindowOutcome(
+            window=1,
+            start_year=1901,
+            first_shortfall_period=None,
+            ending_balance=Money(Decimal(100)),
+            closing_balances=(Money(Decimal(100)),),
+        )
+        result = BacktestResult(
+            outcomes=(worst, best),
+            config=RunConfig(today=TODAY),
+            provenance=RunProvenance(
+                facts=(),
+                decisions=(),
+                assumptions=(),
+                region_data_version="test",
+                seed=None,
+            ),
+            series=HistoricalSeries(
+                years=(
+                    HistoricalYear(
+                        year=1900,
+                        equity=Decimal(0),
+                        bonds=Decimal(0),
+                        cash=Decimal(0),
+                        cpi=Decimal(0),
+                    ),
+                    HistoricalYear(
+                        year=1901,
+                        equity=Decimal(0),
+                        bonds=Decimal(0),
+                        cash=Decimal(0),
+                        cpi=Decimal(0),
+                    ),
+                )
+            ),
+        )
+        state = replace(projected, backtest=result)
+        view_model = build_charts_view_model(state)
+        assert view_model.charts[0].bands == ()
 
     def test_no_backtest_no_bands(self, projected: PlanState) -> None:
         """Without a held result the balances chart draws bars alone."""

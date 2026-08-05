@@ -22,10 +22,12 @@ from glidepath.app import (
     build_charts_view_model,
     initial_plan_state,
     state_with_household,
+    state_with_override,
 )
 from glidepath.app.charts import _category_label
 from glidepath.core import (
     AnnuityPurchase,
+    AssetAllocation,
     Decision,
     EntityId,
     Fact,
@@ -304,6 +306,75 @@ def two_isas_fixture() -> ChartsViewModel:
     )
     state = state_with_household(initial_plan_state(), plan, today=TODAY)
     return build_charts_view_model(state)
+
+
+class TestAllocationNote:
+    """The charts screen states what each wrapper is invested in."""
+
+    def test_glide_path_followers_name_the_default_shape(
+        self, view_model: ChartsViewModel
+    ) -> None:
+        """The note names the glide path and its provenance.
+
+        With nothing stated, the modelled mix must never be silent.
+        """
+        note = view_model.allocation_note
+        assert note.startswith("Invested as — ")
+        assert "ISA: glide path" in note
+        assert "80% equity de-risking to 40%" in note
+        assert "(shipped default)" in note
+
+    def test_a_stated_allocation_reads_stated(self) -> None:
+        """A wrapper with its own split names the split, marked stated."""
+        stated = Wrapper(
+            id=EntityId("alloc-isa"),
+            kind=ISA_KIND,
+            balance=money_fact("25000"),
+            allocation=AssetAllocation(equity=Decimal(1), bonds=Decimal(0)),
+        )
+        state = state_with_household(
+            initial_plan_state(), household((stated,), employment=None), today=TODAY
+        )
+        note = build_charts_view_model(state).allocation_note
+        assert "ISA: 100% equity (stated)" in note
+
+    def test_an_overridden_glide_shape_reads_your_override(self) -> None:
+        """Overriding the shape re-labels the glide provenance."""
+        override_text = (
+            "equity_start = 1.0\n"
+            "derisk_years_before_retirement = 1\n"
+            "equity_at_retirement = 1.0\n"
+            "transition = linear\n"
+            "in_drawdown = hold"
+        )
+        outcome = state_with_override(
+            initial_plan_state(),
+            "glidepath.default_shape",
+            override_text,
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        state = state_with_household(
+            outcome.state,
+            household((wrapper("alloc-isa2", ISA_KIND, "25000"),), employment=None),
+            today=TODAY,
+        )
+        note = build_charts_view_model(state).allocation_note
+        assert "100% equity throughout (your override)" in note
+
+    def test_a_wrapperless_household_has_no_note(self) -> None:
+        """DB/state-pension-only plans invest nothing — no dangling prefix."""
+        state = state_with_household(
+            initial_plan_state(), household((), employment="42000"), today=TODAY
+        )
+        assert state.result is not None
+        assert build_charts_view_model(state).allocation_note == ""
+
+    def test_no_projection_no_note(self) -> None:
+        """The empty state carries no allocation line."""
+        view_model = build_charts_view_model(initial_plan_state())
+        assert view_model.allocation_note == ""
 
 
 class TestWrapperLabelDisambiguation:

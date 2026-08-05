@@ -49,7 +49,13 @@ from glidepath.core import (
     WrapperKindId,
     scenario_orphans,
 )
-from glidepath.regions.uk import RUK_RESIDENCY, SCOTLAND_RESIDENCY, WORKPLACE_DC_KIND
+from glidepath.regions.uk import (
+    CASH_KIND,
+    ISA_KIND,
+    RUK_RESIDENCY,
+    SCOTLAND_RESIDENCY,
+    WORKPLACE_DC_KIND,
+)
 
 RECORDED = datetime(2026, 8, 3, 12, 0, tzinfo=UTC)
 TODAY = RECORDED.date()
@@ -98,6 +104,7 @@ class TestFormSpec:
             "balance",
             "crystallised_balance",
             "balances_as_of",
+            "equity_percent",
             "employee_contribution",
             "employer_contribution",
             "relief_mechanic",
@@ -261,6 +268,99 @@ class TestWrapperParsing:
         assert wrapper.contributions.employer_amount.value == Money(Decimal(2500))
         assert wrapper.contributions.relief_mechanic is ReliefMechanic.RELIEF_AT_SOURCE
         assert wrapper.contributions.escalation is AssumptionKey.EARNINGS_GROWTH_REAL
+
+    def test_a_stated_equity_percent_becomes_the_allocation(self) -> None:
+        """Entering 100 states full equity; the remainder convention gives 0 bonds."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {
+                        "kind": str(ISA_KIND),
+                        "balance": "45000",
+                        "equity_percent": "100",
+                    },
+                ),
+            )
+        )
+        [wrapper] = household.persons[0].wrappers
+        assert wrapper.allocation == AssetAllocation(
+            equity=Decimal(1), bonds=Decimal(0)
+        )
+
+    def test_a_fractional_equity_percent_round_trips(self) -> None:
+        """A fractional percent parses exactly and echoes back unchanged."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {
+                        "kind": str(ISA_KIND),
+                        "balance": "45000",
+                        "equity_percent": "62.5",
+                    },
+                ),
+            )
+        )
+        [wrapper] = household.persons[0].wrappers
+        assert wrapper.allocation == AssetAllocation(
+            equity=Decimal("0.625"), bonds=Decimal("0.375")
+        )
+        values = facts_form_data_from_household(household)
+        assert values.wrappers[0]["equity_percent"] == "62.5"
+
+    def test_blank_equity_percent_follows_the_glide_path(self) -> None:
+        """No entry keeps the wrapper on the default glide path."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                wrappers=({"kind": str(ISA_KIND), "balance": "45000"},),
+            )
+        )
+        [wrapper] = household.persons[0].wrappers
+        assert wrapper.allocation is None
+
+    def test_an_equity_percent_on_a_cash_account_is_rejected(self) -> None:
+        """Cash accounts always hold cash; an entry is an error, not ignored."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {
+                        "kind": str(CASH_KIND),
+                        "balance": "5000",
+                        "equity_percent": "50",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "wrapper"
+        assert error.field_key == "equity_percent"
+
+    @pytest.mark.parametrize("percent", ["101", "-1"])
+    def test_an_out_of_range_equity_percent_is_rejected(self, percent: str) -> None:
+        """The share is a percentage from 0 to 100."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {
+                        "kind": str(ISA_KIND),
+                        "balance": "45000",
+                        "equity_percent": percent,
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.field_key == "equity_percent"
 
     def test_wrapper_without_contributions(self) -> None:
         """Blank contribution fields mean no schedule at all."""
@@ -1370,11 +1470,19 @@ class TestFormCannotRepresent:
         household = _with_first_wrapper(base, fees=fees)
         assert form_cannot_represent(household) == "a wrapper fee schedule"
 
-    def test_wrapper_allocation_is_flagged(self, base: Household) -> None:
-        """A non-cash wrapper's own allocation has no form field yet."""
+    def test_an_equity_bond_allocation_is_representable(self, base: Household) -> None:
+        """A stated equity/bond split now round-trips through the form."""
         allocation = AssetAllocation(equity=Decimal(1), bonds=Decimal(0))
         household = _with_first_wrapper(base, allocation=allocation)
-        assert form_cannot_represent(household) == "a per-wrapper asset allocation"
+        assert form_cannot_represent(household) is None
+
+    def test_a_cash_bearing_allocation_is_flagged(self, base: Household) -> None:
+        """The equity-percent field cannot express a cash slice."""
+        allocation = AssetAllocation(
+            equity=Decimal("0.5"), bonds=Decimal("0.3"), cash=Decimal("0.2")
+        )
+        household = _with_first_wrapper(base, allocation=allocation)
+        assert form_cannot_represent(household) == "an asset allocation holding cash"
 
     def test_split_dated_balances_are_flagged(self, base: Household) -> None:
         """The form shares one as_of between the two balances."""
