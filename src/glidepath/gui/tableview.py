@@ -26,6 +26,7 @@ def read_only_table(parent: QWidget) -> QTableWidget:
     table = QTableWidget(parent)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    table.setAlternatingRowColors(True)
     table.verticalHeader().setVisible(False)
     return table
 
