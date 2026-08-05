@@ -28,7 +28,7 @@ from glidepath.app.retirement import (
 from glidepath.core import Money, ReportBasis, RunMode, build_report
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
     from glidepath.app.plan import PlanState
     from glidepath.core import (
@@ -325,20 +325,19 @@ def _chart(
     )
 
 
-def _wrapper_labels(
-    grouped: dict[Period, list[PeriodReportRow]],
-) -> dict[EntityId, str]:
+def wrapper_display_labels(rows: Iterable[PeriodReportRow]) -> dict[EntityId, str]:
     """A display label per wrapper, in first-seen order.
 
     The wrapper's kind name alone when unique; numbered in first-seen
     order when the household holds several of one kind (entity ids are
-    generated UUIDs, so they are never shown as copy).
+    generated UUIDs, so they are never shown as copy). Shared with the
+    cash-flow export (9.19), which columns its balances the same way
+    the balances chart stacks them.
     """
     kinds: dict[EntityId, str] = {}
-    for rows in grouped.values():
-        for row in rows:
-            for entry in row.wrapper_balances:
-                kinds.setdefault(entry.wrapper_id, format_wrapper_kind(entry.kind))
+    for row in rows:
+        for entry in row.wrapper_balances:
+            kinds.setdefault(entry.wrapper_id, format_wrapper_kind(entry.kind))
     counts = Counter(kinds.values())
     numbered: Counter[str] = Counter()
     labels: dict[EntityId, str] = {}
@@ -387,7 +386,8 @@ def _balances_chart(
 ) -> ChartSpec:
     """Closing balance per wrapper per period, stacked to the total."""
     series = []
-    for wrapper_id, label in _wrapper_labels(grouped).items():
+    labels = wrapper_display_labels(row for rows in grouped.values() for row in rows)
+    for wrapper_id, label in labels.items():
         values = []
         for rows in grouped.values():
             total = _ZERO

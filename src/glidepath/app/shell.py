@@ -20,6 +20,16 @@ from glidepath.app.copy import (
     HELP_GUIDE_TITLE,
     HELP_MENU_LABEL,
 )
+from glidepath.app.exports import (
+    CASH_FLOW_FILE_FILTER,
+    CASH_FLOW_FILE_SUFFIX,
+    EXPORT_CASH_FLOW_DIALOG_TITLE,
+    EXPORT_CASH_FLOW_LABEL,
+    EXPORT_REPORT_DIALOG_TITLE,
+    EXPORT_REPORT_LABEL,
+    REPORT_FILE_FILTER,
+    REPORT_FILE_SUFFIX,
+)
 from glidepath.app.files import (
     FILE_MENU_LABEL,
     OPEN_DIALOG_TITLE,
@@ -38,7 +48,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class FileMenuViewModel:
-    """The File menu: open and save the plan document (§4.5)."""
+    """The File menu: open, save, and export the plan (§4.5, 9.19)."""
 
     menu_label: str
     open_label: str
@@ -48,6 +58,14 @@ class FileMenuViewModel:
     save_dialog_title: str
     file_filter: str
     file_suffix: str
+    export_cash_flow_label: str
+    export_cash_flow_dialog_title: str
+    export_cash_flow_filter: str
+    export_cash_flow_suffix: str
+    export_report_label: str
+    export_report_dialog_title: str
+    export_report_filter: str
+    export_report_suffix: str
 
 
 @dataclass(frozen=True)
@@ -123,6 +141,14 @@ def build_shell_view_model() -> ShellViewModel:
             save_dialog_title=SAVE_DIALOG_TITLE,
             file_filter=PLAN_FILE_FILTER,
             file_suffix=PLAN_FILE_SUFFIX,
+            export_cash_flow_label=EXPORT_CASH_FLOW_LABEL,
+            export_cash_flow_dialog_title=EXPORT_CASH_FLOW_DIALOG_TITLE,
+            export_cash_flow_filter=CASH_FLOW_FILE_FILTER,
+            export_cash_flow_suffix=CASH_FLOW_FILE_SUFFIX,
+            export_report_label=EXPORT_REPORT_LABEL,
+            export_report_dialog_title=EXPORT_REPORT_DIALOG_TITLE,
+            export_report_filter=REPORT_FILE_FILTER,
+            export_report_suffix=REPORT_FILE_SUFFIX,
         ),
         help_menu_label=HELP_MENU_LABEL,
         facts_tab_label="Facts",

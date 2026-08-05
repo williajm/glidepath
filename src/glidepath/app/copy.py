@@ -127,5 +127,19 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "launch. All data stays local; nothing is ever transmitted."
         ),
     ),
+    (
+        "Export the plan",
+        (
+            'File → "Export cash flow (CSV)" writes the projection\'s '
+            "per-year table — every income, tax, contribution, fee, and "
+            "balance figure exactly as charted, in the money basis the "
+            "Charts tab has selected — for a spreadsheet to audit or "
+            'extend. "Export report (PDF)" prints the whole plan: your '
+            "inputs with their stated-vs-assumed provenance, the "
+            "projection charts, Monte Carlo metrics when a run is held, "
+            "and the scenario comparison when scenarios exist. Both "
+            "exports carry the disclaimer."
+        ),
+    ),
     ("Not financial advice", DISCLAIMER_BODY),
 )

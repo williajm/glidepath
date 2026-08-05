@@ -26,8 +26,8 @@ from PySide6.QtCharts import (
     QStackedBarSeries,
     QValueAxis,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QCursor, QPainter
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QCursor, QImage, QPainter
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
@@ -56,6 +56,8 @@ if TYPE_CHECKING:
     )
 
 _CATEGORY_LABEL_ANGLE = -90
+
+_REPORT_CHART_SIZE = QSize(880, 460)
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,61 @@ def tooltip_bar_set(entry: ChartSeries, categories: tuple[str, ...]) -> QBarSet:
         lambda status, index: _bar_hovered(entry, categories, index, hovering=status)
     )
     return bar_set
+
+
+def chart_view(
+    chart: ChartSpec, categories: tuple[str, ...], parent: QWidget | None = None
+) -> QChartView:
+    """One stacked bar chart, percentile bands overlaid, bound to a spec."""
+    series = QStackedBarSeries()
+    for entry in chart.series:
+        series.append(tooltip_bar_set(entry, categories))
+
+    qchart = QChart()
+    qchart.addSeries(series)
+
+    x_axis = QBarCategoryAxis()
+    x_axis.append(list(categories))
+    x_axis.setLabelsAngle(_CATEGORY_LABEL_ANGLE)
+    qchart.addAxis(x_axis, Qt.AlignmentFlag.AlignBottom)
+    series.attachAxis(x_axis)
+
+    y_axis = QValueAxis()
+    y_axis.setTitleText(chart.y_axis_label)
+    y_axis.setRange(0.0, float(chart.y_axis_max))
+    y_axis.applyNiceNumbers()
+    qchart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
+    series.attachAxis(y_axis)
+
+    for band in chart.bands:
+        line = QLineSeries()
+        line.setName(band.label)
+        for index, value in enumerate(band.values):
+            line.append(float(index), float(value))
+        qchart.addSeries(line)
+        line.attachAxis(x_axis)
+        line.attachAxis(y_axis)
+
+    view = QChartView(qchart, parent)
+    view.setRenderHint(QPainter.RenderHint.Antialiasing)
+    return view
+
+
+def chart_image(chart: ChartSpec, categories: tuple[str, ...]) -> QImage:
+    """Rasterise one chart spec for the plan report (roadmap 9.19).
+
+    Renders the same widget the charts tab shows, offscreen at a fixed
+    report size, so the printed charts match the on-screen ones.
+    """
+    view = chart_view(chart, categories)
+    view.resize(_REPORT_CHART_SIZE)
+    image = QImage(view.size(), QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.white)
+    painter = QPainter(image)
+    view.render(painter)
+    painter.end()
+    view.deleteLater()
+    return image
 
 
 class ChartsPane(QWidget):
@@ -184,7 +241,7 @@ class ChartsPane(QWidget):
                 widget.deleteLater()
         for chart in view_model.charts:
             self.chart_tabs.addTab(
-                self._chart_view(chart, view_model.categories), chart.title
+                chart_view(chart, view_model.categories, self.chart_tabs), chart.title
             )
         if 0 <= selected_index < self.chart_tabs.count():
             self.chart_tabs.setCurrentIndex(selected_index)
@@ -359,44 +416,11 @@ class ChartsPane(QWidget):
         self.retirement_message_label.setText(panel.message)
         self.retirement_message_label.setVisible(bool(panel.message))
 
-    def _chart_view(self, chart: ChartSpec, categories: tuple[str, ...]) -> QChartView:
-        """One stacked bar chart, percentile bands overlaid, bound to a spec."""
-        series = QStackedBarSeries()
-        for entry in chart.series:
-            series.append(tooltip_bar_set(entry, categories))
-
-        qchart = QChart()
-        qchart.addSeries(series)
-
-        x_axis = QBarCategoryAxis()
-        x_axis.append(list(categories))
-        x_axis.setLabelsAngle(_CATEGORY_LABEL_ANGLE)
-        qchart.addAxis(x_axis, Qt.AlignmentFlag.AlignBottom)
-        series.attachAxis(x_axis)
-
-        y_axis = QValueAxis()
-        y_axis.setTitleText(chart.y_axis_label)
-        y_axis.setRange(0.0, float(chart.y_axis_max))
-        y_axis.applyNiceNumbers()
-        qchart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
-        series.attachAxis(y_axis)
-
-        for band in chart.bands:
-            line = QLineSeries()
-            line.setName(band.label)
-            for index, value in enumerate(band.values):
-                line.append(float(index), float(value))
-            qchart.addSeries(line)
-            line.attachAxis(x_axis)
-            line.attachAxis(y_axis)
-
-        view = QChartView(qchart, self.chart_tabs)
-        view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        return view
-
 
 __all__ = [
     "ChartsPane",
     "ChartsPaneCallbacks",
+    "chart_image",
+    "chart_view",
     "tooltip_bar_set",
 ]
