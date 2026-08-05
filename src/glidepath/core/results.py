@@ -275,12 +275,14 @@ class LabelledFact:
 
 @dataclass(frozen=True, slots=True)
 class BalanceRollForward:
-    """One stale wrapper balance rolled forward to the run start (§4.8).
+    """One stale stated amount rolled forward to the run start (§4.8).
 
-    A wrapper balance fact is dated ``as_of`` (its statement date); the
-    engine seeds the opening ledger with ``stated`` compounded over the
-    ``months`` whole months from ``as_of`` to the run's ``today`` at
-    the wrapper's expected nominal return — ``factor`` is the exact
+    A statement-dated fact — a wrapper balance, or the DWP forecast's
+    weekly rates — is dated ``as_of``; the engine opens the run with
+    ``stated`` compounded over the ``months`` whole months from
+    ``as_of`` to the run's ``today`` at the rate that governs it (the
+    wrapper's expected nominal return; the state pension uprating
+    rule, CPI-only for the protected slice) — ``factor`` is the exact
     multiplier applied and ``opening`` the quantized result. The stated
     fact itself is never altered: this record is how the estimate
     layered on it stays visible rather than silent (planning §4.8).
@@ -322,10 +324,11 @@ class RunProvenance:
     the engine-side read tracking makes this exhaustive with no UI
     bookkeeping (planning §5.1).
 
-    ``balance_roll_forwards`` lists every wrapper balance fact the run
-    rolled forward from its statement date to ``today`` (planning
-    §4.8) — empty when every balance was stated within a whole month
-    of the run start.
+    ``balance_roll_forwards`` lists every statement-dated fact the run
+    rolled forward from its ``as_of`` to ``today`` (planning §4.8) —
+    wrapper balances and the state pension forecast's weekly rates —
+    empty when every such fact was stated within a whole month of the
+    run start.
     """
 
     facts: tuple[LabelledFact, ...]

@@ -418,9 +418,9 @@
       },
       "stage_multipliers": {
         "decumulation": "1.10",
-        "early_accumulation": "1.00",
-        "mid_accumulation": "1.05",
-        "pre_retirement": "0.95"
+        "go_go": "1.20",
+        "no_go": "0.85",
+        "slow_go": "0.95"
       }
     }
   },

@@ -97,12 +97,21 @@ def test_three_class_tables_interpolate_all_classes() -> None:
         (16, LifeStage.MID_ACCUMULATION),
         (15, LifeStage.PRE_RETIREMENT),
         (1, LifeStage.PRE_RETIREMENT),
-        (0, LifeStage.DECUMULATION),
-        (-5, LifeStage.DECUMULATION),
+        (0, LifeStage.GO_GO),
+        (-5, LifeStage.GO_GO),
+        (-9, LifeStage.GO_GO),
+        (-10, LifeStage.SLOW_GO),
+        (-19, LifeStage.SLOW_GO),
+        (-20, LifeStage.NO_GO),
+        (-35, LifeStage.NO_GO),
     ],
 )
 def test_stage_derives_from_years_to_retirement(years: int, stage: LifeStage) -> None:
-    """The §5.1 stage boundaries around a 15-year de-risking window."""
+    """The §5.1 stage boundaries around a 15-year de-risking window.
+
+    Retirement splits into the go-go/slow-go/no-go sub-stages one and
+    two decades in (issue #114).
+    """
     assert DEFAULT_CONFIG.stage_at(years) == stage
 
 
@@ -113,7 +122,7 @@ def test_a_constant_allocation_never_derisks() -> None:
     )
     assert config.allocation_at(30) == AT_START
     assert config.stage_at(1) == LifeStage.EARLY_ACCUMULATION
-    assert config.stage_at(0) == LifeStage.DECUMULATION
+    assert config.stage_at(0) == LifeStage.GO_GO
 
 
 def test_a_single_high_knot_is_still_constant() -> None:

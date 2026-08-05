@@ -114,7 +114,11 @@ v1 engine conventions, superseded as later phases land:
   with fees before growth as in every modelled period — with every
   non-zero adjustment reported in the run's provenance; a balance
   dated after ``today`` is an engine error (the DB statement-date
-  convention). Annual-allowance measurement joins the loop when the
+  convention). The state pension forecast follows the same
+  convention: its weekly rates roll forward from ``forecast_as_of``
+  to ``today`` — the main slice at the uprating assumption's rate,
+  the protected slice by CPI only — and a future-dated forecast is an
+  engine error. Annual-allowance measurement joins the loop when the
   AA charge is modelled — the in-run MPAA trigger is recorded now,
   and the region's assessment and carry-forward machinery (roadmap
   9.5) is ready for it.
@@ -145,7 +149,11 @@ from glidepath.core.annuities import (
 from glidepath.core.config import EngineError, RunConfig, RunMode
 from glidepath.core.contributions import MemberContributionRequest
 from glidepath.core.entities import validate_household_v1
-from glidepath.core.glide import glide_path_from_shape, years_to_target_retirement
+from glidepath.core.glide import (
+    LifeStage,
+    glide_path_from_shape,
+    years_to_target_retirement,
+)
 from glidepath.core.investments import FeeSchedule, period_fee
 from glidepath.core.money import Money, Rate
 from glidepath.core.pensions import (
@@ -185,7 +193,10 @@ from glidepath.core.returns import (
     StochasticReturnModel,
     nominal_rate,
 )
-from glidepath.core.state_pension import StatePensionUprating
+from glidepath.core.state_pension import (
+    StatePensionEntitlement,
+    StatePensionUprating,
+)
 from glidepath.core.tax import TaxInput, TaxResult
 from glidepath.core.withdrawals import (
     FixedRealWithdrawalStrategy,
@@ -208,14 +219,14 @@ if TYPE_CHECKING:
     from glidepath.core.annuities import AnnuityPurchase
     from glidepath.core.contributions import ContributionSchedule
     from glidepath.core.entities import Household, Person, SpendingPlan
-    from glidepath.core.glide import GlidePathConfig, LifeStage
+    from glidepath.core.glide import GlidePathConfig
     from glidepath.core.investments import AssetAllocation
     from glidepath.core.pensions import DBPension, RevaluationBasis
     from glidepath.core.periods import Period
     from glidepath.core.provenance import AssumptionSet, Fact
     from glidepath.core.region import Region
     from glidepath.core.returns import PeriodReturns, ReturnModel, ReturnModelFactory
-    from glidepath.core.state_pension import StatePensionEntitlement
+    from glidepath.core.state_pension import StatePensionRecord
     from glidepath.core.withdrawals import GrossWithdrawalPlan, WithdrawalStrategy
     from glidepath.core.wrappers import ContributionCap, Wrapper, WrapperTaxTreatment
 
@@ -821,8 +832,10 @@ class _Projection:
         over whole months at the assumed CPI (the run never models
         time before ``today``; module docstring), with the early/late
         factor and the commutation split applied. The state pension
-        entitlement comes from the region's scheme; its uprating rule
-        is read (and recorded) only when a record is present.
+        entitlement comes from the region's scheme in the rates its
+        forecast states, then rolls forward from the forecast date to
+        ``today`` (:meth:`_rolled_entitlement`); its uprating rule is
+        read (and recorded) only when a non-zero record is present.
 
         Annuity purchases create their streams mid-run — pricing needs
         the pot as it stands at the purchase date — so only their
@@ -857,8 +870,9 @@ class _Projection:
             self._db_streams.append(self._db_stream(pension, cpi))
         if person.state_pension is None:
             return
+        record = person.state_pension
         entitlement = self.region.state_pension.entitlement(
-            person.state_pension, person.date_of_birth.value
+            record, person.date_of_birth.value
         )
         if (
             entitlement.annual_amount <= _ZERO
@@ -868,6 +882,7 @@ class _Projection:
         uprating = StatePensionUprating.from_assumption_value(
             self.tracked.get(AssumptionKey.POLICY_STATE_PENSION_UPRATING).value
         )
+        entitlement = self._rolled_entitlement(record, entitlement, uprating, cpi)
         self._sp_stream = _StatePensionStream(
             entitlement=entitlement, uprating=uprating
         )
@@ -926,6 +941,108 @@ class _Projection:
             lump_sum_factor=lump_sum_factor,
             accrual=accrual,
         )
+
+    def _rolled_entitlement(
+        self,
+        record: StatePensionRecord,
+        entitlement: StatePensionEntitlement,
+        uprating: StatePensionUprating,
+        cpi: Decimal,
+    ) -> StatePensionEntitlement:
+        """The entitlement with a stale forecast uprated to ``today``.
+
+        The DWP forecast states rates as of its own date, so — exactly
+        like a stale balance fact (§4.8) — each slice is brought to the
+        run start over the whole months from its fact's ``as_of``: the
+        main amount at the uprating assumption's annual rate, any
+        protected payment by CPI only, both already floored at zero
+        like every statutory uprating step (planning §5.1). The
+        whole-month convention makes a forecast dated within one month
+        of ``today`` an exact no-op, and each adjustment is recorded
+        for the run's provenance in the weekly rates the user stated —
+        an estimate layered on the stated fact is never applied
+        silently (§4.8). The deferral uplift needs no rolling: it is a
+        fraction of whatever rate is payable at claim.
+
+        Raises:
+            EngineError: If the forecast or protected payment is dated
+                after ``today`` (planning §4.8).
+        """
+        forecast = record.forecast_weekly_amount
+        if forecast is None:
+            return entitlement
+        prefix = f"person[{self.person.id}].state_pension"
+        forecast_label = f"{prefix}.forecast_weekly_amount"
+        forecast_months = self._forecast_months(forecast, forecast_label)
+        main_factor = revaluation_factor_for_months(
+            uprating.annual_rate(cpi), forecast_months
+        )
+        protected = record.protected_payment
+        protected_months = 0
+        cpi_factor = _ONE
+        protected_label = f"{prefix}.protected_payment"
+        if protected is not None:
+            protected_months = self._forecast_months(protected, protected_label)
+            cpi_factor = revaluation_factor_for_months(
+                max(cpi, Decimal(0)), protected_months
+            )
+        if forecast_months == 0 and protected_months == 0:
+            return entitlement
+        protected_weekly = _ZERO if protected is None else protected.value
+        main_weekly = forecast.value - protected_weekly
+        if forecast_months > 0:
+            rolled_weekly = main_weekly * main_factor + protected_weekly * cpi_factor
+            blended = (
+                main_factor
+                if protected is None
+                else rolled_weekly.amount / forecast.value.amount
+            )
+            self._roll_forwards.append(
+                BalanceRollForward(
+                    label=forecast_label,
+                    stated=forecast.value,
+                    as_of=forecast.as_of,
+                    months=forecast_months,
+                    factor=blended,
+                    opening=rolled_weekly.quantized(),
+                )
+            )
+        if protected is not None and protected_months > 0:
+            self._roll_forwards.append(
+                BalanceRollForward(
+                    label=protected_label,
+                    stated=protected.value,
+                    as_of=protected.as_of,
+                    months=protected_months,
+                    factor=cpi_factor,
+                    opening=(protected.value * cpi_factor).quantized(),
+                )
+            )
+        return StatePensionEntitlement(
+            start_date=entitlement.start_date,
+            annual_amount=(entitlement.annual_amount * main_factor).quantized(),
+            cpi_uprated_annual_amount=(
+                entitlement.cpi_uprated_annual_amount * cpi_factor
+            ).quantized(),
+            deferral_uplift=entitlement.deferral_uplift,
+        )
+
+    def _forecast_months(self, fact: Fact[Money], label: str) -> int:
+        """Whole months from a forecast fact's ``as_of`` to ``today``.
+
+        Raises:
+            EngineError: If the fact is dated after ``today`` — a
+                future-dated forecast cannot state today's rates
+                (planning §4.8).
+        """
+        today = self.config.today
+        if fact.as_of > today:
+            msg = (
+                f"{label}: forecast as_of {fact.as_of} is after today"
+                f" {today} (planning §4.8)"
+            )
+            raise EngineError(msg)
+        return whole_months_between(fact.as_of, today)
 
     def _horizon_end(self) -> date:
         """The configured horizon end, or the planning-age default (§5.2)."""
@@ -2366,9 +2483,12 @@ def _spending_need(
 
     The real (today's money) need is scaled by the stage multiplier
     when one is configured, then inflated by the run's cumulative CPI
-    factor — the same single inflation truth the returns carry.
+    factor — the same single inflation truth the returns carry. The
+    retirement sub-stage's own multiplier wins; the whole-retirement
+    ``DECUMULATION`` key covers sub-stages without one (planning §5.1).
     """
     multiplier = _ONE
     if spending.stage_multipliers is not None:
-        multiplier = spending.stage_multipliers.get(stage, _ONE)
+        fallback = spending.stage_multipliers.get(LifeStage.DECUMULATION, _ONE)
+        multiplier = spending.stage_multipliers.get(stage, fallback)
     return spending.annual_spending_real.value * multiplier * inflation

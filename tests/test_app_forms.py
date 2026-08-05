@@ -874,6 +874,74 @@ class TestSpendingParsing:
         fact = household.spending.annual_spending_real
         assert fact.value == Money(Decimal(28000))
         assert fact.as_of == TODAY
+        assert household.spending.stage_multipliers is None
+
+    def test_stage_multipliers_parse_per_retirement_phase(self) -> None:
+        """The go-go/slow-go/no-go fields bind to their stages (#114)."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                spending={
+                    "annual_spending_real": "28000",
+                    "go_go_multiplier": "1.2",
+                    "slow_go_multiplier": "0.9",
+                    "no_go_multiplier": "0.8",
+                },
+            )
+        )
+        assert household.spending is not None
+        assert household.spending.stage_multipliers == {
+            LifeStage.GO_GO: Decimal("1.2"),
+            LifeStage.SLOW_GO: Decimal("0.9"),
+            LifeStage.NO_GO: Decimal("0.8"),
+        }
+
+    def test_a_blank_multiplier_stays_absent(self) -> None:
+        """Only the entered stages appear; blank means a multiplier of 1."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                spending={
+                    "annual_spending_real": "28000",
+                    "go_go_multiplier": "1.2",
+                },
+            )
+        )
+        assert household.spending is not None
+        assert household.spending.stage_multipliers == {LifeStage.GO_GO: Decimal("1.2")}
+
+    def test_multipliers_without_spending_are_rejected(self) -> None:
+        """A multiplier with nothing to scale asks for the annual need."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                spending={"go_go_multiplier": "1.2"},
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "spending"
+        assert error.field_key == "annual_spending_real"
+
+    def test_non_positive_multiplier_surfaces_the_core_message(self) -> None:
+        """The spending plan's own multiplier validation lands on the section."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                spending={
+                    "annual_spending_real": "28000",
+                    "slow_go_multiplier": "0",
+                },
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "spending"
+        assert "positive" in error.message
 
 
 class TestValidationMessages:
@@ -1320,7 +1388,12 @@ def _maximal_submission() -> FactsFormData:
             mpaa_triggered_on="2024-01-15",
             lsa_used="1250.50",
         ),
-        spending={"annual_spending_real": "28000"},
+        spending={
+            "annual_spending_real": "28000",
+            "go_go_multiplier": "1.2",
+            "slow_go_multiplier": "0.9",
+            "no_go_multiplier": "0.8",
+        },
         state_pension={
             "forecast_weekly_amount": "230.25",
             "protected_payment": "12.40",
@@ -1445,14 +1518,30 @@ class TestFormCannotRepresent:
         household = _with_person(base, glide_path=glide)
         assert form_cannot_represent(household) == "a personal glide path"
 
-    def test_stage_multipliers_are_flagged(self, base: Household) -> None:
-        """Spending stage multipliers have no form field yet."""
+    def test_whole_retirement_multiplier_is_flagged(self, base: Household) -> None:
+        """The DECUMULATION fallback key has no form field (issue #114)."""
         spending = _altered(
             base.spending,
             stage_multipliers={LifeStage.DECUMULATION: Decimal("0.9")},
         )
         household = _altered(base, spending=spending)
-        assert form_cannot_represent(household) == "spending stage multipliers"
+        assert (
+            form_cannot_represent(household)
+            == "spending stage multipliers beyond the go-go/slow-go/no-go fields"
+        )
+
+    def test_sub_stage_multipliers_are_representable(self, base: Household) -> None:
+        """The go-go/slow-go/no-go keys land in form fields (issue #114)."""
+        spending = _altered(
+            base.spending,
+            stage_multipliers={
+                LifeStage.GO_GO: Decimal("1.2"),
+                LifeStage.SLOW_GO: Decimal("0.9"),
+                LifeStage.NO_GO: Decimal("0.8"),
+            },
+        )
+        household = _altered(base, spending=spending)
+        assert form_cannot_represent(household) is None
 
     def test_unknown_residency_is_flagged(self, base: Household) -> None:
         """A residency the form does not list cannot be re-picked."""

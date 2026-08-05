@@ -33,6 +33,7 @@ from glidepath.core import (
     Fact,
     FactorTable,
     Household,
+    LifeStage,
     Money,
     Person,
     Rate,
@@ -207,8 +208,23 @@ _FORECAST_REQUIRED = (
     "gov.uk/check-state-pension; leave the whole section blank to skip "
     "the state pension"
 )
+_MULTIPLIERS_NEED_SPENDING = (
+    "enter the annual spending need for the stage multipliers to scale"
+)
 
 _AS_OF_HINT = "YYYY-MM-DD; blank means today"
+
+_STAGE_MULTIPLIER_FIELDS: Final[tuple[tuple[str, LifeStage], ...]] = (
+    ("go_go_multiplier", LifeStage.GO_GO),
+    ("slow_go_multiplier", LifeStage.SLOW_GO),
+    ("no_go_multiplier", LifeStage.NO_GO),
+)
+"""The retirement sub-stage multiplier fields the spending section offers.
+
+The whole-retirement ``DECUMULATION`` key stays form-less — scaling all
+of retirement is what the annual spending amount itself expresses — so
+a plan carrying one still refuses the facts form (§4.5).
+"""
 
 _SELECT_OPTION = ChoiceOption(value="", label="Select…")
 """The blank first option of every required choice: a real value must
@@ -452,10 +468,20 @@ class _SectionReader:
 def _spending_from(reader: _SectionReader) -> SpendingPlan | None:
     """The spending plan, or ``None`` when the section is blank."""
     spending_fact = reader.fact_of(reader.money("annual_spending_real"))
+    multipliers = {
+        stage: value
+        for field_key, stage in _STAGE_MULTIPLIER_FIELDS
+        if (value := reader.decimal_value(field_key)) is not None
+    }
     if spending_fact is None:
+        if multipliers:
+            reader.error("annual_spending_real", _MULTIPLIERS_NEED_SPENDING)
         return None
     try:
-        return SpendingPlan(annual_spending_real=spending_fact)
+        return SpendingPlan(
+            annual_spending_real=spending_fact,
+            stage_multipliers=multipliers or None,
+        )
     except ValueError as exc:
         reader.error("", str(exc))
         return None
@@ -954,7 +980,12 @@ def _spending_values(spending: SpendingPlan | None) -> dict[str, str]:
     if spending is None:
         return {}
     fact = spending.annual_spending_real
-    return {"annual_spending_real": str(fact.value.amount)}
+    multipliers = spending.stage_multipliers or {}
+    values = {"annual_spending_real": str(fact.value.amount)}
+    for field_key, stage in _STAGE_MULTIPLIER_FIELDS:
+        multiplier = multipliers.get(stage)
+        values[field_key] = "" if multiplier is None else str(multiplier)
+    return values
 
 
 def _state_pension_values(record: StatePensionRecord | None) -> dict[str, str]:
@@ -1195,8 +1226,9 @@ def form_cannot_represent(household: Household) -> str | None:
     ``None`` when every stored detail lands in a form field. The domain
     model legitimately holds more than the form yet offers (extra
     persons, planned outflows, joint-life annuity purchases, personal
-    glide paths, spending stage multipliers, wrapper allocations and
-    fees, independently dated fact pairs, fact and decision notes) —
+    glide paths, whole-retirement spending multipliers, wrapper
+    allocations and fees, independently dated fact pairs, fact and
+    decision notes) —
     resubmitting the populated form would silently rebuild a reduced
     household, so a shell must refuse to open such a plan rather than
     lose the data (§4.5).
@@ -1207,7 +1239,9 @@ def form_cannot_represent(household: Household) -> str | None:
         return "planned outflows"
     spending = household.spending
     if spending is not None and spending.stage_multipliers is not None:
-        return "spending stage multipliers"
+        offered = {stage for _, stage in _STAGE_MULTIPLIER_FIELDS}
+        if set(spending.stage_multipliers) - offered:
+            return "spending stage multipliers beyond the go-go/slow-go/no-go fields"
     if _carries_note(household):
         return "notes on facts or decisions"
     return _person_cannot_represent(household.persons[0])
@@ -1370,13 +1404,31 @@ def _spending_section() -> SectionSpec:
         title="Household spending",
         description=(
             "Your annual spending need in today's money, after tax. Blank "
-            "means spending is not modelled yet."
+            "means spending is not modelled yet. The optional stage "
+            "multipliers scale that need across retirement's phases — "
+            "the first decade (go-go), the second (slow-go), and beyond "
+            "(no-go); blank means 1."
         ),
         fields=(
             FieldSpec(
                 key="annual_spending_real",
                 label="Annual spending (today's money, net)",
                 hint="e.g. 28000",
+            ),
+            FieldSpec(
+                key="go_go_multiplier",
+                label="Go-go multiplier (first decade retired)",
+                hint="e.g. 1.2; blank means 1",
+            ),
+            FieldSpec(
+                key="slow_go_multiplier",
+                label="Slow-go multiplier (second decade retired)",
+                hint="e.g. 0.9; blank means 1",
+            ),
+            FieldSpec(
+                key="no_go_multiplier",
+                label="No-go multiplier (beyond two decades retired)",
+                hint="e.g. 0.8; blank means 1",
             ),
         ),
     )
@@ -1390,8 +1442,10 @@ def _state_pension_section() -> SectionSpec:
         description=(
             "Your official DWP forecast is the fact — free and instant "
             "from gov.uk/check-state-pension — and the only route to a "
-            "state pension amount. Leave the whole section blank to "
-            "skip the state pension."
+            "state pension amount. A forecast dated a whole month or "
+            "more before today is uprated to today at the assumed "
+            "uprating policy. Leave the whole section blank to skip "
+            "the state pension."
         ),
         fields=(
             FieldSpec(

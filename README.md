@@ -30,7 +30,8 @@ What it models today (single person, UK):
 - **Projection** — deterministic or Monte Carlo runs from the app:
   success rate, probability of ruin, ending-pot percentiles, and
   10th/median/90th bands on the charts, reproducible from a seed. With
-  a de-risking glide path, tax-aware decumulation, and annuity
+  a de-risking glide path, tax-aware decumulation with optional
+  go-go/slow-go/no-go retirement spending multipliers, and annuity
   purchases entered in the facts form. (The engine also models
   alternative withdrawal strategies — fixed %, guardrails, natural
   yield — and tax-free-cash strategies; the app currently runs the

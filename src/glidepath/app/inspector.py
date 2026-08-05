@@ -90,11 +90,12 @@ class FactRow:
 
 @dataclass(frozen=True)
 class RollForwardRow:
-    """One wrapper balance rolled forward to the run start (§4.8).
+    """One stated amount rolled forward to the run start (§4.8).
 
-    The stated fact is unchanged; this row shows the estimate the
-    engine layered on it — the statement value, its date, the whole
-    months rolled, and the opening value the projection actually used.
+    A wrapper balance or state pension forecast rate: the stated fact
+    is unchanged; this row shows the estimate the engine layered on it
+    — the statement value, its date, the whole months rolled, and the
+    opening value the projection actually used.
     """
 
     label: str
@@ -474,8 +475,8 @@ def build_inspector_view_model(state: PlanState) -> InspectorViewModel:
         facts_heading="Facts you stated",
         facts_columns=("Fact", "Value", "As of", "Recorded"),
         facts=facts,
-        roll_forwards_heading="Balances rolled forward to today",
-        roll_forwards_columns=("Balance", "Stated", "As of", "Months", "Value today"),
+        roll_forwards_heading="Stated amounts rolled forward to today",
+        roll_forwards_columns=("Fact", "Stated", "As of", "Months", "Value today"),
         roll_forwards=roll_forwards,
         assumptions_heading="Assumptions used",
         assumptions_columns=(

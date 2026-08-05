@@ -23,8 +23,9 @@ The §5.1 rules, in order:
   (planning §5.1, §6).
 
 Amounts are returned in the weekly rates the forecast states
-(annualised at 52 weeks); uprating from the run start is the engine's
-concern, governed by the ``policy.state_pension.uprating`` assumption
+(annualised at 52 weeks); uprating — from the forecast's own date to
+the run start (§4.8) and onward from there — is the engine's concern,
+governed by the ``policy.state_pension.uprating`` assumption
 (planning §5.1, §7).
 """
 

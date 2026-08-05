@@ -11,10 +11,12 @@ amounts split by uprating treatment, in the rates the forecast states.
 
 Uprating is the engine's concern, governed by the
 ``policy.state_pension.uprating`` assumption (planning §7) parsed here
-as :class:`StatePensionUprating`. The split matters because the two
-slices uprate differently (planning §5.1, §6): the main entitlement
-follows the policy rule (triple-lock proxy by default), while protected
-payments and deferral increments uprate by CPI only.
+as :class:`StatePensionUprating` — both the §4.8 roll-forward of a
+stale forecast from its ``as_of`` to the run start and the in-run
+advance from there. The split matters because the two slices uprate
+differently (planning §5.1, §6): the main entitlement follows the
+policy rule (triple-lock proxy by default), while protected payments
+and deferral increments uprate by CPI only.
 """
 
 from collections.abc import Mapping
