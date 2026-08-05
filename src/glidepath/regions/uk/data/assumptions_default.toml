@@ -4,7 +4,7 @@
 # user-overridable in the app; §6 announced-policy items are facts, these
 # are estimates.
 
-schema_version = 1
+schema_version = 2
 
 [meta]
 verified_on = 2026-08-04

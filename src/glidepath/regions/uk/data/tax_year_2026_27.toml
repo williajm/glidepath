@@ -4,7 +4,7 @@
 # from the primary sources below; never edit a figure without
 # re-verifying and updating [meta].
 
-schema_version = 1
+schema_version = 2
 
 [meta]
 tax_year    = "2026/27"

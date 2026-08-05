@@ -2,7 +2,7 @@
 # re-set each tax year (docs/planning.md §5.3, §6). The SPA timetable was
 # re-verified against the live gov.uk timetable page on 2026-08-02.
 
-schema_version = 1
+schema_version = 2
 
 [meta]
 verified_on = 2026-08-02

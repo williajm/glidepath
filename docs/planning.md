@@ -1044,7 +1044,7 @@ them aligned). Loader rules: money/rates are TOML **strings** parsed to
 validation into frozen dataclasses, unknown keys error.
 
 ```toml
-schema_version = 1
+schema_version = 2
 
 [meta]
 tax_year    = "2026/27"
@@ -1703,7 +1703,8 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   amount (§5.1). The record and facts form lose the qualifying-years,
   NI-record-start and planned-extra-years fields; the tax-year files
   lose the `[state_pension]` table and `age_rules.toml` the
-  `[new_state_pension]` system-start gate (nothing reads them);
+  `[new_state_pension]` system-start gate (nothing reads them; the
+  data-file schema version steps to 2 for the changed shape);
   document schema v3 migrates saved plans by dropping the retired
   fields, and a migrated record without a forecast keeps its deferral
   choice but fails projection with a clear demand for a forecast —

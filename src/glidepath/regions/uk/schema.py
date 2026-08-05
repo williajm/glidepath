@@ -21,8 +21,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from decimal import Decimal
 
-SCHEMA_VERSION = 1
-"""The data-file schema version this code understands."""
+SCHEMA_VERSION = 2
+"""The data-file schema version this code understands.
+
+v2 (#97): tax-year files lose the ``[state_pension]`` table and
+``age_rules.toml`` the ``[new_state_pension]`` table — the state
+pension amount is the user's stated DWP forecast, never a shipped
+rate.
+"""
 
 _TAX_YEAR_FORMAT = re.compile(r"\d{4}/\d{2}")
 _MONTHS_PER_YEAR = 12

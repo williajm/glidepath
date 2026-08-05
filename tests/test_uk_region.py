@@ -104,7 +104,7 @@ class TestUkRegionBundle:
         distinguishable version strings (planning §4.6).
         """
         version = uk_region().data_version
-        assert version.startswith("uk schema=1")
+        assert version.startswith("uk schema=2")
         assert "tax_year 2026/27 verified" in version
         assert "age_rules verified" in version
         assert "assumptions verified" in version
@@ -217,7 +217,7 @@ class TestUkEndToEnd:
         assert first.employment_income == Money(Decimal("33333.33"))
         assert first.wrappers[0].provider_relief == Money(Decimal("666.67"))
         assert first.wrappers[1].employee_contribution == Money(Decimal("3333.33"))
-        assert result.provenance.region_data_version.startswith("uk schema=1")
+        assert result.provenance.region_data_version.startswith("uk schema=2")
         keys_read = {entry.key for entry in result.provenance.assumptions}
         assert AssumptionKey.INFLATION_CPI in keys_read
         assert AssumptionKey.GLIDEPATH_DEFAULT_SHAPE in keys_read

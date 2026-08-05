@@ -27,7 +27,7 @@ from glidepath.regions.uk import (
     tax_year_filename,
 )
 
-TAX_HEADER = "schema_version = 1\n"
+TAX_HEADER = "schema_version = 2\n"
 TAX_META = """
 [meta]
 tax_year = "2026/27"
@@ -110,7 +110,7 @@ VALID_TAX_YEAR = (
 )
 
 VALID_AGE_RULES = """
-schema_version = 1
+schema_version = 2
 
 [meta]
 verified_on = 2026-08-02
@@ -142,7 +142,7 @@ increment_rate = "0.01"
 per_weeks = 9
 """
 
-ASSUMPTIONS_HEADER = """schema_version = 1
+ASSUMPTIONS_HEADER = """schema_version = 2
 
 [meta]
 verified_on = 2026-08-01
@@ -204,21 +204,21 @@ def test_invalid_toml_is_a_load_error() -> None:
 
 def test_missing_schema_version_is_an_error() -> None:
     """schema_version is mandatory."""
-    broken = _mutated(VALID_TAX_YEAR, "schema_version = 1\n", "")
+    broken = _mutated(VALID_TAX_YEAR, "schema_version = 2\n", "")
     with pytest.raises(DataFileError, match="missing required key 'schema_version'"):
         parse_tax_year(broken)
 
 
 def test_unsupported_schema_version_is_an_error() -> None:
-    """Version 2 files must not load into version 1 code."""
-    broken = _mutated(VALID_TAX_YEAR, "schema_version = 1", "schema_version = 2")
-    with pytest.raises(DataFileError, match="schema_version 2 is not supported"):
+    """Version 3 files must not load into version 2 code."""
+    broken = _mutated(VALID_TAX_YEAR, "schema_version = 2", "schema_version = 3")
+    with pytest.raises(DataFileError, match="schema_version 3 is not supported"):
         parse_tax_year(broken)
 
 
 def test_string_schema_version_is_an_error() -> None:
     """schema_version must be an integer."""
-    broken = _mutated(VALID_TAX_YEAR, "schema_version = 1", 'schema_version = "1"')
+    broken = _mutated(VALID_TAX_YEAR, "schema_version = 2", 'schema_version = "2"')
     with pytest.raises(DataFileError, match="expected an integer"):
         parse_tax_year(broken)
 
@@ -240,7 +240,7 @@ def test_missing_meta_key_is_an_error() -> None:
 def test_unknown_top_level_key_is_an_error() -> None:
     """Unknown keys anywhere are load errors."""
     broken = _mutated(
-        VALID_TAX_YEAR, "schema_version = 1\n", "schema_version = 1\nmystery = 1\n"
+        VALID_TAX_YEAR, "schema_version = 2\n", "schema_version = 2\nmystery = 1\n"
     )
     with pytest.raises(DataFileError, match="unknown keys: mystery"):
         parse_tax_year(broken)
