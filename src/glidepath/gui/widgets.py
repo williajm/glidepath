@@ -454,8 +454,13 @@ class MainWindow(QMainWindow):
 
         Every chart spec renders to an image registered under the
         resource name the report's HTML references, then the laid-out
-        document prints to the PDF device. A failure folds into the
-        returned message, matching the app-layer transitions' rule.
+        document prints to the PDF device. The device reports no write
+        status (a failed open only logs a Qt warning), so the document
+        prints to a sibling ``.part`` file that must come out non-empty
+        before it replaces ``path`` — over-writing a stale export can
+        therefore never report success while leaving the old file in
+        place. A failure folds into the returned message, matching the
+        app-layer transitions' rule.
         """
         document = QTextDocument()
         for index, chart in enumerate(report.charts):
@@ -465,14 +470,22 @@ class MainWindow(QMainWindow):
                 chart_image(chart, report.categories),
             )
         document.setHtml(report.html)
-        writer = QPdfWriter(str(path))
-        writer.setResolution(_REPORT_DPI)
+        partial = path.with_name(f"{path.name}.part")
         try:
+            writer = QPdfWriter(str(partial))
+            writer.setResolution(_REPORT_DPI)
             document.print_(writer)
+            # The writer must release its file handle before the
+            # replace, or Windows refuses to move the finished file.
+            del writer
+            if not partial.exists() or partial.stat().st_size == 0:
+                return REPORT_NOT_WRITTEN_MESSAGE
+            partial.replace(path)
         except OSError as exc:
             return f"{REPORT_EXPORT_FAILED_PREFIX}{exc}"
-        if not path.exists() or path.stat().st_size == 0:
-            return REPORT_NOT_WRITTEN_MESSAGE
+        finally:
+            with contextlib.suppress(OSError):
+                partial.unlink(missing_ok=True)
         return report_exported_message(path)
 
     def _write_plan(self, path: Path) -> None:

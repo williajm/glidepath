@@ -9,6 +9,7 @@ the §1 disclaimer; both fold every failure into a status message.
 import csv
 from datetime import UTC, datetime
 from decimal import Decimal
+from html import escape
 from io import StringIO
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,7 @@ from glidepath.app import (
     plan_display_name,
     state_with_household,
     state_with_monte_carlo,
+    state_with_override,
     state_with_scenario_added,
 )
 from glidepath.core import ReportBasis, RunMode, build_report
@@ -256,6 +258,37 @@ class TestPlanReport:
         assert inspector.decisions[0].label in report.html
         assert inspector.structure_heading in report.html
 
+    def test_structured_assumption_values_print_in_full(self) -> None:
+        """Table values escape the screen's truncated display form.
+
+        The report is the audit surface (9.19): every structured
+        assumption prints its complete round-trippable text, never the
+        120-character screen rendering.
+        """
+        state = projected_state()
+        report = build_plan_report(state, _request())
+        assert report is not None
+        inspector = build_inspector_view_model(state)
+        structured = [row for row in inspector.assumptions if row.structured]
+        assert structured
+        for row in structured:
+            assert escape(row.edit_text).replace("\n", "<br>") in report.html
+
+    def test_overridden_default_prints_beside_the_override(self) -> None:
+        """An override never hides the shipped default it replaced (§1)."""
+        outcome = state_with_override(
+            projected_state(),
+            "inflation.cpi",
+            "0.031",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        report = build_plan_report(outcome.state, _request())
+        assert report is not None
+        assert "<td>0.031</td>" in report.html
+        assert "<td>0.02</td>" in report.html
+
     def test_plan_name_is_escaped_into_the_html(self) -> None:
         """User-controlled text can never inject markup."""
         report = build_plan_report(projected_state(), _request(plan_name="<b>plan</b>"))
@@ -284,6 +317,9 @@ class TestPlanReport:
         assert report is not None
         assert "Success rate" in report.html
         assert report.charts[0].bands
+        # The seed and path count attribute the metrics to their run (§4.6).
+        assert "<td>Seed</td><td>1</td>" in report.html
+        assert "<td>Paths</td><td>3</td>" in report.html
 
     def test_deterministic_mode_omits_monte_carlo(self) -> None:
         """Under the deterministic mode a held run stays off the report."""

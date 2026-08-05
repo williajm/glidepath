@@ -8,9 +8,12 @@ dialog, the chart images, and the PDF paint device.
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+from PySide6.QtGui import QPdfWriter
+
 from glidepath.app import (
     DISCLAIMER_BODY,
     NOTHING_TO_EXPORT_MESSAGE,
+    REPORT_NOT_WRITTEN_MESSAGE,
     build_shell_view_model,
 )
 from glidepath.gui import widgets
@@ -121,6 +124,7 @@ class TestExportReportFlow:
         assert target.exists()
         assert target.read_bytes().startswith(b"%PDF")
         assert str(target) in window.statusBar().currentMessage()
+        assert not (tmp_path / "report.pdf.part").exists()
 
     def test_export_appends_the_pdf_suffix(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -151,3 +155,34 @@ class TestExportReportFlow:
         window.export_report_dialog()
         assert not target.exists()
         assert window.statusBar().currentMessage() == NOTHING_TO_EXPORT_MESSAGE
+
+    def test_failed_device_keeps_the_stale_file_and_reports_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A device that writes nothing can never report success.
+
+        A PDF device whose file cannot be opened only logs a Qt
+        warning; over-writing an existing export must then report the
+        failure and leave the stale file alone, never claim success
+        because the old bytes still exist.
+        """
+        target = tmp_path / "report.pdf"
+        target.write_bytes(b"stale")
+        window = _window_with_example()
+
+        class NullWriter(QPdfWriter):
+            """A device aimed elsewhere, as a failed file open behaves."""
+
+            def __init__(self, _path: str) -> None:
+                super().__init__(str(tmp_path / "elsewhere.pdf"))
+
+        monkeypatch.setattr(widgets, "QPdfWriter", NullWriter)
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(target), "")),
+        )
+        window.export_report_dialog()
+        assert target.read_bytes() == b"stale"
+        assert window.statusBar().currentMessage() == REPORT_NOT_WRITTEN_MESSAGE
+        assert not (tmp_path / "report.pdf.part").exists()

@@ -122,7 +122,10 @@ class AssumptionRow:
     is its human display name and is what screens show. ``structured``
     marks a table-valued row; its ``edit_text`` is the round-trippable
     multi-line text form, while a scalar's is simply its value
-    (issue #71).
+    (issue #71). ``value`` and ``default_value`` are display text and
+    truncate long tables; ``default_edit_text`` is the default's
+    complete form (a dash when nothing is overridden), so an export
+    can print the full figures the screen elides (9.19).
     """
 
     key: str
@@ -130,6 +133,7 @@ class AssumptionRow:
     description: str
     value: str
     default_value: str
+    default_edit_text: str
     status: str
     usage: str
     source: str
@@ -186,12 +190,20 @@ def _assumption_row(assumption: Assumption[Any], usage: str) -> AssumptionRow:
     structured = isinstance(assumption.value, Mapping)
     value_text = format_value(assumption.value)
     overridden = assumption.value != assumption.default_value
+    default_edit_text = "—"
+    if overridden:
+        default_edit_text = (
+            table_edit_text(assumption.default_value)
+            if isinstance(assumption.default_value, Mapping)
+            else format_value(assumption.default_value)
+        )
     return AssumptionRow(
         key=str(assumption.key.value),
         label=format_assumption_key(assumption.key.value),
         description=assumption.description,
         value=value_text,
         default_value=format_value(assumption.default_value) if overridden else "—",
+        default_edit_text=default_edit_text,
         status=_STATUS_LABELS[assumption.provenance],
         usage=usage,
         source=assumption.source,

@@ -275,11 +275,16 @@ def report_exported_message(path: Path) -> str:
     return f"Report exported to {path}."
 
 
+def _cell(text: str) -> str:
+    """One escaped table cell; multi-line values keep their lines."""
+    return escape(text).replace("\n", "<br>")
+
+
 def _html_table(columns: tuple[str, ...], rows: Iterable[tuple[str, ...]]) -> str:
     """Column headers and rows as an escaped rich-text table."""
     header = "".join(f"<th>{escape(column)}</th>" for column in columns)
     body = "".join(
-        "<tr>" + "".join(f"<td>{escape(cell)}</td>" for cell in row) + "</tr>"
+        "<tr>" + "".join(f"<td>{_cell(cell)}</td>" for cell in row) + "</tr>"
         for row in rows
     )
     return (
@@ -313,6 +318,8 @@ def _inputs_sections(state: PlanState) -> list[str]:
                 ),
             )
         )
+    # The screen's value/default columns truncate long tables; the
+    # report is the audit surface, so it prints the complete forms.
     parts.append(f"<h3>{escape(inspector.assumptions_heading)}</h3>")
     parts.append(
         _html_table(
@@ -320,8 +327,8 @@ def _inputs_sections(state: PlanState) -> list[str]:
             (
                 (
                     row.label,
-                    row.value,
-                    row.default_value,
+                    row.edit_text if row.structured else row.value,
+                    row.default_edit_text,
                     row.status,
                     row.usage,
                     row.source,
@@ -363,10 +370,17 @@ def _results_sections(state: PlanState, request: ReportRequest) -> list[str]:
         )
     panel = charts.monte_carlo
     if panel.metrics:
+        # The seed and path count are the run's §4.6 reproducibility
+        # manifest — without them the report's metrics are unattributable.
         parts.append(f"<h3>{escape(_MONTE_CARLO_HEADING)}</h3>")
         parts.append(
             _html_table(
-                _METRIC_COLUMNS, ((row.label, row.value) for row in panel.metrics)
+                _METRIC_COLUMNS,
+                (
+                    (panel.seed_label, panel.seed_value),
+                    (panel.paths_label, panel.paths_value),
+                    *((row.label, row.value) for row in panel.metrics),
+                ),
             )
         )
     retirement = charts.retirement
