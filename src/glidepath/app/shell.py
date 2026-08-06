@@ -36,6 +36,7 @@ from glidepath.app.files import (
     OPEN_PLAN_LABEL,
     PLAN_FILE_FILTER,
     PLAN_FILE_SUFFIX,
+    QUIT_LABEL,
     SAVE_DIALOG_TITLE,
     SAVE_PLAN_AS_LABEL,
     SAVE_PLAN_LABEL,
@@ -66,6 +67,7 @@ class FileMenuViewModel:
     export_report_dialog_title: str
     export_report_filter: str
     export_report_suffix: str
+    quit_label: str
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,7 @@ def build_shell_view_model() -> ShellViewModel:
             export_report_dialog_title=EXPORT_REPORT_DIALOG_TITLE,
             export_report_filter=REPORT_FILE_FILTER,
             export_report_suffix=REPORT_FILE_SUFFIX,
+            quit_label=QUIT_LABEL,
         ),
         help_menu_label=HELP_MENU_LABEL,
         facts_tab_label="Facts",

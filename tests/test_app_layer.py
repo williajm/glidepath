@@ -33,6 +33,7 @@ from glidepath.app.files import (
     OPEN_PLAN_LABEL,
     PLAN_FILE_FILTER,
     PLAN_FILE_SUFFIX,
+    QUIT_LABEL,
     SAVE_DIALOG_TITLE,
     SAVE_PLAN_AS_LABEL,
     SAVE_PLAN_LABEL,
@@ -237,8 +238,8 @@ class TestShellViewModel:
     def test_file_menu_wires_each_field_to_its_source_constant(self) -> None:
         """Every File-menu field carries exactly its source constant.
 
-        The view model hand-wires sixteen constants from the files and
-        exports modules; a crossed wire (say, the report filter
+        The view model hand-wires seventeen constants from the files
+        and exports modules; a crossed wire (say, the report filter
         carrying the cash-flow filter) would still pass every
         per-screen test, so each field is pinned here.
         """
@@ -247,6 +248,7 @@ class TestShellViewModel:
         assert menu.open_label == OPEN_PLAN_LABEL
         assert menu.save_label == SAVE_PLAN_LABEL
         assert menu.save_as_label == SAVE_PLAN_AS_LABEL
+        assert menu.quit_label == QUIT_LABEL
         assert menu.open_dialog_title == OPEN_DIALOG_TITLE
         assert menu.save_dialog_title == SAVE_DIALOG_TITLE
         assert menu.file_filter == PLAN_FILE_FILTER

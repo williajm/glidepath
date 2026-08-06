@@ -376,7 +376,7 @@ class TestStateWithRetirement:
         state = state_with_retirement(projected, DETERMINISTIC_REQUEST, today=later)
         assert state.retirement is not None
         re_anchored = replanned_state(
-            projected.assumptions, projected.household, (), today=later
+            projected.assumptions, projected.household, (), today=later, modified=True
         )
         assert state.result == re_anchored.result
         assert state.result != projected.result

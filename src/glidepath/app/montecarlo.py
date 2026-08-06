@@ -273,7 +273,11 @@ def state_with_monte_carlo(
     if not 1 <= paths <= MAX_PATHS:
         return _with_monte_carlo_error(state, MONTE_CARLO_PATHS_MESSAGE)
     base = replanned_state(
-        state.assumptions, state.household, state.scenarios, today=today
+        state.assumptions,
+        state.household,
+        state.scenarios,
+        today=today,
+        modified=state.modified,
     )
     config = RunConfig(today=today, mode=RunMode.MONTE_CARLO, seed=seed)
     try:

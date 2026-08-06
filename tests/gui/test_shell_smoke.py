@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QDialog, QTabWidget
 
 from glidepath.app import (
@@ -101,6 +102,12 @@ class TestMainWindow:
         assert window.help_guide_action.text() == view_model.help_guide.title
         assert window.about_action.text() == view_model.about.title
 
+    def test_file_menu_offers_quit(self) -> None:
+        """The File menu ends with a Quit action carrying the app copy."""
+        view_model = build_shell_view_model()
+        window = MainWindow(view_model)
+        assert window.quit_action.text() == view_model.file_menu.quit_label
+
     def test_about_shows_view_model_copy(self) -> None:
         """About shows the about view model — which repeats the disclaimer."""
         view_model = build_shell_view_model()
@@ -145,6 +152,42 @@ class TestMainWindow:
         monkeypatch.setattr(widgets.HelpGuideDialog, "exec", fake_exec, raising=True)
         MainWindow(build_shell_view_model()).show_help_guide()
         assert executed == ["guide"]
+
+
+class TestKeyboardShortcuts:
+    """The main window binds the standard accelerators (issue #135)."""
+
+    def test_file_actions_use_the_standard_keys(self) -> None:
+        """Open, Save, and Save As follow the platform's conventions."""
+        window = MainWindow(build_shell_view_model())
+        open_key = QKeySequence(QKeySequence.StandardKey.Open)
+        save_key = QKeySequence(QKeySequence.StandardKey.Save)
+        save_as_key = QKeySequence(QKeySequence.StandardKey.SaveAs)
+        assert window.open_action.shortcut() == open_key
+        assert window.save_action.shortcut() == save_key
+        assert window.save_as_action.shortcut() == save_as_key
+
+    def test_exports_carry_explicit_accelerators(self) -> None:
+        """The exports have no standard key, so they take Ctrl+E variants."""
+        window = MainWindow(build_shell_view_model())
+        assert window.export_cash_flow_action.shortcut() == QKeySequence("Ctrl+E")
+        assert window.export_report_action.shortcut() == QKeySequence("Ctrl+Shift+E")
+
+    def test_quit_is_bound_to_ctrl_q_on_every_platform(self) -> None:
+        """Quit takes the Ctrl+Q literal, not StandardKey.Quit.
+
+        Windows resolves the standard key to the rare Key_Exit
+        multimedia key rather than an accelerator; the literal gives
+        Ctrl+Q everywhere, mapped to Command+Q on macOS.
+        """
+        window = MainWindow(build_shell_view_model())
+        assert window.quit_action.shortcut() == QKeySequence("Ctrl+Q")
+
+    def test_help_guide_uses_the_standard_help_key(self) -> None:
+        """The how-to-use guide answers the platform's help key."""
+        window = MainWindow(build_shell_view_model())
+        help_key = QKeySequence(QKeySequence.StandardKey.HelpContents)
+        assert window.help_guide_action.shortcut() == help_key
 
 
 class TestRun:

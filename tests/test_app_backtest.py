@@ -216,7 +216,7 @@ class TestStateWithBacktest:
         assert state.backtest is not None
         assert state.backtest.config.today == later
         re_anchored = replanned_state(
-            projected.assumptions, projected.household, (), today=later
+            projected.assumptions, projected.household, (), today=later, modified=True
         )
         assert state.result == re_anchored.result
         assert state.result != projected.result

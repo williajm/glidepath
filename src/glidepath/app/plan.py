@@ -72,6 +72,13 @@ class PlanState:
     reset whenever the state is recomputed through
     :func:`replanned_state`, so a held result can never go stale
     against a changed plan.
+
+    ``modified`` says whether a plan-mutating transition (facts
+    capture, assumption override, scenario edit) has touched the state
+    since the last save or load — the shell's unsaved-changes signal
+    (issue #136). The slow-run transitions (Monte Carlo, retirement,
+    backtest) carry it through unchanged: a run reads the plan, it
+    does not edit it.
     """
 
     assumptions: AssumptionSet
@@ -87,6 +94,7 @@ class PlanState:
     retirement_error: str | None = None
     backtest: BacktestResult | None = None
     backtest_error: str | None = None
+    modified: bool = False
 
 
 @dataclass(frozen=True)
@@ -160,14 +168,21 @@ def replanned_state(
     scenarios: tuple[Scenario, ...],
     *,
     today: date,
+    modified: bool,
 ) -> PlanState:
     """A state recomputed from its inputs: base run plus scenario runs.
 
     The one route every transition takes, so the projection and the
     scenario comparison can never drift out of step with the inputs.
+    ``modified`` is the unsaved-changes flag the recomputed state
+    carries: True from the plan-mutating transitions, False from a
+    load, and the incoming state's own flag from the slow-run
+    transitions (issue #136).
     """
     if household is None:
-        return PlanState(assumptions=assumptions, scenarios=scenarios)
+        return PlanState(
+            assumptions=assumptions, scenarios=scenarios, modified=modified
+        )
     result, error = _projected(household, assumptions, today)
     runs, runs_error = _scenario_runs(household, assumptions, scenarios, today)
     return PlanState(
@@ -178,6 +193,7 @@ def replanned_state(
         scenarios=scenarios,
         scenario_runs=runs,
         scenario_run_error=runs_error,
+        modified=modified,
     )
 
 
@@ -185,7 +201,9 @@ def state_with_household(
     state: PlanState, household: Household, *, today: date
 ) -> PlanState:
     """The state after capturing ``household`` and re-projecting."""
-    return replanned_state(state.assumptions, household, state.scenarios, today=today)
+    return replanned_state(
+        state.assumptions, household, state.scenarios, today=today, modified=True
+    )
 
 
 def state_with_scenarios(
@@ -198,7 +216,19 @@ def state_with_scenarios(
     ``today`` — in a session left open across a date boundary, the
     comparison's base and the displayed projection must not diverge.
     """
-    return replanned_state(state.assumptions, state.household, scenarios, today=today)
+    return replanned_state(
+        state.assumptions, state.household, scenarios, today=today, modified=True
+    )
+
+
+def state_marked_saved(state: PlanState) -> PlanState:
+    """The state with its unsaved-changes flag cleared (issue #136).
+
+    Shells apply this after a successful save — and after projecting
+    the launch example, which is shipped demo data, not user edits.
+    """
+    changes: dict[str, Any] = {"modified": False} if state.modified else {}
+    return replace(state, **changes) if changes else state
 
 
 def _parsed_override_value(
@@ -307,7 +337,7 @@ def state_with_override(
     assumptions = _with_assumption(state, changed)
     return OverrideOutcome(
         state=replanned_state(
-            assumptions, state.household, state.scenarios, today=today
+            assumptions, state.household, state.scenarios, today=today, modified=True
         )
     )
 

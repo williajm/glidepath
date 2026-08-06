@@ -19,7 +19,7 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QPdfWriter, QTextDocument
+from PySide6.QtGui import QCloseEvent, QKeySequence, QPdfWriter, QTextDocument
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QTabWidget,
@@ -46,6 +47,8 @@ from glidepath.app import (
     REPORT_NOT_WRITTEN_MESSAGE,
     RETIREMENT_RUNNING_MESSAGE,
     RETIREMENT_STALE_MESSAGE,
+    UNSAVED_CHANGES_PROMPT,
+    UNSAVED_CHANGES_TITLE,
     AboutViewModel,
     DisclaimerViewModel,
     FactsFormData,
@@ -66,6 +69,7 @@ from glidepath.app import (
     facts_form_data_from_household,
     facts_saved_message,
     format_form_errors,
+    has_unsaved_changes,
     initial_plan_state,
     load_plan_state,
     metric_from_key,
@@ -77,6 +81,7 @@ from glidepath.app import (
     report_exported_message,
     run_mode_from_key,
     save_plan_state,
+    state_marked_saved,
     state_with_backtest,
     state_with_household,
     state_with_monte_carlo,
@@ -310,27 +315,49 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.inspector_pane, view_model.inspector_tab_label)
         self.setCentralWidget(tabs)
         self._load_example()
+        self._build_menus(view_model)
 
-        # The "&" mnemonic is toolkit mechanics, not copy — the labels
-        # themselves come from the app layer (§4.7).
+    def _build_menus(self, view_model: ShellViewModel) -> None:
+        """Populate the menu bar from the shell view model.
+
+        The "&" mnemonics and keyboard shortcuts are toolkit
+        mechanics, not copy — the labels themselves come from the app
+        layer (§4.7). Standard keys follow platform conventions
+        (issue #135); the exports have no standard key, so they take
+        explicit accelerators.
+        """
         file_menu = self.menuBar().addMenu(f"&{view_model.file_menu.menu_label}")
-        open_action = file_menu.addAction(view_model.file_menu.open_label)
-        open_action.triggered.connect(self.open_plan_dialog)
-        save_action = file_menu.addAction(view_model.file_menu.save_label)
-        save_action.triggered.connect(self.save_plan)
-        save_as_action = file_menu.addAction(view_model.file_menu.save_as_label)
-        save_as_action.triggered.connect(self.save_plan_as_dialog)
+        self.open_action = file_menu.addAction(view_model.file_menu.open_label)
+        self.open_action.setShortcut(QKeySequence.StandardKey.Open)
+        self.open_action.triggered.connect(self.open_plan_dialog)
+        self.save_action = file_menu.addAction(view_model.file_menu.save_label)
+        self.save_action.setShortcut(QKeySequence.StandardKey.Save)
+        self.save_action.triggered.connect(self.save_plan)
+        self.save_as_action = file_menu.addAction(view_model.file_menu.save_as_label)
+        self.save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+        self.save_as_action.triggered.connect(self.save_plan_as_dialog)
         file_menu.addSeparator()
         self.export_cash_flow_action = file_menu.addAction(
             view_model.file_menu.export_cash_flow_label
         )
+        self.export_cash_flow_action.setShortcut(QKeySequence("Ctrl+E"))
         self.export_cash_flow_action.triggered.connect(self.export_cash_flow_dialog)
         self.export_report_action = file_menu.addAction(
             view_model.file_menu.export_report_label
         )
+        self.export_report_action.setShortcut(QKeySequence("Ctrl+Shift+E"))
         self.export_report_action.triggered.connect(self.export_report_dialog)
+        file_menu.addSeparator()
+        self.quit_action = file_menu.addAction(view_model.file_menu.quit_label)
+        # Not StandardKey.Quit: Windows resolves it to the rare
+        # Key_Exit multimedia key rather than an accelerator. The
+        # literal gives Ctrl+Q, and macOS maps Ctrl to Command, so the
+        # binding lands on each platform's convention anyway.
+        self.quit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        self.quit_action.triggered.connect(self.close)
         help_menu = self.menuBar().addMenu(f"&{view_model.help_menu_label}")
         self.help_guide_action = help_menu.addAction(view_model.help_guide.title)
+        self.help_guide_action.setShortcut(QKeySequence.StandardKey.HelpContents)
         self.help_guide_action.triggered.connect(self.show_help_guide)
         self.about_action = help_menu.addAction(view_model.about.title)
         self.about_action.triggered.connect(self.show_about)
@@ -502,8 +529,42 @@ class MainWindow(QMainWindow):
         outcome = save_plan_state(self._state, path)
         self.statusBar().showMessage(outcome.message)
         if outcome.saved:
+            self._state = state_marked_saved(self._state)
             self._plan_path = path
             self._remember_plan_path(path)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        """Ask before a close discards unsaved plan edits (issue #136).
+
+        Save runs the normal save flow — asking for a path when the
+        session has none — and the window closes only once the changes
+        are actually saved: a failed or cancelled save keeps it open
+        rather than silently discarding the edits it just promised to
+        keep.
+        """
+        if not has_unsaved_changes(self._state):
+            event.accept()
+            return
+        choice = QMessageBox.question(
+            self,
+            UNSAVED_CHANGES_TITLE,
+            UNSAVED_CHANGES_PROMPT,
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if choice == QMessageBox.StandardButton.Save:
+            self.save_plan()
+            if has_unsaved_changes(self._state):
+                event.ignore()
+                return
+            event.accept()
+            return
+        if choice == QMessageBox.StandardButton.Discard:
+            event.accept()
+            return
+        event.ignore()
 
     def _remember_plan_path(self, path: Path) -> None:
         """Record the plan path for the next launch, best-effort.
@@ -522,10 +583,13 @@ class MainWindow(QMainWindow):
 
         The example is raw form text through the normal submission
         path — guaranteed parseable by test — with the status line
-        explaining it is an example, not the user's data.
+        explaining it is an example, not the user's data. It is
+        shipped demo data, not a user edit, so closing straight after
+        launch must not ask about saving it (issue #136).
         """
         self.facts_pane.set_form_data(example_facts_form_data())
         self._handle_facts_submitted(self.facts_pane.form_data())
+        self._state = state_marked_saved(self._state)
         self.facts_pane.status_label.setText(self._view_model.facts_form.example_note)
 
     def _handle_cleared(self) -> str:
