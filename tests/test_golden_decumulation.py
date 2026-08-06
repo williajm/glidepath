@@ -374,10 +374,10 @@ class TestHandCheckedAnchors:
 
         Eight whole months remain from 2 Aug 2026 to 5 Apr 2027,
         scaling the 48,000 salary to 32,000.00, the 8,000 SIPP
-        contribution to 5,333.33 (provider relief 666.67 x 8/5 =
-        1,066.67 at 20% of gross), and the 4,000 ISA contribution to
-        2,666.67. Employment tax: 32,000.00 less the 12,570 personal
-        allowance leaves 19,430.00 in the basic band; 20% is 3,886.00.
+        contribution to 5,333.33 (provider relief 20% of that gross:
+        1,066.67), and the 4,000 ISA contribution to 2,666.67.
+        Employment tax: 32,000.00 less the 12,570 personal allowance
+        leaves 19,430.00 in the basic band; 20% is 3,886.00.
         The GIA's portfolio income adds its own marginal charge, which
         the ledger books against the wrapper as growth tax — so total
         tax due less the growth tax must land exactly on the
