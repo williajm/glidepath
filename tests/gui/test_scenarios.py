@@ -176,14 +176,13 @@ def patch_item_dialog_replies(
     monkeypatch: pytest.MonkeyPatch, replies: tuple[str, ...]
 ) -> None:
     """Make successive pick-an-item prompts return ``replies`` in turn."""
-    queue = iter(replies)
+    remaining = list(replies)
 
     def next_reply(*_args: object, **_kwargs: object) -> tuple[str, bool]:
         """The next scripted reply; a prompt past the script is a failure."""
-        try:
-            return (next(queue), True)
-        except StopIteration:
+        if not remaining:
             pytest.fail("the pane opened more prompts than the test scripted")
+        return (remaining.pop(0), True)
 
     monkeypatch.setattr(QInputDialog, "getItem", staticmethod(next_reply))
 
