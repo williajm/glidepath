@@ -23,6 +23,7 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cov",
+    "pytest-timeout",
     "ruff",
 ]
 
@@ -34,7 +35,7 @@ build-backend = "uv_build"
 [tool.uv]
 # Supply-chain cooldown: resolution ignores anything published to PyPI after
 # this timestamp (now minus 7 days). Updated ONLY by `make deps`.
-exclude-newer = "2026-07-27T16:50:15Z"
+exclude-newer = "2026-07-30T09:40:45Z"
 
 # PyPI is the ONLY permitted index (supply-chain policy; see CLAUDE.md).
 [[tool.uv.index]]
@@ -114,6 +115,14 @@ addopts = [
     "--cov-report=xml",
 ]
 testpaths = ["tests"]
+# Fail a stuck test fast instead of hanging CI for the runner limit: the
+# GUI suite waits on worker pools for up to 60s, so the ceiling sits
+# safely above that while still cutting a wedged run short.
+timeout = 120
+markers = [
+    "gui: exercises the PySide6 shell on the offscreen Qt platform",
+    "slow: long-running engine sweeps (Monte Carlo, backtest, solvers); deselect with -m 'not slow'",
+]
 
 [tool.coverage.run]
 branch = true
