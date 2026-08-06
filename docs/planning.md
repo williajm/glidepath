@@ -1293,7 +1293,7 @@ extrapolate. **Recurring task** after each Budget: copy previous
 year's file, re-verify every figure, update `verified_on`/`sources`,
 update §6.
 
-### 5.4 Plan document format (`.glidepath.json` schema v3)
+### 5.4 Plan document format (`.glidepath.json` schema v4)
 
 Implements the §4.5 decision (`glidepath/persistence/`, roadmap 6.2/6.4;
 region-agnostic like the core — the region's shipped defaults and data
@@ -1301,7 +1301,7 @@ version are function inputs, never imports). Top level:
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "region": "uk",
   "assumptions_resolved_against": "<region data_version at last save>",
   "household": { "persons": [...], "spending": ..., "planned_outflows": [...] },
@@ -1345,7 +1345,13 @@ all load deferred; v2→v3 (#97) drops the state pension
 qualifying-years fields (`ni_record_start`, `qualifying_years`,
 `planned_extra_years`) — a migrated record keeps its deferral choice,
 and one without a forecast fails projection with a clear demand for
-one (§5.1).
+one (§5.1); v3→v4 (#129) drops the accumulation-stage spending
+multiplier keys (`early_accumulation`, `mid_accumulation`,
+`pre_retirement`) that older builds accepted and wrote — spending is
+modelled only in retirement, so they never scaled anything and the
+drop loses no behaviour (#114 retired the tokens from the
+`SpendingPlan` invariant without a migration, which left genuine
+v1-era files unloadable until this step).
 
 ## 6. Verified UK policy figures (2026/27)
 

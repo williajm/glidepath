@@ -413,7 +413,10 @@
         "value": "24000"
       },
       "stage_multipliers": {
-        "decumulation": "1.10"
+        "decumulation": "1.10",
+        "early_accumulation": "1.00",
+        "mid_accumulation": "1.05",
+        "pre_retirement": "0.95"
       }
     }
   },

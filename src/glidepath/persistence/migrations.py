@@ -66,8 +66,29 @@ def _upgrade_v2_to_v3(raw: RawDocument) -> RawDocument:
     return raw
 
 
+def _upgrade_v3_to_v4(raw: RawDocument) -> RawDocument:
+    """v4 drops the accumulation-stage spending multipliers (#129).
+
+    Spending is modelled only in retirement, so the accumulation-stage
+    keys older builds accepted and wrote never scaled anything —
+    dropping them loses no behaviour. #114 retired the tokens from the
+    ``SpendingPlan`` invariant without a migration, so a genuine v1-era
+    file carrying them failed to load until this step.
+    """
+    household = raw.get("household")
+    spending = household.get("spending") if isinstance(household, dict) else None
+    multipliers = (
+        spending.get("stage_multipliers") if isinstance(spending, dict) else None
+    )
+    if isinstance(multipliers, dict):
+        for key in ("early_accumulation", "mid_accumulation", "pre_retirement"):
+            multipliers.pop(key, None)
+    raw[_VERSION_KEY] = 4
+    return raw
+
+
 UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
-    {1: _upgrade_v1_to_v2, 2: _upgrade_v2_to_v3}
+    {1: _upgrade_v1_to_v2, 2: _upgrade_v2_to_v3, 3: _upgrade_v3_to_v4}
 )
 """The registered upgraders, keyed by the version each reads."""
 
