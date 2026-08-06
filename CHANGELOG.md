@@ -48,6 +48,14 @@ in the release PR and becomes the GitHub Release notes verbatim.
   PDF text extraction asserting the exported report carries the
   disclaimer and its section headings, and a direct render test of the
   report chart rasteriser (#133).
+- Tests for the operational scripts that gate merges and releases:
+  the supply-chain dep-age check (fail-closed on malformed lockfiles,
+  non-PyPI sources, late uploads, and network errors), the cooldown
+  cutoff rewrite, the release version bump, the release-notes
+  changelog extraction, and the JST returns-history derivation. The
+  scripts now sit inside the pytest coverage gate (and the SonarQube
+  coverage metric), with only the manual Monte Carlo performance
+  harness left outside it (#130).
 
 ### Fixed
 

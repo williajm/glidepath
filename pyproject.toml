@@ -103,6 +103,9 @@ strict = true
 warn_unused_ignores = true
 python_version = "3.14"
 files = ["src", "tests", "scripts"]
+# Lets the tests' top-level script imports (e.g. `import check_dep_age`)
+# resolve to scripts/ — mirrors pytest's pythonpath below.
+mypy_path = ["scripts"]
 
 # --- pytest / coverage ------------------------------------------------------
 [tool.pytest.ini_options]
@@ -111,10 +114,14 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--cov=glidepath",
+    "--cov=scripts",
     "--cov-report=term-missing",
     "--cov-report=xml",
 ]
 testpaths = ["tests"]
+# scripts/ is not a package; tests import the operational scripts (the
+# gates behind `make deps`/`make bump`/releases) as top-level modules.
+pythonpath = ["scripts"]
 # Fail a stuck test fast instead of hanging CI for the runner limit: the
 # GUI suite waits on worker pools for up to 60s, so the ceiling sits
 # safely above that while still cutting a wedged run short.
@@ -126,9 +133,18 @@ markers = [
 
 [tool.coverage.run]
 branch = true
+# The Monte Carlo performance harness is a manual measurement tool
+# (planning §4.6), run by hand and read by a human — the only scripts/
+# entry outside the coverage gate.
+omit = ["scripts/measure_mc_performance.py"]
 
 [tool.coverage.report]
 # The suite sits at ~98%; a floor close behind it means an entire module
 # losing its tests fails CI instead of coasting on the old 90% margin.
 fail_under = 96
 show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    # Script entry-point guards: the tests call main() directly.
+    'if __name__ == "__main__":',
+]
