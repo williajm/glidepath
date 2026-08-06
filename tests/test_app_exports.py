@@ -70,6 +70,7 @@ MONEY_COLUMNS = {
     "Fees": "fees",
     "Growth": "growth",
     "Growth tax": "growth_tax",
+    "AA charge": "aa_charge",
     "Banked": "banked",
     "Withdrawals (gross)": "withdrawals_gross",
     "Closing balance": "closing_balance",

@@ -14,6 +14,7 @@ from decimal import Decimal
 import pytest
 
 from glidepath.core import (
+    AnnualAllowanceFunding,
     AnnualAllowanceMeasurement,
     AnnualAllowanceOutcome,
     AnnualCalendar,
@@ -50,6 +51,7 @@ from glidepath.core import (
     RunProvenance,
     Scenario,
     ScenarioError,
+    SchemeInput,
     StatePensionEntitlement,
     StatePensionRecord,
     TaxInput,
@@ -359,6 +361,13 @@ class PassThroughContributions:
         """No allowance machinery: zero excess, empty pool."""
         del measurement, period
         return AnnualAllowanceOutcome(chargeable_excess=ZERO, carry_forward=())
+
+    def annual_allowance_funding(
+        self, charge: Money, schemes: tuple[SchemeInput, ...], period: Period
+    ) -> AnnualAllowanceFunding:
+        """No scheme-funded route: the whole charge falls to cash."""
+        del schemes, period
+        return AnnualAllowanceFunding(scheme_payments=(), cash=charge)
 
 
 @dataclass(frozen=True)

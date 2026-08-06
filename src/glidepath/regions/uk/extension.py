@@ -329,6 +329,9 @@ def _indexed_pension(pension: PensionRules, factor: Decimal) -> PensionRules:
         aa_taper_floor=_indexed_money(pension.aa_taper_floor, factor),
         mpaa=_indexed_money(pension.mpaa, factor),
         aa_carry_forward_years=pension.aa_carry_forward_years,
+        # The scheme-pays minimum is a fixed statutory figure (FA 2004
+        # s237B, unchanged since 2011) — never indexed.
+        scheme_pays_min_charge=pension.scheme_pays_min_charge,
         member_relief_basic_amount=_indexed_money(
             pension.member_relief_basic_amount, factor
         ),

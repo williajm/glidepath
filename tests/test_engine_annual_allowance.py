@@ -28,6 +28,7 @@ from glidepath.core import (
 )
 from glidepath.core.entities import Person
 from glidepath.regions.uk import (
+    GIA_KIND,
     RUK_RESIDENCY,
     WORKPLACE_DC_KIND,
     default_assumption_set,
@@ -49,8 +50,10 @@ def money_fact(amount: str, as_of: date = AS_OF) -> Fact[Money]:
 def dc_saver(
     *,
     contribution: str,
+    employer: str | None = None,
     employment: str = "60000",
     mpaa_triggered_on: date | None = None,
+    gia_balance: str | None = None,
     as_of: date = AS_OF,
 ) -> Household:
     """A working-age DC saver contributing ``contribution`` gross per year."""
@@ -62,9 +65,20 @@ def dc_saver(
             employee_amount=Decision(
                 value=Money(Decimal(contribution)), recorded_on=RECORDED
             ),
+            employer_amount=None
+            if employer is None
+            else money_fact(employer, as_of=as_of),
             relief_mechanic=ReliefMechanic.RELIEF_AT_SOURCE,
         ),
     )
+    wrappers: tuple[Wrapper, ...] = (dc,)
+    if gia_balance is not None:
+        gia = Wrapper(
+            id=EntityId("aa-gia"),
+            kind=GIA_KIND,
+            balance=money_fact(gia_balance, as_of=as_of),
+        )
+        wrappers = (dc, gia)
     person = Person(
         id=EntityId("aa-person"),
         date_of_birth=Fact(value=date(1980, 2, 1), as_of=as_of, recorded_on=RECORDED),
@@ -74,7 +88,7 @@ def dc_saver(
         mpaa_triggered_on=None
         if mpaa_triggered_on is None
         else Fact(value=mpaa_triggered_on, as_of=as_of, recorded_on=RECORDED),
-        wrappers=(dc,),
+        wrappers=wrappers,
     )
     return Household(persons=(person,))
 
@@ -133,3 +147,63 @@ def test_tapered_allowance_charges_a_high_earner() -> None:
     ]
     assert [line.band for line in charge_lines] == ["aa_charge_additional"]
     assert charge_lines[0].tax == Money(Decimal("9000.00"))
+
+
+def test_scheme_pays_debits_the_breaching_pension_pot() -> None:
+    """The mandatory conditions route the whole charge to the DC pot (#124).
+
+    An £80,000 employer contribution against £60,000 of pay leaves a
+    £20,000 excess (no taper: threshold income £60,000). Taxable
+    income is £47,430, so the excess prices wholly in the higher band:
+    £8,000.00. The charge exceeds £2,000 and the wrapper's own input
+    exceeds the standard £60,000 allowance — mandatory scheme pays
+    (FA 2004 s237B) — so the pot funds all of it at close and nothing
+    joins the shortfall.
+    """
+    plan = dc_saver(contribution="0", employer="80000", as_of=date(2026, 4, 1))
+    result = one_year_run(plan, date(2026, 4, 6))
+    [person] = result.snapshots[0].persons
+    [dc] = person.wrappers
+    charge_lines = [
+        line for line in person.tax.lines if line.band.startswith("aa_charge_")
+    ]
+    assert [line.band for line in charge_lines] == ["aa_charge_higher"]
+    assert charge_lines[0].tax == Money(Decimal("8000.00"))
+    assert dc.aa_charge == Money(Decimal("8000.00"))
+    assert person.shortfall == ZERO
+
+
+def test_cash_route_debits_the_taxable_account() -> None:
+    """A charge under £2,000 settles from the GIA, not the pension.
+
+    The #116 MPAA repro with a £10,000 GIA alongside: the £666.66
+    charge fails the mandatory scheme-pays minimum, so it is deducted
+    from the taxable account at close and the pension pot keeps its
+    contributions.
+    """
+    plan = dc_saver(
+        contribution="20000",
+        mpaa_triggered_on=date(2025, 1, 1),
+        gia_balance="10000",
+    )
+    result = one_year_run(plan, date(2026, 8, 2))
+    [person] = result.snapshots[0].persons
+    dc, gia = person.wrappers
+    assert dc.aa_charge == ZERO
+    assert gia.aa_charge == Money(Decimal("666.66"))
+    assert person.shortfall == ZERO
+
+
+def test_an_unfundable_charge_joins_the_shortfall() -> None:
+    """With no taxable account the cash route has nothing to debit.
+
+    Same breach, no GIA: the £666.66 charge cannot come from the
+    pension (conditions unmet) or from cash, so it lands in the
+    person's shortfall — the ruin signal sees the breach.
+    """
+    plan = dc_saver(contribution="20000", mpaa_triggered_on=date(2025, 1, 1))
+    result = one_year_run(plan, date(2026, 8, 2))
+    [person] = result.snapshots[0].persons
+    [dc] = person.wrappers
+    assert dc.aa_charge == ZERO
+    assert person.shortfall == Money(Decimal("666.66"))

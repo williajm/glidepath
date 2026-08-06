@@ -68,6 +68,7 @@ aa_taper_rate = "0.5"
 aa_taper_floor = "10000"
 mpaa = "10000"
 aa_carry_forward_years = 3
+scheme_pays_min_charge = "2000"
 member_relief_basic_amount = "3600"
 member_relief_max_age = 75
 relief_at_source_rate = "0.20"

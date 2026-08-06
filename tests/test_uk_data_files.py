@@ -26,7 +26,7 @@ def test_tax_year_2026_27_meta() -> None:
     assert meta.tax_year == "2026/27"
     assert meta.start_date == date(2026, 4, 6)
     assert meta.end_date == date(2027, 4, 5)
-    assert meta.verified_on == date(2026, 8, 4)
+    assert meta.verified_on == date(2026, 8, 6)
     assert meta.sources
     assert all(source.startswith("https://") for source in meta.sources)
 

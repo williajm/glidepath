@@ -114,6 +114,7 @@ _FLOW_COLUMNS: Final[tuple[tuple[str, Callable[[PeriodReportRow], Money]], ...]]
     ("Fees", lambda row: row.fees),
     ("Growth", lambda row: row.growth),
     ("Growth tax", lambda row: row.growth_tax),
+    ("AA charge", lambda row: row.aa_charge),
     ("Banked", lambda row: row.banked),
     ("Withdrawals (gross)", lambda row: row.withdrawals_gross),
     ("Closing balance", lambda row: row.closing_balance),

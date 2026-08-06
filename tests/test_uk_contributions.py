@@ -22,10 +22,12 @@ from glidepath.core import (
     AnnualAllowanceMeasurement,
     ContributionRuleset,
     DbArrangementInput,
+    EntityId,
     MemberContributionRequest,
     Money,
     Period,
     ReliefMechanic,
+    SchemeInput,
 )
 from glidepath.regions.uk import (
     AnnualAllowanceAssessment,
@@ -973,3 +975,74 @@ def test_a_pool_beyond_a_shrunken_window_expires_oldest_first(
     )
     assert outcome.chargeable_excess == money("2000")
     assert outcome.carry_forward == (money("0"), money("0"), money("0"))
+
+
+# --- annual-allowance charge funding (roadmap 9.21, #124) --------------------
+
+
+def scheme(name: str, input_amount: str) -> SchemeInput:
+    """One pension wrapper's own input amount for the funding split."""
+    return SchemeInput(wrapper_id=EntityId(name), input_amount=money(input_amount))
+
+
+def test_charge_at_the_minimum_falls_to_cash(rules: UkContributionRuleset) -> None:
+    """FA 2004 s237B: mandatory scheme pays needs a charge *over* 2,000."""
+    schemes = (scheme("dc", "80000"),)
+    funding = rules.annual_allowance_funding(money("2000"), schemes, TAX_YEAR_2026_27)
+    assert funding.scheme_payments == ()
+    assert funding.cash == money("2000")
+
+
+def test_charge_over_the_minimum_debits_the_qualifying_scheme(
+    rules: UkContributionRuleset,
+) -> None:
+    """Both conditions met: the whole charge routes to the scheme."""
+    schemes = (scheme("dc", "60000.01"),)
+    funding = rules.annual_allowance_funding(
+        money("2000.01"), schemes, TAX_YEAR_2026_27
+    )
+    [payment] = funding.scheme_payments
+    assert payment.wrapper_id == EntityId("dc")
+    assert payment.amount == money("2000.01")
+    assert funding.cash == money("0")
+
+
+def test_input_at_the_standard_allowance_falls_to_cash(
+    rules: UkContributionRuleset,
+) -> None:
+    """The input must *exceed* the standard AA — 60,000 exactly fails.
+
+    PTM056410: the s228 amount is the test, with the tapered allowance
+    and MPAA ignored, and only an input beyond it qualifies.
+    """
+    schemes = (scheme("dc", "60000"),)
+    funding = rules.annual_allowance_funding(money("9000"), schemes, TAX_YEAR_2026_27)
+    assert funding.scheme_payments == ()
+    assert funding.cash == money("9000")
+
+
+def test_the_largest_qualifying_input_pays(rules: UkContributionRuleset) -> None:
+    """With several qualifying schemes the largest input takes the debit."""
+    schemes = (
+        scheme("first", "61000"),
+        scheme("largest", "90000"),
+        scheme("other", "70000"),
+    )
+    funding = rules.annual_allowance_funding(money("12000"), schemes, TAX_YEAR_2026_27)
+    [payment] = funding.scheme_payments
+    assert payment.wrapper_id == EntityId("largest")
+    assert payment.amount == money("12000")
+
+
+def test_no_schemes_at_all_falls_to_cash(rules: UkContributionRuleset) -> None:
+    """A DB-origin charge has no pot to debit — cash route only."""
+    funding = rules.annual_allowance_funding(money("9000"), (), TAX_YEAR_2026_27)
+    assert funding.scheme_payments == ()
+    assert funding.cash == money("9000")
+
+
+def test_a_negative_charge_is_rejected(rules: UkContributionRuleset) -> None:
+    """The funding split cannot price a negative charge."""
+    charge = money("-1")
+    with pytest.raises(UkContributionError, match="charge must be non-negative"):
+        rules.annual_allowance_funding(charge, (), TAX_YEAR_2026_27)

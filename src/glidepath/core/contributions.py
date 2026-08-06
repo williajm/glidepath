@@ -27,6 +27,7 @@ from glidepath.core.money import Money
 if TYPE_CHECKING:
     from datetime import date
 
+    from glidepath.core.entities import EntityId
     from glidepath.core.periods import Period
     from glidepath.core.provenance import AssumptionKey, Decision, Fact
     from glidepath.core.wrappers import ReliefMechanic
@@ -240,6 +241,63 @@ class AnnualAllowanceOutcome:
             raise ValueError(msg)
 
 
+@dataclass(frozen=True, slots=True)
+class SchemeInput:
+    """One pension wrapper's own input amount, for the funding split (#124).
+
+    ``input_amount`` is the wrapper's own money-purchase pension input
+    for the period — member gross (provider relief included) plus
+    employer. DB streams are not schemes here: they have no modelled
+    pot to debit, so a charge their input generates always takes the
+    cash route (planning §5.2).
+    """
+
+    wrapper_id: EntityId
+    input_amount: Money
+
+    def __post_init__(self) -> None:
+        """Reject a negative input amount."""
+        if self.input_amount < _ZERO:
+            msg = "SchemeInput.input_amount must be non-negative"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class SchemePayment:
+    """One scheme-funded debit of a period's priced AA charge (#124)."""
+
+    wrapper_id: EntityId
+    amount: Money
+
+    def __post_init__(self) -> None:
+        """Reject a negative payment."""
+        if self.amount < _ZERO:
+            msg = "SchemePayment.amount must be non-negative"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class AnnualAllowanceFunding:
+    """How a period's priced AA charge is funded (planning §5.2, #124).
+
+    ``scheme_payments`` are debits against pension wrappers (the UK's
+    Scheme Pays — a scheme-administrator payment, not a member
+    withdrawal); ``cash`` falls to the person's bare taxable accounts
+    at period close, alongside the portfolio-income tax charge. The
+    split covers the whole charge; what a drained wrapper cannot fund
+    joins the person's shortfall (planning §5.2).
+    """
+
+    scheme_payments: tuple[SchemePayment, ...]
+    cash: Money
+
+    def __post_init__(self) -> None:
+        """Reject a negative cash share."""
+        if self.cash < _ZERO:
+            msg = "AnnualAllowanceFunding.cash must be non-negative"
+            raise ValueError(msg)
+
+
 class ContributionRuleset(Protocol):
     """Region-supplied contribution relief mechanics (planning §4.2).
 
@@ -263,4 +321,17 @@ class ContributionRuleset(Protocol):
         self, measurement: AnnualAllowanceMeasurement, period: Period
     ) -> AnnualAllowanceOutcome:
         """Measure a period's pension inputs against the region's allowances."""
+        ...
+
+    def annual_allowance_funding(
+        self, charge: Money, schemes: tuple[SchemeInput, ...], period: Period
+    ) -> AnnualAllowanceFunding:
+        """Split a period's priced AA charge between scheme pays and cash.
+
+        ``charge`` is the priced charge the tax system appended to the
+        period's assessment; ``schemes`` are the person's pension
+        wrappers with their own input amounts. A region without
+        scheme-funded payment returns the whole charge as cash
+        (planning §5.2, #124).
+        """
         ...

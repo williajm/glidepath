@@ -130,9 +130,13 @@ v1 engine conventions, superseded as later phases land:
   inputs paid before an in-period step-4 trigger stay pre-trigger;
   the carry-forward pool starts empty at the run start (pre-run
   years' unused allowance is unknown — §4.1 conservative) and rolls
-  forward each period. The charge is reported in the assessment,
-  never funded from modelled balances — the accumulation-phase tax
-  convention (employment tax likewise settles outside the model).
+  forward each period. Unlike employment tax (which settles outside
+  the model), the priced charge is funded from modelled balances
+  (#124): the region splits it between scheme pays — a debit against
+  the pension wrapper whose own input met the mandatory conditions —
+  and cash from the bare taxable wrappers, each settling at period
+  close after fees and growth exactly like the portfolio-income tax
+  charge; what no wrapper can fund joins the person's shortfall.
 - Partial first and last periods (roadmap 4.6, planning §5.2): the run
   models only the window from ``config.today`` through the horizon end.
   A period partly outside that window has its flows (employment income,
@@ -165,6 +169,7 @@ from glidepath.core.contributions import (
     AnnualAllowanceMeasurement,
     DbArrangementInput,
     MemberContributionRequest,
+    SchemeInput,
 )
 from glidepath.core.entities import validate_household_v1
 from glidepath.core.glide import (
@@ -300,6 +305,8 @@ class _WrapperLedger:
     taxable_dividends: Money = _ZERO
     growth_tax: Money = _ZERO
     growth_tax_unfunded: Money = _ZERO
+    aa_charge: Money = _ZERO
+    aa_charge_unfunded: Money = _ZERO
     banked_in: Money = _ZERO
 
 
@@ -678,6 +685,7 @@ class _Projection:
     _relief_at_source: Money = _ZERO
     _net_pay_deductions: Money = _ZERO
     _aa_carry_forward: tuple[Money, ...] = ()
+    _aa_charge_unallocated: Money = _ZERO
     _db_openings: tuple[Money, ...] = ()
     _mpaa_at_contributions: date | None = None
     _expected_returns: AssetReturns | None = None
@@ -1269,12 +1277,16 @@ class _Projection:
         wrapper_results = tuple(
             self._close_wrapper(ledger, returns, fraction) for ledger in ledgers
         )
-        # Portfolio-income tax a drained wrapper could not fund is
-        # unmet need: it joins the shortfall so the ledger reconciles
-        # and the roadmap-7.3 ruin signal sees it (planning §5.2).
-        unfunded_tax = _ZERO
+        # Portfolio-income tax or an annual-allowance charge a drained
+        # wrapper could not fund is unmet need: it joins the shortfall
+        # so the ledger reconciles and the roadmap-7.3 ruin signal
+        # sees it (planning §5.2), as does the charge's cash share
+        # when no taxable wrapper could take it at all.
+        unfunded_tax = self._aa_charge_unallocated
         for ledger in ledgers:
-            unfunded_tax = unfunded_tax + ledger.growth_tax_unfunded
+            unfunded_tax = (
+                unfunded_tax + ledger.growth_tax_unfunded + ledger.aa_charge_unfunded
+            )
         shortfall = max(wrapper_need - delivered, _ZERO) + unfunded_tax
         person_result = PersonPeriodResult(
             person_id=person.id,
@@ -2398,15 +2410,17 @@ class _Projection:
         income, the portfolio-income slice is charged to its wrappers
         against that pre-charge result, and any annual-allowance
         charge is appended last — so the wrapper charge never absorbs
-        it.
+        it — and routed to the wrappers that fund it (#124).
         """
         outcome = self._annual_allowance_step(ledgers, period, returns, fraction)
         self._aa_carry_forward = outcome.carry_forward
         tax = self.region.tax.assess(period, self._tax_input())
         self._charge_portfolio_tax(ledgers, period, tax)
-        return self._with_annual_allowance_charge(
+        final = self._with_annual_allowance_charge(
             period, tax, outcome.chargeable_excess
         )
+        self._fund_annual_allowance_charge(ledgers, period, final.tax_due - tax.tax_due)
+        return final
 
     def _annual_allowance_step(
         self,
@@ -2507,6 +2521,71 @@ class _Projection:
             lines=(*tax.lines, *lines),
         )
 
+    def _fund_annual_allowance_charge(
+        self, ledgers: list[_WrapperLedger], period: Period, charge: Money
+    ) -> None:
+        """Route the priced AA charge to the wrappers that fund it (#124).
+
+        The region splits the charge between scheme pays — a debit
+        against a pension wrapper whose own input met its conditions —
+        and cash. The cash share falls to the bare taxable wrappers in
+        plan order, each capped at its balance at allocation; a share
+        no wrapper can take joins the person's shortfall, as does
+        whatever a wrapper's post-growth balance turns out unable to
+        fund at close (planning §5.2). The amounts land as each
+        ledger's ``aa_charge`` and are deducted at period close after
+        fees and growth, exactly the portfolio-income tax convention
+        (:meth:`_close_wrapper`); a scheme-pays debit is a
+        scheme-administrator payment, not a member withdrawal — no tax
+        lines, no MPAA trigger, no lump-sum-allowance use.
+
+        Raises:
+            EngineError: If the region's split does not cover the
+                charge exactly, or pays from an unknown wrapper.
+        """
+        self._aa_charge_unallocated = _ZERO
+        if charge <= _ZERO:
+            return
+        schemes = tuple(
+            SchemeInput(
+                wrapper_id=ledger.wrapper.id,
+                input_amount=ledger.employee_in + ledger.employer_in,
+            )
+            for ledger in ledgers
+            if ledger.treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+        )
+        funding = self.region.contributions.annual_allowance_funding(
+            charge, schemes, period
+        )
+        routed = funding.cash
+        by_id = {ledger.wrapper.id: ledger for ledger in ledgers}
+        for payment in funding.scheme_payments:
+            ledger = by_id.get(payment.wrapper_id)
+            if ledger is None:
+                msg = (
+                    "annual-allowance funding names an unknown wrapper:"
+                    f" {payment.wrapper_id}"
+                )
+                raise EngineError(msg)
+            ledger.aa_charge = ledger.aa_charge + payment.amount
+            routed = routed + payment.amount
+        if routed != charge:
+            msg = (
+                "annual-allowance funding must split the charge exactly:"
+                f" {routed} routed of {charge}"
+            )
+            raise EngineError(msg)
+        remaining = funding.cash
+        for ledger in ledgers:
+            if remaining <= _ZERO:
+                break
+            if not _is_bare_taxable(ledger.treatment):
+                continue
+            share = min(remaining, max(ledger.uncrystallised, _ZERO))
+            ledger.aa_charge = ledger.aa_charge + share
+            remaining = remaining - share
+        self._aa_charge_unallocated = remaining
+
     def _bank_surplus(self, ledgers: list[_WrapperLedger], surplus: Money) -> Money:
         """Sweep decumulation surplus into the first taxable wrapper.
 
@@ -2521,12 +2600,7 @@ class _Projection:
         if surplus <= _ZERO:
             return _ZERO
         for ledger in ledgers:
-            treatment = ledger.treatment
-            if (
-                treatment.contributions is ContributionTaxTreatment.FROM_TAXED_INCOME
-                and treatment.growth is GrowthTaxTreatment.TAXABLE
-                and treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE
-            ):
+            if _is_bare_taxable(ledger.treatment):
                 ledger.uncrystallised = ledger.uncrystallised + surplus
                 ledger.banked_in = ledger.banked_in + surplus
                 return surplus
@@ -2558,7 +2632,11 @@ class _Projection:
         taxable-growth wrapper's attributed portfolio-income tax
         (:meth:`_charge_portfolio_tax`) leaves the balance last —
         settled at the period's close like a real self-assessment
-        payment — capped at what the account then holds.
+        payment — capped at what the account then holds. Any routed
+        annual-allowance charge (:meth:`_fund_annual_allowance_charge`)
+        settles after it under the same convention — uncrystallised
+        funds first, then crystallised — with the unfunded remainder
+        joining the person's shortfall (#124).
         """
         fees = self._fees_for(ledger.wrapper)
         opening_total = ledger.opening_uncrystallised + ledger.opening_crystallised
@@ -2596,10 +2674,25 @@ class _Projection:
         # tax; the remainder joins the person's shortfall rather than
         # silently disappearing from the ledger (planning §5.2).
         ledger.growth_tax_unfunded = ledger.growth_tax - growth_tax
-        closing_uncrystallised = (
+        after_tax_uncrystallised = (
             post_fee_uncrystallised + growth_uncrystallised - growth_tax
+        )
+        after_tax_crystallised = post_fee_crystallised + growth_crystallised
+        aa_from_uncrystallised = min(
+            ledger.aa_charge, max(after_tax_uncrystallised, _ZERO)
+        )
+        aa_from_crystallised = min(
+            ledger.aa_charge - aa_from_uncrystallised,
+            max(after_tax_crystallised, _ZERO),
+        )
+        aa_charge = aa_from_uncrystallised + aa_from_crystallised
+        ledger.aa_charge_unfunded = ledger.aa_charge - aa_charge
+        closing_uncrystallised = (
+            after_tax_uncrystallised - aa_from_uncrystallised
         ).quantized()
-        closing_crystallised = (post_fee_crystallised + growth_crystallised).quantized()
+        closing_crystallised = (
+            after_tax_crystallised - aa_from_crystallised
+        ).quantized()
         self._balances[ledger.wrapper.id] = (
             closing_uncrystallised,
             closing_crystallised,
@@ -2625,8 +2718,23 @@ class _Projection:
             taxable_interest=ledger.taxable_interest.quantized(),
             taxable_dividends=ledger.taxable_dividends.quantized(),
             growth_tax=growth_tax.quantized(),
+            aa_charge=aa_charge.quantized(),
             banked_in=ledger.banked_in.quantized(),
         )
+
+
+def _is_bare_taxable(treatment: WrapperTaxTreatment) -> bool:
+    """Whether a wrapper is a bare taxable account (a GIA or cash).
+
+    Paid from taxed income, growth taxable, withdrawals tax-free — the
+    kind the decumulation surplus sweep banks into and the cash route
+    of the annual-allowance charge pays from (planning §5.2).
+    """
+    return (
+        treatment.contributions is ContributionTaxTreatment.FROM_TAXED_INCOME
+        and treatment.growth is GrowthTaxTreatment.TAXABLE
+        and treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE
+    )
 
 
 def _apply_contribution_caps(

@@ -16,6 +16,7 @@ from decimal import ROUND_DOWN, Decimal
 import pytest
 
 from glidepath.core import (
+    AnnualAllowanceFunding,
     AnnualAllowanceMeasurement,
     AnnualAllowanceOutcome,
     AnnualCalendar,
@@ -66,6 +67,8 @@ from glidepath.core import (
     RevaluationReference,
     RunConfig,
     RunMode,
+    SchemeInput,
+    SchemePayment,
     SpendingPlan,
     StatePensionEntitlement,
     StatePensionRecord,
@@ -424,6 +427,8 @@ class RecordingContributionRules:
     )
     excess: Money = ZERO
     rolled_pool: tuple[Money, ...] = ()
+    scheme_pays_wrapper: EntityId | None = None
+    withheld_cash: Money = ZERO
 
     def annual_allowance(
         self, measurement: AnnualAllowanceMeasurement, period: Period
@@ -433,6 +438,22 @@ class RecordingContributionRules:
         self.measurements.append(measurement)
         return AnnualAllowanceOutcome(
             chargeable_excess=self.excess, carry_forward=self.rolled_pool
+        )
+
+    def annual_allowance_funding(
+        self, charge: Money, schemes: tuple[SchemeInput, ...], period: Period
+    ) -> AnnualAllowanceFunding:
+        """Route to the configured wrapper when set; otherwise all cash.
+
+        ``withheld_cash`` deliberately under-routes the cash share so
+        tests can pin the engine's exact-split guard.
+        """
+        del schemes, period
+        if self.scheme_pays_wrapper is not None:
+            payment = SchemePayment(wrapper_id=self.scheme_pays_wrapper, amount=charge)
+            return AnnualAllowanceFunding(scheme_payments=(payment,), cash=ZERO)
+        return AnnualAllowanceFunding(
+            scheme_payments=(), cash=charge - self.withheld_cash
         )
 
     def member_contribution(
@@ -4708,3 +4729,169 @@ class TestAnnualAllowance:
         )
         [measurement] = rules.measurements
         assert measurement.db_arrangements == ()
+
+
+def zero_yield_assumptions() -> AssumptionSet:
+    """The baseline assumptions with all three ``yield.*`` keys at zero.
+
+    Taxable-growth wrappers must price their portfolio income, but the
+    charge-funding tests want no income tax in the way of the
+    hand-worked annual-allowance figures.
+    """
+    return yield_assumptions(
+        {
+            "yield.equity": Decimal(0),
+            "yield.bonds": Decimal(0),
+            "yield.cash": Decimal(0),
+        }
+    )
+
+
+class TestAnnualAllowanceChargeFunding:
+    """Roadmap 9.21 (#124): the priced charge settles from the wrappers."""
+
+    def test_cash_route_cascades_across_taxable_wrappers_in_plan_order(self) -> None:
+        """Each taxable wrapper takes what it holds; the next takes the rest.
+
+        The configured 1,000 excess prices at the flat 25%: a 250
+        charge, all cash. The first GIA holds 100 at allocation, so it
+        takes 100 and the second takes the remaining 150. Both settle
+        at close after 10% growth: 110 - 100 = 10 and
+        11,000 - 150 = 10,850; nothing is unfunded.
+        """
+        small = wrapper_of(TAXABLE, "100")
+        large = wrapper_of(TAXABLE, "10000")
+        rules = RecordingContributionRules(excess=Money(Decimal(1000)))
+        result = run(
+            household_of(person_of((small, large))),
+            zero_yield_assumptions(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [person] = result.snapshots[0].persons
+        first, second = person.wrappers
+        assert first.aa_charge == Money(Decimal(100))
+        assert second.aa_charge == Money(Decimal(150))
+        assert first.closing_uncrystallised == Money(Decimal(10))
+        assert second.closing_uncrystallised == Money(Decimal(10850))
+        assert person.tax.tax_due == Money(Decimal(250))
+        assert person.shortfall == ZERO
+
+    def test_cash_no_taxable_wrapper_can_take_joins_the_shortfall(self) -> None:
+        """With no bare taxable account the whole charge is unmet need."""
+        free = wrapper_of(FREE, "1000")
+        rules = RecordingContributionRules(excess=Money(Decimal(1000)))
+        result = run(
+            household_of(person_of((free,))),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [person] = result.snapshots[0].persons
+        [wrapper] = person.wrappers
+        assert wrapper.aa_charge == ZERO
+        assert wrapper.closing_uncrystallised == Money(Decimal(1100))
+        assert person.shortfall == Money(Decimal(250))
+
+    def test_a_down_period_caps_the_funded_charge_at_close(self) -> None:
+        """The close-time balance bounds what the allocation promised.
+
+        The GIA holds 1,000 at allocation, so it takes the whole
+        1,000 charge — but the -50% period leaves only 500 at close.
+        The wrapper funds the 500 it holds (draining to zero) and the
+        unfunded 500 joins the shortfall.
+        """
+        account = wrapper_of(TAXABLE, "1000")
+        rules = RecordingContributionRules(excess=Money(Decimal(4000)))
+        result = run(
+            household_of(person_of((account,))),
+            zero_yield_assumptions(),
+            stub_region(rules),
+            one_period_config(),
+            return_model_factory=fixed_returns("-0.5"),
+        )
+        [person] = result.snapshots[0].persons
+        [wrapper] = person.wrappers
+        assert wrapper.aa_charge == Money(Decimal(500))
+        assert wrapper.closing_uncrystallised == ZERO
+        assert person.shortfall == Money(Decimal(500))
+
+    def test_scheme_pays_debits_the_named_pension_wrapper(self) -> None:
+        """A scheme-pays split leaves the pot, not the taxable account.
+
+        The region routes the whole 250 charge to the pension, which
+        settles at close after growth: 11,000 - 250 = 10,750. The GIA
+        keeps its full grown balance, and the debit is no withdrawal —
+        no flexible-access trigger, no withdrawal flow.
+        """
+        pension = wrapper_of(PENSION, "10000")
+        account = wrapper_of(TAXABLE, "5000")
+        rules = RecordingContributionRules(
+            excess=Money(Decimal(1000)), scheme_pays_wrapper=pension.id
+        )
+        result = run(
+            household_of(person_of((pension, account))),
+            zero_yield_assumptions(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [person] = result.snapshots[0].persons
+        first, second = person.wrappers
+        assert first.aa_charge == Money(Decimal(250))
+        assert first.closing_uncrystallised == Money(Decimal(10750))
+        assert first.withdrawal_taxable == ZERO
+        assert first.withdrawal_tax_free == ZERO
+        assert second.aa_charge == ZERO
+        assert second.closing_uncrystallised == Money(Decimal(5500))
+        assert person.mpaa_triggered_on is None
+        assert person.shortfall == ZERO
+
+    def test_scheme_pays_takes_uncrystallised_funds_first(self) -> None:
+        """A debit beyond the uncrystallised funds falls to crystallised.
+
+        The pension holds 100 uncrystallised and 10,000 crystallised;
+        the 250 charge drains the grown 110 uncrystallised and takes
+        the remaining 140 from the crystallised side:
+        11,000 - 140 = 10,860.
+        """
+        pension = wrapper_of(PENSION, "100", crystallised="10000")
+        rules = RecordingContributionRules(
+            excess=Money(Decimal(1000)), scheme_pays_wrapper=pension.id
+        )
+        result = run(
+            household_of(person_of((pension,), date_of_birth=date(1960, 1, 1))),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [person] = result.snapshots[0].persons
+        [wrapper] = person.wrappers
+        assert wrapper.aa_charge == Money(Decimal(250))
+        assert wrapper.closing_uncrystallised == ZERO
+        assert wrapper.closing_crystallised == Money(Decimal(10860))
+        assert person.shortfall == ZERO
+
+    def test_a_split_that_underpays_the_charge_is_an_engine_error(self) -> None:
+        """The region must account for every penny of the charge."""
+        rules = RecordingContributionRules(
+            excess=Money(Decimal(1000)), withheld_cash=Money(Decimal("0.01"))
+        )
+        plan = household_of(person_of((wrapper_of(TAXABLE, "1000"),)))
+        assumptions = zero_yield_assumptions()
+        region = stub_region(rules)
+        config = one_period_config()
+        with pytest.raises(EngineError, match="split the charge exactly"):
+            run(plan, assumptions, region, config)
+
+    def test_a_payment_from_an_unknown_wrapper_is_an_engine_error(self) -> None:
+        """A scheme-pays debit must name a wrapper the plan holds."""
+        rules = RecordingContributionRules(
+            excess=Money(Decimal(1000)),
+            scheme_pays_wrapper=EntityId("no-such-wrapper"),
+        )
+        plan = household_of(person_of((wrapper_of(FREE, "1000"),)))
+        assumptions = assumptions_with()
+        region = stub_region(rules)
+        config = one_period_config()
+        with pytest.raises(EngineError, match="unknown wrapper"):
+            run(plan, assumptions, region, config)
