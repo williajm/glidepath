@@ -20,6 +20,7 @@ from glidepath.app import (
     NOTHING_TO_EXPORT_MESSAGE,
     PlanState,
     ReportRequest,
+    RetirementAnswer,
     build_inspector_view_model,
     build_plan_report,
     cash_flow_csv,
@@ -35,7 +36,15 @@ from glidepath.app import (
     state_with_override,
     state_with_scenario_added,
 )
-from glidepath.core import ReportBasis, RunMode, build_report
+from glidepath.app.plan import region_for
+from glidepath.core import (
+    Money,
+    ReportBasis,
+    RunConfig,
+    RunMode,
+    build_report,
+    run,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -73,6 +82,31 @@ def projected_state() -> PlanState:
     result = parse_facts_form(
         example_facts_form_data(), recorded_on=RECORDED, today=TODAY
     )
+    assert result.household is not None
+    return state_with_household(initial_plan_state(), result.household, today=TODAY)
+
+
+def _monte_carlo_state() -> PlanState:
+    """A session whose held result is a seeded one-path Monte Carlo run."""
+    state = projected_state()
+    assert state.household is not None
+    config = RunConfig(today=TODAY, mode=RunMode.MONTE_CARLO, seed=7)
+    result = run(
+        state.household, state.assumptions, region_for(state.assumptions), config
+    )
+    return replace(state, result=result)
+
+
+def _stale_balance_state() -> PlanState:
+    """A projected session whose wrapper balances are a year old."""
+    data = example_facts_form_data()
+    stale = replace(
+        data,
+        wrappers=tuple(
+            {**wrapper, "balances_as_of": "2025-08-03"} for wrapper in data.wrappers
+        ),
+    )
+    result = parse_facts_form(stale, recorded_on=RECORDED, today=TODAY)
     assert result.household is not None
     return state_with_household(initial_plan_state(), result.household, today=TODAY)
 
@@ -158,6 +192,20 @@ class TestCashFlowCsv:
         assert rows[2] == ["Scenario", "Base plan"]
         assert rows[3] == ["Money basis", "Real (today's money)"]
         assert rows[4] == ["Disclaimer", DISCLAIMER_BODY]
+
+    def test_monte_carlo_run_header_pins_the_seed(self) -> None:
+        """A Monte Carlo run's header line carries its seed (§4.6).
+
+        The seed is the reproducibility claim, so the exact text is
+        pinned — the file must attribute its numbers to a rerunnable
+        run, never to a bare "Monte Carlo".
+        """
+        text = cash_flow_csv(
+            _monte_carlo_state(), basis=ReportBasis.REAL, plan_name="Example"
+        )
+        assert text is not None
+        rows = list(csv.reader(StringIO(text)))
+        assert rows[1] == ["Run", "Monte Carlo, seed 7"]
 
     def test_nominal_basis_serialises_the_nominal_report(self) -> None:
         """The basis toggle drives the export, same as the charts."""
@@ -341,6 +389,61 @@ class TestPlanReport:
         labels = [band.label for band in report.charts[0].bands]
         assert f"Start · {picked_year}" in labels
         assert labels[0].startswith("Worst start · ")
+
+    def test_monte_carlo_provenance_names_the_seed_in_the_summary(self) -> None:
+        """A Monte Carlo result's report attributes it to its seed (§4.6)."""
+        report = build_plan_report(_monte_carlo_state(), _request())
+        assert report is not None
+        assert "Monte Carlo run, seed 7" in report.html
+        assert "seed: 7" in report.html
+
+    def test_stale_balances_print_the_roll_forward_section(self) -> None:
+        """The §4.8 roll-forward table prints exactly when rows exist.
+
+        The report is the audit surface: a year-old statement's stated
+        value, date, months rolled, and opening value all print, and a
+        fresh plan carries no such section at all.
+        """
+        state = _stale_balance_state()
+        inspector = build_inspector_view_model(state)
+        assert inspector.roll_forwards
+        fresh = build_plan_report(projected_state(), _request())
+        assert fresh is not None
+        assert inspector.roll_forwards_heading not in fresh.html
+        report = build_plan_report(state, _request())
+        assert report is not None
+        assert inspector.roll_forwards_heading in report.html
+        row = inspector.roll_forwards[0]
+        assert row.months == "12"
+        cells = (row.label, row.stated, row.as_of, row.months, row.opening)
+        rendered = "".join(f"<td>{escape(cell)}</td>" for cell in cells)
+        assert rendered in report.html
+
+    def test_a_held_retirement_answer_prints_its_section(self) -> None:
+        """The "When can I retire?" answer rides on the report (9.14)."""
+        state = projected_state()
+        answer = RetirementAnswer(
+            age=58,
+            replacement_rate=Decimal("0.66"),
+            employment_income=Money(Decimal(52000)),
+            target_income=Money(Decimal(34320)),
+            minimum_age=35,
+            maximum_age=94,
+            mode=RunMode.DETERMINISTIC,
+        )
+        held = replace(state, retirement=answer)
+        report = build_plan_report(held, _request())
+        assert report is not None
+        assert "<h3>When can I retire?</h3>" in report.html
+        assert "Earliest retirement age: 58" in report.html
+        assert "Target income £34,320.00 a year" in report.html
+        assert (
+            "Basis: deterministic projection, no unmet need in any period."
+            in report.html
+        )
+        plain = build_plan_report(state, _request())
+        assert plain is not None
+        assert "When can I retire?" not in plain.html
 
     def test_deterministic_mode_omits_monte_carlo(self) -> None:
         """Under the deterministic mode a held run stays off the report."""

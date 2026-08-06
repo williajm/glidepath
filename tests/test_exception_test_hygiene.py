@@ -52,7 +52,7 @@ def _invocations_in_body(block: ast.With) -> int:
 def test_every_pytest_raises_block_has_exactly_one_invocation() -> None:
     """One call, variable-only arguments — the S5778 contract, enforced."""
     violations: list[str] = []
-    for path in sorted(TESTS_DIR.glob("test_*.py")):
+    for path in sorted(TESTS_DIR.rglob("test_*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         violations.extend(
             f"{path.name}:{block.lineno} has {_invocations_in_body(block)}"

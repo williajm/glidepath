@@ -7,6 +7,7 @@ import pytest
 
 from glidepath.core import (
     AssetAllocation,
+    ContributionCap,
     ContributionSchedule,
     ContributionTaxTreatment,
     Decision,
@@ -157,3 +158,30 @@ def test_tax_free_fraction_must_be_a_proper_fraction(fraction: str) -> None:
             withdrawals=WithdrawalTaxTreatment.PARTIALLY_TAX_FREE,
             tax_free_fraction=rate,
         )
+
+
+def test_contribution_cap_names_a_group_and_its_limit() -> None:
+    """A cap ties an opaque allowance group to its annual budget."""
+    cap = ContributionCap(group="uk.isa_overall", limit=Money(Decimal(20000)))
+    assert cap.group == "uk.isa_overall"
+    assert cap.limit == Money(Decimal(20000))
+
+
+def test_contribution_cap_allows_a_zero_limit() -> None:
+    """A zero budget is a closed allowance, not an error."""
+    cap = ContributionCap(group="uk.isa_overall", limit=Money(Decimal(0)))
+    assert cap.limit == Money(Decimal(0))
+
+
+def test_contribution_cap_rejects_an_empty_group() -> None:
+    """A cap must name the allowance group it counts against."""
+    limit = Money(Decimal(20000))
+    with pytest.raises(ValueError, match="group must not be empty"):
+        ContributionCap(group="", limit=limit)
+
+
+def test_contribution_cap_rejects_a_negative_limit() -> None:
+    """A negative annual allowance is a data-entry error."""
+    negative = Money(Decimal(-1))
+    with pytest.raises(ValueError, match="limit must be non-negative"):
+        ContributionCap(group="uk.isa_overall", limit=negative)

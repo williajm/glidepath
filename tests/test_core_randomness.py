@@ -103,11 +103,19 @@ class TestSeededRandomSource:
             source.standard_normals(-1)
 
     def test_draws_look_standard_normal(self) -> None:
-        """Mean near 0 and variance near 1 over a fixed-seed sample."""
+        """Mean near 0 and variance near 1 over a fixed-seed sample.
+
+        The bounds are tight enough to catch a 10% scale error (which
+        moves the variance to ~0.81 or ~1.21) or a 0.05 location shift:
+        the seeded actuals are mean ~0.0056 and variance ~1.018, so a
+        legitimate reseeding refactor keeps several standard errors of
+        margin (SE of the mean ~0.022, of the variance ~0.032 at 2,000
+        draws).
+        """
         count = 2000
         zero = Decimal(0)
         draws = SeededRandomSource(20260803).standard_normals(count)
         mean = sum(draws, start=zero) / count
         variance = sum(((draw - mean) ** 2 for draw in draws), start=zero) / count
-        assert abs(mean) < Decimal("0.1")
-        assert Decimal("0.85") < variance < Decimal("1.15")
+        assert abs(mean) < Decimal("0.05")
+        assert Decimal("0.93") < variance < Decimal("1.07")

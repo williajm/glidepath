@@ -9,13 +9,17 @@ import pytest
 from glidepath.core import AssumptionKey, Money, Rate
 from glidepath.regions.uk import (
     SCHEMA_VERSION,
+    AgeRulesFile,
     AssumptionDefault,
     AssumptionsFile,
     DataFileError,
+    DividendRate,
+    DividendRules,
     FileMeta,
     IncomeTaxSchedule,
     LisaAges,
     NmpaStep,
+    PensionRules,
     SpaAgeBand,
     StatePensionDeferral,
     TaxBand,
@@ -58,6 +62,53 @@ def make_schedule(bands: tuple[TaxBand, ...]) -> IncomeTaxSchedule:
 def make_assumption(key: AssumptionKey) -> AssumptionDefault:
     """Build a minimal default assumption for ``key``."""
     return AssumptionDefault(key=key, value=Decimal("0.1"), basis="test basis")
+
+
+def make_pension_rules(
+    member_relief_max_age: int = 75,
+    aa_carry_forward_years: int = 3,
+    db_valuation_factor: int = 16,
+) -> PensionRules:
+    """Build pension rules with valid defaults around the guarded fields."""
+    return PensionRules(
+        annual_allowance=Money(Decimal(60000)),
+        aa_taper_threshold_income=Money(Decimal(200000)),
+        aa_taper_adjusted_income=Money(Decimal(260000)),
+        aa_taper_rate=Rate(Decimal("0.5")),
+        aa_taper_floor=Money(Decimal(10000)),
+        mpaa=Money(Decimal(10000)),
+        aa_carry_forward_years=aa_carry_forward_years,
+        member_relief_basic_amount=Money(Decimal(3600)),
+        member_relief_max_age=member_relief_max_age,
+        relief_at_source_rate=Rate(Decimal("0.20")),
+        tax_free_lump_sum_fraction=Rate(Decimal("0.25")),
+        lump_sum_allowance=Money(Decimal(268275)),
+        lump_sum_death_benefit_allowance=Money(Decimal(1073100)),
+        db_valuation_factor=db_valuation_factor,
+    )
+
+
+LISA_AGES = LisaAges(
+    open_age_min=18, open_age_max=39, contribute_until_age=50, access_age=60
+)
+DEFERRAL = StatePensionDeferral(increment_rate=Rate(Decimal("0.01")), per_weeks=9)
+BASELINE_NMPA = (NmpaStep(age=55, effective_from=None),)
+OPEN_SPA_BAND = SpaAgeBand(dob_from=None, dob_to=None, years=66, months=0)
+
+
+def make_age_rules(
+    nmpa: tuple[NmpaStep, ...] = BASELINE_NMPA,
+    spa_bands: tuple[SpaAgeBand, ...] = (OPEN_SPA_BAND,),
+) -> AgeRulesFile:
+    """Build an age-rules file around ``nmpa`` and ``spa_bands``."""
+    return AgeRulesFile(
+        schema_version=SCHEMA_VERSION,
+        meta=FILE_META,
+        nmpa=nmpa,
+        spa_bands=spa_bands,
+        lisa=LISA_AGES,
+        deferral=DEFERRAL,
+    )
 
 
 def test_tax_year_meta_accepts_coherent_values() -> None:
@@ -131,6 +182,45 @@ def test_schedule_requires_a_basic_band() -> None:
         make_schedule(bands)
 
 
+def test_pension_rules_accept_valid_figures() -> None:
+    """The 2026/27-shaped figures construct cleanly."""
+    rules = make_pension_rules()
+    assert rules.member_relief_max_age == 75
+
+
+def test_pension_rules_reject_non_positive_relief_age() -> None:
+    """The FA 2004 s188 relief age limit must be positive."""
+    with pytest.raises(DataFileError, match="member_relief_max_age must be positive"):
+        make_pension_rules(member_relief_max_age=0)
+
+
+def test_pension_rules_reject_negative_carry_forward_window() -> None:
+    """The AA carry-forward window cannot be negative."""
+    message = "aa_carry_forward_years must be non-negative"
+    with pytest.raises(DataFileError, match=message):
+        make_pension_rules(aa_carry_forward_years=-1)
+
+
+def test_pension_rules_reject_non_positive_db_valuation_factor() -> None:
+    """The FA 2004 s234 DB valuation factor must be positive."""
+    with pytest.raises(DataFileError, match="db_valuation_factor must be positive"):
+        make_pension_rules(db_valuation_factor=0)
+
+
+def test_dividend_rate_rejects_an_empty_name() -> None:
+    """A dividend rate must be named."""
+    rate = Rate(Decimal("0.1075"))
+    with pytest.raises(DataFileError, match="name must not be empty"):
+        DividendRate(name="", rate=rate)
+
+
+def test_dividend_rules_require_at_least_one_rate() -> None:
+    """An empty dividend rate ladder is invalid."""
+    allowance = Money(Decimal(500))
+    with pytest.raises(DataFileError, match="at least one dividend rate"):
+        DividendRules(allowance=allowance, rates=())
+
+
 def test_nmpa_step_rejects_non_positive_age() -> None:
     """An NMPA age of zero is nonsense."""
     with pytest.raises(DataFileError, match="age must be positive"):
@@ -155,6 +245,54 @@ def test_spa_age_band_rejects_inverted_dob_range() -> None:
     dob_to = date(1960, 1, 1)
     with pytest.raises(DataFileError, match="is after"):
         SpaAgeBand(dob_from=dob_from, dob_to=dob_to, years=66, months=0)
+
+
+def test_age_rules_file_accepts_a_minimal_valid_shape() -> None:
+    """One baseline NMPA step and one open-ended SPA band suffice."""
+    rules = make_age_rules()
+    assert rules.nmpa == BASELINE_NMPA
+
+
+def test_age_rules_file_requires_at_least_one_nmpa_step() -> None:
+    """An empty NMPA schedule is invalid."""
+    with pytest.raises(DataFileError, match="at least one step is required"):
+        make_age_rules(nmpa=())
+
+
+def test_age_rules_file_rejects_a_second_undated_nmpa_step() -> None:
+    """Only the baseline step may omit its effective date."""
+    steps = (
+        NmpaStep(age=55, effective_from=None),
+        NmpaStep(age=57, effective_from=None),
+    )
+    with pytest.raises(DataFileError, match="only the first step may omit"):
+        make_age_rules(nmpa=steps)
+
+
+def test_age_rules_file_requires_at_least_one_spa_band() -> None:
+    """An empty SPA timetable is invalid."""
+    with pytest.raises(DataFileError, match="at least one band is required"):
+        make_age_rules(spa_bands=())
+
+
+def test_age_rules_file_rejects_an_open_ended_middle_band() -> None:
+    """Only the last SPA band may be open-ended (future births)."""
+    bands = (
+        SpaAgeBand(dob_from=None, dob_to=None, years=66, months=0),
+        SpaAgeBand(dob_from=date(1960, 4, 6), dob_to=None, years=67, months=0),
+    )
+    with pytest.raises(DataFileError, match="only the last band may omit dob_to"):
+        make_age_rules(spa_bands=bands)
+
+
+def test_age_rules_file_rejects_an_unanchored_later_band() -> None:
+    """Only the first SPA band may leave its dob_from open."""
+    bands = (
+        SpaAgeBand(dob_from=None, dob_to=date(1960, 4, 5), years=66, months=0),
+        SpaAgeBand(dob_from=None, dob_to=None, years=67, months=0),
+    )
+    with pytest.raises(DataFileError, match="only the first band may omit dob_from"):
+        make_age_rules(spa_bands=bands)
 
 
 def test_lisa_ages_must_ascend() -> None:

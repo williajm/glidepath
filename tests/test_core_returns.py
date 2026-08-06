@@ -247,9 +247,18 @@ class TestStochasticReturnModelBehaviour:
             assert drawn.value.quantize(precision) == expected.value.quantize(precision)
 
     def test_sample_mean_matches_the_expected_nominal_return(self) -> None:
-        """The lognormal is mean-matched to (1 + real)(1 + cpi) - 1."""
+        """The lognormal is mean-matched to (1 + real)(1 + cpi) - 1.
+
+        The ±0.012 bound is load-bearing: matching the log-space mean
+        instead of the arithmetic mean — the classic lognormal
+        mean-matching bug — scales every gross draw by exp(-sigma^2/2),
+        shifting this seeded sample mean by about -0.017, outside the
+        bound. The seeded actual sits within 0.0014 of the expected
+        value, so the bound (about two standard errors at 1,000 draws)
+        keeps ample margin for legitimate draw-order refactors.
+        """
         instance = model(11)
-        count = 500
+        count = 1000
         total = sum(
             (
                 instance.returns_for(PERIOD, path).assets.equity.value
@@ -258,7 +267,7 @@ class TestStochasticReturnModelBehaviour:
             start=_ZERO,
         )
         expected = Decimal("0.0608")
-        assert abs(total / count - expected) < Decimal("0.05")
+        assert abs(total / count - expected) < Decimal("0.012")
 
     def test_high_correlation_shows_in_the_draws(self) -> None:
         """Correlated substreams move together (Cholesky transform)."""
@@ -273,7 +282,10 @@ class TestStochasticReturnModelBehaviour:
             returns = instance.returns_for(PERIOD, path)
             equity_logs.append((_ONE + returns.assets.equity.value).ln())
             bond_logs.append((_ONE + returns.assets.bonds.value).ln())
-        assert _pearson(equity_logs, bond_logs) > Decimal("0.6")
+        # The configured correlation is 0.9 and the seeded sample sits at
+        # ~0.885; > 0.8 keeps refactor margin while still failing the ~0.7
+        # a transposed Cholesky factor would produce.
+        assert _pearson(equity_logs, bond_logs) > Decimal("0.8")
 
     def test_source_factory_is_injectable(self) -> None:
         """An injected RandomSource factory replaces the default streams.

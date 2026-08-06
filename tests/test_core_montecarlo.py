@@ -483,16 +483,41 @@ class TestRunPaths:
         assert all(outcome.ending_balance == ending for outcome in result.outcomes)
 
     def test_generous_pot_never_ruins(self) -> None:
-        """Tiny spending from a large pot succeeds on every path."""
+        """Tiny spending from a large pot succeeds on every path.
+
+        Thirty-two seeded paths, not a handful: enough draws that a
+        plan which merely rarely ruins would betray itself — the
+        borderline test below finds ruined paths in the same
+        thirty-two draws.
+        """
         result = run_paths(
             household_of(spending="1"),
             assumptions_with(),
             stub_region(),
             mc_config(),
-            paths=4,
+            paths=32,
         )
         assert result.probability_of_ruin == Decimal(0)
         assert result.success_rate == Decimal(1)
+
+    def test_borderline_spending_ruins_only_some_paths(self) -> None:
+        """The ruin fraction separates rare failure from none.
+
+        Spending 23,000 a year from the 100,000 pot survives only a
+        favourable return sequence: over the same thirty-two seeded
+        paths some fall short and some do not, pinning that the
+        generous plan's zero is a measured outcome, not too few
+        paths to tell the difference.
+        """
+        result = run_paths(
+            household_of(spending="23000"),
+            assumptions_with(),
+            stub_region(),
+            mc_config(),
+            paths=32,
+        )
+        ruin = result.probability_of_ruin
+        assert Decimal(0) < ruin < Decimal(1)
 
     def test_impossible_spending_ruins_every_path_immediately(self) -> None:
         """Spending double the pot falls short in the first period."""
@@ -870,6 +895,52 @@ class TestSustainableIncome:
             search,
         )
         assert income == Money(Decimal(25000))
+
+    def test_a_midpoint_that_meets_the_target_raises_the_floor(self) -> None:
+        """Bisection refines upward when the boundary sits inside a cell.
+
+        A 105,000 pot over four years sustains exactly 26,250 —
+        strictly inside the (25,000, 30,000) scan cell, reachable
+        only by raising the floor: the scan holds 25,000, the first
+        midpoint 27,500 fails, the second midpoint 26,250 succeeds
+        and becomes the new floor, and every later midpoint fails
+        until the bracket closes within the 100 tolerance. Probing
+        the boundary directly confirms the returned level: 26,250
+        never ruins; 100 more always does.
+        """
+        assumptions = assumptions_with(
+            ZERO_VOLATILITY | {AssumptionKey.RETURNS_EQUITY_REAL: Decimal(0)}
+        )
+        search = SustainableIncomeSearch(
+            paths=2,
+            target_success_rate=Decimal(1),
+            maximum=Money(Decimal(50000)),
+            tolerance=Money(Decimal(100)),
+        )
+        income = sustainable_income(
+            household_of(balance="105000", spending=None),
+            assumptions,
+            stub_region(),
+            mc_config(),
+            search,
+        )
+        assert income == Money(Decimal(26250))
+        at_income = run_paths(
+            household_of(balance="105000", spending="26250"),
+            assumptions,
+            stub_region(),
+            mc_config(),
+            paths=2,
+        )
+        above = run_paths(
+            household_of(balance="105000", spending="26350"),
+            assumptions,
+            stub_region(),
+            mc_config(),
+            paths=2,
+        )
+        assert at_income.probability_of_ruin == Decimal(0)
+        assert above.probability_of_ruin == Decimal(1)
 
     def test_returns_the_maximum_when_it_meets_the_target(self) -> None:
         """A ceiling the pot outlasts is returned unprobed further."""

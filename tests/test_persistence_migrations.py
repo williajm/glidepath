@@ -1,9 +1,12 @@
 """Tests for the schema migration harness (issue 6.4, planning §4.5).
 
 These tests exercise it three ways: the real registry (the 9.6 v1→v2
-upgrader adding ``active_membership`` to DB pensions), synthetic
+upgrader adding ``active_membership`` to DB pensions and the #97 v2→v3
+upgrader dropping the qualifying-years derivation fields), synthetic
 upgrader registries that prove sequencing, missing-step detection, and
-the one-version-per-upgrader rule, and end-to-end loads of a v1 file.
+the one-version-per-upgrader rule, and the load boundary refusing a
+future-version file (the checked-in v1 file's end-to-end load lives
+with the round-trip tests in ``test_persistence.py``).
 """
 
 import pytest
@@ -107,6 +110,72 @@ class TestV1ToV2:
             "schema_version": 1,
             "household": {"persons": [{"db_pensions": "not-a-list"}, "not-a-dict"]},
         }
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+
+
+class TestV2ToV3:
+    """The #97 migration: state pensions lose the derivation fields (§4.5)."""
+
+    def test_state_pension_records_drop_the_derivation_fields(self) -> None:
+        """The retired keys go; everything else on the record stays."""
+        raw: RawDocument = {
+            "schema_version": 2,
+            "household": {
+                "persons": [
+                    {
+                        "state_pension": {
+                            "ni_record_start": {"value": "2016-04-06"},
+                            "qualifying_years": {"value": 20},
+                            "planned_extra_years": {"value": 2},
+                            "deferral_years": {"value": "0.5"},
+                        }
+                    },
+                    {"state_pension": None},
+                ]
+            },
+        }
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        persons = migrated["household"]["persons"]
+        assert persons[0]["state_pension"] == {"deferral_years": {"value": "0.5"}}
+        assert persons[1]["state_pension"] is None
+
+    def test_a_record_without_the_retired_fields_is_untouched(self) -> None:
+        """A record already free of the retired keys passes unchanged."""
+        record = {"forecast_weekly_amount": None, "deferral_years": {"value": "0"}}
+        raw: RawDocument = {
+            "schema_version": 2,
+            "household": {"persons": [{"state_pension": dict(record)}]},
+        }
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        assert migrated["household"]["persons"][0]["state_pension"] == record
+
+    def test_a_document_without_persons_just_bumps_the_version(self) -> None:
+        """Nothing to upgrade still steps the version."""
+        raw: RawDocument = {"schema_version": 2, "marker": "untouched"}
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        assert migrated["marker"] == "untouched"
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            {"schema_version": 2, "household": "not-an-object"},
+            {"schema_version": 2, "household": {"persons": "not-a-list"}},
+            {
+                "schema_version": 2,
+                "household": {
+                    "persons": [{"state_pension": "not-a-dict"}, "not-a-dict"]
+                },
+            },
+        ],
+    )
+    def test_malformed_shapes_pass_through_for_the_strict_decoder(
+        self, raw: RawDocument
+    ) -> None:
+        """The upgrader never crashes on shapes the decoder will reject."""
         migrated = apply_migrations(raw)
         assert migrated["schema_version"] == SCHEMA_VERSION
 

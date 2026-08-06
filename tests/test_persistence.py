@@ -85,6 +85,8 @@ if TYPE_CHECKING:
 
 GOLDEN_PATH = Path(__file__).parent / "golden" / "kitchen_sink.glidepath.json"
 
+V1_GOLDEN_PATH = Path(__file__).parent / "golden" / "kitchen_sink_v1.glidepath.json"
+
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 AS_OF = date(2026, 8, 1)
 RESIDENCY = TaxResidencyId("uk.ruk")
@@ -577,6 +579,56 @@ class TestRoundTrip:
         text = dumps_plan(kitchen_sink_document())
         assert dumps_plan(loads_plan(text)) == text
 
+    def test_checked_in_v1_file_loads_through_the_full_chain(self) -> None:
+        """A genuine v1 file upgrades 1→2→3 on load (§4.5).
+
+        The fixture is the kitchen-sink golden as the v1 build wrote
+        it — never synthesized from a current document. Its DB
+        pensions predate ``active_membership`` and its state pension
+        record still carries the retired derivation fields. One
+        departure from the v1 bytes: the stage multipliers keep only
+        the ``decumulation`` entry, because the accumulation-stage
+        tokens the v1 build also accepted are rejected by today's
+        ``SpendingPlan`` invariant and no migration retires them.
+        """
+        raw = json.loads(V1_GOLDEN_PATH.read_text(encoding="utf-8"))
+        assert raw["schema_version"] == 1
+        stored_person = raw["household"]["persons"][0]
+        assert "active_membership" not in stored_person["db_pensions"][0]
+        stored_record = stored_person["state_pension"]
+        assert "ni_record_start" in stored_record
+        assert "qualifying_years" in stored_record
+        assert "planned_extra_years" in stored_record
+        loaded = load_plan(V1_GOLDEN_PATH)
+        persons = loaded.household.persons
+        assert [person.id for person in persons] == [PERSON_ID, PARTNER_ID]
+        pensions = [pension for person in persons for pension in person.db_pensions]
+        assert [pension.id for pension in pensions] == [
+            DB_CPI_ID,
+            DB_FIXED_ID,
+            DB_FROZEN_ID,
+        ]
+        assert all(pension.active_membership is None for pension in pensions)
+        record = persons[0].state_pension
+        assert record is not None
+        assert record.forecast_weekly_amount is not None
+        assert record.forecast_weekly_amount.value == Money(Decimal("230.25"))
+        assert record.protected_payment is not None
+        assert record.protected_payment.value == Money(Decimal("20.10"))
+        assert record.deferral_years.value == Decimal("0.5")
+        spending = loaded.household.spending
+        assert spending is not None
+        assert spending.stage_multipliers is not None
+        assert spending.stage_multipliers[LifeStage.DECUMULATION] == Decimal("1.10")
+        assert [scenario.name for scenario in loaded.scenarios] == [
+            "retire at 60",
+            "do nothing",
+        ]
+        assert loaded.assumption_overrides[0].key is AssumptionKey.INFLATION_CPI
+        assert loaded.assumption_overrides[0].value == Decimal("0.03")
+        rewritten = json.loads(dumps_plan(loaded))
+        assert rewritten["schema_version"] == SCHEMA_VERSION
+
     def test_v1_file_loads_with_every_pension_deferred(self) -> None:
         """The 9.6 migration upgrades a v1 file on load (§4.5)."""
         payload = payload_of(kitchen_sink_document())
@@ -922,6 +974,21 @@ def _object_persons(payload: dict[str, Any]) -> None:
     payload["household"]["persons"] = {}
 
 
+def _text_tagged_table(payload: dict[str, Any]) -> None:
+    """Store text where a tagged table's entries belong."""
+    payload["assumption_overrides"][0]["value"] = {"kind": "table", "value": "flat"}
+
+
+def _text_factor_table(payload: dict[str, Any]) -> None:
+    """Store text where a factor-table object belongs."""
+    _person(payload)["db_pensions"][0]["early_late_factors"] = "none"
+
+
+def _array_stage_multipliers(payload: dict[str, Any]) -> None:
+    """Store an array where the stage-multiplier object belongs."""
+    payload["household"]["spending"]["stage_multipliers"] = ["go_go"]
+
+
 def _non_finite_decimal(payload: dict[str, Any]) -> None:
     """Store a non-finite decimal string."""
     payload["assumption_overrides"][0]["value"] = {"kind": "decimal", "value": "NaN"}
@@ -961,6 +1028,9 @@ class TestDecodeErrors:
             (_null_required_field, "expected a string"),
             (_list_person, "expected an object"),
             (_object_persons, "expected an array"),
+            (_text_tagged_table, "expected a table object, got str"),
+            (_text_factor_table, "early_late_factors: expected an object, got str"),
+            (_array_stage_multipliers, "stage_multipliers: expected an object"),
             (_non_finite_decimal, "must be finite"),
             (_non_decimal_string, "not a decimal number"),
         ],
@@ -992,6 +1062,53 @@ class TestDecodeErrors:
         )
         with pytest.raises(PersistenceError, match="floats are not permitted"):
             loads_plan(text)
+
+    def test_rejects_a_truncated_document(self) -> None:
+        """A file cut off mid-JSON (a crashed writer) fails as invalid JSON.
+
+        The §4.5 atomic save makes this shape unreachable through
+        glidepath itself, but a copy truncated by a failing disk or
+        transfer must still fail loudly, never half-load.
+        """
+        text = dumps_plan(minimal_document())
+        truncated = text[: len(text) // 2]
+        with pytest.raises(PersistenceError, match="not valid JSON"):
+            loads_plan(truncated)
+
+    def test_rejects_a_utf8_bom(self, tmp_path: Path) -> None:
+        """A BOM-prefixed file is rejected as invalid JSON.
+
+        The canonical writer never emits a byte-order mark and the
+        reader decodes strict UTF-8 (not ``utf-8-sig``), so a plan
+        re-saved by a BOM-adding editor fails loudly at the JSON layer
+        rather than parsing with an invisible extra character.
+        """
+        target = tmp_path / "plan.glidepath.json"
+        body = dumps_plan(minimal_document()).encode("utf-8")
+        target.write_bytes(b"\xef\xbb\xbf" + body)
+        with pytest.raises(PersistenceError, match="not valid JSON"):
+            load_plan(target)
+
+    def test_rejects_a_version_the_migration_chain_failed_to_reach(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The decoder pins the post-migration version (defence in depth).
+
+        ``apply_migrations`` already guarantees it returns the current
+        version, so the decoder's own check is unreachable through the
+        real registry — a neutered migration layer stands in for a
+        future bug that hands the strict decoder a stale document.
+        """
+        monkeypatch.setattr(
+            "glidepath.persistence.decode.apply_migrations", lambda raw: raw
+        )
+        payload = payload_of(minimal_document())
+        payload["schema_version"] = SCHEMA_VERSION - 1
+        with pytest.raises(
+            PersistenceError,
+            match=f"expected {SCHEMA_VERSION} after migration",
+        ):
+            loads_payload(payload)
 
 
 class TestEncodeErrors:

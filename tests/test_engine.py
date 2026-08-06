@@ -212,6 +212,52 @@ class TieredTaxSystem:
         return ()
 
 
+ALLOWANCE = Money(Decimal(1000))
+
+
+@dataclass(frozen=True)
+class AllowanceTaxSystem:
+    """Flat 25% above a 1,000 allowance on the stacked income.
+
+    A modest taxable account's portfolio income can sit wholly
+    inside the allowance — the savings/dividend-allowance shape of
+    real regions — so the marginal assessment finds no incremental
+    tax to attribute to the wrappers (roadmap 9.2).
+    """
+
+    def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:
+        """One flat band over the income beyond the allowance."""
+        del period
+        income = (
+            tax_input.non_savings_income
+            + tax_input.savings_income
+            + tax_input.dividend_income
+        )
+        taxed = income - ALLOWANCE
+        if taxed <= ZERO:
+            return TaxResult(
+                tax_due=ZERO,
+                taxable_income=income,
+                tax_free_allowance=ALLOWANCE,
+                lines=(),
+            )
+        tax = Money((TAX_RATE * taxed.amount).quantize(PENNY, rounding=ROUND_DOWN))
+        line = TaxLine(band="allowance_flat", rate=Rate(TAX_RATE), taxed=taxed, tax=tax)
+        return TaxResult(
+            tax_due=tax,
+            taxable_income=income,
+            tax_free_allowance=ALLOWANCE,
+            lines=(line,),
+        )
+
+    def annual_allowance_charge(
+        self, period: Period, tax_input: TaxInput, excess: Money
+    ) -> tuple[TaxLine, ...]:
+        """No annual-allowance charge in this region."""
+        del period, tax_input, excess
+        return ()
+
+
 @dataclass(frozen=True)
 class FixedReturnModel:
     """Every period returns the same all-equity nominal rate at zero CPI."""
@@ -464,7 +510,7 @@ def stub_region(
     free_window: Period | None = None,
     sub_kind_cap: Money | None = None,
     fee_free_kinds: frozenset[WrapperKindId] = frozenset(),
-    tax_system: FlatTaxSystem | TieredTaxSystem | None = None,
+    tax_system: FlatTaxSystem | TieredTaxSystem | AllowanceTaxSystem | None = None,
 ) -> Region:
     """A calendar-year region over the stub implementations."""
     return Region(
@@ -3990,6 +4036,81 @@ class TestTaxableGrowthWrappers:
         assert wrapper.taxable_dividends == Money(Decimal(100))
         assert wrapper.taxable_interest == Money(Decimal(105))
         assert wrapper.growth_tax == Money(Decimal("51.25"))
+
+    def test_income_tax_splits_pro_rata_across_wrappers(self) -> None:
+        """Unequal incomes are charged proportionally, not equally.
+
+        Three GIAs of 2,000, 3,000 and 5,000 wholly in equity yield
+        2% — dividends of 40, 60 and 100, 200 in all — taxed at the
+        flat 25%: 50, split pro rata to income as 10, 15 and 25.
+        Each charge settles at close after 10% growth: 2,190, 3,285
+        and 5,475.
+        """
+        small = wrapper_of(TAXABLE, "2000")
+        medium = wrapper_of(TAXABLE, "3000")
+        large = wrapper_of(TAXABLE, "5000")
+        plan = household_of(person_of((small, medium, large)))
+        result = run(plan, yield_assumptions(), stub_region(), one_period_config())
+        person = result.snapshots[0].persons[0]
+        first, second, third = person.wrappers
+        assert first.taxable_dividends == Money(Decimal(40))
+        assert second.taxable_dividends == Money(Decimal(60))
+        assert third.taxable_dividends == Money(Decimal(100))
+        assert first.growth_tax == Money(Decimal(10))
+        assert second.growth_tax == Money(Decimal(15))
+        assert third.growth_tax == Money(Decimal(25))
+        assert person.tax.tax_due == Money(Decimal(50))
+        assert first.closing_uncrystallised == Money(Decimal(2190))
+        assert second.closing_uncrystallised == Money(Decimal(3285))
+        assert third.closing_uncrystallised == Money(Decimal(5475))
+
+    def test_the_split_remainder_lands_on_the_last_wrapper(self) -> None:
+        """The per-wrapper charges reconcile to the assessed tax.
+
+        GIAs of 5,001 and 10,002 yield dividends of 100.02 and
+        200.04 — 300.06 in all, taxed at the flat 25% floored to the
+        penny: 75.01. The first wrapper's pro-rata third (25.0033…)
+        writes as 25.00; the last is charged the exact remainder
+        (50.0066…), written as 50.01 — the floored half-penny lands
+        there, so the charges sum to the assessed 75.01 and the
+        closings carry the exact shares: 5,501.10 - 25.0033… →
+        5,476.10 and 11,002.20 - 50.0066… → 10,952.19.
+        """
+        smaller = wrapper_of(TAXABLE, "5001")
+        larger = wrapper_of(TAXABLE, "10002")
+        plan = household_of(person_of((smaller, larger)))
+        result = run(plan, yield_assumptions(), stub_region(), one_period_config())
+        person = result.snapshots[0].persons[0]
+        first, second = person.wrappers
+        assert first.growth_tax == Money(Decimal("25.00"))
+        assert second.growth_tax == Money(Decimal("50.01"))
+        assert person.tax.tax_due == Money(Decimal("75.01"))
+        assert first.growth_tax + second.growth_tax == person.tax.tax_due
+        assert first.closing_uncrystallised == Money(Decimal("5476.10"))
+        assert second.closing_uncrystallised == Money(Decimal("10952.19"))
+
+    def test_income_within_an_allowance_charges_no_growth_tax(self) -> None:
+        """Income the allowance absorbs costs the wrappers nothing.
+
+        Under a 1,000 allowance, two GIAs' combined 300 of dividends
+        generate no incremental tax — the assessment is zero with
+        the portfolio income and without — so neither wrapper is
+        charged and both keep the full 10% growth.
+        """
+        smaller = wrapper_of(TAXABLE, "5000")
+        larger = wrapper_of(TAXABLE, "10000")
+        plan = household_of(person_of((smaller, larger)))
+        region = stub_region(tax_system=AllowanceTaxSystem())
+        result = run(plan, yield_assumptions(), region, one_period_config())
+        person = result.snapshots[0].persons[0]
+        first, second = person.wrappers
+        assert first.taxable_dividends == Money(Decimal(100))
+        assert second.taxable_dividends == Money(Decimal(200))
+        assert first.growth_tax == ZERO
+        assert second.growth_tax == ZERO
+        assert person.tax.tax_due == ZERO
+        assert first.closing_uncrystallised == Money(Decimal(5500))
+        assert second.closing_uncrystallised == Money(Decimal(11000))
 
     def test_tax_free_wrappers_accrue_no_portfolio_income(self) -> None:
         """A TEE account reads no yield keys and pays no growth tax."""

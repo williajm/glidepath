@@ -226,6 +226,94 @@ def test_additional_rate_has_no_psa(system: UkTaxSystem) -> None:
     assert result.tax_due == Money(Decimal("45153.00"))
 
 
+@pytest.mark.parametrize(
+    ("savings", "psa", "expected_tax"),
+    [
+        ("1999.99", "1000", "7339.99"),  # taxable 37,699.99: a penny inside basic
+        ("2000", "1000", "7340.00"),  # taxable exactly 37,700: basic tier holds
+        ("2000.01", "500", "7440.00"),  # first penny beyond: PSA halves to 500
+    ],
+)
+def test_psa_tier_at_the_basic_band_edge(
+    system: UkTaxSystem, savings: str, psa: str, expected_tax: str
+) -> None:
+    """The PSA tier is decided exactly at the £37,700 basic limit.
+
+    Pay of £48,270 leaves taxable pay of 35,700, so the savings push
+    total taxable income across the limit penny by penny. The £1,000
+    basic tier applies up to and including exactly £37,700; the first
+    penny beyond drops to the £500 higher tier, costing £100 (the 500
+    no longer nil-rated, at 20%).
+    """
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "48270", savings, "0")
+    )
+    nil_rates = [line.taxed for line in result.lines if line.band == "savings_nil_rate"]
+    assert nil_rates == [Money(Decimal(psa))]
+    assert result.tax_due == Money(Decimal(expected_tax))
+
+
+@pytest.mark.parametrize(
+    ("savings", "psa", "expected_tax"),
+    [
+        ("1999.99", "500", "42315.59"),  # taxable 125,138.99: PA held at £1
+        ("2000", "500", "42316.00"),  # taxable exactly 125,140: higher tier holds
+        ("2000.01", None, "42516.00"),  # first penny beyond: no PSA at all
+    ],
+)
+def test_psa_tier_at_the_additional_rate_edge(
+    system: UkTaxSystem, savings: str, psa: str | None, expected_tax: str
+) -> None:
+    """The PSA vanishes exactly one penny past the £125,140 higher limit.
+
+    Pay of £123,140 with £2,000 of savings makes total taxable income
+    exactly £125,140 (the taper leaves the allowance at exactly nil):
+    the £500 higher tier still applies at the limit itself; the first
+    penny beyond drops to the nil additional tier, costing £200 (the
+    500 no longer nil-rated, at 40%). A penny below, the taper
+    reduction rounds down so the allowance is £1 and taxable income is
+    125,138.99 — still the higher tier.
+    """
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "123140", savings, "0")
+    )
+    expected_nil = [] if psa is None else [Money(Decimal(psa))]
+    nil_rates = [line.taxed for line in result.lines if line.band == "savings_nil_rate"]
+    assert nil_rates == expected_nil
+    assert result.tax_due == Money(Decimal(expected_tax))
+
+
+@pytest.mark.parametrize(
+    ("income", "starting", "expected_tax"),
+    [
+        ("17569.99", "0.01", "1099.98"),  # taxable pay 4,999.99: 1p of headroom
+        ("17570", None, "1100.00"),  # taxable pay exactly 5,000: headroom nil
+        ("17570.01", None, "1100.00"),  # a penny past: still nil, never negative
+    ],
+)
+def test_starting_rate_headroom_at_the_5000_limit(
+    system: UkTaxSystem, income: str, starting: str | None, expected_tax: str
+) -> None:
+    """The starting rate for savings dies exactly at £5,000 of pay.
+
+    Taxable non-savings income eats the £5,000 starting-rate limit £1
+    per £1: at exactly £5,000 (pay of £17,570) the headroom is exactly
+    nil and the line disappears; a penny of pay less leaves exactly 1p
+    of starting rate; a penny more must clamp at nil, never go
+    negative. The £1,500 of interest then takes the £1,000 basic PSA
+    and pays 20% on the rest.
+    """
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, income, "1500", "0")
+    )
+    expected_lines = [] if starting is None else [Money(Decimal(starting))]
+    starting_lines = [
+        line.taxed for line in result.lines if line.band == "savings_starting_rate"
+    ]
+    assert starting_lines == expected_lines
+    assert result.tax_due == Money(Decimal(expected_tax))
+
+
 def test_dividends_stack_above_pay(system: UkTaxSystem) -> None:
     """£20,000 pay + £5,000 dividends: £500 nil, 10.75% on the rest."""
     result = system.assess(
