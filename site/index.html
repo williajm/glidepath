@@ -347,14 +347,13 @@
   <section class="wrap" id="get-started">
     <h2>Get started</h2>
     <p class="section-sub">
-      Requires <a href="https://docs.astral.sh/uv/">uv</a> and GNU Make;
-      uv manages the Python toolchain for you.
+      Requires only <a href="https://docs.astral.sh/uv/">uv</a>, which
+      manages the Python toolchain for you.
     </p>
     <div class="steps">
 <pre><code><span class="p">$</span> git clone https://github.com/williajm/glidepath.git
 <span class="p">$</span> cd glidepath
-<span class="p">$</span> make sync      <span class="c"># create the venv and install locked dependencies</span>
-<span class="p">$</span> uv run glidepath</code></pre>
+<span class="p">$</span> uv run glidepath  <span class="c"># first run installs the locked dependencies</span></code></pre>
       <p>
         The app launches with an example plan already projected, so every tab has
         something to show &mdash; replace its values with your own facts, or clear
