@@ -189,6 +189,8 @@ class PensionRules:
     mpaa: Money
     aa_carry_forward_years: int
     """How many previous tax years' unused AA may carry forward (FA 2004 s228A)."""
+    scheme_pays_min_charge: Money
+    """Mandatory scheme pays applies above this AA charge (FA 2004 s237B)."""
     member_relief_basic_amount: Money
     """Relief floor for low/no earners, available via relief at source only."""
     member_relief_max_age: int

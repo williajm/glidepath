@@ -78,6 +78,7 @@ def make_pension_rules(
         aa_taper_floor=Money(Decimal(10000)),
         mpaa=Money(Decimal(10000)),
         aa_carry_forward_years=aa_carry_forward_years,
+        scheme_pays_min_charge=Money(Decimal(2000)),
         member_relief_basic_amount=Money(Decimal(3600)),
         member_relief_max_age=member_relief_max_age,
         relief_at_source_rate=Rate(Decimal("0.20")),

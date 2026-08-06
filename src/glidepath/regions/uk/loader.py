@@ -289,6 +289,10 @@ def _parse_pension(raw: object, context: str) -> PensionRules:
             f"{context}.aa_carry_forward_years",
             minimum=0,
         ),
+        scheme_pays_min_charge=_money(
+            table.take("scheme_pays_min_charge"),
+            f"{context}.scheme_pays_min_charge",
+        ),
         member_relief_basic_amount=_money(
             table.take("member_relief_basic_amount"),
             f"{context}.member_relief_basic_amount",

@@ -1,8 +1,8 @@
 # UK tax year 2026/27 policy figures (docs/planning.md §5.3, §6).
 # Income tax, pension and ISA figures verified 2026-08-01/02; savings,
-# dividend, AA carry-forward and DB valuation figures 2026-08-04 — all
-# from the primary sources below; never edit a figure without
-# re-verifying and updating [meta].
+# dividend, AA carry-forward and DB valuation figures 2026-08-04; the
+# scheme-pays minimum 2026-08-06 — all from the primary sources below;
+# never edit a figure without re-verifying and updating [meta].
 
 schema_version = 2
 
@@ -10,8 +10,10 @@ schema_version = 2
 tax_year    = "2026/27"
 start_date  = 2026-04-06
 end_date    = 2027-04-05
-verified_on = 2026-08-04
+verified_on = 2026-08-06
 sources = [
+  "https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm056410",
+  "https://www.legislation.gov.uk/ukpga/2004/12/section/237B",
   "https://www.gov.uk/income-tax-rates",
   "https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027",
   "https://www.gov.uk/scottish-income-tax",
@@ -62,6 +64,7 @@ aa_taper_rate              = "0.5"
 aa_taper_floor             = "10000"
 mpaa                       = "10000"
 aa_carry_forward_years     = 3  # unused AA carries from the previous 3 tax years
+scheme_pays_min_charge     = "2000"  # mandatory scheme pays above this charge (FA 2004 s237B)
 member_relief_basic_amount = "3600"  # low/no-earner relief floor, RAS only
 member_relief_max_age      = 75  # no relief on contributions from age 75 (FA 2004 s188)
 relief_at_source_rate      = "0.20"

@@ -58,6 +58,15 @@ the MPAA (PTM056510), and nothing from a year without
 registered-scheme membership.
 :func:`roll_carry_forward` advances the pool one tax year, expiring the
 oldest entry.
+
+**Charge funding** (roadmap 9.21, #124; verified 2026-08-06 against
+PTM056410). :meth:`UkContributionRuleset.annual_allowance_funding`
+splits the priced charge between Scheme Pays — the whole charge debited
+from the pension wrapper with the largest qualifying input when the
+mandatory conditions hold (charge over ``scheme_pays_min_charge``,
+that wrapper's own input over the standard AA; FA 2004 s237B) — and
+cash from the person's taxable accounts otherwise (planning §5.2
+records the whole-charge simplification).
 """
 
 from dataclasses import dataclass
@@ -65,10 +74,12 @@ from decimal import ROUND_DOWN, Decimal
 from typing import TYPE_CHECKING
 
 from glidepath.core import (
+    AnnualAllowanceFunding,
     AnnualAllowanceOutcome,
     MemberContributionOutcome,
     Money,
     ReliefMechanic,
+    SchemePayment,
     date_age_attained,
 )
 from glidepath.regions.uk.loader import available_tax_years, load_tax_year
@@ -82,6 +93,7 @@ if TYPE_CHECKING:
         AnnualAllowanceMeasurement,
         MemberContributionRequest,
         Period,
+        SchemeInput,
     )
     from glidepath.regions.uk.extension import FutureYearsExtension
     from glidepath.regions.uk.schema import PensionRules, TaxYearFile
@@ -277,6 +289,42 @@ class UkContributionRuleset:
         return AnnualAllowanceOutcome(
             chargeable_excess=set_off.chargeable_excess,
             carry_forward=roll_carry_forward(pension, set_off.remaining, generated),
+        )
+
+    def annual_allowance_funding(
+        self, charge: Money, schemes: tuple[SchemeInput, ...], period: Period
+    ) -> AnnualAllowanceFunding:
+        """Split a priced AA charge per the Scheme Pays conditions (#124).
+
+        Mandatory scheme pays (FA 2004 s237B; PTM056410) is modelled
+        on its two conditions: the year's total charge exceeds
+        ``scheme_pays_min_charge`` and the wrapper's own pension input
+        amount exceeds the **standard** annual allowance — the s228
+        amount, with the tapered allowance and MPAA ignored. The whole
+        charge is then debited from the qualifying wrapper with the
+        largest input (planning §5.2 records the whole-charge
+        simplification: voluntary scheme pays covers the slice
+        mandatory scheme pays strictly would not). Outside the
+        conditions the charge falls to cash — the person's bare
+        taxable accounts at period close.
+        """
+        _require_non_negative(charge, "charge")
+        pension = self._year_for(period).pension
+        if charge <= pension.scheme_pays_min_charge:
+            return AnnualAllowanceFunding(scheme_payments=(), cash=charge)
+        qualifying = [
+            scheme
+            for scheme in schemes
+            if scheme.input_amount > pension.annual_allowance
+        ]
+        if not qualifying:
+            return AnnualAllowanceFunding(scheme_payments=(), cash=charge)
+        paying = max(qualifying, key=lambda scheme: scheme.input_amount.amount)
+        return AnnualAllowanceFunding(
+            scheme_payments=(
+                SchemePayment(wrapper_id=paying.wrapper_id, amount=charge),
+            ),
+            cash=_ZERO,
         )
 
     def _series(self) -> TaxYearSeries:

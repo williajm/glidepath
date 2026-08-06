@@ -11,6 +11,15 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- The annual-allowance charge is now funded from modelled balances
+  (#124): Scheme Pays debits the pension pot when the FA 2004 s237B
+  mandatory conditions hold (charge over £2,000 — shipped as data —
+  and that wrapper's own pension input over the standard allowance),
+  the cash route debits the taxable accounts otherwise, and whatever
+  no wrapper can fund joins the person's shortfall — so a sustained
+  breach now degrades the balance path and the success metrics see
+  it. The cash-flow CSV gains an "AA charge" column; decision record
+  in planning §5.2.
 - Keyboard shortcuts for the main window: Ctrl+O open, Ctrl+S save,
   Ctrl+Shift+S save-as, Ctrl+E / Ctrl+Shift+E for the CSV and PDF
   exports, F1 for the how-to-use guide, and a new File → Quit action

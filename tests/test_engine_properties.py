@@ -236,6 +236,7 @@ class TestEngineInvariants:
                     - entry.withdrawal_taxable
                     - entry.annuity_purchase
                     - entry.growth_tax
+                    - entry.aa_charge
                     - entry.fee
                     + entry.growth
                 )
@@ -255,16 +256,18 @@ class TestEngineInvariants:
         The golden scenarios' need identity, over generated plans:
         every retired period's net need is met by net withdrawals plus
         income net of the personal tax assessment — excluding the
-        growth tax, which the wrappers fund directly — with any surplus
-        banked and any deficit reported as shortfall.
+        growth tax and the funded annual-allowance charge, which the
+        wrappers fund directly — with any surplus banked and any
+        deficit reported as shortfall.
         """
         result = run_projection(household, years)
         for snapshot in result.snapshots:
             [person] = snapshot.persons
             if person.years_to_retirement > 0:
                 continue
-            growth_tax = sum(
-                (entry.growth_tax for entry in person.wrappers), start=ZERO
+            wrapper_funded_tax = sum(
+                (entry.growth_tax + entry.aa_charge for entry in person.wrappers),
+                start=ZERO,
             )
             income = (
                 person.db_income
@@ -277,7 +280,7 @@ class TestEngineInvariants:
             delivered = (
                 person.net_withdrawn
                 + income
-                - (person.tax.tax_due - growth_tax)
+                - (person.tax.tax_due - wrapper_funded_tax)
                 - person.banked
                 + person.shortfall
             )

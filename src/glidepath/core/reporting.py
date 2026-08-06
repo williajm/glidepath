@@ -85,7 +85,9 @@ class PeriodReportRow:
     taxable draws across wrappers; ``annuity_purchases`` totals the
     capital that left the wrappers to buy annuity income this period
     (roadmap 5.5). ``growth_tax`` totals the portfolio-income tax
-    charged to taxable-growth wrappers and ``banked`` is the
+    charged to taxable-growth wrappers, ``aa_charge`` totals the
+    annual-allowance charge the wrappers funded at close — scheme
+    pays and the cash route together (#124) — and ``banked`` is the
     period's surplus — decumulation income and draws beyond the need,
     or pre-retirement non-employment income beyond the planned
     outflows — swept into one (roadmap 9.2).
@@ -115,6 +117,7 @@ class PeriodReportRow:
     fees: Money
     growth: Money
     growth_tax: Money
+    aa_charge: Money
     banked: Money
     withdrawals_gross: Money
     closing_balance: Money
@@ -220,6 +223,7 @@ def _person_row(
         fees=flow(_total(entry.fee for entry in wrappers)),
         growth=flow(_total(entry.growth for entry in wrappers)),
         growth_tax=flow(_total(entry.growth_tax for entry in wrappers)),
+        aa_charge=flow(_total(entry.aa_charge for entry in wrappers)),
         banked=flow(person.banked),
         withdrawals_gross=flow(_total(entry.withdrawal_gross for entry in wrappers)),
         closing_balance=_total(entry.closing_balance for entry in wrapper_balances),

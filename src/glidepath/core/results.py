@@ -64,10 +64,15 @@ class WrapperPeriodResult:
     is the tax attributable to that income actually charged to the
     wrapper at period close — capped at what the account then holds,
     with any unfunded remainder joining the person's shortfall
-    (planning §5.2). ``banked_in`` is decumulation surplus swept into
-    this wrapper — income or gross draws beyond the period's need
-    (planning §5.2). ``growth`` may be negative (a down period); every
-    other flow is non-negative.
+    (planning §5.2). ``aa_charge`` is the slice of the period's priced
+    annual-allowance charge this wrapper actually funded at close
+    (#124) — a scheme-pays debit on a pension wrapper, or the cash
+    route on a bare taxable one — under the same close-settlement
+    convention as ``growth_tax``; it is not a withdrawal and appears
+    in no ``withdrawal_*`` flow. ``banked_in`` is decumulation surplus
+    swept into this wrapper — income or gross draws beyond the
+    period's need (planning §5.2). ``growth`` may be negative (a down
+    period); every other flow is non-negative.
     """
 
     wrapper_id: EntityId
@@ -90,6 +95,7 @@ class WrapperPeriodResult:
     taxable_interest: Money = _ZERO
     taxable_dividends: Money = _ZERO
     growth_tax: Money = _ZERO
+    aa_charge: Money = _ZERO
     banked_in: Money = _ZERO
 
     def __post_init__(self) -> None:
@@ -111,6 +117,7 @@ class WrapperPeriodResult:
             self.taxable_interest,
             self.taxable_dividends,
             self.growth_tax,
+            self.aa_charge,
             self.banked_in,
         )
         if any(amount < _ZERO for amount in non_negative):
@@ -142,8 +149,9 @@ class PersonPeriodResult:
     net cash the withdrawal step delivered toward it; ``shortfall`` is
     the need left unmet after the configured withdrawal strategy's plan
     executed, plus any portfolio-income tax a drained taxable wrapper
-    could not fund (roadmap 9.2) — the ruin signal the success metrics
-    of roadmap 7.3 read.
+    could not fund (roadmap 9.2) and any slice of the annual-allowance
+    charge no wrapper could fund (#124) — the ruin signal the success
+    metrics of roadmap 7.3 read.
     Under the default net-defined strategy a shortfall means every
     accessible wrapper was exhausted; a gross-defined strategy (e.g.
     fixed-%) may report one with balances still standing, because its
