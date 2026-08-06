@@ -580,16 +580,14 @@ class TestRoundTrip:
         assert dumps_plan(loads_plan(text)) == text
 
     def test_checked_in_v1_file_loads_through_the_full_chain(self) -> None:
-        """A genuine v1 file upgrades 1→2→3 on load (§4.5).
+        """A genuine v1 file upgrades 1→2→3→4 on load (§4.5).
 
         The fixture is the kitchen-sink golden as the v1 build wrote
         it — never synthesized from a current document. Its DB
-        pensions predate ``active_membership`` and its state pension
-        record still carries the retired derivation fields. One
-        departure from the v1 bytes: the stage multipliers keep only
-        the ``decumulation`` entry, because the accumulation-stage
-        tokens the v1 build also accepted are rejected by today's
-        ``SpendingPlan`` invariant and no migration retires them.
+        pensions predate ``active_membership``, its state pension
+        record still carries the retired derivation fields, and its
+        stage multipliers carry the accumulation-stage tokens the v1
+        build accepted (retired by the #129 migration).
         """
         raw = json.loads(V1_GOLDEN_PATH.read_text(encoding="utf-8"))
         assert raw["schema_version"] == 1
@@ -599,6 +597,10 @@ class TestRoundTrip:
         assert "ni_record_start" in stored_record
         assert "qualifying_years" in stored_record
         assert "planned_extra_years" in stored_record
+        stored_multipliers = raw["household"]["spending"]["stage_multipliers"]
+        assert "early_accumulation" in stored_multipliers
+        assert "mid_accumulation" in stored_multipliers
+        assert "pre_retirement" in stored_multipliers
         loaded = load_plan(V1_GOLDEN_PATH)
         persons = loaded.household.persons
         assert [person.id for person in persons] == [PERSON_ID, PARTNER_ID]
@@ -618,8 +620,7 @@ class TestRoundTrip:
         assert record.deferral_years.value == Decimal("0.5")
         spending = loaded.household.spending
         assert spending is not None
-        assert spending.stage_multipliers is not None
-        assert spending.stage_multipliers[LifeStage.DECUMULATION] == Decimal("1.10")
+        assert spending.stage_multipliers == {LifeStage.DECUMULATION: Decimal("1.10")}
         assert [scenario.name for scenario in loaded.scenarios] == [
             "retire at 60",
             "do nothing",
@@ -695,6 +696,21 @@ class TestRoundTrip:
         assert migrated is not None
         assert migrated.forecast_weekly_amount is None
         assert migrated.deferral_years.value == Decimal("0.5")
+
+    def test_v3_file_drops_the_accumulation_stage_multipliers(self) -> None:
+        """The #129 migration retires the accumulation-stage keys on load."""
+        payload = payload_of(kitchen_sink_document())
+        payload["household"]["spending"]["stage_multipliers"] = {
+            "decumulation": "1.10",
+            "early_accumulation": "1.00",
+            "mid_accumulation": "1.05",
+            "pre_retirement": "0.95",
+        }
+        payload["schema_version"] = 3
+        loaded = loads_plan(json.dumps(payload))
+        spending = loaded.household.spending
+        assert spending is not None
+        assert spending.stage_multipliers == {LifeStage.DECUMULATION: Decimal("1.10")}
 
     @given(
         balance=st.decimals(

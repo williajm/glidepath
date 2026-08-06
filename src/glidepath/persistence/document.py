@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from glidepath.core import AssumptionKey, Household, Scenario
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 """The schema version this build reads and writes (planning §4.5).
 
 v2 (roadmap 9.6): every DB pension carries an ``active_membership``
@@ -27,6 +27,11 @@ v3 (#97): the state pension record loses the qualifying-years
 derivation fields (``ni_record_start``, ``qualifying_years``,
 ``planned_extra_years``) — the official DWP forecast is the only
 route to an amount.
+
+v4 (#129): the spending plan loses the accumulation-stage multiplier
+keys (``early_accumulation``, ``mid_accumulation``,
+``pre_retirement``) — spending is modelled only in retirement, so
+they never bound (#114 retired the tokens without a migration).
 """
 
 

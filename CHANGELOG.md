@@ -29,6 +29,15 @@ in the release PR and becomes the GitHub Release notes verbatim.
   roll-forwards and retirement report sections), a README disclaimer
   sync test, and direct tests for the shared table view.
 
+### Fixed
+
+- v1-era plan files carrying accumulation-stage spending multipliers
+  (`early_accumulation`, `mid_accumulation`, `pre_retirement`) failed
+  to load after the tokens were retired without a migration. A new
+  v3→v4 schema migration drops the keys — they never scaled anything,
+  spending being modelled only in retirement — and the checked-in v1
+  golden fixture now carries the true v1 bytes (#129).
+
 ### Changed
 
 - Coverage gate raised from 90% to 96%; statistical tolerances in the
