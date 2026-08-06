@@ -27,7 +27,7 @@ from PySide6.QtCharts import (
     QStackedBarSeries,
     QValueAxis,
 )
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF, Qt
 from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen
 from PySide6.QtWidgets import (
     QGroupBox,
@@ -209,15 +209,20 @@ def chart_view(
 def chart_image(chart: ChartSpec, categories: tuple[str, ...]) -> QImage:
     """Rasterise one chart spec for the plan report (roadmap 9.19).
 
-    Renders the same widget the charts tab shows, offscreen at a fixed
-    report size, so the printed charts match the on-screen ones.
+    Renders the same chart the charts tab shows, offscreen at a fixed
+    report size. The view is never shown, so Qt only delivers its
+    resize on show — a widget render would draw the chart at its
+    default size in a corner of the image. Resizing the chart's
+    graphics widget directly lays it out synchronously, and the scene
+    render then draws the laid-out chart.
     """
     view = chart_view(chart, categories)
-    view.resize(_REPORT_CHART_SIZE)
-    image = QImage(view.size(), QImage.Format.Format_ARGB32)
+    view.chart().resize(QSizeF(_REPORT_CHART_SIZE))
+    image = QImage(_REPORT_CHART_SIZE, QImage.Format.Format_ARGB32)
     image.fill(Qt.GlobalColor.white)
     painter = QPainter(image)
-    view.render(painter)
+    frame = QRectF(QPointF(0, 0), QSizeF(_REPORT_CHART_SIZE))
+    view.scene().render(painter, frame, frame)
     painter.end()
     view.deleteLater()
     return image

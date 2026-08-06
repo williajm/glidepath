@@ -6,6 +6,7 @@ workstations.
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,6 +36,14 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 def qt_app() -> QApplication:
     """The process-wide QApplication, created on the offscreen platform."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    if sys.platform == "win32":
+        # The offscreen platform's freetype font database does not scan
+        # the Windows system fonts, so text renders as replacement-glyph
+        # boxes and the exported PDF embeds no extractable text at all;
+        # pointing it at the system directory restores real text.
+        fonts = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+        if fonts.is_dir():
+            os.environ.setdefault("QT_QPA_FONTDIR", str(fonts))
     existing = QApplication.instance()
     if existing is None:
         return QApplication([])

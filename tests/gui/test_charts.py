@@ -31,8 +31,10 @@ from glidepath.app import (
     bar_tooltip,
     build_charts_view_model,
     build_shell_view_model,
+    example_facts_form_data,
     initial_plan_state,
     monte_carlo_running_status,
+    parse_facts_form,
     state_with_backtest,
     state_with_household,
     state_with_monte_carlo,
@@ -848,3 +850,41 @@ class TestMainWindowBacktestFlow:
         assert pane.backtest_button.isEnabled()
         assert pane.run_button.isEnabled()
         assert "Success rate" in pane.backtest_metrics_label.text()
+
+
+def example_projected_state() -> PlanState:
+    """A projected session over the launch example's richer household."""
+    parsed = parse_facts_form(
+        example_facts_form_data(), recorded_on=RECORDED, today=TODAY
+    )
+    assert parsed.household is not None
+    return state_with_household(initial_plan_state(), parsed.household, today=TODAY)
+
+
+class TestChartImage:
+    """The report rasteriser draws real content (issue #133; 9.19)."""
+
+    def test_every_chart_renders_at_report_size_with_content(self) -> None:
+        """Each chart rasterises to the fixed report size, non-blank.
+
+        The PDF export embeds these images; before the never-shown
+        view's layout fix, the chart rendered at its default size in a
+        corner of the image, and any blank or mis-scaled render passed
+        as long as the PDF file was non-empty. The dimensions pin
+        ``_REPORT_CHART_SIZE``; the colour count over a sampled grid
+        rejects an un-laid-out render (a healthy chart samples 30+
+        distinct colours, a broken one under 10).
+        """
+        view_model = build_charts_view_model(example_projected_state())
+        assert view_model.charts
+        for chart in view_model.charts:
+            image = gui_charts.chart_image(chart, view_model.categories)
+            assert not image.isNull()
+            assert image.width() == 880
+            assert image.height() == 460
+            colours = {
+                image.pixel(x, y)
+                for x in range(0, image.width(), 8)
+                for y in range(0, image.height(), 8)
+            }
+            assert len(colours) >= 16, chart.title

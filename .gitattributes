@@ -1,3 +1,7 @@
 # This checkout is shared between Windows and WSL: normalise everything to
 # LF in the working tree so the two platforms' git defaults don't fight.
 * text=auto eol=lf
+
+# CSV export goldens are byte snapshots whose CRLF row terminators are
+# part of the pinned bytes: exempt them from EOL normalisation.
+tests/golden/*.csv -text

@@ -36,8 +36,26 @@ in the release PR and becomes the GitHub Release notes verbatim.
   handling, export content assertions (Monte Carlo seed header,
   roll-forwards and retirement report sections), a README disclaimer
   sync test, and direct tests for the shared table view.
+- Property-based tests over the engine: hypothesis-generated modest
+  households projected through the real UK region, asserting that no
+  closing balance goes negative, the wrapper ledger identity and the
+  retirement cash-conservation identity reconcile every period, the
+  per-band tax lines sum to the tax due, reordering a person's wrapper
+  listing changes nothing, and parallel Monte Carlo reproduces the
+  serial run (#132).
+- Export artefact snapshots: a checked-in byte-for-byte golden of the
+  cash-flow CSV (column order, quoting, and line terminators pinned),
+  PDF text extraction asserting the exported report carries the
+  disclaimer and its section headings, and a direct render test of the
+  report chart rasteriser (#133).
 
 ### Fixed
+
+- The plan report's charts rendered at their default size in a corner
+  of the embedded image instead of filling it: the rasteriser rendered
+  a never-shown chart view whose resize Qt only delivers on show. It
+  now lays the chart out at the report size directly, so exported PDFs
+  carry full-size charts (#133).
 
 - v1-era plan files carrying accumulation-stage spending multipliers
   (`early_accumulation`, `mid_accumulation`, `pre_retirement`) failed
