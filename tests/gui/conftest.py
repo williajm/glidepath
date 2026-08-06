@@ -6,6 +6,7 @@ workstations.
 """
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,6 +15,20 @@ from PySide6.QtWidgets import QApplication
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+GUI_TESTS_DIR = Path(__file__).resolve().parent
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark every test collected under this directory as ``gui``.
+
+    The marker is applied here rather than per-module so new GUI test
+    files cannot forget it; ``-m "not gui"`` then deselects the whole
+    offscreen-Qt suite locally or shards it in CI.
+    """
+    for item in items:
+        if item.path.is_relative_to(GUI_TESTS_DIR):
+            item.add_marker(pytest.mark.gui)
 
 
 @pytest.fixture(autouse=True, scope="session")

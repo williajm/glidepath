@@ -10,6 +10,9 @@ Cheap failing tests turn the repo's isolation rules into merge gates:
 - Qt may be imported only by the ``glidepath.gui`` shell — the app layer
   and everything below it stay UI-toolkit-agnostic so a web shell can be
   added later.
+- Above the core, region code may be imported only by the app layer
+  (an accepted §4.7 coupling, issue #134) — the gui shell reaches
+  region data through ``glidepath.app``, never directly.
 """
 
 import ast
@@ -87,6 +90,28 @@ def test_core_never_imports_regions() -> None:
         for module in _imported_modules(tree):
             offending = "regions" in module.split(".")
             assert not offending, f"{path.name} imports region code: {module}"
+
+
+def test_gui_shell_never_imports_regions() -> None:
+    """Region access above the core flows through the app layer (§4.7).
+
+    The app layer's direct dependency on ``glidepath.regions.uk`` is an
+    accepted, documented coupling (§4.7; issue #134) — but it is
+    confined to that one layer: the shell keeps reaching region data
+    through ``glidepath.app``, so a future region-selection seam has
+    exactly one layer to cut into.
+    """
+    gui_files = _python_files(SRC_ROOT / "gui")
+    assert gui_files, "gui package not found — guard would pass vacuously"
+    for path in gui_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for module in _imported_modules(tree):
+            offending = "regions" in module.split(".")
+            assert not offending, (
+                f"gui/{path.name} imports region code: {module}"
+                " — the shell reaches region data through the app layer"
+                " (§4.7, issue #134)"
+            )
 
 
 def test_qt_imports_confined_to_gui_shell() -> None:

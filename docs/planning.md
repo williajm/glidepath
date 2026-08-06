@@ -284,6 +284,23 @@ properly). **Accepted cost:** some ceremony — every screen needs a view
 model even when trivial; Qt-specific glue still needs a few smoke tests
 under an offscreen platform (`QT_QPA_PLATFORM=offscreen`).
 
+**App-layer/region coupling (issue #134).** The app layer imports
+`glidepath.regions.uk` directly (defaults, assumption metadata, the
+returns history, form vocabularies) rather than going through a
+region-selection seam. **Decision:** accept that coupling for the
+UK-first shell. The isolation promise of §4.2 protects the *core* —
+the engine, and everything the maths depends on, stays region-agnostic
+and guard-tested — while the app layer is presentation plumbing that a
+second region would rework anyway (its copy, forms, and defaults are
+region-shaped by nature). What *is* pinned by a guard test alongside
+the §4.2 guards: only the app layer may import region code above the
+core — the gui shell must keep reaching region data through
+`glidepath.app`, so when a second region becomes real, the seam has
+exactly one layer to cut into. **Rejected:** a region-selection
+Protocol in the app layer now — an abstraction with one implementation
+and no second customer to shape it; revisit when a second region is
+actually planned.
+
 ### 4.8 Wrapper balance roll-forward from the statement date
 
 **Decision.** A wrapper balance is a fact dated `as_of` (its statement
