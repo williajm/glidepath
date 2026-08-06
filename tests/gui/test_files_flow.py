@@ -2,14 +2,16 @@
 
 The shell is thin by policy: these tests check that the File menu's
 open/save actions route through the app layer's transitions, that the
-facts form repopulates from a loaded plan, and that the settings file
-remembers the plan for the next launch.
+facts form repopulates from a loaded plan, that the settings file
+remembers the plan for the next launch, and that closing with unsaved
+changes prompts save/discard/cancel (issue #136).
 """
 
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QStandardPaths
+from PySide6.QtWidgets import QMessageBox
 
 from glidepath.app import (
     build_shell_view_model,
@@ -28,6 +30,14 @@ if TYPE_CHECKING:
 def _window_with_example(settings_path: Path | None = None) -> MainWindow:
     """A window whose launch example is already submitted and projected."""
     return MainWindow(build_shell_view_model(), settings_path=settings_path)
+
+
+def _message_box_answering(choice: QMessageBox.StandardButton) -> SimpleNamespace:
+    """A QMessageBox stand-in whose question always answers ``choice``."""
+    return SimpleNamespace(
+        StandardButton=QMessageBox.StandardButton,
+        question=lambda *_args: choice,
+    )
 
 
 class TestSaveFlow:
@@ -264,3 +274,162 @@ class TestOpenFlow:
         plan.unlink()
         window.save_plan()
         assert plan.exists()
+
+
+class TestCloseFlow:
+    """Closing with unsaved changes prompts save/discard/cancel (#136)."""
+
+    def test_clean_close_never_prompts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The launch example is shipped demo data — close is silent."""
+
+        def unexpected(*_args: object) -> QMessageBox.StandardButton:
+            msg = "a clean session must not prompt on close"
+            raise AssertionError(msg)
+
+        window = _window_with_example()
+        window.show()
+        monkeypatch.setattr(
+            widgets,
+            "QMessageBox",
+            SimpleNamespace(
+                StandardButton=QMessageBox.StandardButton, question=unexpected
+            ),
+        )
+        assert window.close()
+        assert not window.isVisible()
+
+    def test_cancel_keeps_the_window_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Answering Cancel abandons the close, edits intact."""
+        window = _window_with_example()
+        window.show()
+        window.facts_pane.submit_button.click()
+        monkeypatch.setattr(
+            widgets,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.Cancel),
+        )
+        assert not window.close()
+        assert window.isVisible()
+
+    def test_discard_closes_without_writing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Answering Discard closes; no save dialog, no file."""
+
+        def unexpected(*_args: object) -> tuple[str, str]:
+            msg = "Discard must not open a save dialog"
+            raise AssertionError(msg)
+
+        window = _window_with_example()
+        window.show()
+        window.facts_pane.submit_button.click()
+        monkeypatch.setattr(
+            widgets, "QFileDialog", SimpleNamespace(getSaveFileName=unexpected)
+        )
+        monkeypatch.setattr(
+            widgets,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.Discard),
+        )
+        assert window.close()
+        assert not window.isVisible()
+
+    def test_save_writes_the_sessions_file_and_closes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Answering Save writes the session's plan file, then closes."""
+        plan = tmp_path / "my-plan.glidepath.json"
+        window = _window_with_example()
+        window.show()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(plan), "")),
+        )
+        window.save_plan_as_dialog()
+        window.facts_pane.submit_button.click()
+        plan.unlink()
+        monkeypatch.setattr(
+            widgets,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.Save),
+        )
+        assert window.close()
+        assert plan.exists()
+        assert not window.isVisible()
+
+    def test_a_cancelled_save_keeps_the_window_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Answering Save then cancelling the path dialog must not close.
+
+        The prompt promised to keep the changes; closing anyway would
+        discard them behind the user's back.
+        """
+        window = _window_with_example()
+        window.show()
+        window.facts_pane.submit_button.click()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: ("", "")),
+        )
+        monkeypatch.setattr(
+            widgets,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.Save),
+        )
+        assert not window.close()
+        assert window.isVisible()
+
+    def test_saving_clears_the_prompt_for_later_closes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Once saved, a close is silent until the next edit."""
+
+        def unexpected(*_args: object) -> QMessageBox.StandardButton:
+            msg = "a saved session must not prompt on close"
+            raise AssertionError(msg)
+
+        plan = tmp_path / "my-plan.glidepath.json"
+        window = _window_with_example()
+        window.show()
+        window.facts_pane.submit_button.click()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(plan), "")),
+        )
+        window.save_plan()
+        monkeypatch.setattr(
+            widgets,
+            "QMessageBox",
+            SimpleNamespace(
+                StandardButton=QMessageBox.StandardButton, question=unexpected
+            ),
+        )
+        assert window.close()
+
+    def test_quit_action_routes_through_the_close_prompt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """File → Quit is a close, so it honours the same prompt."""
+        window = _window_with_example()
+        window.show()
+        window.facts_pane.submit_button.click()
+        monkeypatch.setattr(
+            widgets,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.Cancel),
+        )
+        window.quit_action.trigger()
+        assert window.isVisible()
+        monkeypatch.setattr(
+            widgets,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.Discard),
+        )
+        window.quit_action.trigger()
+        assert not window.isVisible()

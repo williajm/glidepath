@@ -51,9 +51,17 @@ SAVE_PLAN_LABEL: Final = "Save plan"
 
 SAVE_PLAN_AS_LABEL: Final = "Save plan as…"
 
+QUIT_LABEL: Final = "Quit"
+
 OPEN_DIALOG_TITLE: Final = "Open plan"
 
 SAVE_DIALOG_TITLE: Final = "Save plan"
+
+UNSAVED_CHANGES_TITLE: Final = "Unsaved changes"
+
+UNSAVED_CHANGES_PROMPT: Final = (
+    "This plan has unsaved changes. Save them before closing?"
+)
 
 NOTHING_TO_SAVE_MESSAGE: Final = (
     "Nothing to save yet — save facts on the Facts tab first."
@@ -118,6 +126,18 @@ def document_from_state(state: PlanState) -> PlanDocument | None:
         assumption_overrides=assumption_overrides_from(state.assumptions),
         scenarios=state.scenarios,
     )
+
+
+def has_unsaved_changes(state: PlanState) -> bool:
+    """Whether closing now would discard plan edits (issue #136).
+
+    True only when a plan-mutating transition has touched the state
+    since the last save or load *and* there is a plan a save could
+    write — an assumption overridden before any facts exist has no
+    document to preserve, so a prompt would offer a save that does
+    nothing.
+    """
+    return state.modified and state.household is not None
 
 
 def save_plan_state(state: PlanState, path: Path) -> SaveOutcome:
@@ -198,7 +218,7 @@ def load_plan_state(path: Path, *, today: date) -> LoadOutcome:
     except PersistenceError as exc:
         return LoadOutcome(state=None, message=f"{_OPEN_FAILED_PREFIX}{exc}")
     state = replanned_state(
-        assumptions, document.household, document.scenarios, today=today
+        assumptions, document.household, document.scenarios, today=today, modified=False
     )
     message = f"Plan loaded from {path}."
     if document.assumptions_resolved_against != _shipped_data_version():
@@ -214,12 +234,16 @@ __all__ = [
     "PLAN_FILE_FILTER",
     "PLAN_FILE_SUFFIX",
     "PLAN_REGION",
+    "QUIT_LABEL",
     "SAVE_DIALOG_TITLE",
     "SAVE_PLAN_AS_LABEL",
     "SAVE_PLAN_LABEL",
+    "UNSAVED_CHANGES_PROMPT",
+    "UNSAVED_CHANGES_TITLE",
     "LoadOutcome",
     "SaveOutcome",
     "document_from_state",
+    "has_unsaved_changes",
     "load_plan_state",
     "save_plan_state",
 ]

@@ -16,8 +16,10 @@ from glidepath.app import (
     PlanState,
     facts_saved_message,
     initial_plan_state,
+    state_marked_saved,
     state_with_household,
     state_with_override,
+    state_with_scenarios,
 )
 from glidepath.app.tables import table_edit_text
 from glidepath.core import (
@@ -29,6 +31,7 @@ from glidepath.core import (
     Money,
     Person,
     Provenance,
+    Scenario,
     SpendingPlan,
     TaxResidencyId,
     Wrapper,
@@ -393,3 +396,50 @@ class TestStateWithOverride:
             for assumption in outcome.state.result.provenance.assumptions
         }
         assert read[AssumptionKey.RETURNS_EQUITY_REAL].value == Decimal("0.05")
+
+
+class TestModifiedFlag:
+    """The unsaved-changes flag over the pure transitions (issue #136)."""
+
+    def test_a_fresh_session_is_clean(self) -> None:
+        """Nothing has touched a fresh session, so nothing is unsaved."""
+        assert initial_plan_state().modified is False
+
+    def test_capturing_a_household_marks_the_state(self, projected: PlanState) -> None:
+        """A facts capture is a plan edit."""
+        assert projected.modified is True
+
+    def test_an_override_marks_the_state(self, projected: PlanState) -> None:
+        """An assumption override is a plan edit, even on a saved state."""
+        saved = state_marked_saved(projected)
+        outcome = state_with_override(
+            saved,
+            AssumptionKey.INFLATION_CPI.value,
+            "0.03",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        assert outcome.state.modified is True
+
+    def test_a_scenario_edit_marks_the_state(self, projected: PlanState) -> None:
+        """Replacing the scenario list is a plan edit."""
+        saved = state_marked_saved(projected)
+        edited = state_with_scenarios(
+            saved, (Scenario(name="Retire later"),), today=TODAY
+        )
+        assert edited.modified is True
+
+    def test_state_marked_saved_clears_only_the_flag(
+        self, projected: PlanState
+    ) -> None:
+        """Clearing the flag leaves the rest of the session in place."""
+        saved = state_marked_saved(projected)
+        assert saved.modified is False
+        assert saved.household is projected.household
+        assert saved.result is projected.result
+
+    def test_state_marked_saved_on_a_clean_state_is_a_no_op(self) -> None:
+        """A clean state has nothing to clear, so it comes back as is."""
+        state = initial_plan_state()
+        assert state_marked_saved(state) is state

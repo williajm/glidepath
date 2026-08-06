@@ -214,7 +214,13 @@ def state_with_retirement(
         inputs = _solver_inputs(household, state.assumptions, request, today)
     except ValueError as exc:
         return _with_retirement_error(state, str(exc))
-    base = replanned_state(state.assumptions, household, state.scenarios, today=today)
+    base = replanned_state(
+        state.assumptions,
+        household,
+        state.scenarios,
+        today=today,
+        modified=state.modified,
+    )
     try:
         config, search = _config_and_search(inputs, request.mode, today)
         candidates = inputs.maximum_age - inputs.minimum_age + 1

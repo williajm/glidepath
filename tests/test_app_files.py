@@ -17,6 +17,7 @@ from glidepath.app import (
     PlanState,
     document_from_state,
     example_facts_form_data,
+    has_unsaved_changes,
     initial_plan_state,
     load_plan_state,
     parse_facts_form,
@@ -92,6 +93,40 @@ class TestSavePlanState:
     def test_document_from_empty_state_is_none(self) -> None:
         """No household, no document."""
         assert document_from_state(initial_plan_state()) is None
+
+
+class TestUnsavedChanges:
+    """The signal shells prompt on before discarding edits (issue #136)."""
+
+    def test_a_fresh_session_has_no_unsaved_changes(self) -> None:
+        """Nothing entered yet, nothing to lose."""
+        assert not has_unsaved_changes(initial_plan_state())
+
+    def test_a_captured_household_has_unsaved_changes(self) -> None:
+        """Facts entered but never written to disk would be lost."""
+        assert has_unsaved_changes(projected_state())
+
+    def test_a_loaded_plan_is_clean(self, tmp_path: Path) -> None:
+        """A load re-anchors the flag: the file already holds the plan."""
+        path = tmp_path / "plan.glidepath.json"
+        assert save_plan_state(projected_state(), path).saved
+        outcome = load_plan_state(path, today=TODAY)
+        assert outcome.state is not None
+        assert outcome.state.modified is False
+        assert not has_unsaved_changes(outcome.state)
+
+    def test_an_override_without_a_plan_never_prompts(self) -> None:
+        """With no household a save writes nothing, so no prompt either."""
+        outcome = state_with_override(
+            initial_plan_state(),
+            AssumptionKey.INFLATION_CPI.value,
+            "0.03",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        assert outcome.state.modified is True
+        assert not has_unsaved_changes(outcome.state)
 
 
 class TestLoadPlanState:

@@ -116,7 +116,11 @@ def state_with_backtest(state: PlanState, *, today: date) -> PlanState:
     if state.household is None:
         return _with_backtest_error(state, BACKTEST_NO_PLAN_MESSAGE)
     base = replanned_state(
-        state.assumptions, state.household, state.scenarios, today=today
+        state.assumptions,
+        state.household,
+        state.scenarios,
+        today=today,
+        modified=state.modified,
     )
     config = RunConfig(today=today)
     try:

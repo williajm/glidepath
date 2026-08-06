@@ -38,7 +38,7 @@ from glidepath.app.montecarlo import (
     MONTE_CARLO_FAILED_PREFIX,
     PARALLEL_PATHS_MIN,
 )
-from glidepath.app.plan import replanned_state
+from glidepath.app.plan import replanned_state, state_marked_saved
 from glidepath.core import (
     Decision,
     EntityId,
@@ -164,6 +164,23 @@ class TestStateWithMonteCarlo:
         assert state.monte_carlo is None
         assert state.monte_carlo_error == MONTE_CARLO_NO_PLAN_MESSAGE
 
+    def test_a_run_carries_the_unsaved_changes_flag_through(
+        self, projected: PlanState, mc_state: PlanState
+    ) -> None:
+        """A run reads the plan, it does not edit it (issue #136).
+
+        Unsaved edits stay unsaved through a run, and a freshly saved
+        plan stays clean — the run must never invent a save prompt or
+        hide a pending one.
+        """
+        assert projected.modified is True
+        assert mc_state.modified is True
+        clean_rerun = state_with_monte_carlo(
+            state_marked_saved(projected), "7", "3", today=TODAY
+        )
+        assert clean_rerun.monte_carlo is not None
+        assert clean_rerun.modified is False
+
     def test_an_unparseable_seed_is_rejected(self, projected: PlanState) -> None:
         """A seed that is not a whole number cannot seed the streams."""
         state = state_with_monte_carlo(projected, "lucky", "3", today=TODAY)
@@ -241,7 +258,7 @@ class TestStateWithMonteCarlo:
         assert state.monte_carlo is not None
         assert state.monte_carlo.config.today == later
         re_anchored = replanned_state(
-            projected.assumptions, projected.household, (), today=later
+            projected.assumptions, projected.household, (), today=later, modified=True
         )
         assert state.result == re_anchored.result
         assert state.result != projected.result

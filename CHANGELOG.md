@@ -11,6 +11,14 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Keyboard shortcuts for the main window: Ctrl+O open, Ctrl+S save,
+  Ctrl+Shift+S save-as, Ctrl+E / Ctrl+Shift+E for the CSV and PDF
+  exports, F1 for the how-to-use guide, and a new File → Quit action
+  on Ctrl+Q — standard keys where the platform defines one (#135).
+- Unsaved-changes prompt on close: the session now tracks whether the
+  plan has been edited since the last save or load, and closing the
+  window with unsaved edits asks save / discard / cancel instead of
+  silently discarding them (#136).
 - Second end-to-end golden scenario: a mixed-income decumulator
   (crystallised + uncrystallised SIPP, taxable GIA, commuted DB
   pension, deferred state pension, staged annuity purchase, planned
