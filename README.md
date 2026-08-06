@@ -90,26 +90,19 @@ It is not financial advice and is not regulated; its outputs depend on
 assumptions that will not match reality. Do not make financial decisions
 based solely on this tool.
 
-## Setup
-
-Requires [uv](https://docs.astral.sh/uv/) and GNU Make.
-
-```sh
-make sync          # creates the platform venv and installs locked dependencies
-make hooks         # installs the pre-commit hooks (required)
-```
-
-One-time per machine: set `UV_PROJECT_ENVIRONMENT` user-wide (`.venv-win`
-on Windows, `.venv-wsl` in WSL) so bare `uv` commands and the git hooks use
-the same venv as make. See `CLAUDE.md`.
-
 ## Run
 
+Requires only [uv](https://docs.astral.sh/uv/):
+
 ```sh
+git clone https://github.com/williajm/glidepath.git
+cd glidepath
 uv run glidepath
 ```
 
-Launches the desktop app. Accept the disclaimer and a fresh install
+The first run creates a virtual environment and installs the locked
+dependencies automatically, then launches the desktop app. Accept the
+disclaimer and a fresh install
 opens with an example plan already projected, so every tab has
 something to show — replace its values with your own facts, or clear
 the form and start blank. Charts label each bar with the tax year and
@@ -117,6 +110,22 @@ your age and switch between today's money and nominal; Help → "How to
 use glidepath" walks through every tab. Save your plan from the File
 menu as a `.glidepath.json` file you own, stored wherever you choose;
 the next launch reopens your last plan automatically.
+
+## Developing
+
+Development additionally requires GNU Make, which drives every workflow
+command:
+
+```sh
+make sync          # create the platform venv from the lockfile (fails if the lock has drifted)
+make hooks         # install the pre-commit hooks (required before committing)
+```
+
+One-time per machine: set `UV_PROJECT_ENVIRONMENT` user-wide (`.venv-win`
+on Windows, `.venv-wsl` in WSL) so bare `uv` commands and the git hooks use
+the same venv as make. See `CLAUDE.md`. (Skipping this only matters for a
+shared Windows/WSL checkout — for trying the app, uv's default `.venv` is
+fine.)
 
 ## Everyday commands
 
