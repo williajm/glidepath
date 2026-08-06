@@ -119,5 +119,7 @@ testpaths = ["tests"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 90
+# The suite sits at ~98%; a floor close behind it means an entire module
+# losing its tests fails CI instead of coasting on the old 90% margin.
+fail_under = 96
 show_missing = true

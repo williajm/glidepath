@@ -352,6 +352,38 @@ def test_non_increasing_band_uppers_are_an_error() -> None:
         parse_tax_year(broken)
 
 
+def test_non_table_section_is_an_error() -> None:
+    """A scalar where a table is expected is a load error."""
+    broken = _mutated(VALID_TAX_YEAR, TAX_META, "\nmeta = 1\n")
+    with pytest.raises(DataFileError, match="expected a TOML table, got int"):
+        parse_tax_year(broken)
+
+
+def test_string_typed_date_is_an_error() -> None:
+    """A quoted date is a string, not a TOML date."""
+    broken = _mutated(
+        VALID_TAX_YEAR, "start_date = 2026-04-06", 'start_date = "2026-04-06"'
+    )
+    with pytest.raises(DataFileError, match="expected a TOML date, got str"):
+        parse_tax_year(broken)
+
+
+def test_non_string_tax_year_label_is_an_error() -> None:
+    """The tax-year label must be a TOML string."""
+    broken = _mutated(VALID_TAX_YEAR, 'tax_year = "2026/27"', "tax_year = 2026")
+    with pytest.raises(DataFileError, match="expected a string, got int"):
+        parse_tax_year(broken)
+
+
+def test_non_array_sources_are_an_error() -> None:
+    """The sources list must be a TOML array."""
+    broken = _mutated(
+        VALID_TAX_YEAR, '["https://example.test/tax"]', '"https://example.test/tax"'
+    )
+    with pytest.raises(DataFileError, match="expected an array, got str"):
+        parse_tax_year(broken)
+
+
 def test_datetime_in_date_position_is_an_error() -> None:
     """Dates must be calendar dates without a time part."""
     broken = _mutated(

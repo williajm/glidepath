@@ -172,6 +172,22 @@ class TestRateTableParsing:
         with pytest.raises(EngineError, match="joint_factor"):
             AnnuityRateTable.from_assumption_value(value)
 
+    @pytest.mark.parametrize("escalation", ["-0.01", "1.03"])
+    def test_escalation_outside_the_unit_interval_is_rejected(
+        self, escalation: str
+    ) -> None:
+        """1.03 is a mis-entered growth factor, not a 3% escalation rate."""
+        value = table_value(escalation=escalation)
+        with pytest.raises(EngineError, match="escalation must lie between 0 and 1"):
+            AnnuityRateTable.from_assumption_value(value)
+
+    @pytest.mark.parametrize("age", ["0", "-1"])
+    def test_non_positive_knot_age_is_rejected(self, age: str) -> None:
+        """A zero or negative knot age is nonsense."""
+        value = table_value(level={age: Decimal(1)})
+        with pytest.raises(EngineError, match="ages must be positive"):
+            AnnuityRateTable.from_assumption_value(value)
+
 
 class TestAgeMultiplier:
     """Per-age lookup: exact knots, interpolation, hard edges."""

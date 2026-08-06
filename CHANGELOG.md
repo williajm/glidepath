@@ -9,6 +9,32 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Added
+
+- Second end-to-end golden scenario: a mixed-income decumulator
+  (crystallised + uncrystallised SIPP, taxable GIA, commuted DB
+  pension, deferred state pension, staged annuity purchase, planned
+  outflow, spending stages) pinning the flows the first golden never
+  produces, with hand-checked anchors and whole-run ledger identities.
+- Native Windows CI job running the full test suite (the app's primary
+  desktop platform was previously only tested on Linux).
+- Test-gap closures across the suite: multi-wrapper growth-tax
+  apportionment, the sustainable-income bisection's raise-the-floor
+  branch, PSA/starting-rate/state-pension-deferral boundary cases,
+  construction-guard rejections (contribution caps, annuity rate
+  tables, UK schema invariants), a genuine v1 fixture document loaded
+  through the full migration chain, v2→v3 migration unit tests,
+  scenario-override save/load round-trip, malformed/truncated document
+  handling, export content assertions (Monte Carlo seed header,
+  roll-forwards and retirement report sections), a README disclaimer
+  sync test, and direct tests for the shared table view.
+
+### Changed
+
+- Coverage gate raised from 90% to 96%; statistical tolerances in the
+  return-model tests tightened to catch mean/correlation regressions;
+  the exception-test hygiene guard now covers `tests/gui/`.
+
 ## [0.1.0] - 2026-08-05
 
 First tagged release, covering roadmap Phases 1–8 and the Phase 9

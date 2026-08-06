@@ -17,6 +17,28 @@ from glidepath.app import (
     record_last_plan_path,
     should_show_disclaimer,
 )
+from glidepath.app.exports import (
+    CASH_FLOW_FILE_FILTER,
+    CASH_FLOW_FILE_SUFFIX,
+    EXPORT_CASH_FLOW_DIALOG_TITLE,
+    EXPORT_CASH_FLOW_LABEL,
+    EXPORT_REPORT_DIALOG_TITLE,
+    EXPORT_REPORT_LABEL,
+    REPORT_FILE_FILTER,
+    REPORT_FILE_SUFFIX,
+)
+from glidepath.app.files import (
+    FILE_MENU_LABEL,
+    OPEN_DIALOG_TITLE,
+    OPEN_PLAN_LABEL,
+    PLAN_FILE_FILTER,
+    PLAN_FILE_SUFFIX,
+    SAVE_DIALOG_TITLE,
+    SAVE_PLAN_AS_LABEL,
+    SAVE_PLAN_LABEL,
+)
+
+README = Path(__file__).resolve().parents[1] / "README.md"
 
 
 class TestDisclaimerCopy:
@@ -29,6 +51,18 @@ class TestDisclaimerCopy:
     def test_disclaimer_states_not_regulated(self) -> None:
         """The disclaimer must say the tool is not regulated."""
         assert "not regulated" in DISCLAIMER_BODY
+
+    def test_disclaimer_matches_the_readme_section(self) -> None:
+        """The canonical copy matches the README's Disclaimer section.
+
+        :mod:`glidepath.app.copy` promises the in-app wording and the
+        README's stay one text (§1); the README hard-wraps its prose,
+        so the section is unwrapped onto one line before comparing.
+        """
+        text = README.read_text(encoding="utf-8")
+        section = text.split("\n## Disclaimer\n")[1].split("\n## ")[0]
+        unwrapped = " ".join(section.split())
+        assert unwrapped == DISCLAIMER_BODY
 
 
 class TestFirstRunState:
@@ -199,6 +233,32 @@ class TestShellViewModel:
         monkeypatch.setattr(metadata, "version", missing)
         view_model = build_shell_view_model()
         assert view_model.about.body.startswith("glidepath unknown")
+
+    def test_file_menu_wires_each_field_to_its_source_constant(self) -> None:
+        """Every File-menu field carries exactly its source constant.
+
+        The view model hand-wires sixteen constants from the files and
+        exports modules; a crossed wire (say, the report filter
+        carrying the cash-flow filter) would still pass every
+        per-screen test, so each field is pinned here.
+        """
+        menu = build_shell_view_model().file_menu
+        assert menu.menu_label == FILE_MENU_LABEL
+        assert menu.open_label == OPEN_PLAN_LABEL
+        assert menu.save_label == SAVE_PLAN_LABEL
+        assert menu.save_as_label == SAVE_PLAN_AS_LABEL
+        assert menu.open_dialog_title == OPEN_DIALOG_TITLE
+        assert menu.save_dialog_title == SAVE_DIALOG_TITLE
+        assert menu.file_filter == PLAN_FILE_FILTER
+        assert menu.file_suffix == PLAN_FILE_SUFFIX
+        assert menu.export_cash_flow_label == EXPORT_CASH_FLOW_LABEL
+        assert menu.export_cash_flow_dialog_title == EXPORT_CASH_FLOW_DIALOG_TITLE
+        assert menu.export_cash_flow_filter == CASH_FLOW_FILE_FILTER
+        assert menu.export_cash_flow_suffix == CASH_FLOW_FILE_SUFFIX
+        assert menu.export_report_label == EXPORT_REPORT_LABEL
+        assert menu.export_report_dialog_title == EXPORT_REPORT_DIALOG_TITLE
+        assert menu.export_report_filter == REPORT_FILE_FILTER
+        assert menu.export_report_suffix == REPORT_FILE_SUFFIX
 
     def test_disclaimer_shows_until_acknowledged(self) -> None:
         """The disclaimer shows on every run until acknowledged, then never."""

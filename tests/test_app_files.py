@@ -24,11 +24,14 @@ from glidepath.app import (
     state_with_household,
     state_with_override,
     state_with_scenario_added,
+    state_with_scenario_override,
 )
 from glidepath.core import (
     AssumptionKey,
+    AssumptionSet,
     AssumptionTarget,
     Decision,
+    DecisionTarget,
     EntityId,
     Money,
     Override,
@@ -37,9 +40,12 @@ from glidepath.core import (
     Scenario,
 )
 from glidepath.persistence import AssumptionOverride, save_plan
+from glidepath.regions.uk import default_assumption_set
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
     from glidepath.persistence import PlanDocument
 
@@ -121,6 +127,39 @@ class TestLoadPlanState:
         assert cpi.provenance is Provenance.USER_OVERRIDE
         assert loaded.result is not None
         assert loaded.run_error is None
+
+    def test_round_trips_a_scenario_decision_override(self, tmp_path: Path) -> None:
+        """A scenario's decision override survives with id and value intact."""
+        state = projected_state()
+        added = state_with_scenario_added(state, "Retire earlier", today=TODAY)
+        assert added.error is None
+        state = added.state
+        assert state.household is not None
+        person_id = state.household.persons[0].id
+        set_outcome = state_with_scenario_override(
+            state,
+            "Retire earlier",
+            f"{person_id}:target_retirement_age",
+            "58",
+            today=TODAY,
+        )
+        assert set_outcome.error is None
+        state = set_outcome.state
+        path = tmp_path / "plan.glidepath.json"
+        assert save_plan_state(state, path).saved
+        outcome = load_plan_state(path, today=TODAY)
+        loaded = outcome.state
+        assert loaded is not None
+        scenario = loaded.scenarios[0]
+        assert scenario.name == "Retire earlier"
+        assert len(scenario.overrides) == 1
+        override = scenario.overrides[0]
+        target = override.target
+        assert isinstance(target, DecisionTarget)
+        assert target.entity_id == person_id
+        assert target.field_path == "target_retirement_age"
+        assert override.value == 58
+        assert loaded.scenario_runs is not None
 
     def test_missing_file_reports_rather_than_raises(self, tmp_path: Path) -> None:
         """A vanished file comes back as a status message."""
@@ -261,6 +300,40 @@ class TestLoadGuards:
         assert outcome.state is None
         assert "Riskier shape" in outcome.message
         assert "glidepath.default_shape" in outcome.message
+
+    def test_override_on_an_unregistered_key_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stored override key this build no longer ships fails the load.
+
+        Every catalogued key is registered today, so a future build
+        that retires one is simulated by shrinking the shipped set the
+        loader resolves against.
+        """
+        path = tmp_path / "plan.glidepath.json"
+        override = state_with_override(
+            projected_state(),
+            AssumptionKey.INFLATION_CPI.value,
+            "0.031",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert override.error is None
+        assert save_plan_state(override.state, path).saved
+        defaults = default_assumption_set()
+        reduced = AssumptionSet(
+            defaults.get(key)
+            for key in defaults.keys
+            if key is not AssumptionKey.INFLATION_CPI
+        )
+        monkeypatch.setattr(
+            "glidepath.app.files.default_assumption_set", lambda: reduced
+        )
+        outcome = load_plan_state(path, today=TODAY)
+        assert outcome.state is None
+        assert outcome.message.startswith("Could not open the plan")
+        assert "unregistered keys" in outcome.message
+        assert "inflation.cpi" in outcome.message
 
     def test_non_utf8_file_reports_rather_than_raises(self, tmp_path: Path) -> None:
         """A binary or mis-encoded file comes back as a status message."""

@@ -5,13 +5,13 @@ The official DWP forecast is the fact and the only route to an amount
 ``age_rules.toml``: +1% per 9 whole weeks deferred.
 """
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
 from glidepath.core import Decision, Fact, Money, StatePensionRecord
-from glidepath.regions.uk import UkStatePensionError, UkStatePensionScheme
+from glidepath.regions.uk import UkAgeRules, UkStatePensionError, UkStatePensionScheme
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 AS_OF = date(2026, 8, 1)
@@ -35,7 +35,7 @@ def record_of(
     *,
     forecast: str | None = None,
     protected: str | None = None,
-    deferral: str = "0",
+    deferral: str | Decimal = "0",
 ) -> StatePensionRecord:
     """A state pension record built from compact test parameters."""
     return StatePensionRecord(
@@ -81,6 +81,21 @@ class TestForecastIsTheOnlyRoute:
             uk.entitlement(record, DOB_SPA_67)
 
 
+class _CliffProbe(UkStatePensionScheme):
+    """The scheme with its uplift computation exposed for exact day gaps.
+
+    Whole-month deferrals can never land on exactly nine weeks (two
+    calendar months span at most 62 days, three at least 89), so the
+    statutory 9-week cliff is pinned through the scheme's own uplift
+    computation over crafted dates.
+    """
+
+    def uplift_after_days(self, days: int) -> Decimal:
+        """The uplift fraction for a start ``days`` after SPA."""
+        spa = date(2037, 6, 15)
+        return self._deferral_uplift(spa, spa + timedelta(days=days))
+
+
 class TestDeferral:
     """Deferral shifts the start and earns per-week increments (§6)."""
 
@@ -107,6 +122,42 @@ class TestDeferral:
         assert (date(2037, 9, 15) - date(2037, 6, 15)).days // 7 == 13
         expected = Decimal("0.01") * (Decimal(13) / Decimal(9))
         assert entitlement.deferral_uplift == expected
+
+    def test_two_month_deferral_is_eight_weeks_and_earns_nothing(self) -> None:
+        """61 days are 8 whole weeks: under the 9-week statutory minimum.
+
+        The shortest deferral that earns anything through the
+        whole-month API is 3 months; 2 months sits just under the
+        cliff and must yield exactly nil, not a part increment.
+        """
+        record = record_of(forecast="241.30", deferral=Decimal(2) / Decimal(12))
+        entitlement = scheme().entitlement(record, DOB_SPA_67)
+        assert entitlement.start_date == date(2037, 8, 15)
+        assert (date(2037, 8, 15) - date(2037, 6, 15)).days // 7 == 8
+        assert entitlement.deferral_uplift == Decimal(0)
+
+    def test_eight_whole_weeks_earn_nothing(self) -> None:
+        """62 days are 8 whole weeks: one day short of the cliff, nil."""
+        probe = _CliffProbe(ages=UkAgeRules.from_shipped_data())
+        uplift = probe.uplift_after_days(62)
+        assert uplift == Decimal(0)
+
+    @pytest.mark.parametrize(
+        ("days", "weeks"),
+        [
+            (63, 9),  # exactly nine whole weeks: the first increment vests
+            (69, 9),  # nine weeks six days: part-weeks never count
+            (70, 10),  # ten whole weeks: one further ninth of 1%
+        ],
+    )
+    def test_nine_whole_weeks_vest_the_first_increment(
+        self, days: int, weeks: int
+    ) -> None:
+        """The increment vests at exactly 9 whole weeks and steps weekly."""
+        probe = _CliffProbe(ages=UkAgeRules.from_shipped_data())
+        uplift = probe.uplift_after_days(days)
+        expected = Decimal("0.01") * (Decimal(weeks) / Decimal(9))
+        assert uplift == expected
 
     def test_no_deferral_earns_no_uplift(self) -> None:
         """Zero weeks is under the 9-week statutory minimum."""
