@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPdfWriter
+from PySide6.QtPdf import QPdfDocument
 
 from glidepath.app import (
     DISCLAIMER_BODY,
@@ -28,6 +29,21 @@ if TYPE_CHECKING:
 def _window_with_example() -> MainWindow:
     """A window whose launch example is already submitted and projected."""
     return MainWindow(build_shell_view_model())
+
+
+def _pdf_text(path: Path) -> str:
+    """Every page's extracted text, whitespace-collapsed to single spaces.
+
+    Qt wraps paragraphs into lines at print time, so assertions on the
+    extracted text must not depend on where the line breaks fell.
+    """
+    document = QPdfDocument()
+    error = document.load(str(path))
+    assert error == QPdfDocument.Error.None_
+    assert document.pageCount() >= 1
+    pages = [document.getAllText(index).text() for index in range(document.pageCount())]
+    document.close()
+    return " ".join(" ".join(pages).split())
 
 
 class TestExportMenu:
@@ -155,6 +171,29 @@ class TestExportReportFlow:
         window.export_report_dialog()
         assert not target.exists()
         assert window.statusBar().currentMessage() == NOTHING_TO_EXPORT_MESSAGE
+
+    def test_pdf_text_carries_disclaimer_and_sections(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The rendered pages carry the report's substance (issue #133).
+
+        The write test above only proves a PDF file exists; extracting
+        the text Qt actually laid out catches a report that renders
+        blank, drops the disclaimer, or loses a section.
+        """
+        target = tmp_path / "report.pdf"
+        window = _window_with_example()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(target), "")),
+        )
+        window.export_report_dialog()
+        text = _pdf_text(target)
+        assert " ".join(DISCLAIMER_BODY.split()) in text
+        assert "Inputs and provenance" in text
+        assert "Projection results" in text
+        assert "Unsaved plan" in text
 
     def test_failed_device_keeps_the_stale_file_and_reports_failure(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
