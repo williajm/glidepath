@@ -816,6 +816,32 @@ class TestMonteCarloMetrics:
         with pytest.raises(ValueError, match="between 0 and 100"):
             result.balance_percentile(negative)
 
+    def test_a_percentile_batch_matches_the_single_calls(self) -> None:
+        """One sorted vector per period must change no value (9.24).
+
+        The fan chart reads nine percentiles per refresh through
+        ``balance_percentiles``; each row must equal the one
+        ``balance_percentile`` would have returned on its own.
+        """
+        result = result_of(
+            outcome_of(0, "50", balances=("100", "50")),
+            outcome_of(1, "150", balances=("200", "150")),
+            outcome_of(2, "250", balances=("300", "250")),
+        )
+        requested = tuple(Decimal(value) for value in (5, 25, 50, 75, 95))
+        batch = result.balance_percentiles(requested)
+        singles = tuple(
+            result.balance_percentile(percentile) for percentile in requested
+        )
+        assert batch == singles
+
+    def test_a_percentile_batch_rejects_any_bad_percentile(self) -> None:
+        """One out-of-range entry fails the whole batch."""
+        result = result_of(outcome_of(0, "50", balances=("100", "50")))
+        mixed = (Decimal(50), Decimal(101))
+        with pytest.raises(ValueError, match="between 0 and 100"):
+            result.balance_percentiles(mixed)
+
     def test_rejects_an_empty_outcome_set(self) -> None:
         """Metrics over no paths are undefined."""
         config = mc_config()

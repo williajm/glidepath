@@ -59,6 +59,7 @@ if TYPE_CHECKING:
 
 _ZERO = Money(Decimal(0))
 _MIN_AXIS_MAX = Decimal(1)
+_MEDIAN_PERCENTILE = Decimal(50)
 
 DEFAULT_CHART_BASIS: Final = ReportBasis.REAL
 
@@ -556,25 +557,37 @@ def _fan_chart(
     Nested inter-percentile fills (outermost first, per ``FAN_SPECS``)
     with the median as the single overlay line — each fill a genuine
     interval statement over the paths' per-period closing balances,
-    deflated like every Monte Carlo amount (:func:`_deflated`). A held
-    result whose period count differs from the projection's (the runs
+    deflated like every Monte Carlo amount (:func:`_deflated`). All
+    nine percentiles come from one ``balance_percentiles`` batch — the
+    view model is built on the GUI thread, and per-percentile calls
+    would re-sort a 10,000-path result nine times over. A held result
+    whose period count differs from the projection's (the runs
     straddled a calendar day) draws no fan rather than a fan against
     the wrong periods.
     """
     deflators = tuple(rows[0].balance_deflator for rows in grouped.values())
-    if len(result.balance_percentile(FAN_SPECS[0].lower)) != len(deflators):
+    count = len(FAN_SPECS)
+    requested = (
+        *(spec.lower for spec in FAN_SPECS),
+        *(spec.upper for spec in FAN_SPECS),
+        _MEDIAN_PERCENTILE,
+    )
+    percentiles = result.balance_percentiles(requested)
+    if len(percentiles[0]) != len(deflators):
         return None
     fills = tuple(
         ChartFill(
             label=spec.label,
-            lower=_deflated(result.balance_percentile(spec.lower), deflators),
-            upper=_deflated(result.balance_percentile(spec.upper), deflators),
+            lower=_deflated(lower, deflators),
+            upper=_deflated(upper, deflators),
         )
-        for spec in FAN_SPECS
+        for spec, lower, upper in zip(
+            FAN_SPECS, percentiles[:count], percentiles[count : 2 * count], strict=True
+        )
     )
     median = ChartBand(
         label=FAN_MEDIAN_LABEL,
-        values=_deflated(result.balance_percentile(Decimal(50)), deflators),
+        values=_deflated(percentiles[-1], deflators),
     )
     return _chart(
         MONTE_CARLO_CHART_TITLE,
