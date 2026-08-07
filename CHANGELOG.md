@@ -97,6 +97,14 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Changed
 
+- The launch example plan now holds together: retirement at 62 (was
+  60), a £24,000 net spending need (was £28,000), and £4,800/year into
+  the ISA (was £2,500). The old numbers left the deterministic
+  projection in shortfall from age 88 and a seeded Monte Carlo run
+  succeeding only 28% of the time — a first launch showed a plan
+  already in ruin. The tuned persona meets every deterministic
+  period's need and succeeds in roughly 71% of simulated paths, which
+  still leaves honestly failing paths visible on the new fan chart.
 - Coverage gate raised from 90% to 96%; statistical tolerances in the
   return-model tests tightened to catch mean/correlation regressions;
   the exception-test hygiene guard now covers `tests/gui/`.
