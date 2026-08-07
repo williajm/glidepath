@@ -561,23 +561,40 @@ class TestStructuralInvariants:
     def test_retirement_cash_conservation_every_period(
         self, result: ProjectionResult
     ) -> None:
-        """Withdrawals + income - tax - banked + shortfall = need + outflows.
+        """Gross draws + income - tax - banked + shortfall = need + outflows.
 
         The mixed-income version of the first golden's need identity:
         every retired period's net need (spending plus planned
-        outflows) is met by net withdrawals plus pension income and
-        tax-free lump sums (a DB commutation, an annuity purchase's
-        tax-free cash — cash in hand the withdrawal step never counts
-        in ``net_withdrawn``) net of the personal tax assessment —
-        excluding the growth tax, which the wrappers fund directly —
-        with any surplus banked and any deficit reported as shortfall.
-        Nothing is silently dropped.
+        outflows) is met by the gross cash the withdrawal step pays
+        out of wrappers plus pension income and tax-free lump sums (a
+        DB commutation, an annuity purchase's tax-free cash) net of
+        the personal tax assessment — excluding the growth tax, which
+        the wrappers fund directly — with any surplus banked and any
+        deficit reported as shortfall. Nothing is silently dropped.
+        The gross form matters (#147): ``net_withdrawn`` is already
+        net of the marginal tax the gross-up prices on draws and
+        ``tax_due`` assesses that same tax, so a net-figure identity
+        would count it twice. The wrapper withdrawal fields also carry
+        the up-front and annuity-purchase tax-free lump sums, already
+        counted in the income term, so those come off the gross
+        figure.
         """
         tolerance = Decimal("0.05")
         for snapshot in result.snapshots[RETIREMENT_INDEX:]:
             [person] = snapshot.persons
             growth_tax = sum(
                 (entry.growth_tax for entry in person.wrappers), start=ZERO
+            )
+            gross_withdrawn = (
+                sum(
+                    (
+                        entry.withdrawal_tax_free + entry.withdrawal_taxable
+                        for entry in person.wrappers
+                    ),
+                    start=ZERO,
+                )
+                - person.pension_lump_sum
+                - person.annuity_lump_sum
             )
             income = (
                 person.db_income
@@ -588,7 +605,7 @@ class TestStructuralInvariants:
                 + person.pension_lump_sum
             )
             delivered = (
-                person.net_withdrawn
+                gross_withdrawn
                 + income
                 - (person.tax.tax_due - growth_tax)
                 - person.banked
