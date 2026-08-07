@@ -11,6 +11,14 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- "How much can I draw down?" card on the charts screen (#149): the
+  dual of "When can I retire?" — choose a retirement age (the plan's
+  stated decision by default) and the app answers with the highest
+  net annual income, in today's money, the plan sustains from that
+  age, on the screen's selected basis: deterministic (no unmet need
+  in any period) or at least the chosen Monte Carlo success rate over
+  the panel's seed and paths. The underlying sustainable-income
+  search gained a deterministic basis to match.
 - Monte Carlo fan chart on its own tab (#146): a held run now draws
   nested inter-percentile bands (5th-95th through 35th-65th) in a
   single hue deepening toward the median line, so the probability of

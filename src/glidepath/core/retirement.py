@@ -1,4 +1,4 @@
-"""The "When can I retire?" solver (roadmap 9.14; planning §5.2).
+"""The retirement-question solvers (roadmap 9.14, 9.25; planning §5.2).
 
 :func:`earliest_retirement_age` finds the earliest target retirement
 age at which the plan sustains a target retirement income — the age
@@ -25,6 +25,14 @@ success means their success rate meets the search's target — "earliest
 age with ≥ N% Monte Carlo success". Every probe reuses the same config
 (common random numbers), so the search is reproducible from the seed
 alone (§4.6), and probe plans never leave the search.
+
+:func:`sustainable_income_at_age` is the same question asked the
+other way around (roadmap 9.25): "how much can I draw down if I
+retire at this age?" — the retirement-age decision is fixed at the
+chosen age and the spending level is searched, delegating to the
+7.3 income search under the same exposure gate: an age with no
+retired period inside the run's horizon has nothing to test the
+income in, so it answers ``None`` rather than succeeding vacuously.
 """
 
 from dataclasses import dataclass, replace
@@ -34,7 +42,12 @@ from typing import TYPE_CHECKING, Any
 from glidepath.core.config import RunMode
 from glidepath.core.engine import run
 from glidepath.core.money import Money
-from glidepath.core.montecarlo import probe_with_spending, run_paths
+from glidepath.core.montecarlo import (
+    has_shortfall,
+    probe_with_spending,
+    run_paths,
+    sustainable_income,
+)
 from glidepath.core.periods import date_age_attained, is_age_attained_by_period_start
 from glidepath.core.provenance import AssumptionKey, int_assumption_value
 
@@ -43,10 +56,10 @@ if TYPE_CHECKING:
 
     from glidepath.core.config import RunConfig
     from glidepath.core.entities import Household, Person
-    from glidepath.core.montecarlo import PathParallelism
+    from glidepath.core.montecarlo import PathParallelism, SustainableIncomeSearch
+    from glidepath.core.periods import Period
     from glidepath.core.provenance import AssumptionSet
     from glidepath.core.region import Region
-    from glidepath.core.results import ProjectionResult
 
 _ZERO = Money(Decimal(0))
 _ONE = Decimal(1)
@@ -135,9 +148,7 @@ def earliest_retirement_age(
             Monte Carlo config without a seed (planning §5.2).
     """
     date_of_birth = plan.persons[0].date_of_birth.value
-    periods = tuple(
-        region.calendar.periods(config.today, _horizon_end(plan, assumptions, config))
-    )
+    periods = _projected_periods(plan, assumptions, region, config)
 
     def has_retired_period(age: int) -> bool:
         """Whether any projected period opens the plan retired (§4.1)."""
@@ -161,12 +172,84 @@ def earliest_retirement_age(
                 parallelism=parallelism,
             )
             return result.success_rate >= search.target_success_rate
-        return not _has_shortfall(run(probe, assumptions, region, config))
+        return not has_shortfall(run(probe, assumptions, region, config))
 
     for age in range(search.minimum_age, search.maximum_age + 1):
         if has_retired_period(age) and meets(age):
             return age
     return None
+
+
+def sustainable_income_at_age(
+    plan: Household,
+    assumptions: AssumptionSet,
+    region: Region,
+    config: RunConfig,
+    *,
+    age: int,
+    search: SustainableIncomeSearch,
+    parallelism: PathParallelism | None = None,
+) -> Money | None:
+    """The highest income sustainable when retiring at ``age`` (9.25).
+
+    The drawdown dual of :func:`earliest_retirement_age`: the (v1
+    single) person's retirement-age decision is replaced with ``age``
+    and the spending level is searched through
+    :func:`~glidepath.core.montecarlo.sustainable_income` — the same
+    scan-plus-bisection over the search's bracket, the same success
+    reading per probe (no unmet need under a deterministic config;
+    "success rate ≥ target" over the seeded paths under a Monte Carlo
+    one), and the same reproducibility: every probe reuses ``config``
+    unchanged, so the answer is reproducible from the recorded inputs
+    (and seed) alone (§4.6). The plan's stated retirement age and
+    spending level are both irrelevant — the probes carry the chosen
+    age and the candidate spending instead, everything else unchanged.
+
+    An ``age`` with no *retirement exposure* — no projected period
+    opening the plan retired under the §4.1 gate convention, because
+    its retirement date falls at or past the run's horizon — has no
+    retired period to test any income in: spending is modelled only in
+    retirement, so every level would succeed vacuously. It answers
+    ``None`` without probing, exactly as such candidates fail in the
+    age search. ``None`` otherwise means what the income search means
+    by it: not even zero spending survives the plan's outflows.
+
+    Raises:
+        ValueError: If ``age`` is negative.
+        EngineError: If a probe is rejected by the engine — including
+            a Monte Carlo config without a seed (planning §5.2).
+    """
+    if age < 0:
+        msg = f"age must be non-negative, got {age}"
+        raise ValueError(msg)
+    date_of_birth = plan.persons[0].date_of_birth.value
+    exposed = any(
+        is_age_attained_by_period_start(date_of_birth, age, period)
+        for period in _projected_periods(plan, assumptions, region, config)
+    )
+    if not exposed:
+        return None
+    return sustainable_income(
+        _with_retirement_age(plan, age),
+        assumptions,
+        region,
+        config,
+        search,
+        parallelism=parallelism,
+    )
+
+
+def _projected_periods(
+    plan: Household, assumptions: AssumptionSet, region: Region, config: RunConfig
+) -> tuple[Period, ...]:
+    """The periods a probe under ``config`` would project (§5.2).
+
+    What the solvers' exposure gates scan: the run's own calendar over
+    its own horizon, computed exactly as the engine would.
+    """
+    return tuple(
+        region.calendar.periods(config.today, _horizon_end(plan, assumptions, config))
+    )
 
 
 def _horizon_end(
@@ -185,15 +268,6 @@ def _horizon_end(
         assumptions.get(AssumptionKey.HORIZON_PLANNING_AGE)
     )
     return date_age_attained(plan.persons[0].date_of_birth.value, planning_age)
-
-
-def _has_shortfall(result: ProjectionResult) -> bool:
-    """Whether any period's need went unmet — the §5.2 ruin signal."""
-    return any(
-        person.shortfall > _ZERO
-        for snapshot in result.snapshots
-        for person in snapshot.persons
-    )
 
 
 def _with_retirement_age(plan: Household, age: int) -> Household:

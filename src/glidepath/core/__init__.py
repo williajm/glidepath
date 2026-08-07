@@ -149,6 +149,7 @@ from glidepath.core.results import (
 from glidepath.core.retirement import (
     RetirementAgeSearch,
     earliest_retirement_age,
+    sustainable_income_at_age,
 )
 from glidepath.core.returns import (
     DeterministicReturnModel,
@@ -381,6 +382,7 @@ __all__ = [
     "scenario_orphans",
     "service_active_fraction",
     "sustainable_income",
+    "sustainable_income_at_age",
     "tax_aware_order",
     "validate_household_v1",
     "whole_months_between",

@@ -41,6 +41,8 @@ from glidepath.app import (
     DEFAULT_CHART_BASIS,
     DEFAULT_COMPARISON_METRIC_KEY,
     DEFAULT_RUN_MODE,
+    DRAWDOWN_RUNNING_MESSAGE,
+    DRAWDOWN_STALE_MESSAGE,
     MONTE_CARLO_STALE_MESSAGE,
     NOTHING_TO_EXPORT_MESSAGE,
     REPORT_EXPORT_FAILED_PREFIX,
@@ -51,6 +53,7 @@ from glidepath.app import (
     UNSAVED_CHANGES_TITLE,
     AboutViewModel,
     DisclaimerViewModel,
+    DrawdownRequest,
     FactsFormData,
     HelpGuideViewModel,
     PlanReport,
@@ -83,6 +86,7 @@ from glidepath.app import (
     save_plan_state,
     state_marked_saved,
     state_with_backtest,
+    state_with_drawdown,
     state_with_household,
     state_with_monte_carlo,
     state_with_override,
@@ -276,6 +280,8 @@ class MainWindow(QMainWindow):
         self._monte_carlo_input: PlanState | None = None
         self._retirement_worker: _TransitionWorker | None = None
         self._retirement_input: PlanState | None = None
+        self._drawdown_worker: _TransitionWorker | None = None
+        self._drawdown_input: PlanState | None = None
         self._backtest_worker: _TransitionWorker | None = None
         self._backtest_input: PlanState | None = None
         self._backtest_year = ""
@@ -293,6 +299,7 @@ class MainWindow(QMainWindow):
                 select_mode=self._handle_charts_mode,
                 run_monte_carlo=self._handle_monte_carlo_run,
                 run_retirement=self._handle_retirement_run,
+                run_drawdown=self._handle_drawdown_run,
                 run_backtest=self._handle_backtest_run,
                 select_backtest_year=self._handle_backtest_year,
             )
@@ -648,7 +655,7 @@ class MainWindow(QMainWindow):
         self._refresh_charts_pane()
 
     def _transition_in_flight(self) -> bool:
-        """Whether a slow run (Monte Carlo, retirement, backtest) is running.
+        """Whether a slow run (Monte Carlo, retirement, drawdown, backtest) is running.
 
         The transitions share one guard: each computes from the
         session state captured at start, so a second launched while
@@ -658,6 +665,7 @@ class MainWindow(QMainWindow):
         return (
             self._monte_carlo_worker is not None
             or self._retirement_worker is not None
+            or self._drawdown_worker is not None
             or self._backtest_worker is not None
         )
 
@@ -665,6 +673,7 @@ class MainWindow(QMainWindow):
         """Disable (or re-enable) every slow-run action together."""
         self.charts_pane.set_monte_carlo_busy(busy=busy)
         self.charts_pane.set_retirement_busy(busy=busy)
+        self.charts_pane.set_drawdown_busy(busy=busy)
         self.charts_pane.set_backtest_busy(busy=busy)
 
     def _handle_monte_carlo_run(self, seed_text: str, paths_text: str) -> None:
@@ -759,6 +768,59 @@ class MainWindow(QMainWindow):
         self._retirement_input = None
         if stale:
             self.statusBar().showMessage(RETIREMENT_STALE_MESSAGE)
+            return
+        self._state = state
+        self.statusBar().clearMessage()
+        self._refresh_result_panes()
+
+    def _handle_drawdown_run(
+        self, age_text: str, success_text: str, seed_text: str, paths_text: str
+    ) -> None:
+        """Start a sustainable-income search off the GUI thread (9.25).
+
+        The search runs the plan once per probed spending level — same
+        threading rules as the Monte Carlo run: the window stays
+        responsive, every slow-run action disables meanwhile, and a
+        request while any is in flight is ignored. The screen's
+        current run mode is the search's basis; the seed and path text
+        come from the Monte Carlo panel's own controls.
+        """
+        if self._transition_in_flight():
+            return
+        state = self._state
+        today = _today()
+        request = DrawdownRequest(
+            mode=self._charts_mode,
+            age_text=age_text,
+            seed_text=seed_text,
+            paths_text=paths_text,
+            success_text=success_text,
+        )
+        worker = _TransitionWorker(
+            lambda: state_with_drawdown(state, request, today=today)
+        )
+        worker.signals.finished.connect(self._handle_drawdown_finished)
+        self._drawdown_worker = worker
+        self._drawdown_input = state
+        self._set_transitions_busy(busy=True)
+        self.statusBar().showMessage(DRAWDOWN_RUNNING_MESSAGE)
+        self.charts_pane.show_busy(DRAWDOWN_RUNNING_MESSAGE)
+        self.monte_carlo_pool.start(worker)
+
+    def _handle_drawdown_finished(self, state: PlanState) -> None:
+        """Adopt a finished search unless the plan moved on (9.25).
+
+        Same staleness rule as the Monte Carlo delivery: an answer
+        computed from a session state that was replaced mid-search
+        describes a plan no longer on screen and is discarded.
+        """
+        self._drawdown_worker = None
+        self._set_transitions_busy(busy=False)
+        self.charts_pane.clear_busy()
+        stale = self._state is not self._drawdown_input
+        self._drawdown_input = None
+        if stale:
+            self.statusBar().showMessage(DRAWDOWN_STALE_MESSAGE)
             return
         self._state = state
         self.statusBar().clearMessage()

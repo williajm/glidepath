@@ -21,6 +21,10 @@ from glidepath.app.backtest import (
     selected_window,
 )
 from glidepath.app.display import format_money, format_share, format_wrapper_kind
+from glidepath.app.drawdown import (
+    DrawdownPanelViewModel,
+    build_drawdown_panel,
+)
 from glidepath.app.montecarlo import (
     DEFAULT_RUN_MODE,
     FAN_MEDIAN_LABEL,
@@ -203,6 +207,7 @@ class ChartsViewModel:
     allocation_note: str
     monte_carlo: MonteCarloPanelViewModel
     retirement: RetirementPanelViewModel
+    drawdown: DrawdownPanelViewModel
     backtest: BacktestPanelViewModel
 
 
@@ -302,6 +307,7 @@ def build_charts_view_model(
                 state, mode, ending_pot_deflator=None, basis_suffix=suffix
             ),
             retirement=build_retirement_panel(state, mode),
+            drawdown=build_drawdown_panel(state, mode),
             backtest=build_backtest_panel(
                 state,
                 ending_pot_deflator=None,
@@ -338,6 +344,7 @@ def build_charts_view_model(
             basis_suffix=suffix,
         ),
         retirement=build_retirement_panel(state, mode),
+        drawdown=build_drawdown_panel(state, mode),
         backtest=build_backtest_panel(
             state,
             ending_pot_deflator=final_rows[0].balance_deflator,

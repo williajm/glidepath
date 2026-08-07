@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import date, datetime
 
+    from glidepath.app.drawdown import DrawdownAnswer
     from glidepath.app.retirement import RetirementAnswer
     from glidepath.core import BacktestResult, MonteCarloResult, Region
     from glidepath.regions.uk import AssumptionValue
@@ -67,7 +68,9 @@ class PlanState:
     over the same plan (roadmap 9.13), with ``monte_carlo_error``
     mirroring ``run_error``; ``retirement`` holds the explicit "When
     can I retire?" answer (roadmap 9.14), with ``retirement_error``
-    alongside; ``backtest`` holds the explicit historical backtest
+    alongside; ``drawdown`` holds the explicit "How much can I draw
+    down?" answer (roadmap 9.25), with ``drawdown_error`` alongside;
+    ``backtest`` holds the explicit historical backtest
     (roadmap 9.18), with ``backtest_error`` alongside. All of them
     reset whenever the state is recomputed through
     :func:`replanned_state`, so a held result can never go stale
@@ -77,8 +80,8 @@ class PlanState:
     capture, assumption override, scenario edit) has touched the state
     since the last save or load — the shell's unsaved-changes signal
     (issue #136). The slow-run transitions (Monte Carlo, retirement,
-    backtest) carry it through unchanged: a run reads the plan, it
-    does not edit it.
+    drawdown, backtest) carry it through unchanged: a run reads the
+    plan, it does not edit it.
     """
 
     assumptions: AssumptionSet
@@ -92,6 +95,8 @@ class PlanState:
     monte_carlo_error: str | None = None
     retirement: RetirementAnswer | None = None
     retirement_error: str | None = None
+    drawdown: DrawdownAnswer | None = None
+    drawdown_error: str | None = None
     backtest: BacktestResult | None = None
     backtest_error: str | None = None
     modified: bool = False

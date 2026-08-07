@@ -1,12 +1,13 @@
-"""Tests for the "When can I retire?" solver (issue 9.14).
+"""Tests for the retirement-question solvers (issues 9.14 and 9.25).
 
 End-to-end over a minimal stub region — a saver spending from one
 tax-free wrapper under zero tax, zero returns, and zero inflation — so
 every expectation is hand-computable: a 100,000 pot funds exactly four
 years of 25,000 spending, making age 60 the earliest retirement age
-over a 2026-2033 horizon for a person born on 1970-01-01. The
+over a 2026-2033 horizon for a person born on 1970-01-01 — and,
+dually, 25,000 the sustainable income when retiring at 60. The
 acceptance criterion is pinned directly: the answer is consistent with
-re-running the plan at that age, and the solver is deterministic.
+re-running the plan at that age, and the solvers are deterministic.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -51,6 +52,7 @@ from glidepath.core import (
     SpendingPlan,
     StatePensionEntitlement,
     StatePensionRecord,
+    SustainableIncomeSearch,
     TaxInput,
     TaxLine,
     TaxResidencyId,
@@ -63,6 +65,7 @@ from glidepath.core import (
     earliest_retirement_age,
     is_age_attained_by_period_start,
     run,
+    sustainable_income_at_age,
 )
 
 pytestmark = pytest.mark.slow
@@ -335,6 +338,20 @@ def search_of(
     )
 
 
+def income_search_of(
+    maximum: str = "50000",
+    paths: int = 1,
+    target_success_rate: Decimal = Decimal(1),
+) -> SustainableIncomeSearch:
+    """An income search whose scan grid lands on the exact answers."""
+    return SustainableIncomeSearch(
+        maximum=Money(Decimal(maximum)),
+        tolerance=Money(Decimal(100)),
+        paths=paths,
+        target_success_rate=target_success_rate,
+    )
+
+
 class TestRetirementAgeSearch:
     """The search parameter validation."""
 
@@ -601,3 +618,181 @@ class TestMonteCarloSolver:
             )
         assert parallel == serial
         assert parallel == 60
+
+
+class TestSustainableIncomeAtAge:
+    """The drawdown dual (9.25): income searched at a fixed age."""
+
+    def test_finds_the_hand_computable_income(self) -> None:
+        """Retiring at 60 leaves four years: 25,000 of the 100,000 pot."""
+        income = sustainable_income_at_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            age=60,
+            search=income_search_of(),
+        )
+        assert income == Money(Decimal(25000))
+
+    def test_the_answer_is_consistent_with_re_running_at_that_age(self) -> None:
+        """Acceptance criterion: the answer reproduces under ``run``.
+
+        The plan re-run retiring at 60 with the answer as its spending
+        shows no unmet need; the next scan point up falls short.
+        """
+        at_answer = run(
+            household_of(spending="25000", stated_retirement_age=60),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+        )
+        above = run(
+            household_of(spending="30000", stated_retirement_age=60),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+        )
+        shortfalls_at_answer = [
+            person.shortfall
+            for snapshot in at_answer.snapshots
+            for person in snapshot.persons
+        ]
+        assert all(shortfall == ZERO for shortfall in shortfalls_at_answer)
+        assert any(
+            person.shortfall > ZERO
+            for snapshot in above.snapshots
+            for person in snapshot.persons
+        )
+
+    def test_a_later_age_sustains_more(self) -> None:
+        """Retiring at 62 leaves two years: even the 50,000 ceiling holds."""
+        income = sustainable_income_at_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            age=62,
+            search=income_search_of(),
+        )
+        assert income == Money(Decimal(50000))
+
+    def test_the_stated_age_and_spending_are_irrelevant(self) -> None:
+        """The search probes the chosen age, not the plan's stated choices."""
+        stated_low = sustainable_income_at_age(
+            household_of(spending="99999", stated_retirement_age=57),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            age=60,
+            search=income_search_of(),
+        )
+        stated_high = sustainable_income_at_age(
+            household_of(spending="1", stated_retirement_age=63),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            age=60,
+            search=income_search_of(),
+        )
+        assert stated_low == stated_high
+        assert stated_low == Money(Decimal(25000))
+
+    def test_rejects_a_negative_age(self) -> None:
+        """Ages are non-negative."""
+        plan = household_of()
+        assumptions = flat_assumptions()
+        region = stub_region()
+        config = deterministic_config()
+        search = income_search_of()
+        with pytest.raises(ValueError, match="age must be non-negative"):
+            sustainable_income_at_age(
+                plan, assumptions, region, config, age=-1, search=search
+            )
+
+    def test_an_age_past_the_horizon_answers_none(self) -> None:
+        """Ages 64+ retire after the 2033 horizon: nothing to test.
+
+        Spending is modelled only in retirement, so without the
+        exposure gate every level up to the ceiling would succeed
+        vacuously and the answer would read as the maximum.
+        """
+        income = sustainable_income_at_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            age=64,
+            search=income_search_of(),
+        )
+        assert income is None
+
+    def test_monte_carlo_zero_volatility_matches_the_deterministic_answer(
+        self,
+    ) -> None:
+        """With no volatility every path repeats the expected run."""
+        income = sustainable_income_at_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            mc_config(),
+            age=60,
+            search=income_search_of(paths=3),
+        )
+        assert income == Money(Decimal(25000))
+
+    def test_the_search_is_reproducible_from_the_seed(self) -> None:
+        """Same plan, seed, age, and search → the same answer (§4.6)."""
+        first = sustainable_income_at_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            mc_config(),
+            age=60,
+            search=income_search_of(paths=2),
+        )
+        second = sustainable_income_at_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            mc_config(),
+            age=60,
+            search=income_search_of(paths=2),
+        )
+        assert first == second
+
+    def test_an_unseeded_monte_carlo_config_is_rejected(self) -> None:
+        """An unseeded stochastic search could never be reproduced."""
+        plan = household_of()
+        assumptions = flat_assumptions()
+        region = stub_region()
+        config = mc_config(seed=None)
+        search = income_search_of(paths=2)
+        with pytest.raises(EngineError, match=r"requires RunConfig\.seed"):
+            sustainable_income_at_age(
+                plan, assumptions, region, config, age=60, search=search
+            )
+
+    def test_a_parallel_search_reproduces_the_serial_answer(self) -> None:
+        """One executor shared across probes changes nothing (§4.6)."""
+        serial = sustainable_income_at_age(
+            household_of(),
+            flat_assumptions(),
+            stub_region(),
+            mc_config(),
+            age=60,
+            search=income_search_of(paths=4),
+        )
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            parallelism = PathParallelism(executor=executor, workers=2)
+            parallel = sustainable_income_at_age(
+                household_of(),
+                flat_assumptions(),
+                stub_region(),
+                mc_config(),
+                age=60,
+                search=income_search_of(paths=4),
+                parallelism=parallelism,
+            )
+        assert parallel == serial
+        assert parallel == Money(Decimal(25000))

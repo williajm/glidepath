@@ -83,6 +83,9 @@ max-complexity = 10
 "src/glidepath/app/retirement.py" = [
     "BLE001", # Same in-flight-guard rationale as app/montecarlo.py.
 ]
+"src/glidepath/app/drawdown.py" = [
+    "BLE001", # Same in-flight-guard rationale as app/montecarlo.py.
+]
 "src/glidepath/app/backtest.py" = [
     "BLE001", # Same in-flight-guard rationale as app/montecarlo.py.
 ]

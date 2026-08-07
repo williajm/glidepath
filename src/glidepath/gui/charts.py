@@ -12,7 +12,9 @@ answer hover with app-layer tooltip copy over the exact ``Decimal``
 amounts (9.23). The "When can I retire?" card (9.14) forwards
 the raw replacement-rate and success-target text — plus the Monte
 Carlo panel's seed and path text, its basis under that mode — and
-renders the answer, detail, and message the view model carries. All
+renders the answer, detail, and message the view model carries; the
+"How much can I draw down?" card (9.25) does the same with the raw
+retirement-age text in place of the rate. All
 copy, series labels, and the real/nominal presentation come from the
 app layer — this pane only draws what the view model says (planning
 §4.7).
@@ -71,6 +73,7 @@ if TYPE_CHECKING:
         ChartSeries,
         ChartSpec,
         ChartsViewModel,
+        DrawdownPanelViewModel,
         MonteCarloPanelViewModel,
         RetirementPanelViewModel,
     )
@@ -93,7 +96,9 @@ class ChartsPaneCallbacks:
     ``run_retirement`` receives the raw replacement-rate and
     success-target text plus the Monte Carlo panel's raw seed and
     path-count text (its basis under that run mode) — the shell
-    parses, the pane only captures (planning §4.7). ``run_backtest``
+    parses, the pane only captures (planning §4.7); ``run_drawdown``
+    is its dual (9.25), forwarding the raw retirement-age text
+    instead of the rate. ``run_backtest``
     carries nothing — the run itself has no inputs (9.18) — and
     ``select_backtest_year`` forwards the starting-year picker's raw
     text, presentation state like the basis and mode selections.
@@ -103,6 +108,7 @@ class ChartsPaneCallbacks:
     select_mode: Callable[[str], None]
     run_monte_carlo: Callable[[str, str], None]
     run_retirement: Callable[[str, str, str, str], None]
+    run_drawdown: Callable[[str, str, str, str], None]
     run_backtest: Callable[[], None]
     select_backtest_year: Callable[[str], None]
 
@@ -347,32 +353,9 @@ class ChartsPane(QWidget):
         self._basis_box = QGroupBox(self)
         self._basis_layout = QHBoxLayout(self._basis_box)
 
-        self._monte_carlo_box = QGroupBox(self)
-        monte_carlo_layout = QVBoxLayout(self._monte_carlo_box)
-        self._mode_layout = QHBoxLayout()
-        monte_carlo_layout.addLayout(self._mode_layout)
-        controls_row = QHBoxLayout()
-        self.seed_label = QLabel("", self._monte_carlo_box)
-        self.seed_edit = QLineEdit(self._monte_carlo_box)
-        self.paths_label = QLabel("", self._monte_carlo_box)
-        self.paths_edit = QLineEdit(self._monte_carlo_box)
-        self.run_button = QPushButton("", self._monte_carlo_box)
-        self.run_button.clicked.connect(self._run_clicked)
-        controls_row.addWidget(self.seed_label)
-        controls_row.addWidget(self.seed_edit)
-        controls_row.addWidget(self.paths_label)
-        controls_row.addWidget(self.paths_edit)
-        controls_row.addWidget(self.run_button)
-        controls_row.addStretch(1)
-        monte_carlo_layout.addLayout(controls_row)
-        self.metrics_label = QLabel("", self._monte_carlo_box)
-        self.metrics_label.setWordWrap(True)
-        monte_carlo_layout.addWidget(self.metrics_label)
-        self.monte_carlo_message_label = QLabel("", self._monte_carlo_box)
-        self.monte_carlo_message_label.setWordWrap(True)
-        monte_carlo_layout.addWidget(self.monte_carlo_message_label)
-
+        self._build_monte_carlo_box()
         self._build_retirement_box()
+        self._build_drawdown_box()
         self._build_backtest_box()
         busy_row = self._build_busy_row()
 
@@ -390,6 +373,7 @@ class ChartsPane(QWidget):
         controls.addWidget(self._monte_carlo_box, 1)
         layout.addLayout(controls)
         layout.addWidget(self._retirement_box)
+        layout.addWidget(self._drawdown_box)
         layout.addWidget(self._backtest_box)
         layout.addLayout(busy_row)
         layout.addWidget(self.allocation_label)
@@ -407,6 +391,7 @@ class ChartsPane(QWidget):
         self._sync_basis_buttons(view_model)
         self._sync_monte_carlo(view_model.monte_carlo)
         self._sync_retirement(view_model.retirement)
+        self._sync_drawdown(view_model.drawdown)
         self._sync_backtest(view_model.backtest)
         self.allocation_label.setText(view_model.allocation_note)
         self.allocation_label.setVisible(bool(view_model.allocation_note))
@@ -444,6 +429,33 @@ class ChartsPane(QWidget):
         busy_row.addWidget(self.busy_label, 1)
         return busy_row
 
+    def _build_monte_carlo_box(self) -> None:
+        """Create the run-mode control and Monte Carlo readout (9.13)."""
+        self._monte_carlo_box = QGroupBox(self)
+        monte_carlo_layout = QVBoxLayout(self._monte_carlo_box)
+        self._mode_layout = QHBoxLayout()
+        monte_carlo_layout.addLayout(self._mode_layout)
+        controls_row = QHBoxLayout()
+        self.seed_label = QLabel("", self._monte_carlo_box)
+        self.seed_edit = QLineEdit(self._monte_carlo_box)
+        self.paths_label = QLabel("", self._monte_carlo_box)
+        self.paths_edit = QLineEdit(self._monte_carlo_box)
+        self.run_button = QPushButton("", self._monte_carlo_box)
+        self.run_button.clicked.connect(self._run_clicked)
+        controls_row.addWidget(self.seed_label)
+        controls_row.addWidget(self.seed_edit)
+        controls_row.addWidget(self.paths_label)
+        controls_row.addWidget(self.paths_edit)
+        controls_row.addWidget(self.run_button)
+        controls_row.addStretch(1)
+        monte_carlo_layout.addLayout(controls_row)
+        self.metrics_label = QLabel("", self._monte_carlo_box)
+        self.metrics_label.setWordWrap(True)
+        monte_carlo_layout.addWidget(self.metrics_label)
+        self.monte_carlo_message_label = QLabel("", self._monte_carlo_box)
+        self.monte_carlo_message_label.setWordWrap(True)
+        monte_carlo_layout.addWidget(self.monte_carlo_message_label)
+
     def _build_retirement_box(self) -> None:
         """Create the "When can I retire?" card's widgets (9.14)."""
         self._retirement_box = QGroupBox(self)
@@ -472,6 +484,35 @@ class ChartsPane(QWidget):
         self.retirement_message_label = QLabel("", self._retirement_box)
         self.retirement_message_label.setWordWrap(True)
         retirement_layout.addWidget(self.retirement_message_label)
+
+    def _build_drawdown_box(self) -> None:
+        """Create the "How much can I draw down?" card's widgets (9.25)."""
+        self._drawdown_box = QGroupBox(self)
+        drawdown_layout = QVBoxLayout(self._drawdown_box)
+        drawdown_controls = QHBoxLayout()
+        self.drawdown_age_label = QLabel("", self._drawdown_box)
+        self.drawdown_age_edit = QLineEdit(self._drawdown_box)
+        self.drawdown_success_label = QLabel("", self._drawdown_box)
+        self.drawdown_success_edit = QLineEdit(self._drawdown_box)
+        self.drawdown_button = QPushButton("", self._drawdown_box)
+        self.drawdown_button.clicked.connect(self._drawdown_clicked)
+        drawdown_controls.addWidget(self.drawdown_age_label)
+        drawdown_controls.addWidget(self.drawdown_age_edit)
+        drawdown_controls.addWidget(self.drawdown_success_label)
+        drawdown_controls.addWidget(self.drawdown_success_edit)
+        drawdown_controls.addWidget(self.drawdown_button)
+        drawdown_controls.addStretch(1)
+        drawdown_layout.addLayout(drawdown_controls)
+        self.drawdown_answer_label = QLabel("", self._drawdown_box)
+        self.drawdown_answer_label.setObjectName("answerLabel")
+        self.drawdown_answer_label.setWordWrap(True)
+        drawdown_layout.addWidget(self.drawdown_answer_label)
+        self.drawdown_detail_label = QLabel("", self._drawdown_box)
+        self.drawdown_detail_label.setWordWrap(True)
+        drawdown_layout.addWidget(self.drawdown_detail_label)
+        self.drawdown_message_label = QLabel("", self._drawdown_box)
+        self.drawdown_message_label.setWordWrap(True)
+        drawdown_layout.addWidget(self.drawdown_message_label)
 
     def _build_backtest_box(self) -> None:
         """Create the historical-backtest card's widgets (9.18)."""
@@ -524,6 +565,19 @@ class ChartsPane(QWidget):
             self.paths_edit.text(),
         )
 
+    def _drawdown_clicked(self) -> None:
+        """Forward the card's raw text to the shell (roadmap 9.25).
+
+        The Monte Carlo panel's seed and path text ride along: they
+        are the search's basis when the Monte Carlo mode is selected.
+        """
+        self._callbacks.run_drawdown(
+            self.drawdown_age_edit.text(),
+            self.drawdown_success_edit.text(),
+            self.seed_edit.text(),
+            self.paths_edit.text(),
+        )
+
     def set_monte_carlo_busy(self, *, busy: bool) -> None:
         """Disable the run action while a Monte Carlo run is in flight.
 
@@ -540,6 +594,14 @@ class ChartsPane(QWidget):
         runs off the GUI thread and must not overlap itself.
         """
         self.retirement_button.setEnabled(not busy)
+
+    def set_drawdown_busy(self, *, busy: bool) -> None:
+        """Disable the card's action while a search is in flight (9.25).
+
+        Same rationale as :meth:`set_monte_carlo_busy`: the search
+        runs off the GUI thread and must not overlap itself.
+        """
+        self.drawdown_button.setEnabled(not busy)
 
     def set_backtest_busy(self, *, busy: bool) -> None:
         """Disable the card's action while a backtest is in flight (9.18).
@@ -655,6 +717,23 @@ class ChartsPane(QWidget):
         self.retirement_detail_label.setVisible(bool(panel.detail))
         self.retirement_message_label.setText(panel.message)
         self.retirement_message_label.setVisible(bool(panel.message))
+
+    def _sync_drawdown(self, panel: DrawdownPanelViewModel) -> None:
+        """Re-render the "How much can I draw down?" card (9.25)."""
+        self._drawdown_box.setTitle(panel.heading)
+        self.drawdown_age_label.setText(panel.age_label)
+        self.drawdown_age_edit.setText(panel.age_value)
+        self.drawdown_success_label.setText(panel.success_label)
+        self.drawdown_success_edit.setText(panel.success_value)
+        self.drawdown_button.setText(panel.run_label)
+        self.drawdown_success_label.setVisible(panel.success_visible)
+        self.drawdown_success_edit.setVisible(panel.success_visible)
+        self.drawdown_answer_label.setText(panel.answer)
+        self.drawdown_answer_label.setVisible(bool(panel.answer))
+        self.drawdown_detail_label.setText(panel.detail)
+        self.drawdown_detail_label.setVisible(bool(panel.detail))
+        self.drawdown_message_label.setText(panel.message)
+        self.drawdown_message_label.setVisible(bool(panel.message))
 
 
 __all__ = [

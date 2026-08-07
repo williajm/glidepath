@@ -330,8 +330,11 @@ def _success_echo(answer: RetirementAnswer | None) -> str:
     return str(int(answer.target_success_rate * _HUNDRED))
 
 
-def _parsed_percent(text: str, message: str) -> Decimal:
+def parsed_percent(text: str, message: str) -> Decimal:
     """A whole-number percentage in [1, 100] as a fraction.
+
+    Shared with the drawdown card (:mod:`glidepath.app.drawdown`,
+    roadmap 9.25), whose success target parses by the same rule.
 
     Raises:
         ValueError: With ``message``, if ``text`` is not a whole
@@ -366,7 +369,7 @@ def _solver_inputs(
     employment = person.employment_income
     if employment is None or employment.value <= _ZERO:
         raise ValueError(RETIREMENT_NO_INCOME_MESSAGE)
-    rate = _parsed_percent(request.rate_text, RETIREMENT_RATE_MESSAGE)
+    rate = parsed_percent(request.rate_text, RETIREMENT_RATE_MESSAGE)
     target_income = (employment.value * rate).quantized()
     if target_income <= _ZERO:
         raise ValueError(RETIREMENT_NO_INCOME_MESSAGE)
@@ -394,7 +397,7 @@ def _solver_inputs(
         candidates = maximum_age - minimum_age + 1
         if candidates * paths > MAX_RETIREMENT_PATH_RUNS:
             raise ValueError(RETIREMENT_BUDGET_MESSAGE)
-        success = _parsed_percent(request.success_text, RETIREMENT_SUCCESS_MESSAGE)
+        success = parsed_percent(request.success_text, RETIREMENT_SUCCESS_MESSAGE)
     return _SolverInputs(
         replacement_rate=rate,
         employment_income=employment.value,

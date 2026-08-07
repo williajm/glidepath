@@ -112,7 +112,12 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "a replacement rate you choose (66% of your employment income "
             "by default) — on the selected run mode's basis: met with no "
             "shortfall deterministically, or with at least your chosen "
-            "Monte Carlo success rate."
+            "Monte Carlo success rate. "
+            'The "How much can I draw down?" card asks the same question '
+            "the other way around: choose a retirement age (your planned "
+            "one by default) and it answers with the highest net annual "
+            "income, in today's money, the plan sustains from that age — "
+            "on the same selected basis."
         ),
     ),
     (
