@@ -23,10 +23,13 @@ Success metrics over the outcomes (planning §5.2):
   percentiles rank paths identically; deflate by the final period's
   inflation factor for today's money.
 - **sustainable income** (:func:`sustainable_income`) — the highest
-  starting net withdrawal meeting a target success rate
+  starting net withdrawal meeting the target
   (:class:`SustainableIncomeSearch`): a descending scan over the
   bracket finds the highest succeeding scan point, then bisection
-  refines upward within the scan cell above it. For a strategy whose
+  refines upward within the scan cell above it. Under a Monte Carlo
+  config a candidate meets by success rate over its seeded paths;
+  under a deterministic config by a single run with no unmet need —
+  the same §5.2 ruin signal either way. For a strategy whose
   success is monotone in the spending level — the default fixed-real
   strategy, and the gross-defined strategies whose draws ignore the
   need — the result is exact to the search tolerance. A strategy with
@@ -340,26 +343,32 @@ def _path_chunks(paths: int, workers: int) -> Iterator[tuple[int, int]]:
 class SustainableIncomeSearch:
     """The parameters of one sustainable-income search (planning §5.2).
 
-    ``paths`` seeded paths are projected per candidate spending level;
-    a candidate meets the target when at least ``target_success_rate``
-    of them avoid ruin. The search covers ``[0, maximum]`` of real
-    annual spending: a descending scan over ``scan_steps`` equal steps
-    finds the highest succeeding scan point, then bisection refines
-    upward within the step above it, stopping once the bracket narrows
-    to ``tolerance``. The scan is what makes the search robust to a
-    non-monotone success predicate (module docstring): success islands
-    narrower than ``maximum / scan_steps`` can still be missed, so
-    raise ``scan_steps`` when the withdrawal strategy has adjustment
+    The search covers ``[0, maximum]`` of real annual spending: a
+    descending scan over ``scan_steps`` equal steps finds the highest
+    succeeding scan point, then bisection refines upward within the
+    step above it, stopping once the bracket narrows to ``tolerance``.
+    The scan is what makes the search robust to a non-monotone success
+    predicate (module docstring): success islands narrower than
+    ``maximum / scan_steps`` can still be missed, so raise
+    ``scan_steps`` when the withdrawal strategy has adjustment
     triggers; ``scan_steps=1`` is a pure bisection. Probe count is at
     most ``1 + scan_steps`` plus the bisection's
     ``log2(step / tolerance)``.
+
+    ``paths`` and ``target_success_rate`` apply only under a Monte
+    Carlo config: ``paths`` seeded paths are projected per candidate
+    spending level, and a candidate meets the target when at least the
+    target fraction of them avoid ruin. A deterministic probe ignores
+    them — success is one run with no unmet need, the single-path
+    equivalent of a 100% target (the same convention as
+    :class:`~glidepath.core.retirement.RetirementAgeSearch`).
     """
 
-    paths: int
-    target_success_rate: Decimal
     maximum: Money
     tolerance: Money = _DEFAULT_TOLERANCE
     scan_steps: int = 10
+    paths: int = 1
+    target_success_rate: Decimal = _ONE
 
     def __post_init__(self) -> None:
         """Reject an empty path count, an off-range target, or bad bounds."""
@@ -413,20 +422,28 @@ def sustainable_income(
     The plan's stated spending amount is irrelevant to the search —
     only its stage multipliers and the rest of the plan carry over; a
     plan with no spending plan is probed with a bare one. Probes reuse
-    ``config`` unchanged (same seed: common random numbers), keeping
-    the §4.6 reproducibility guarantee over the whole search.
-    ``parallelism`` spreads each probe's paths over its executor
-    (:class:`PathParallelism` — results identical to a serial search);
-    pass one executor for the whole search so probes share it.
+    ``config`` unchanged, and its mode is the search's basis: under a
+    Monte Carlo config a candidate meets when its seeded paths' success
+    rate meets the search's target (same seed per probe: common random
+    numbers, keeping the §4.6 reproducibility guarantee over the whole
+    search); under a deterministic config a candidate meets when its
+    single run reports no period with unmet need — the §5.2 ruin
+    signal, exactly as :func:`~glidepath.core.retirement.earliest_retirement_age`
+    reads it. ``parallelism`` spreads each Monte Carlo probe's paths
+    over its executor (:class:`PathParallelism` — results identical to
+    a serial search); pass one executor for the whole search so probes
+    share it.
 
     Raises:
-        EngineError: If ``config`` is not a seeded ``MONTE_CARLO``
-            config, or a probe is rejected by the engine.
+        EngineError: If a probe is rejected by the engine — including
+            a Monte Carlo config without a seed (planning §5.2).
     """
 
     def meets(amount: Money) -> bool:
-        """Whether spending ``amount`` meets the target success rate."""
+        """Whether spending ``amount`` meets the search's target."""
         probe = probe_with_spending(plan, amount, config)
+        if config.mode is not RunMode.MONTE_CARLO:
+            return not has_shortfall(run(probe, assumptions, region, config))
         result = run_paths(
             probe,
             assumptions,
@@ -546,6 +563,22 @@ def _path_outcome(index: int, result: ProjectionResult) -> PathOutcome:
         first_shortfall_period=first_shortfall,
         ending_balance=balances[-1],
         closing_balances=tuple(balances),
+    )
+
+
+def has_shortfall(result: ProjectionResult) -> bool:
+    """Whether any period's need went unmet — the §5.2 ruin signal.
+
+    What a deterministic probe's success reads: the single-run
+    equivalent of a path's ruin. Shared by the sustainable-income
+    search and the earliest-retirement-age solver
+    (:mod:`glidepath.core.retirement`, roadmap 9.14); not part of the
+    package API.
+    """
+    return any(
+        person.shortfall > _ZERO
+        for snapshot in result.snapshots
+        for person in snapshot.persons
     )
 
 

@@ -27,14 +27,18 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
 from glidepath.app import (
     BACKTEST_RUNNING_MESSAGE,
     BACKTEST_STALE_MESSAGE,
+    DRAWDOWN_RUNNING_MESSAGE,
+    DRAWDOWN_STALE_MESSAGE,
     MONTE_CARLO_CHART_TITLE,
     MONTE_CARLO_STALE_MESSAGE,
     NO_BACKTEST_MESSAGE,
+    NO_DRAWDOWN_MESSAGE,
     NO_MONTE_CARLO_MESSAGE,
     NO_RETIREMENT_MESSAGE,
     RETIREMENT_RUNNING_MESSAGE,
     RETIREMENT_STALE_MESSAGE,
     ChartsViewModel,
+    DrawdownRequest,
     PlanState,
     RetirementRequest,
     bar_tooltip,
@@ -46,12 +50,14 @@ from glidepath.app import (
     monte_carlo_running_status,
     parse_facts_form,
     state_with_backtest,
+    state_with_drawdown,
     state_with_household,
     state_with_monte_carlo,
     state_with_override,
     state_with_retirement,
 )
 from glidepath.app.backtest import BACKTEST_YEAR_LABEL
+from glidepath.app.drawdown import DRAWDOWN_ANSWER_PREFIX
 from glidepath.app.retirement import RETIREMENT_ANSWER_PREFIX
 from glidepath.core import (
     Decision,
@@ -90,6 +96,7 @@ def callbacks(
     select_mode: Callable[[str], None] | None = None,
     run_monte_carlo: Callable[[str, str], None] | None = None,
     run_retirement: Callable[[str, str, str, str], None] | None = None,
+    run_drawdown: Callable[[str, str, str, str], None] | None = None,
     run_backtest: Callable[[], None] | None = None,
     select_backtest_year: Callable[[str], None] | None = None,
 ) -> ChartsPaneCallbacks:
@@ -99,6 +106,7 @@ def callbacks(
         select_mode=select_mode or (lambda _key: None),
         run_monte_carlo=run_monte_carlo or (lambda _seed, _paths: None),
         run_retirement=run_retirement or (lambda _rate, _success, _seed, _paths: None),
+        run_drawdown=run_drawdown or (lambda _age, _success, _seed, _paths: None),
         run_backtest=run_backtest or (lambda: None),
         select_backtest_year=select_backtest_year or (lambda _year: None),
     )
@@ -186,6 +194,41 @@ def retirement_state() -> PlanState:
     state = state_with_household(outcome.state, plan, today=TODAY)
     request = RetirementRequest(mode=RunMode.DETERMINISTIC, rate_text="66")
     return state_with_retirement(state, request, today=TODAY)
+
+
+def drawdown_state() -> PlanState:
+    """The same short-horizon saver, solved for the sustainable income."""
+    outcome = state_with_override(
+        initial_plan_state(),
+        "horizon.planning_age",
+        "65",
+        recorded_on=RECORDED,
+        today=TODAY,
+    )
+    assert outcome.error is None
+    isa = Wrapper(
+        id=EntityId("drawdown-gui-isa"),
+        kind=ISA_KIND,
+        balance=Fact(value=Money(Decimal(300000)), as_of=AS_OF, recorded_on=RECORDED),
+    )
+    person = Person(
+        id=EntityId("drawdown-gui-person"),
+        date_of_birth=Fact(value=date(1966, 2, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=63, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+        wrappers=(isa,),
+    )
+    plan = Household(
+        persons=(person,),
+        spending=SpendingPlan(
+            annual_spending_real=Fact(
+                value=Money(Decimal(18000)), as_of=AS_OF, recorded_on=RECORDED
+            )
+        ),
+    )
+    state = state_with_household(outcome.state, plan, today=TODAY)
+    request = DrawdownRequest(mode=RunMode.DETERMINISTIC, age_text="63")
+    return state_with_drawdown(state, request, today=TODAY)
 
 
 class TestChartsPane:
@@ -442,6 +485,68 @@ class TestRetirementCard:
         assert not pane.retirement_detail_label.isHidden()
         assert "£33,000.00" in pane.retirement_detail_label.text()
         assert pane.retirement_message_label.isHidden()
+
+
+class TestDrawdownCard:
+    """The "How much can I draw down?" card bindings (9.25)."""
+
+    def test_deterministic_mode_hides_the_success_target(self) -> None:
+        """The deterministic basis offers no success target to set."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        assert pane.drawdown_success_edit.isHidden()
+        assert pane.drawdown_success_label.isHidden()
+        assert not pane.drawdown_age_edit.isHidden()
+        assert not pane.drawdown_button.isHidden()
+        assert pane.drawdown_message_label.text() == NO_DRAWDOWN_MESSAGE
+
+    def test_monte_carlo_mode_shows_the_success_target(self) -> None:
+        """The Monte Carlo basis adds the success-target input."""
+        pane = ChartsPane(callbacks())
+        view_model = build_charts_view_model(
+            projected_state(), mode=RunMode.MONTE_CARLO
+        )
+        pane.refresh(view_model)
+        assert not pane.drawdown_success_edit.isHidden()
+        assert not pane.drawdown_success_label.isHidden()
+
+    def test_the_age_defaults_to_the_stated_decision(self) -> None:
+        """Before any run the age input echoes the plan's decision."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        assert pane.drawdown_age_edit.text() == "60"
+
+    def test_find_button_forwards_the_raw_text(self) -> None:
+        """The shell parses; the card only captures and forwards."""
+        searches: list[tuple[str, str, str, str]] = []
+        pane = ChartsPane(
+            callbacks(
+                run_drawdown=lambda age, success, seed, paths: searches.append(
+                    (age, success, seed, paths)
+                )
+            )
+        )
+        view_model = build_charts_view_model(
+            projected_state(), mode=RunMode.MONTE_CARLO
+        )
+        pane.refresh(view_model)
+        pane.drawdown_age_edit.setText("62")
+        pane.drawdown_success_edit.setText("85")
+        pane.seed_edit.setText("42")
+        pane.paths_edit.setText("5")
+        pane.drawdown_button.click()
+        assert searches == [("62", "85", "42", "5")]
+
+    def test_an_answer_renders_on_the_card(self) -> None:
+        """The answer and its detail show; the no-run message hides."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(build_charts_view_model(drawdown_state()))
+        answer_text = pane.drawdown_answer_label.text()
+        assert answer_text.startswith(DRAWDOWN_ANSWER_PREFIX)
+        assert not pane.drawdown_answer_label.isHidden()
+        assert not pane.drawdown_detail_label.isHidden()
+        assert "age 63" in pane.drawdown_detail_label.text()
+        assert pane.drawdown_message_label.isHidden()
 
 
 class TestChartTheme:
@@ -938,6 +1043,57 @@ class TestMainWindowRetirementFlow:
         assert pane.retirement_button.isEnabled()
         assert "Success rate" in pane.metrics_label.text()
         assert pane.retirement_message_label.text() == NO_RETIREMENT_MESSAGE
+
+
+class TestMainWindowDrawdownFlow:
+    """The sustainable-income search runs through the window (9.25)."""
+
+    @pytest.fixture(name="window")
+    def window_fixture(self) -> MainWindow:
+        """A window with a plan whose retirement-age decision is 63."""
+        window = MainWindow(build_shell_view_model())
+        facts = window.facts_pane
+        facts.person_form.set_value("date_of_birth", "1966-02-01")
+        facts.person_form.set_value("tax_residency", str(RUK_RESIDENCY))
+        facts.person_form.set_value("target_retirement_age", "63")
+        facts.spending_form.set_value("annual_spending_real", "18000")
+        wrapper_form = facts.wrappers.add_entry()
+        wrapper_form.set_value("kind", str(ISA_KIND))
+        wrapper_form.set_value("balance", "300000")
+        facts.submit_button.click()
+        return window
+
+    def test_drawdown_search_through_the_window(self, window: MainWindow) -> None:
+        """Choose an age, press find: the answer lands on the card (9.25)."""
+        pane = window.charts_pane
+        assert pane.drawdown_age_edit.text() == "63"
+        pane.drawdown_button.click()
+        # The search executes off the GUI thread; every slow-run
+        # action disables and the busy indicator names the search
+        # until the finished state is delivered back (9.16).
+        assert not pane.drawdown_button.isEnabled()
+        assert not pane.retirement_button.isEnabled()
+        assert not pane.busy_bar.isHidden()
+        assert pane.busy_label.text() == DRAWDOWN_RUNNING_MESSAGE
+        wait_for_monte_carlo(window)
+        assert pane.drawdown_button.isEnabled()
+        assert pane.busy_bar.isHidden()
+        assert pane.drawdown_answer_label.text().startswith(DRAWDOWN_ANSWER_PREFIX)
+        assert not pane.drawdown_detail_label.isHidden()
+        assert pane.drawdown_age_edit.text() == "63"
+
+    def test_a_plan_change_discards_an_in_flight_search(
+        self, window: MainWindow
+    ) -> None:
+        """An answer computed from a replaced state never lands (9.25)."""
+        pane = window.charts_pane
+        pane.drawdown_button.click()
+        window.facts_pane.submit_button.click()
+        wait_for_monte_carlo(window)
+        assert window.statusBar().currentMessage() == DRAWDOWN_STALE_MESSAGE
+        assert pane.drawdown_message_label.text() == NO_DRAWDOWN_MESSAGE
+        assert pane.drawdown_button.isEnabled()
+        assert pane.busy_bar.isHidden()
 
 
 class TestMainWindowBacktestFlow:

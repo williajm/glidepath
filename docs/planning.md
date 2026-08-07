@@ -1185,7 +1185,9 @@ spending level (the default fixed-real), and never below the best scan
 point for adjustment-trigger strategies (guardrails), whose success
 islands narrower than one scan step need a finer `scan_steps`; every
 probe reuses the run's seed, i.e. common random numbers, and the
-returned level is always one actually probed); **ending-pot
+returned level is always one actually probed — since 9.25 the same
+search also accepts a deterministic config, each probe then a single
+run judged by the ruin signal, no seed involved); **ending-pot
 percentiles** (linear interpolation between order statistics of the
 nominal ending balances; CPI is deterministic across paths, so nominal
 and real rank identically). Sequence-of-returns risk is demonstrated by
@@ -1213,6 +1215,17 @@ its candidate ages (20,000 by default) so an unsuccessful search
 cannot multiply the per-run path cap. A candidate with no retired
 period inside the projected horizon never tests the income and fails
 rather than succeeding vacuously.
+
+**Sustainable income at an age.** `sustainable_income_at_age` (roadmap
+9.25) is the same question asked the other way — "how much can I draw
+down if I retire at this age?": the retirement-age decision is fixed
+at the chosen age and the spending level is searched by delegating to
+the 7.3 `sustainable_income` scan-plus-bisection, under the same
+exposure gate (an age with no retired period inside the horizon
+answers `None` rather than succeeding vacuously — spending is modelled
+only in retirement, so every level would pass untested) and the same
+reproducibility: one config for every probe, so the answer follows
+from the recorded inputs (and seed, under a Monte Carlo basis) alone.
 
 ### 5.3 UK region data files
 
@@ -2053,6 +2066,25 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   deterministic context) and drops the Monte Carlo overlays; the
   ending-pot 10/50/90 metrics stay on the card, and the fan tab joins
   the 9.19 PDF report like every chart.*
+- [x] 9.25 "How much can I draw down?" card (#149) — *the drawdown
+  dual of the 9.14 card: `sustainable_income_at_age` fixes the
+  retirement-age decision at a chosen age and searches the spending
+  level through the 7.3 `sustainable_income` scan-plus-bisection,
+  which gained a deterministic basis (one run per probe, judged by
+  the §5.2 ruin signal) so the card answers under either run mode
+  like its 9.14 sibling. The same exposure gate applies: an age with
+  no retired period inside the horizon answers nothing rather than
+  succeeding vacuously. Surfaced per §4.7 as a card beside "When can
+  I retire?": a retirement-age input defaulting to the plan's stated
+  decision, a success target under the Monte Carlo basis, an explicit
+  find action off the GUI thread with the shared in-flight guard and
+  staleness discard, and an answer naming the income (today's money,
+  the highest net annual level the plan sustains), the age assumed,
+  the £1,000,000 search ceiling, and the basis. A Monte Carlo search
+  is bounded by the same 20,000 path-projection budget as 9.14,
+  multiplied over the search's probe bound rather than candidate
+  ages. Answers reproduce from the recorded inputs (and seed) per
+  §4.6.*
 
 ## 9. Open questions
 

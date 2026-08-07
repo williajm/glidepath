@@ -903,6 +903,17 @@ class TestSustainableIncomeSearch:
                 paths=2, target_success_rate=target, maximum=maximum, scan_steps=0
             )
 
+    def test_defaults_to_the_deterministic_single_path(self) -> None:
+        """Only the bracket is required; the Monte Carlo knobs default off.
+
+        One path and a 100% target — the single-run convention a
+        deterministic probe ignores anyway, mirroring
+        ``RetirementAgeSearch`` (roadmap 9.14).
+        """
+        search = SustainableIncomeSearch(maximum=Money(Decimal(50000)))
+        assert search.paths == 1
+        assert search.target_success_rate == Decimal(1)
+
 
 class TestSustainableIncome:
     """The bisection over the stub region, pinned by exact arithmetic.
@@ -1050,6 +1061,30 @@ class TestSustainableIncome:
         )
         assert frugal == lavish
         assert frugal == Money(Decimal(25000))
+
+    def test_a_deterministic_basis_answers_without_paths(self) -> None:
+        """A deterministic config reads one run's shortfall per probe.
+
+        The same exact arithmetic as the seeded search: zero returns
+        make a 100,000 pot over four years sustain precisely 25,000 —
+        and the deterministic basis needs no seed at all (9.25).
+        """
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2029, 12, 31))
+        assumptions = assumptions_with(
+            ZERO_VOLATILITY | {AssumptionKey.RETURNS_EQUITY_REAL: Decimal(0)}
+        )
+        search = SustainableIncomeSearch(
+            maximum=Money(Decimal(50000)),
+            tolerance=Money(Decimal(100)),
+        )
+        income = sustainable_income(
+            household_of(spending=None),
+            assumptions,
+            stub_region(),
+            config,
+            search,
+        )
+        assert income == Money(Decimal(25000))
 
     def test_the_scan_rescues_a_non_monotone_success_island(self) -> None:
         """Guardrails make success non-monotone; the scan still finds it.
