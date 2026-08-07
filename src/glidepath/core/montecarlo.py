@@ -49,6 +49,8 @@ from datetime import UTC, datetime, time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from glidepath.core.config import EngineError, RunMode
 from glidepath.core.engine import run
 from glidepath.core.entities import SpendingPlan
@@ -151,11 +153,10 @@ class MonteCarloResult:
     def ending_pot_percentile(self, percentile: Decimal) -> Money:
         """The ending-balance percentile over paths, in [0, 100].
 
-        Linear interpolation between order statistics: rank
-        ``(count - 1) * percentile / 100`` over the sorted balances,
-        fractional ranks interpolating between the two neighbours —
-        exact ``Decimal`` arithmetic, quantized as a presentation
-        value (planning §4.6).
+        Linear interpolation between order statistics — numpy's
+        ``linear`` percentile method over the balances' whole-penny
+        values (:func:`_interpolated_percentile`), quantized as a
+        presentation value (planning §4.6).
 
         Raises:
             ValueError: If ``percentile`` lies outside [0, 100].
@@ -184,15 +185,14 @@ class MonteCarloResult:
     def balance_percentiles(
         self, percentiles: Sequence[Decimal]
     ) -> tuple[tuple[Money, ...], ...]:
-        """Several balance percentiles from one sort per period (9.24).
+        """Several balance percentiles from one vectorized pass (9.24).
 
         One :meth:`balance_percentile` row per requested percentile,
         in request order. The fan chart reads nine percentiles at
-        once; interpolating them all from a single sorted balance
-        vector per period keeps the cost one sort rather than one per
-        percentile — the shells build their chart view models on the
-        GUI thread, where a 10,000-path result sorted nine times over
-        every period is a visible stall.
+        once; one ``numpy.percentile`` call over the paths-by-periods
+        penny matrix answers them all — the shells build their chart
+        view models on the GUI thread, where per-period Python sorting
+        of a 10,000-path result was a visible stall.
 
         Raises:
             ValueError: If any percentile lies outside [0, 100], or
@@ -204,13 +204,19 @@ class MonteCarloResult:
         if len(lengths) != 1:
             msg = "balance_percentiles needs every path to cover the same periods"
             raise ValueError(msg)
-        by_period = [
-            sorted(outcome.closing_balances[index] for outcome in self.outcomes)
-            for index in range(lengths.pop())
-        ]
+        matrix = np.array(
+            [
+                [balance.quantized().pennies for balance in outcome.closing_balances]
+                for outcome in self.outcomes
+            ],
+            dtype=np.int64,
+        ).reshape(self.path_count, lengths.pop())
+        interpolated = np.percentile(
+            matrix, [float(percentile) for percentile in percentiles], axis=0
+        )
         return tuple(
-            tuple(_sorted_percentile(ordered, percentile) for ordered in by_period)
-            for percentile in percentiles
+            tuple(_money_from_interpolated_pennies(value) for value in row)
+            for row in interpolated.tolist()
         )
 
 
@@ -492,31 +498,34 @@ def _check_percentile(percentile: Decimal) -> None:
 def _interpolated_percentile(balances: Sequence[Money], percentile: Decimal) -> Money:
     """The ``percentile`` of ``balances`` between order statistics.
 
-    Rank ``(count - 1) * percentile / 100`` over the sorted balances,
-    fractional ranks interpolating between the two neighbours — exact
-    ``Decimal`` arithmetic, quantized as a presentation value
-    (planning §4.6).
+    ``numpy.percentile`` over the balances' whole-penny values — its
+    default ``linear`` method is exactly the
+    ``(count - 1) * percentile / 100`` fractional-rank interpolation
+    rule — read back through the int-penny interchange and quantized
+    as a presentation value (planning §4.6). Balances cross into
+    integer form via :attr:`Money.pennies` after ledger rounding (a
+    no-op for the quantized ledger values every projection produces).
 
     Raises:
         ValueError: If ``percentile`` lies outside [0, 100].
     """
     _check_percentile(percentile)
-    return _sorted_percentile(sorted(balances), percentile)
+    pennies = np.array(
+        [balance.quantized().pennies for balance in balances], dtype=np.int64
+    )
+    return _money_from_interpolated_pennies(
+        float(np.percentile(pennies, float(percentile)))
+    )
 
 
-def _sorted_percentile(ordered: Sequence[Money], percentile: Decimal) -> Money:
-    """:func:`_interpolated_percentile` over an already-sorted vector.
+def _money_from_interpolated_pennies(value: float) -> Money:
+    """One interpolated penny count back across the int-penny boundary.
 
-    Split out so a caller reading several percentiles of one
-    population (the fan chart's nine) sorts it once.
+    The float converts exactly to ``Decimal`` before the shift to
+    pounds and the ledger rounding, so the only rounding step is the
+    final presentation quantization (planning §4.6).
     """
-    rank = (Decimal(len(ordered)) - _ONE) * percentile / _HUNDRED
-    lower = int(rank)
-    fraction = rank - Decimal(lower)
-    value = ordered[lower]
-    if fraction > 0:
-        value = value + (ordered[lower + 1] - ordered[lower]) * fraction
-    return value.quantized()
+    return Money(Decimal(value).scaleb(-2)).quantized()
 
 
 def _merged_provenance(provenances: Sequence[RunProvenance]) -> RunProvenance:

@@ -1,4 +1,4 @@
-"""Tests for the stochastic return model and Decimal Cholesky (roadmap 7.2).
+"""Tests for the stochastic return model and Cholesky transform (roadmap 7.2).
 
 The §4.6 reproducibility criterion as a Hypothesis property (same
 assumptions + seed + path → identical returns), the purity guarantees
@@ -111,7 +111,12 @@ class TestCholeskyLower:
         assert cholesky_lower(identity) == identity
 
     def test_factor_reconstructs_the_matrix(self) -> None:
-        """L·Lᵀ reproduces the input to context precision."""
+        """L·Lᵀ reproduces the input to float64 precision.
+
+        The factorisation runs in numpy float64 (~1e-16 relative), so
+        the reconstruction bound sits an order of magnitude above that
+        rather than at Decimal context precision.
+        """
         matrix = (
             (_ONE, Decimal("0.2"), Decimal("0.0")),
             (Decimal("0.2"), _ONE, Decimal("0.2")),
@@ -123,7 +128,7 @@ class TestCholeskyLower:
                 rebuilt = sum(
                     (factor[i][k] * factor[j][k] for k in range(3)), start=_ZERO
                 )
-                assert abs(rebuilt - matrix[i][j]) < Decimal("1e-25")
+                assert abs(rebuilt - matrix[i][j]) < Decimal("1e-15")
 
     def test_factor_is_lower_triangular(self) -> None:
         """Entries above the diagonal are exactly zero."""

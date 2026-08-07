@@ -9,6 +9,7 @@ license = "MIT AND CC-BY-NC-SA-4.0"
 license-files = ["LICENSE", "LICENSE-DATA"]
 requires-python = ">=3.14"
 dependencies = [
+    "numpy>=2.3",
     "pyside6>=6.11.1",
 ]
 
@@ -35,7 +36,7 @@ build-backend = "uv_build"
 [tool.uv]
 # Supply-chain cooldown: resolution ignores anything published to PyPI after
 # this timestamp (now minus 7 days). Updated ONLY by `make deps`.
-exclude-newer = "2026-07-30T09:40:45Z"
+exclude-newer = "2026-07-31T12:19:54Z"
 
 # PyPI is the ONLY permitted index (supply-chain policy; see CLAUDE.md).
 [[tool.uv.index]]
@@ -62,9 +63,6 @@ convention = "google"
 max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
-"src/glidepath/core/randomness.py" = [
-    "S311", # Seeded Monte Carlo simulation draws, never security material (planning §4.6).
-]
 "src/glidepath/core/montecarlo.py" = [
     "PLR0913", # run_paths/sustainable_income take the §5.2 engine quartet plus keyword-only run knobs; bundling would obscure the run(plan, assumptions, region, config) shape.
 ]

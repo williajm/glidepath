@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol
 
+import numpy as np
+
 from glidepath.core.investments import AssetReturns
 from glidepath.core.money import Rate
 from glidepath.core.provenance import AssumptionKey, decimal_assumption_value
@@ -135,15 +137,19 @@ class DeterministicReturnModel:
 def cholesky_lower(
     matrix: tuple[tuple[Decimal, ...], ...],
 ) -> tuple[tuple[Decimal, ...], ...]:
-    """Lower-triangular Cholesky factor of a symmetric matrix, in ``Decimal``.
+    """Lower-triangular Cholesky factor of a symmetric matrix.
 
-    ``L`` such that ``L @ L.T`` reproduces ``matrix`` (to context
-    precision), computed entirely in ``Decimal`` — the correlation
-    transform of planning §5.2 never touches float.
+    ``L`` such that ``L @ L.T`` reproduces ``matrix`` to float64
+    precision: the factorisation is delegated to
+    ``numpy.linalg.cholesky`` (the LAPACK routine) and the factor
+    converts exactly back to ``Decimal`` — binary floats are decimally
+    representable — so the correlated draws downstream stay ``Decimal``
+    arithmetic over a factor carrying ~1e-16 relative precision
+    (planning §4.6).
 
     Raises:
         ValueError: If the matrix is not square, not symmetric, or not
-            positive definite (a pivot fails to stay positive).
+            positive definite.
     """
     size = len(matrix)
     if any(len(row) != size for row in matrix):
@@ -152,19 +158,15 @@ def cholesky_lower(
     if any(matrix[i][j] != matrix[j][i] for i in range(size) for j in range(i)):
         msg = "matrix must be symmetric"
         raise ValueError(msg)
-    rows: list[list[Decimal]] = [[_ZERO] * size for _ in range(size)]
-    for i in range(size):
-        for j in range(i + 1):
-            partial = sum((rows[i][k] * rows[j][k] for k in range(j)), start=_ZERO)
-            if i == j:
-                pivot = matrix[i][i] - partial
-                if pivot <= _ZERO:
-                    msg = "matrix is not positive definite"
-                    raise ValueError(msg)
-                rows[i][j] = pivot.sqrt()
-            else:
-                rows[i][j] = (matrix[i][j] - partial) / rows[j][j]
-    return tuple(tuple(row) for row in rows)
+    array = np.array(
+        [[float(value) for value in row] for row in matrix], dtype=np.float64
+    )
+    try:
+        factor = np.linalg.cholesky(array)
+    except np.linalg.LinAlgError as error:
+        msg = "matrix is not positive definite"
+        raise ValueError(msg) from error
+    return tuple(tuple(Decimal(value) for value in row) for row in factor.tolist())
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,8 +179,9 @@ class StochasticReturnModel:
     run agrees with the deterministic run by construction. The assumed
     volatility is read as the standard deviation of the annual
     log-return; draws are correlated across the three classes (in the
-    fixed order equity, bonds, cash) through the ``Decimal`` Cholesky
-    factor of the pairwise correlation assumptions. CPI stays the
+    fixed order equity, bonds, cash) through the Cholesky factor of
+    the pairwise correlation assumptions (numpy-computed, converted
+    exactly to ``Decimal`` — :func:`cholesky_lower`). CPI stays the
     assumed deterministic value on every path (module docstring).
 
     Purity (planning §4.6): each ``(period, path)`` pair reads its
