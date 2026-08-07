@@ -9,8 +9,10 @@ Anything that cannot be verified fails the check. See CLAUDE.md for the
 policy.
 """
 
+import http.client
 import json
 import sys
+import threading
 import time
 import tomllib
 import urllib.error
@@ -29,10 +31,54 @@ _ROOT_SOURCES = ({"virtual": "."}, {"editable": "."})
 _HTTP_TIMEOUT_SECONDS = 30.0
 _MAX_WORKERS = 8
 _RETRY_PAUSES = (5.0, 10.0)
+# Enough for a handful of flaky queries; a systemic PyPI outage exhausts
+# it quickly so the run fails in one timeout wave instead of stacking
+# every package's retries and sleeps.
+_MAX_TOTAL_RETRIES = 10
+# 408/429 are timeout/rate-limit signals — the one transient corner of
+# the otherwise deterministic 4xx range (the check's own 8-way burst can
+# plausibly draw a 429).
+_RETRYABLE_CLIENT_STATUSES = frozenset(
+    {HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS}
+)
+# HTTPError (an OSError) is classified per-status by _should_retry;
+# HTTPException covers a connection severed mid-body (IncompleteRead);
+# JSONDecodeError covers a truncated or garbled 200 payload.
+_TRANSIENT_ERRORS = (OSError, http.client.HTTPException, json.JSONDecodeError)
 
 
 class PolicyError(Exception):
     """A supply-chain policy violation that must fail the check."""
+
+
+class _RetryTracker:
+    """Thread-safe retry bookkeeping shared by the worker threads.
+
+    Caps the retries spent across the whole run — a couple of flaky
+    queries retry freely, while a systemic outage exhausts the cap and
+    later failures go straight to their violations instead of stacking
+    minutes of sleeps — and records what was retried so ``main`` can
+    report it once, from one thread, instead of interleaving prints.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._lock = threading.Lock()
+        self._events: list[str] = []
+
+    def take(self, event: str) -> bool:
+        """Consume one retry for ``event``; False once the cap is spent."""
+        with self._lock:
+            if len(self._events) >= self._limit:
+                return False
+            self._events.append(event)
+            return True
+
+    @property
+    def events(self) -> tuple[str, ...]:
+        """The granted retries, in grant order."""
+        with self._lock:
+            return tuple(self._events)
 
 
 def _load_lock() -> dict[str, Any]:
@@ -95,37 +141,63 @@ def _release_payload(name: str, version: str) -> dict[str, Any]:
     return payload
 
 
-def _release_payload_with_retry(name: str, version: str) -> dict[str, Any]:
+def _should_retry(exc: Exception) -> bool:
+    """Whether a failed fetch is worth another attempt.
+
+    HTTP client errors are deterministic — bar the timeout/rate-limit
+    statuses in ``_RETRYABLE_CLIENT_STATUSES`` — while server errors,
+    network faults, and truncated or garbled bodies are transient.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return (
+            exc.code >= HTTPStatus.INTERNAL_SERVER_ERROR
+            or exc.code in _RETRYABLE_CLIENT_STATUSES
+        )
+    return True
+
+
+def _release_payload_with_retry(
+    name: str, version: str, tracker: _RetryTracker
+) -> dict[str, Any]:
     """Fetch a release's JSON, retrying transient failures.
 
-    A network fault or a PyPI server error (5xx) gets one more attempt
-    per pause in ``_RETRY_PAUSES`` before the final try, so a runner
-    blip does not read as a cooldown violation. A client error (4xx) is
-    deterministic and raises immediately, and the last failure always
-    propagates — the caller reports it as a violation, keeping the
-    check fail-closed.
+    A transient failure — a network fault, an HTTP 5xx/408/429, a
+    truncated or garbled body — gets one more attempt per pause in
+    ``_RETRY_PAUSES``, so a runner blip does not read as a cooldown
+    violation; ``tracker`` caps the retries spent across the whole run.
+    A deterministic client error, and the last failure of anything
+    transient, always propagates — the caller reports it as a
+    violation, keeping the check fail-closed.
     """
-    for pause in _RETRY_PAUSES:
+    pauses = iter(_RETRY_PAUSES)
+    while True:
         try:
             payload = _release_payload(name, version)
-        except urllib.error.HTTPError as exc:
-            if exc.code < HTTPStatus.INTERNAL_SERVER_ERROR:
+        except _TRANSIENT_ERRORS as exc:
+            pause = next(pauses, None)
+            if (
+                pause is None
+                or not _should_retry(exc)
+                or not tracker.take(f"{name}=={version}: {exc}")
+            ):
                 raise
-            print(f"  retrying {name}=={version}: HTTP {exc.code}")
-        except OSError as exc:  # URLError/timeouts are all OSError.
-            print(f"  retrying {name}=={version}: {exc}")
+            time.sleep(pause)
         else:
             return payload
-        time.sleep(pause)
-    return _release_payload(name, version)
 
 
-def _verify_package(cutoff: datetime, item: tuple[str, str, list[str]]) -> list[str]:
+def _verify_package(
+    cutoff: datetime,
+    item: tuple[str, str, list[str]],
+    tracker: _RetryTracker | None = None,
+) -> list[str]:
     """Return violation messages for one locked package (empty if clean)."""
     name, version, filenames = item
+    if tracker is None:
+        tracker = _RetryTracker(_MAX_TOTAL_RETRIES)
     try:
-        payload = _release_payload_with_retry(name, version)
-    except OSError as exc:  # URLError/HTTPError/timeouts are all OSError.
+        payload = _release_payload_with_retry(name, version, tracker)
+    except _TRANSIENT_ERRORS as exc:
         return [f"{name}=={version}: PyPI query failed: {exc}"]
     uploads = {
         file["filename"]: datetime.fromisoformat(file["upload_time_iso_8601"])
@@ -157,9 +229,12 @@ def main() -> int:
         f"Verifying {len(packages)} locked packages against "
         f"cutoff {cutoff:%Y-%m-%d %H:%M} UTC"
     )
+    tracker = _RetryTracker(_MAX_TOTAL_RETRIES)
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
-        results = pool.map(partial(_verify_package, cutoff), packages)
+        results = pool.map(partial(_verify_package, cutoff, tracker=tracker), packages)
     violations = [violation for package in results for violation in package]
+    for event in tracker.events:
+        print(f"  retried {event}")
     if violations:
         print("COOLDOWN VIOLATIONS:")
         for line in violations:

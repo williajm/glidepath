@@ -12,6 +12,7 @@ policy: it must rewrite exactly the ``exclude-newer`` timestamp to now
 minus the cooldown and touch nothing else.
 """
 
+import http.client
 import io
 import json
 import re
@@ -31,10 +32,12 @@ from check_dep_age import (
     PolicyError,
     _cutoff,
     _locked_artifacts,
+    _RetryTracker,
     _verify_package,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 # A cutoff comfortably before every upload time used in these tests.
@@ -53,17 +56,48 @@ def _payload_bytes(files: list[tuple[str, str]]) -> bytes:
     ).encode()
 
 
+def _serve_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+    responses: Sequence[bytes | Exception],
+    requested: list[str],
+) -> None:
+    """Answer PyPI queries from ``responses`` in order, recording URLs.
+
+    A bytes entry is served as the response body; an exception entry is
+    raised. The last entry repeats once the sequence is exhausted.
+    """
+
+    def fake_urlopen(url: str, timeout: float = 0.0) -> io.BytesIO:
+        del timeout
+        response = responses[min(len(requested), len(responses) - 1)]
+        requested.append(url)
+        if isinstance(response, Exception):
+            raise response
+        return io.BytesIO(response)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+
 def _serve_payload(
     monkeypatch: pytest.MonkeyPatch, payload: bytes, requested: list[str]
 ) -> None:
     """Answer every PyPI query with ``payload``, recording requested URLs."""
+    _serve_sequence(monkeypatch, [payload], requested)
 
-    def fake_urlopen(url: str, timeout: float = 0.0) -> io.BytesIO:
-        del timeout
-        requested.append(url)
-        return io.BytesIO(payload)
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+def _http_error(status: HTTPStatus) -> urllib.error.HTTPError:
+    """An HTTPError for ``status`` with the boilerplate filled in."""
+    return urllib.error.HTTPError(
+        "https://pypi.org/pypi/alpha/1.0.0/json", status, status.phrase, Message(), None
+    )
+
+
+@pytest.fixture
+def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Recorded retry pauses — time.sleep patched to record, not wait."""
+    recorded: list[float] = []
+    monkeypatch.setattr(time, "sleep", recorded.append)
+    return recorded
 
 
 # --- check_dep_age: cutoff validation ---------------------------------------
@@ -230,77 +264,125 @@ def test_verify_package_flags_unknown_artifact(
 
 
 def test_verify_package_fails_closed_on_network_error(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
 ) -> None:
-    """A persistent PyPI failure is a violation once every retry is spent."""
-    attempts: list[str] = []
-
-    def broken_urlopen(url: str, timeout: float = 0.0) -> io.BytesIO:
-        del timeout
-        attempts.append(url)
-        reason = "connection refused"
-        raise urllib.error.URLError(reason)
-
-    monkeypatch.setattr("urllib.request.urlopen", broken_urlopen)
-    sleeps: list[float] = []
-    monkeypatch.setattr(time, "sleep", sleeps.append)
+    """A persistent network failure is a violation once retries are spent."""
+    requested: list[str] = []
+    _serve_sequence(
+        monkeypatch, [urllib.error.URLError("connection refused")], requested
+    )
     violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
     assert len(violations) == 1
     assert "PyPI query failed" in violations[0]
-    assert len(attempts) == 1 + len(_RETRY_PAUSES)
+    assert len(requested) == 1 + len(_RETRY_PAUSES)
+    assert sleeps == list(_RETRY_PAUSES)
+
+
+def test_verify_package_fails_closed_on_persistent_server_error(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    """A 5xx on every attempt still converts to a violation, fail-closed."""
+    requested: list[str] = []
+    _serve_sequence(
+        monkeypatch, [_http_error(HTTPStatus.SERVICE_UNAVAILABLE)], requested
+    )
+    violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
+    assert len(violations) == 1
+    assert "PyPI query failed" in violations[0]
+    assert len(requested) == 1 + len(_RETRY_PAUSES)
     assert sleeps == list(_RETRY_PAUSES)
 
 
 def test_verify_package_retries_transient_server_error(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
 ) -> None:
     """A PyPI blip (here a 503) is retried and the clean answer verifies."""
     payload = _payload_bytes([("alpha-1.0.0.tar.gz", "2026-01-01T00:00:00Z")])
-    attempts: list[str] = []
-
-    def flaky_urlopen(url: str, timeout: float = 0.0) -> io.BytesIO:
-        del timeout
-        attempts.append(url)
-        if len(attempts) == 1:
-            raise urllib.error.HTTPError(
-                url,
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                "Service Unavailable",
-                Message(),
-                None,
-            )
-        return io.BytesIO(payload)
-
-    monkeypatch.setattr("urllib.request.urlopen", flaky_urlopen)
-    sleeps: list[float] = []
-    monkeypatch.setattr(time, "sleep", sleeps.append)
+    requested: list[str] = []
+    _serve_sequence(
+        monkeypatch, [_http_error(HTTPStatus.SERVICE_UNAVAILABLE), payload], requested
+    )
     violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
     assert violations == []
-    assert len(attempts) == 2
+    assert len(requested) == 2
     assert sleeps == [_RETRY_PAUSES[0]]
 
 
-def test_verify_package_does_not_retry_client_error(
-    monkeypatch: pytest.MonkeyPatch,
+def test_verify_package_retries_rate_limit(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
 ) -> None:
-    """A deterministic client error (here a 404) fails without retrying."""
-    attempts: list[str] = []
+    """A 429 is a transient rate-limit signal, not a deterministic 4xx."""
+    payload = _payload_bytes([("alpha-1.0.0.tar.gz", "2026-01-01T00:00:00Z")])
+    requested: list[str] = []
+    _serve_sequence(
+        monkeypatch, [_http_error(HTTPStatus.TOO_MANY_REQUESTS), payload], requested
+    )
+    violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
+    assert violations == []
+    assert len(requested) == 2
+    assert sleeps == [_RETRY_PAUSES[0]]
 
-    def missing_urlopen(url: str, timeout: float = 0.0) -> io.BytesIO:
-        del timeout
-        attempts.append(url)
-        raise urllib.error.HTTPError(
-            url, HTTPStatus.NOT_FOUND, "Not Found", Message(), None
-        )
 
-    monkeypatch.setattr("urllib.request.urlopen", missing_urlopen)
-    sleeps: list[float] = []
-    monkeypatch.setattr(time, "sleep", sleeps.append)
+def test_verify_package_retries_garbled_body(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    """A garbled 200 body (JSONDecodeError) is transient, never a crash."""
+    payload = _payload_bytes([("alpha-1.0.0.tar.gz", "2026-01-01T00:00:00Z")])
+    requested: list[str] = []
+    _serve_sequence(monkeypatch, [b"not json", payload], requested)
+    violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
+    assert violations == []
+    assert len(requested) == 2
+    assert sleeps == [_RETRY_PAUSES[0]]
+
+
+def test_verify_package_converts_mid_body_disconnect_to_violation(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    """A connection severed mid-body (IncompleteRead) never crashes the check."""
+    requested: list[str] = []
+    _serve_sequence(monkeypatch, [http.client.IncompleteRead(b"")], requested)
     violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
     assert len(violations) == 1
     assert "PyPI query failed" in violations[0]
-    assert len(attempts) == 1
+    assert len(requested) == 1 + len(_RETRY_PAUSES)
+    assert sleeps == list(_RETRY_PAUSES)
+
+
+def test_verify_package_does_not_retry_client_error(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    """A deterministic client error (here a 404) fails without retrying."""
+    requested: list[str] = []
+    _serve_sequence(monkeypatch, [_http_error(HTTPStatus.NOT_FOUND)], requested)
+    violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
+    assert len(violations) == 1
+    assert "PyPI query failed" in violations[0]
+    assert len(requested) == 1
     assert sleeps == []
+
+
+def test_verify_package_stops_retrying_when_tracker_exhausted(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    """An exhausted run-wide retry cap fails straight to the violation."""
+    requested: list[str] = []
+    _serve_sequence(monkeypatch, [urllib.error.URLError("PyPI down")], requested)
+    violations = _verify_package(
+        CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]), tracker=_RetryTracker(0)
+    )
+    assert len(violations) == 1
+    assert "PyPI query failed" in violations[0]
+    assert len(requested) == 1
+    assert sleeps == []
+
+
+def test_retry_tracker_caps_and_records() -> None:
+    """The tracker grants up to its limit and records what it granted."""
+    tracker = _RetryTracker(2)
+    grants = [tracker.take("a"), tracker.take("b"), tracker.take("c")]
+    assert grants == [True, True, False]
+    assert tracker.events == ("a", "b")
 
 
 # --- check_dep_age: end to end ----------------------------------------------
@@ -355,6 +437,31 @@ def test_main_passes_clean_lockfile(
     assert exit_code == 0
     assert "OK: every locked artifact" in capsys.readouterr().out
     assert requested == ["https://pypi.org/pypi/alpha/1.0.0/json"]
+
+
+@pytest.mark.usefixtures("sleeps")
+def test_main_reports_retries_from_main_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A retried query is reported once, after the workers finish."""
+    monkeypatch.chdir(tmp_path)
+    _write_lockfile(tmp_path, cutoff=_old_cutoff_string())
+    payload = _payload_bytes(
+        [
+            ("alpha-1.0.0.tar.gz", "2020-01-01T00:00:00Z"),
+            ("alpha-1.0.0-py3-none-any.whl", "2020-01-01T00:00:00Z"),
+        ]
+    )
+    requested: list[str] = []
+    _serve_sequence(
+        monkeypatch, [urllib.error.URLError("handshake timed out"), payload], requested
+    )
+    exit_code = check_dep_age.main()
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "retried alpha==1.0.0" in out
+    assert "OK: every locked artifact" in out
+    assert len(requested) == 2
 
 
 def test_main_fails_on_late_upload(
