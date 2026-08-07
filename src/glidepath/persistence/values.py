@@ -11,7 +11,9 @@ planning §4.6), tables as tagged objects, and enums as their stable
 tokens.
 
 This module also holds the primitive parsers and the enum token tables
-the entity codecs share.
+the wire models share. Everything raises :class:`PersistenceError`
+without a document path — the pydantic layer above supplies the
+location (:mod:`glidepath.persistence.models`).
 """
 
 from collections.abc import Callable, Mapping
@@ -58,7 +60,7 @@ class EnumTokens[E: Enum]:
         """The stable token written for ``member``."""
         return self.by_member[member]
 
-    def member(self, raw: object, path: str) -> E:
+    def member(self, raw: object) -> E:
         """The member a stored token names.
 
         Raises:
@@ -68,7 +70,7 @@ class EnumTokens[E: Enum]:
             if token == raw:
                 return member
         known = ", ".join(sorted(self.by_member.values()))
-        msg = f"{path}: unknown token {raw!r} (one of: {known})"
+        msg = f"unknown token {raw!r} (one of: {known})"
         raise PersistenceError(msg)
 
 
@@ -109,7 +111,7 @@ LIFE_STAGE_TOKENS = EnumTokens(
 )
 
 
-def parse_decimal(raw: object, path: str) -> Decimal:
+def parse_decimal(raw: object) -> Decimal:
     """Parse a stored ``Decimal`` string, exactly and finitely.
 
     Raises:
@@ -117,102 +119,102 @@ def parse_decimal(raw: object, path: str) -> Decimal:
             decimal number.
     """
     if not isinstance(raw, str):
-        msg = f"{path}: expected a decimal string, got {type(raw).__name__}"
+        msg = f"expected a decimal string, got {type(raw).__name__}"
         raise PersistenceError(msg)
     try:
         value = Decimal(raw)
     except InvalidOperation:
-        msg = f"{path}: not a decimal number: {raw!r}"
+        msg = f"not a decimal number: {raw!r}"
         raise PersistenceError(msg) from None
     if not value.is_finite():
-        msg = f"{path}: decimal values must be finite, got {raw!r}"
+        msg = f"decimal values must be finite, got {raw!r}"
         raise PersistenceError(msg)
     return value
 
 
-def parse_int(raw: object, path: str) -> int:
+def parse_int(raw: object) -> int:
     """Parse a stored whole number (``bool`` rejected, as ever).
 
     Raises:
         PersistenceError: If ``raw`` is not an integer.
     """
     if isinstance(raw, bool) or not isinstance(raw, int):
-        msg = f"{path}: expected a whole number, got {type(raw).__name__}"
+        msg = f"expected a whole number, got {type(raw).__name__}"
         raise PersistenceError(msg)
     return raw
 
 
-def parse_str(raw: object, path: str) -> str:
+def parse_str(raw: object) -> str:
     """Parse a stored string.
 
     Raises:
         PersistenceError: If ``raw`` is not a string.
     """
     if not isinstance(raw, str):
-        msg = f"{path}: expected a string, got {type(raw).__name__}"
+        msg = f"expected a string, got {type(raw).__name__}"
         raise PersistenceError(msg)
     return raw
 
 
-def parse_date(raw: object, path: str) -> date:
+def parse_date(raw: object) -> date:
     """Parse a stored ISO-8601 calendar date.
 
     Raises:
         PersistenceError: If ``raw`` is not an ISO-8601 date string.
     """
-    text = parse_str(raw, path)
+    text = parse_str(raw)
     try:
         return date.fromisoformat(text)
     except ValueError:
-        msg = f"{path}: not an ISO-8601 date: {text!r}"
+        msg = f"not an ISO-8601 date: {text!r}"
         raise PersistenceError(msg) from None
 
 
-def parse_datetime(raw: object, path: str) -> datetime:
+def parse_datetime(raw: object) -> datetime:
     """Parse a stored ISO-8601 timezone-aware datetime.
 
     Raises:
         PersistenceError: If ``raw`` is not an ISO-8601 datetime string
             carrying a UTC offset.
     """
-    text = parse_str(raw, path)
+    text = parse_str(raw)
     try:
         moment = datetime.fromisoformat(text)
     except ValueError:
-        msg = f"{path}: not an ISO-8601 datetime: {text!r}"
+        msg = f"not an ISO-8601 datetime: {text!r}"
         raise PersistenceError(msg) from None
     if moment.tzinfo is None or moment.tzinfo.utcoffset(moment) is None:
-        msg = f"{path}: datetimes must be timezone-aware, got {text!r}"
+        msg = f"datetimes must be timezone-aware, got {text!r}"
         raise PersistenceError(msg)
     return moment
 
 
-def parse_money(raw: object, path: str) -> Money:
+def parse_money(raw: object) -> Money:
     """Parse a stored monetary amount (a ``Decimal`` string).
 
     Raises:
         PersistenceError: If ``raw`` is not a finite decimal string.
     """
-    return Money(parse_decimal(raw, path))
+    return Money(parse_decimal(raw))
 
 
-def encode_value(value: object, path: str) -> dict[str, object]:
+def encode_value(value: object) -> dict[str, object]:
     """Encode one polymorphic value as a tagged JSON object.
 
     Raises:
         PersistenceError: If the value's type is outside the closed
             vocabulary, or a table key is not a string.
     """
-    kind, payload = _tagged(value, path)
+    kind, payload = _tagged(value)
     return {_KIND: kind, _VALUE: payload}
 
 
-def _tagged(value: object, path: str) -> tuple[str, object]:
+def _tagged(value: object) -> tuple[str, object]:
     """The tag and JSON payload for one value."""
     if isinstance(value, bool):
-        msg = f"{path}: booleans are not a persisted value type"
+        msg = "booleans are not a persisted value type"
         raise PersistenceError(msg)
-    scalar = _tagged_scalar(value, path)
+    scalar = _tagged_scalar(value)
     if scalar is not None:
         return scalar
     if isinstance(value, AnnuityType):
@@ -220,12 +222,12 @@ def _tagged(value: object, path: str) -> tuple[str, object]:
     if isinstance(value, AnnuityBasis):
         return (_KIND_ANNUITY_BASIS, ANNUITY_BASIS_TOKENS.token(value))
     if isinstance(value, Mapping):
-        return (_KIND_TABLE, _encode_table(value, path))
-    msg = f"{path}: cannot persist a value of type {type(value).__name__}"
+        return (_KIND_TABLE, _encode_table(value))
+    msg = f"cannot persist a value of type {type(value).__name__}"
     raise PersistenceError(msg)
 
 
-def _tagged_scalar(value: object, path: str) -> tuple[str, object] | None:
+def _tagged_scalar(value: object) -> tuple[str, object] | None:
     """The tag and payload for a scalar value; ``None`` for non-scalars.
 
     A non-finite ``Decimal`` is rejected here so the writer never
@@ -241,7 +243,7 @@ def _tagged_scalar(value: object, path: str) -> tuple[str, object] | None:
         return (_KIND_TEXT, value)
     if isinstance(value, Decimal):
         if not value.is_finite():
-            msg = f"{path}: decimal values must be finite, got {value!r}"
+            msg = f"decimal values must be finite, got {value!r}"
             raise PersistenceError(msg)
         return (_KIND_DECIMAL, str(value))
     if isinstance(value, Money):
@@ -249,26 +251,26 @@ def _tagged_scalar(value: object, path: str) -> tuple[str, object] | None:
     return None
 
 
-def _encode_table(value: Mapping[object, object], path: str) -> dict[str, object]:
+def _encode_table(value: Mapping[object, object]) -> dict[str, object]:
     """Encode a structured table value, entry by entry."""
     table: dict[str, object] = {}
     for key, entry in value.items():
         if not isinstance(key, str):
-            msg = f"{path}: table keys must be strings, got {type(key).__name__}"
+            msg = f"table keys must be strings, got {type(key).__name__}"
             raise PersistenceError(msg)
-        table[key] = encode_value(entry, f"{path}.{key}")
+        table[key] = encode_value(entry)
     return table
 
 
-def _decode_table(raw: object, path: str) -> dict[str, object]:
+def _decode_table(raw: object) -> dict[str, object]:
     """Decode a tagged table's entries back to a plain dictionary."""
     if not isinstance(raw, dict):
-        msg = f"{path}: expected a table object, got {type(raw).__name__}"
+        msg = f"expected a table object, got {type(raw).__name__}"
         raise PersistenceError(msg)
-    return {key: decode_value(entry, f"{path}.{key}") for key, entry in raw.items()}
+    return {key: decode_value(entry) for key, entry in raw.items()}
 
 
-_DECODERS: Mapping[str, Callable[[object, str], object]] = MappingProxyType(
+_DECODERS: Mapping[str, Callable[[object], object]] = MappingProxyType(
     {
         _KIND_INT: parse_int,
         _KIND_TEXT: parse_str,
@@ -281,18 +283,18 @@ _DECODERS: Mapping[str, Callable[[object, str], object]] = MappingProxyType(
 )
 
 
-def decode_value(raw: object, path: str) -> object:
+def decode_value(raw: object) -> object:
     """Decode one tagged JSON object back to its exact runtime type.
 
     Raises:
         PersistenceError: If the tag shape or kind is not recognised.
     """
     if not isinstance(raw, dict) or set(raw) != {_KIND, _VALUE}:
-        msg = f"{path}: expected a tagged value object with keys 'kind' and 'value'"
+        msg = "expected a tagged value object with keys 'kind' and 'value'"
         raise PersistenceError(msg)
     kind = raw[_KIND]
     decoder = _DECODERS.get(kind) if isinstance(kind, str) else None
     if decoder is None:
-        msg = f"{path}: unknown value kind {kind!r}"
+        msg = f"unknown value kind {kind!r}"
         raise PersistenceError(msg)
-    return decoder(raw[_VALUE], path)
+    return decoder(raw[_VALUE])

@@ -789,9 +789,9 @@ class TestRoundTrip:
     )
     def test_tagged_values_round_trip(self, value: object) -> None:
         """Property: the polymorphic value codec preserves exact types."""
-        encoded = encode_value(value, "value")
+        encoded = encode_value(value)
         text = json.dumps(encoded, ensure_ascii=False, indent=2, sort_keys=True)
-        assert decode_value(json.loads(text), "value") == value
+        assert decode_value(json.loads(text)) == value
 
 
 class TestDocumentModel:
@@ -1021,9 +1021,9 @@ class TestDecodeErrors:
     @pytest.mark.parametrize(
         ("mutate", "message"),
         [
-            (_drop_region, "missing required key 'region'"),
-            (_add_unknown_key, "unknown keys: surprise"),
-            (_unknown_person_key, "unknown keys: surprise"),
+            (_drop_region, "document.region: Field required"),
+            (_add_unknown_key, "document.surprise: Extra inputs are not permitted"),
+            (_unknown_person_key, "surprise: Extra inputs are not permitted"),
             (_bad_sex_token, "unknown token 'other'"),
             (_naive_recorded_on, "timezone-aware"),
             (_bad_date, "not an ISO-8601 date"),
@@ -1040,13 +1040,13 @@ class TestDecodeErrors:
             (_unknown_value_kind, "unknown value kind 'float'"),
             (_malformed_tagged_value, "tagged value object"),
             (_bool_as_int, "expected a whole number"),
-            (_bad_target_kind, "expected 'assumption' or 'decision'"),
+            (_bad_target_kind, "does not match any of the expected tags"),
             (_null_required_field, "expected a string"),
-            (_list_person, "expected an object"),
-            (_object_persons, "expected an array"),
+            (_list_person, "Input should be a valid dictionary"),
+            (_object_persons, "Input should be a valid tuple"),
             (_text_tagged_table, "expected a table object, got str"),
-            (_text_factor_table, "early_late_factors: expected an object, got str"),
-            (_array_stage_multipliers, "stage_multipliers: expected an object"),
+            (_text_factor_table, "early_late_factors: Input should be a valid dict"),
+            (_array_stage_multipliers, "stage_multipliers: Input should be a valid"),
             (_non_finite_decimal, "must be finite"),
             (_non_decimal_string, "not a decimal number"),
         ],
@@ -1169,7 +1169,7 @@ class TestEncodeErrors:
             target_retirement_age=decision(cast("int", smuggled)),
         )
         document = _document_with_household(Household(persons=(person,)))
-        with pytest.raises(PersistenceError, match="not persisted whole numbers"):
+        with pytest.raises(PersistenceError, match="expected a whole number, got bool"):
             dumps_plan(document)
 
     def test_rejects_an_empty_entity_id(self) -> None:
