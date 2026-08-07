@@ -175,17 +175,39 @@ class MonteCarloResult:
             ValueError: If ``percentile`` lies outside [0, 100], or
                 the outcomes carry differing period counts.
         """
-        _check_percentile(percentile)
+        [values] = self.balance_percentiles((percentile,))
+        return values
+
+    def balance_percentiles(
+        self, percentiles: Sequence[Decimal]
+    ) -> tuple[tuple[Money, ...], ...]:
+        """Several balance percentiles from one sort per period (9.24).
+
+        One :meth:`balance_percentile` row per requested percentile,
+        in request order. The fan chart reads nine percentiles at
+        once; interpolating them all from a single sorted balance
+        vector per period keeps the cost one sort rather than one per
+        percentile — the shells build their chart view models on the
+        GUI thread, where a 10,000-path result sorted nine times over
+        every period is a visible stall.
+
+        Raises:
+            ValueError: If any percentile lies outside [0, 100], or
+                the outcomes carry differing period counts.
+        """
+        for percentile in percentiles:
+            _check_percentile(percentile)
         lengths = {len(outcome.closing_balances) for outcome in self.outcomes}
         if len(lengths) != 1:
-            msg = "balance_percentile needs every path to cover the same periods"
+            msg = "balance_percentiles needs every path to cover the same periods"
             raise ValueError(msg)
-        return tuple(
-            _interpolated_percentile(
-                [outcome.closing_balances[index] for outcome in self.outcomes],
-                percentile,
-            )
+        by_period = [
+            sorted(outcome.closing_balances[index] for outcome in self.outcomes)
             for index in range(lengths.pop())
+        ]
+        return tuple(
+            tuple(_sorted_percentile(ordered, percentile) for ordered in by_period)
+            for percentile in percentiles
         )
 
 
@@ -462,7 +484,15 @@ def _interpolated_percentile(balances: Sequence[Money], percentile: Decimal) -> 
         ValueError: If ``percentile`` lies outside [0, 100].
     """
     _check_percentile(percentile)
-    ordered = sorted(balances)
+    return _sorted_percentile(sorted(balances), percentile)
+
+
+def _sorted_percentile(ordered: Sequence[Money], percentile: Decimal) -> Money:
+    """:func:`_interpolated_percentile` over an already-sorted vector.
+
+    Split out so a caller reading several percentiles of one
+    population (the fan chart's nine) sorts it once.
+    """
     rank = (Decimal(len(ordered)) - _ONE) * percentile / _HUNDRED
     lower = int(rank)
     fraction = rank - Decimal(lower)

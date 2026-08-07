@@ -1,11 +1,15 @@
 """The projection chart widgets (§4.7, roadmap 8.4, 9.13, 9.14).
 
-One sub-tab per chart, each a stacked bar chart bound to the app
-layer's :class:`~glidepath.app.ChartsViewModel`; the money-basis
-radio toggle and the run-mode control forward their selected option
-keys back, and the Monte Carlo run action forwards the raw seed and
-path-count text. Monte Carlo percentile bands draw as line series
-over the stacked bars. The "When can I retire?" card (9.14) forwards
+One sub-tab per chart, each bound to the app layer's
+:class:`~glidepath.app.ChartsViewModel`; the money-basis radio toggle
+and the run-mode control forward their selected option keys back, and
+the Monte Carlo run action forwards the raw seed and path-count text.
+Overlay bands (backtest trajectories, the fan's median) draw as line
+series over any stacked bars, and the Monte Carlo fan chart's nested
+inter-percentile fills draw as area series in the theme's single fan
+hue at stepped alphas (9.24). Bars, overlay lines, and fills all
+answer hover with app-layer tooltip copy over the exact ``Decimal``
+amounts (9.23). The "When can I retire?" card (9.14) forwards
 the raw replacement-rate and success-target text — plus the Monte
 Carlo panel's seed and path text, its basis under that mode — and
 renders the answer, detail, and message the view model carries. All
@@ -18,6 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCharts import (
+    QAreaSeries,
     QBarCategoryAxis,
     QBarSet,
     QChart,
@@ -43,10 +48,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from glidepath.app import bar_tooltip
+from glidepath.app import bar_tooltip, fill_tooltip
 from glidepath.gui.style import (
     CHART_AXIS_LINE,
     CHART_BAND_INKS,
+    CHART_FAN_ALPHAS,
+    CHART_FAN_FILL,
     CHART_GRID,
     CHART_LABEL_INK,
     CHART_SERIES,
@@ -59,6 +66,8 @@ if TYPE_CHECKING:
 
     from glidepath.app import (
         BacktestPanelViewModel,
+        ChartBand,
+        ChartFill,
         ChartSeries,
         ChartSpec,
         ChartsViewModel,
@@ -106,6 +115,54 @@ def _bar_hovered(
         QToolTip.showText(
             QCursor.pos(),
             bar_tooltip(categories[index], entry.label, entry.values[index]),
+        )
+    else:
+        QToolTip.hideText()
+
+
+def _snapped_index(x: float, count: int) -> int | None:
+    """The category index a hovered plot x falls on; ``None`` off-chart.
+
+    Line and area hovers deliver a plot-space point, not a category
+    index like the bar hovers — the nearest whole x is the period the
+    pointer is over (9.23).
+    """
+    index = round(x)
+    if 0 <= index < count:
+        return index
+    return None
+
+
+def _band_hovered(
+    band: ChartBand, categories: tuple[str, ...], point: QPointF, *, hovering: bool
+) -> None:
+    """Show or hide one overlay line's tooltip at the pointer (9.23).
+
+    The copy carries the app layer's exact ``Decimal`` amount for the
+    snapped period, never the float plot coordinate.
+    """
+    index = _snapped_index(point.x(), min(len(band.values), len(categories)))
+    if hovering and index is not None:
+        QToolTip.showText(
+            QCursor.pos(),
+            bar_tooltip(categories[index], band.label, band.values[index]),
+        )
+    else:
+        QToolTip.hideText()
+
+
+def _fill_hovered(
+    fill: ChartFill, categories: tuple[str, ...], point: QPointF, *, hovering: bool
+) -> None:
+    """Show or hide one fan fill's interval tooltip (9.23, 9.24)."""
+    count = min(len(fill.lower), len(fill.upper), len(categories))
+    index = _snapped_index(point.x(), count)
+    if hovering and index is not None:
+        QToolTip.showText(
+            QCursor.pos(),
+            fill_tooltip(
+                categories[index], fill.label, fill.lower[index], fill.upper[index]
+            ),
         )
     else:
         QToolTip.hideText()
@@ -159,10 +216,43 @@ def _apply_chart_chrome(
         axis.setTitleBrush(QBrush(QColor(CHART_LABEL_INK)))
 
 
+def _fill_area(
+    fill: ChartFill, slot: int, categories: tuple[str, ...], qchart: QChart
+) -> QAreaSeries:
+    """One fan fill as an area series with its hover binding (9.24).
+
+    The nested fills share the theme's single fan hue; ``slot`` picks
+    the alpha step, outermost first, and the overlap deepens the
+    stack toward the median. The chart parents the bounding line
+    series so they live exactly as long as the area drawn between
+    them. Fills are added outermost first, so where they overlap the
+    hover lands on the innermost — the narrowest interval containing
+    the pointer.
+    """
+    lower = QLineSeries(qchart)
+    upper = QLineSeries(qchart)
+    for index, value in enumerate(fill.lower):
+        lower.append(float(index), float(value))
+    for index, value in enumerate(fill.upper):
+        upper.append(float(index), float(value))
+    area = QAreaSeries(upper, lower)
+    area.setName(fill.label)
+    colour = QColor(CHART_FAN_FILL)
+    colour.setAlpha(CHART_FAN_ALPHAS[slot % len(CHART_FAN_ALPHAS)])
+    area.setBrush(QBrush(colour))
+    area.setPen(QPen(Qt.PenStyle.NoPen))
+    area.hovered.connect(
+        lambda point, status, fill=fill: _fill_hovered(
+            fill, categories, point, hovering=status
+        )
+    )
+    return area
+
+
 def chart_view(
     chart: ChartSpec, categories: tuple[str, ...], parent: QWidget | None = None
 ) -> QChartView:
-    """One stacked bar chart, percentile bands overlaid, bound to a spec."""
+    """One chart bound to a spec: bars, fan fills, and overlay lines."""
     series = QStackedBarSeries()
     series.setBarWidth(_BAR_WIDTH)
     for slot, entry in enumerate(chart.series):
@@ -184,6 +274,12 @@ def chart_view(
     qchart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
     series.attachAxis(y_axis)
 
+    for slot, fill in enumerate(chart.fills):
+        area = _fill_area(fill, slot, categories, qchart)
+        qchart.addSeries(area)
+        area.attachAxis(x_axis)
+        area.attachAxis(y_axis)
+
     for slot, band in enumerate(chart.bands):
         line = QLineSeries()
         line.setName(band.label)
@@ -192,14 +288,20 @@ def chart_view(
         )
         for index, value in enumerate(band.values):
             line.append(float(index), float(value))
+        line.hovered.connect(
+            lambda point, status, band=band: _band_hovered(
+                band, categories, point, hovering=status
+            )
+        )
         qchart.addSeries(line)
         line.attachAxis(x_axis)
         line.attachAxis(y_axis)
 
     _apply_chart_chrome(qchart, x_axis, y_axis)
-    # A single unbanded series needs no legend box — the sub-tab title
-    # already names it; identity-by-colour only starts at two entries.
-    if len(chart.series) + len(chart.bands) == 1:
+    # A single unbanded, unfilled series needs no legend box — the
+    # sub-tab title already names it; identity-by-colour only starts
+    # at two entries.
+    if len(chart.series) + len(chart.bands) + len(chart.fills) == 1:
         qchart.legend().setVisible(False)
     view = QChartView(qchart, parent)
     view.setRenderHint(QPainter.RenderHint.Antialiasing)

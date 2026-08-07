@@ -1819,7 +1819,8 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 - [x] 9.13 Monte Carlo in the GUI — *the Phase 7 core surfaced per §4.7:
   run-mode control (deterministic | Monte Carlo with paths + seed),
   success-metrics readout (success rate, probability of ruin, ending-pot
-  percentiles), percentile bands on the balances chart in either basis;
+  percentiles), percentile bands on the balances chart in either basis
+  (re-homed by 9.24 — the bands now draw as the fan chart's own tab);
   same seed + inputs reproduce identical results (§4.6). The run is an
   explicit action (default 100 paths ≈ 4 s at the §4.6 measurements;
   path count capped at 10,000) and executes on a worker thread — the
@@ -2020,6 +2021,38 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   with a curated `CHANGELOG.md`, `make bump` for the version, and a
   validating `release.yml`; tag-only for now (no built artifacts) —
   decision record in §4.10.*
+- [x] 9.23 Overlay-line tooltips (#145) — *hovering any chart overlay
+  line — a backtest trajectory or the fan chart's median (9.24) —
+  pops the same app-layer tooltip copy the bar segments carry (§4.7):
+  the line's label with the period category and the exact `Decimal`
+  amount, never the float plot coordinate. Line hovers arrive as
+  plot-space points rather than category indices, so the shell snaps
+  to the nearest whole x; a point off the categories hides rather
+  than misreports, and leaving the line dismisses the tooltip. The
+  fan chart's interval fills answer hover with their range copy —
+  label, category, and the low-to-high amounts.*
+- [x] 9.24 Monte Carlo fan chart tab (#146) — *the Monte Carlo
+  presentation moves off the balances chart onto its own "Monte
+  Carlo" sub-tab, so neither surface crowds the other (the balances
+  chart was stacking per-wrapper bars under three percentile lines,
+  plus trajectories when a backtest was held). The tab draws a
+  probability fan: nested inter-percentile fills — 5th-95th,
+  15th-85th, 25th-75th, 35th-65th — in the theme's single brand-green
+  hue at stepped alphas (depth by lightness alone keeps the fan
+  colour-vision-safe), the overlap deepening toward a median line in
+  the darkest band ink, so central probability mass reads as colour
+  depth. Each fill is a genuine interval statement ("90% of paths
+  closed inside this region"), not a cosmetic gradient.
+  `MonteCarloResult.balance_percentile` already interpolates any
+  percentile, so the core is untouched; the fills deflate to today's
+  money by the deterministic report's own deflators and follow the
+  9.13 alignment guard — a held result whose period count differs
+  from the projection's draws no fan tab rather than a fan against
+  the wrong periods. The balances chart keeps the backtest
+  trajectories (each a genuine historical outcome, suited to the
+  deterministic context) and drops the Monte Carlo overlays; the
+  ending-pot 10/50/90 metrics stay on the card, and the fan tab joins
+  the 9.19 PDF report like every chart.*
 
 ## 9. Open questions
 

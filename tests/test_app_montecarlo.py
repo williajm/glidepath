@@ -2,9 +2,10 @@
 
 The acceptance criterion: the shell can run the plan in Monte Carlo
 mode with a chosen seed and path count, shows success metrics, and
-charts percentile bands; same seed + inputs reproduce identical
-results (§4.6). The tests keep runs fast by shrinking the horizon —
-a just-retired saver with the planning age overridden down to 65.
+draws the fan chart on its own tab (roadmap 9.24); same seed + inputs
+reproduce identical results (§4.6). The tests keep runs fast by
+shrinking the horizon — a just-retired saver with the planning age
+overridden down to 65.
 """
 
 import os
@@ -15,6 +16,7 @@ from decimal import Decimal
 import pytest
 
 from glidepath.app import (
+    MONTE_CARLO_CHART_TITLE,
     MONTE_CARLO_NO_PLAN_MESSAGE,
     MONTE_CARLO_PATHS_MESSAGE,
     MONTE_CARLO_RUNNING_MESSAGE,
@@ -246,7 +248,7 @@ class TestStateWithMonteCarlo:
         assert state.monte_carlo_error is None
 
     def test_the_run_re_anchors_the_base_projection(self, projected: PlanState) -> None:
-        """The bands and the chart they overlay share one anchor date.
+        """The fan and the projection it presents share one anchor date.
 
         In a session left open across a date boundary the held
         deterministic projection is anchored on the earlier day; the
@@ -263,7 +265,7 @@ class TestStateWithMonteCarlo:
         assert state.result == re_anchored.result
         assert state.result != projected.result
         view_model = build_charts_view_model(state, mode=RunMode.MONTE_CARLO)
-        assert len(view_model.charts[0].bands) == 3
+        assert view_model.charts[-1].title == MONTE_CARLO_CHART_TITLE
 
 
 class TestMonteCarloPanel:
@@ -346,50 +348,80 @@ class TestMonteCarloPanel:
         assert view_model.monte_carlo.message == NO_MONTE_CARLO_MESSAGE
 
 
-class TestBalanceBands:
-    """The percentile bands over the balances chart."""
+class TestFanChart:
+    """The Monte Carlo fan chart on its own tab (roadmap 9.24)."""
 
-    def test_monte_carlo_mode_draws_three_bands(
+    def test_monte_carlo_mode_adds_the_fan_chart(
         self, mc_view_model: ChartsViewModel
     ) -> None:
-        """Acceptance criterion: the shell charts percentile bands."""
-        bands = mc_view_model.charts[0].bands
-        assert [band.label for band in bands] == [
-            "10th percentile",
-            "Median",
-            "90th percentile",
+        """Acceptance criterion: a held run adds the fan as a chart.
+
+        Nested inter-percentile fills, outermost first, with the
+        median as the single overlay line.
+        """
+        fan = mc_view_model.charts[-1]
+        assert fan.title == MONTE_CARLO_CHART_TITLE
+        assert len(mc_view_model.charts) == 4
+        assert [fill.label for fill in fan.fills] == [
+            "5th-95th percentile",
+            "15th-85th percentile",
+            "25th-75th percentile",
+            "35th-65th percentile",
         ]
-        for band in bands:
-            assert len(band.values) == len(mc_view_model.categories)
-            assert all(value >= 0 for value in band.values)
+        assert [band.label for band in fan.bands] == ["Median"]
+        assert fan.series == ()
 
-    def test_only_the_balances_chart_carries_bands(
+    def test_the_fills_cover_every_period_and_stay_ordered(
         self, mc_view_model: ChartsViewModel
     ) -> None:
-        """Income and tax chart nothing but their own stacks."""
-        assert mc_view_model.charts[1].bands == ()
-        assert mc_view_model.charts[2].bands == ()
+        """Each fill spans the categories with its upper above its lower."""
+        fan = mc_view_model.charts[-1]
+        for fill in fan.fills:
+            assert len(fill.lower) == len(mc_view_model.categories)
+            assert len(fill.upper) == len(mc_view_model.categories)
+            for low, high in zip(fill.lower, fill.upper, strict=True):
+                assert low >= 0
+                assert high >= low
 
-    def test_deterministic_mode_draws_no_bands(self, mc_state: PlanState) -> None:
-        """Bands appear only under the Monte Carlo presentation."""
+    def test_the_fills_nest_outermost_first(
+        self, mc_view_model: ChartsViewModel
+    ) -> None:
+        """Every inner fill lies inside the fill before it."""
+        fan = mc_view_model.charts[-1]
+        for outer, inner in zip(fan.fills, fan.fills[1:], strict=False):
+            for index in range(len(inner.lower)):
+                assert outer.lower[index] <= inner.lower[index]
+                assert inner.upper[index] <= outer.upper[index]
+
+    def test_the_balances_chart_carries_no_monte_carlo_overlays(
+        self, mc_view_model: ChartsViewModel
+    ) -> None:
+        """The 9.13 percentile lines moved off the balances chart (9.24)."""
+        assert mc_view_model.charts[0].bands == ()
+        assert all(chart.fills == () for chart in mc_view_model.charts[:3])
+
+    def test_deterministic_mode_draws_no_fan(self, mc_state: PlanState) -> None:
+        """The fan appears only under the Monte Carlo presentation."""
         view_model = build_charts_view_model(mc_state)
-        assert all(chart.bands == () for chart in view_model.charts)
+        assert len(view_model.charts) == 3
+        assert all(chart.fills == () for chart in view_model.charts)
 
-    def test_the_axis_covers_the_bands(self, mc_view_model: ChartsViewModel) -> None:
-        """A band above the deterministic stack still fits the chart."""
-        chart = mc_view_model.charts[0]
-        peak = max(max(band.values) for band in chart.bands)
-        assert chart.y_axis_max >= peak
+    def test_the_axis_covers_the_fan(self, mc_view_model: ChartsViewModel) -> None:
+        """The outermost fill's peak still fits the chart."""
+        fan = mc_view_model.charts[-1]
+        peak = max(max(fill.upper) for fill in fan.fills)
+        assert fan.y_axis_max >= peak
 
-    def test_bands_present_in_the_nominal_basis_too(self, mc_state: PlanState) -> None:
-        """Acceptance criterion: bands in either money basis."""
+    def test_fan_present_in_the_nominal_basis_too(self, mc_state: PlanState) -> None:
+        """Acceptance criterion: the fan in either money basis."""
         view_model = build_charts_view_model(
             mc_state, basis=ReportBasis.NOMINAL, mode=RunMode.MONTE_CARLO
         )
-        bands = view_model.charts[0].bands
-        assert len(bands) == 3
+        fan = view_model.charts[-1]
+        assert fan.title == MONTE_CARLO_CHART_TITLE
+        assert len(fan.fills) == 4
 
-    def test_zero_volatility_collapses_the_bands_together(self) -> None:
+    def test_zero_volatility_collapses_the_fan_together(self) -> None:
         """With no volatility every path repeats the deterministic run."""
         state = short_horizon_state()
         for key in ("volatility.equity", "volatility.bonds", "volatility.cash"):
@@ -401,14 +433,16 @@ class TestBalanceBands:
         state = state_with_household(state, household(), today=TODAY)
         state = state_with_monte_carlo(state, "7", "3", today=TODAY)
         view_model = build_charts_view_model(state, mode=RunMode.MONTE_CARLO)
-        low, median, high = view_model.charts[0].bands
-        assert low.values == median.values
-        assert high.values == median.values
+        fan = view_model.charts[-1]
+        [median] = fan.bands
+        for fill in fan.fills:
+            assert fill.lower == median.values
+            assert fill.upper == median.values
 
-    def test_a_result_over_different_periods_draws_no_bands(
+    def test_a_result_over_different_periods_draws_no_fan(
         self, mc_state: PlanState
     ) -> None:
-        """A held result must align with the projection it overlays."""
+        """A held result must align with the projection it presents."""
         assert mc_state.monte_carlo is not None
         result = mc_state.monte_carlo
         truncated = tuple(
@@ -422,7 +456,8 @@ class TestBalanceBands:
         mismatched = replace(result, outcomes=truncated)
         state = replace(mc_state, monte_carlo=mismatched)
         view_model = build_charts_view_model(state, mode=RunMode.MONTE_CARLO)
-        assert view_model.charts[0].bands == ()
+        assert len(view_model.charts) == 3
+        assert all(chart.fills == () for chart in view_model.charts)
 
 
 class TestMonteCarloRunningStatus:

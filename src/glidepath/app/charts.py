@@ -2,11 +2,12 @@
 
 Chart series for the three projection surfaces — wrapper balances,
 income composition, and tax over the horizon — presented through the
-core reporting layer (roadmap 4.4) in either money basis. **Real
-(today's money) is the default presentation**; the nominal toggle
-re-presents the same ledger, never a second inflation source (planning
-§5.2). Amounts stay ``Decimal`` here: converting them to plot
-coordinates is shell mechanics (§4.7).
+core reporting layer (roadmap 4.4) in either money basis, plus the
+Monte Carlo fan chart a held run adds under the Monte Carlo mode
+(roadmap 9.24). **Real (today's money) is the default presentation**;
+the nominal toggle re-presents the same ledger, never a second
+inflation source (planning §5.2). Amounts stay ``Decimal`` here:
+converting them to plot coordinates is shell mechanics (§4.7).
 """
 
 from collections import Counter
@@ -21,8 +22,9 @@ from glidepath.app.backtest import (
 )
 from glidepath.app.display import format_money, format_share, format_wrapper_kind
 from glidepath.app.montecarlo import (
-    BAND_SPECS,
     DEFAULT_RUN_MODE,
+    FAN_MEDIAN_LABEL,
+    FAN_SPECS,
     MonteCarloPanelViewModel,
     build_monte_carlo_panel,
 )
@@ -57,6 +59,7 @@ if TYPE_CHECKING:
 
 _ZERO = Money(Decimal(0))
 _MIN_AXIS_MAX = Decimal(1)
+_MEDIAN_PERCENTILE = Decimal(50)
 
 DEFAULT_CHART_BASIS: Final = ReportBasis.REAL
 
@@ -75,6 +78,8 @@ INCOME_CHART_TITLE: Final = "Income composition"
 TAX_CHART_TITLE: Final = "Tax"
 
 TAX_SERIES_LABEL: Final = "Tax due"
+
+MONTE_CARLO_CHART_TITLE: Final = "Monte Carlo"
 
 _BASIS_BY_KEY: Final[Mapping[str, ReportBasis]] = {
     "real": ReportBasis.REAL,
@@ -130,20 +135,37 @@ class ChartSeries:
 
 @dataclass(frozen=True)
 class ChartBand:
-    """One percentile line over the categories (roadmap 9.13)."""
+    """One overlay line over the categories (roadmap 9.13, 9.18)."""
 
     label: str
     values: tuple[Decimal, ...]
 
 
 @dataclass(frozen=True)
+class ChartFill:
+    """One filled band between two per-category value runs (9.24).
+
+    The Monte Carlo fan's building block: ``lower`` and ``upper``
+    bound one inter-percentile region, one value per period category
+    each. Shells fill between them; the tooltip copy comes from
+    :func:`fill_tooltip` over these exact ``Decimal`` amounts.
+    """
+
+    label: str
+    lower: tuple[Decimal, ...]
+    upper: tuple[Decimal, ...]
+
+
+@dataclass(frozen=True)
 class ChartSpec:
     """One chart, ready for a shell to bind to a plotting widget.
 
-    ``bands`` are the Monte Carlo percentile lines drawn over the
-    stacked bars (roadmap 9.13) — empty outside a Monte Carlo
-    presentation. ``y_axis_max`` is the largest stacked total or band
-    value across the periods (never below 1, so an all-zero chart
+    ``bands`` are overlay lines over any stacked bars — backtest
+    trajectories on the balances chart (roadmap 9.18), the median on
+    the Monte Carlo fan chart (9.24). ``fills`` are the fan chart's
+    nested inter-percentile regions, outermost first — empty on every
+    other chart. ``y_axis_max`` is the largest stacked total, band, or
+    fill value across the periods (never below 1, so an all-zero chart
     still renders a visible axis); every value here is non-negative,
     so the y range is always ``[0, y_axis_max]``.
     """
@@ -153,6 +175,7 @@ class ChartSpec:
     y_axis_max: Decimal
     series: tuple[ChartSeries, ...]
     bands: tuple[ChartBand, ...] = ()
+    fills: tuple[ChartFill, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -213,13 +236,27 @@ def basis_suffix(basis: ReportBasis) -> str:
 
 
 def bar_tooltip(category: str, series_label: str, value: Decimal) -> str:
-    """The hover copy for one bar segment (planning §4.7).
+    """The hover copy for one bar segment or overlay-line point (§4.7).
 
     Shells bind this to their plotting widget's hover affordance, so
-    the copy — series, period, and the amount in pounds and pence —
-    stays app-layer like every other label on the chart.
+    the copy — series or line label, period, and the amount in pounds
+    and pence — stays app-layer like every other label on the chart
+    (roadmap 9.23 extends it from the bar segments to the overlay
+    lines).
     """
     return f"{series_label}\n{category}: {format_money(Money(value))}"
+
+
+def fill_tooltip(category: str, label: str, lower: Decimal, upper: Decimal) -> str:
+    """The hover copy for one fan fill at one period (9.23, 9.24).
+
+    The fill's interval statement made concrete for the hovered
+    period: its label with the low and high amounts, from the same
+    exact ``Decimal`` values the fill draws.
+    """
+    low = format_money(Money(lower))
+    high = format_money(Money(upper))
+    return f"{label}\n{category}: {low} to {high}"
 
 
 def build_charts_view_model(
@@ -234,8 +271,8 @@ def build_charts_view_model(
     Real (today's money) is the default; the deflators come from the
     run's own CPI path via the core reporting layer (planning §5.2).
     ``mode`` is the screen's run-mode selection (roadmap 9.13): under
-    ``MONTE_CARLO`` a held Monte Carlo run adds its percentile bands
-    to the balances chart and its metrics to the panel.
+    ``MONTE_CARLO`` a held Monte Carlo run adds its fan chart as a
+    fourth chart (9.24) and its metrics to the panel.
     ``backtest_year`` is the backtest card's starting-year picker as
     raw text (presentation state the shell holds, like the basis and
     mode): with a held backtest it adds that starting year's actual
@@ -273,8 +310,17 @@ def build_charts_view_model(
             ),
         )
     grouped = _rows_by_period(build_report(state.result, basis))
-    bands = _chart_bands(state, mode, grouped, backtest_year)
+    bands = _chart_bands(state, grouped, backtest_year)
     final_rows = next(reversed(grouped.values()))
+    charts = [
+        _balances_chart(grouped, suffix, bands),
+        _income_chart(grouped, suffix),
+        _tax_chart(grouped, suffix),
+    ]
+    if mode is RunMode.MONTE_CARLO and state.monte_carlo is not None:
+        fan = _fan_chart(state.monte_carlo, grouped, suffix)
+        if fan is not None:
+            charts.append(fan)
     return ChartsViewModel(
         basis_heading=BASIS_HEADING,
         basis_options=options,
@@ -282,11 +328,7 @@ def build_charts_view_model(
         categories=tuple(
             _category_label(period, rows) for period, rows in grouped.items()
         ),
-        charts=(
-            _balances_chart(grouped, suffix, bands),
-            _income_chart(grouped, suffix),
-            _tax_chart(grouped, suffix),
-        ),
+        charts=tuple(charts),
         message="",
         allocation_note=_allocation_note(state, grouped),
         monte_carlo=build_monte_carlo_panel(
@@ -307,21 +349,16 @@ def build_charts_view_model(
 
 def _chart_bands(
     state: PlanState,
-    mode: RunMode,
     grouped: dict[Period, list[PeriodReportRow]],
     backtest_year: str,
 ) -> tuple[ChartBand, ...]:
     """The overlay lines the balances chart draws, if any.
 
-    A held Monte Carlo run supplies its percentile bands under the
-    Monte Carlo mode (roadmap 9.13); a held backtest supplies actual
-    window trajectories in either mode (roadmap 9.18) — the two can
-    never be held together, since each slow-run transition re-anchors
-    through :func:`~glidepath.app.plan.replanned_state` and so drops
-    the other's result.
+    A held backtest supplies actual window trajectories in either run
+    mode (roadmap 9.18). A held Monte Carlo run no longer overlays
+    the balances chart — its percentiles moved to the fan chart's own
+    tab (9.24) so neither surface crowds the other.
     """
-    if mode is RunMode.MONTE_CARLO and state.monte_carlo is not None:
-        return _balance_bands(state.monte_carlo, grouped)
     if state.backtest is not None:
         return _backtest_trajectories(state.backtest, grouped, backtest_year)
     return ()
@@ -450,19 +487,22 @@ def _chart(
     y_axis_label: str,
     series: tuple[ChartSeries, ...],
     bands: tuple[ChartBand, ...] = (),
+    fills: tuple[ChartFill, ...] = (),
 ) -> ChartSpec:
-    """A chart spec with its y-axis maximum covering stack and bands."""
+    """A chart spec with its y axis covering stack, bands, and fills."""
     stacked: dict[int, Decimal] = {}
     for entry in series:
         for index, value in enumerate(entry.values):
             stacked[index] = stacked.get(index, Decimal(0)) + value
     band_values = [value for band in bands for value in band.values]
+    fill_values = [value for fill in fills for value in fill.upper]
     return ChartSpec(
         title=title,
         y_axis_label=y_axis_label,
-        y_axis_max=max([*stacked.values(), *band_values, _MIN_AXIS_MAX]),
+        y_axis_max=max([*stacked.values(), *band_values, *fill_values, _MIN_AXIS_MAX]),
         series=series,
         bands=bands,
+        fills=fills,
     )
 
 
@@ -491,32 +531,70 @@ def wrapper_display_labels(rows: Iterable[PeriodReportRow]) -> dict[EntityId, st
     return labels
 
 
-def _balance_bands(
-    result: MonteCarloResult, grouped: dict[Period, list[PeriodReportRow]]
-) -> tuple[ChartBand, ...]:
-    """The 10/50/90 percentile bands over the balances chart (9.13).
+def _deflated(
+    values: tuple[Money, ...], deflators: tuple[Decimal, ...]
+) -> tuple[Decimal, ...]:
+    """Nominal per-period amounts presented by the report's deflators.
 
-    The Monte Carlo balances are nominal; CPI is deterministic across
-    paths (planning §5.2), so each period's band value deflates by the
-    same balance deflator the deterministic report rows carry — 1
-    under the nominal basis. A held result whose period count differs
-    from the projection's (the runs straddled a calendar day) draws no
-    bands rather than bands against the wrong periods.
+    CPI is deterministic across Monte Carlo paths and backtest windows
+    alike (planning §5.2), so each period's nominal amount deflates by
+    the same balance deflator the deterministic report rows carry — 1
+    under the nominal basis.
+    """
+    return tuple(
+        Money(value.amount / deflator).quantized().amount
+        for value, deflator in zip(values, deflators, strict=True)
+    )
+
+
+def _fan_chart(
+    result: MonteCarloResult,
+    grouped: dict[Period, list[PeriodReportRow]],
+    suffix: str,
+) -> ChartSpec | None:
+    """The Monte Carlo fan chart, or ``None`` if it cannot align (9.24).
+
+    Nested inter-percentile fills (outermost first, per ``FAN_SPECS``)
+    with the median as the single overlay line — each fill a genuine
+    interval statement over the paths' per-period closing balances,
+    deflated like every Monte Carlo amount (:func:`_deflated`). All
+    nine percentiles come from one ``balance_percentiles`` batch — the
+    view model is built on the GUI thread, and per-percentile calls
+    would re-sort a 10,000-path result nine times over. A held result
+    whose period count differs from the projection's (the runs
+    straddled a calendar day) draws no fan rather than a fan against
+    the wrong periods.
     """
     deflators = tuple(rows[0].balance_deflator for rows in grouped.values())
-    if len(result.balance_percentile(BAND_SPECS[0].percentile)) != len(deflators):
-        return ()
-    return tuple(
-        ChartBand(
-            label=spec.band_label,
-            values=tuple(
-                Money(value.amount / deflator).quantized().amount
-                for value, deflator in zip(
-                    result.balance_percentile(spec.percentile), deflators, strict=True
-                )
-            ),
+    count = len(FAN_SPECS)
+    requested = (
+        *(spec.lower for spec in FAN_SPECS),
+        *(spec.upper for spec in FAN_SPECS),
+        _MEDIAN_PERCENTILE,
+    )
+    percentiles = result.balance_percentiles(requested)
+    if len(percentiles[0]) != len(deflators):
+        return None
+    fills = tuple(
+        ChartFill(
+            label=spec.label,
+            lower=_deflated(lower, deflators),
+            upper=_deflated(upper, deflators),
         )
-        for spec in BAND_SPECS
+        for spec, lower, upper in zip(
+            FAN_SPECS, percentiles[:count], percentiles[count : 2 * count], strict=True
+        )
+    )
+    median = ChartBand(
+        label=FAN_MEDIAN_LABEL,
+        values=_deflated(percentiles[-1], deflators),
+    )
+    return _chart(
+        MONTE_CARLO_CHART_TITLE,
+        f"Closing balance, £ ({suffix})",
+        (),
+        bands=(median,),
+        fills=fills,
     )
 
 
@@ -531,10 +609,7 @@ def _trajectory_band(
     """
     return ChartBand(
         label=f"{label_prefix} · {outcome.start_year}",
-        values=tuple(
-            Money(value.amount / deflator).quantized().amount
-            for value, deflator in zip(outcome.closing_balances, deflators, strict=True)
-        ),
+        values=_deflated(outcome.closing_balances, deflators),
     )
 
 

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from glidepath.app import (
     DEFAULT_COMPARISON_METRIC_KEY,
     DISCLAIMER_BODY,
+    MONTE_CARLO_CHART_TITLE,
     NOTHING_TO_EXPORT_MESSAGE,
     PlanState,
     ReportRequest,
@@ -361,13 +362,15 @@ class TestPlanReport:
         assert "Retire later" in compared.html
 
     def test_monte_carlo_metrics_ride_along_under_that_mode(self) -> None:
-        """A held Monte Carlo run adds its metrics and bands (9.13)."""
+        """A held run adds its metrics and fan chart (9.13, 9.24)."""
         state = state_with_monte_carlo(projected_state(), "1", "3", today=TODAY)
         assert state.monte_carlo is not None
         report = build_plan_report(state, _request(mode=RunMode.MONTE_CARLO))
         assert report is not None
         assert "Success rate" in report.html
-        assert report.charts[0].bands
+        assert report.charts[-1].title == MONTE_CARLO_CHART_TITLE
+        assert report.charts[-1].fills
+        assert f"<h3>{MONTE_CARLO_CHART_TITLE}</h3>" in report.html
         # The seed and path count attribute the metrics to their run (§4.6).
         assert "<td>Seed</td><td>1</td>" in report.html
         assert "<td>Paths</td><td>3</td>" in report.html
@@ -453,4 +456,5 @@ class TestPlanReport:
         report = build_plan_report(state, _request())
         assert report is not None
         assert "Success rate" not in report.html
-        assert not report.charts[0].bands
+        assert all(chart.title != MONTE_CARLO_CHART_TITLE for chart in report.charts)
+        assert all(chart.fills == () for chart in report.charts)
