@@ -1,15 +1,19 @@
 """Strict TOML loader for the UK region data files (planning §5.3).
 
-``importlib.resources`` + stdlib ``tomllib`` only. Loading is strict:
+``importlib.resources`` + stdlib ``tomllib`` for the parsing; pydantic
+wire models for the validation. Loading is strict:
 
 - money and rates are TOML **strings** parsed to ``Decimal`` — a bare
   float (or int) in a money position is a load error;
 - every file declares ``schema_version`` and carries a mandatory
   ``[meta]`` table with ``verified_on`` + ``sources``;
-- unknown keys anywhere are load errors.
+- unknown keys anywhere are load errors (``extra="forbid"``).
 
-Failures raise :class:`~glidepath.regions.uk.schema.DataFileError` with a
-``file.section.key`` context string.
+Each wire model builds its schema dataclass inside an after-validator,
+so the §5.3 policy invariants (band ordering, SPA tiling, NMPA
+baseline) surface as validation errors carrying the precise location.
+Failures raise :class:`~glidepath.regions.uk.schema.DataFileError`
+with a ``file.section.key`` context string.
 """
 
 import hashlib
@@ -18,7 +22,17 @@ import tomllib
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from importlib import resources
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Annotated, NoReturn, Self, cast
+
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    PlainValidator,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 
 from glidepath.core import AssumptionKey, HistoricalSeries, HistoricalYear, Money, Rate
 from glidepath.regions.uk.schema import (
@@ -26,6 +40,7 @@ from glidepath.regions.uk.schema import (
     AgeRulesFile,
     AssumptionDefault,
     AssumptionsFile,
+    AssumptionValue,
     DataFileError,
     DividendRate,
     DividendRules,
@@ -51,8 +66,6 @@ from glidepath.regions.uk.schema import (
 if TYPE_CHECKING:
     from importlib.resources.abc import Traversable
 
-    from glidepath.regions.uk.schema import AssumptionValue
-
 AGE_RULES_FILENAME = "age_rules.toml"
 ASSUMPTIONS_FILENAME = "assumptions_default.toml"
 RETURNS_HISTORY_FILENAME = "returns_history.toml"
@@ -68,564 +81,820 @@ def _fail(context: str, problem: str) -> NoReturn:
     raise DataFileError(msg)
 
 
-class _Table:
-    """Strict view over one TOML table: every key must be consumed."""
+def _error_message(error: ValidationError, context: str) -> str:
+    """One context-prefixed message from a validation failure.
 
-    __slots__ = ("_context", "_entries")
-
-    def __init__(self, raw: object, context: str) -> None:
-        """Wrap ``raw`` if it is a TOML table, else fail."""
-        if not isinstance(raw, dict):
-            _fail(context, f"expected a TOML table, got {type(raw).__name__}")
-        self._entries: dict[str, object] = dict(raw)
-        self._context = context
-
-    def take(self, key: str) -> object:
-        """Remove and return the required ``key``."""
-        if key not in self._entries:
-            _fail(self._context, f"missing required key {key!r}")
-        return self._entries.pop(key)
-
-    def take_optional(self, key: str) -> object | None:
-        """Remove and return ``key``, or ``None`` if absent."""
-        return self._entries.pop(key, None)
-
-    def finish(self) -> None:
-        """Fail if any key was never consumed (unknown keys)."""
-        if self._entries:
-            unknown = ", ".join(sorted(self._entries))
-            _fail(self._context, f"unknown keys: {unknown}")
+    The first error's location renders as the ``file.section.key``
+    context string of planning §5.3; pydantic's ``Value error, ``
+    prefix is stripped so the loader's messages read unchanged.
+    """
+    details = error.errors()
+    first = details[0]
+    path = context + "".join(
+        f"[{part}]" if isinstance(part, int) else f".{part}" for part in first["loc"]
+    )
+    message = first["msg"].removeprefix("Value error, ")
+    suffix = f" (and {len(details) - 1} more)" if len(details) > 1 else ""
+    return f"{path}: {message}{suffix}"
 
 
-def _decimal_string(raw: object, context: str) -> Decimal:
+def _decimal_string(raw: object) -> Decimal:
     """Parse a money/rate figure, which must be a TOML string (§5.3)."""
+    if isinstance(raw, Decimal):
+        return raw
     if isinstance(raw, float):
-        _fail(context, 'float-typed number; write money and rates as strings ("0.25")')
+        msg = 'float-typed number; write money and rates as strings ("0.25")'
+        raise DataFileError(msg)
     if not isinstance(raw, str):
-        type_name = type(raw).__name__
-        _fail(context, f"money and rates must be TOML strings, got {type_name}")
+        msg = f"money and rates must be TOML strings, got {type(raw).__name__}"
+        raise DataFileError(msg)
     try:
         value = Decimal(raw)
     except InvalidOperation:
-        _fail(context, f"not a valid decimal number: {raw!r}")
+        msg = f"not a valid decimal number: {raw!r}"
+        raise DataFileError(msg) from None
     if not value.is_finite():
-        _fail(context, "number must be finite")
+        msg = "number must be finite"
+        raise DataFileError(msg)
     return value
 
 
-def _money(raw: object, context: str) -> Money:
+def _money_amount(raw: object) -> Money:
     """Parse a non-negative monetary amount."""
-    value = _decimal_string(raw, context)
+    if isinstance(raw, Money):
+        return raw
+    value = _decimal_string(raw)
     if value < 0:
-        _fail(context, "money amounts must be non-negative")
+        msg = "money amounts must be non-negative"
+        raise DataFileError(msg)
     return Money(value)
 
 
-def _fraction(raw: object, context: str) -> Rate:
+def _fraction_rate(raw: object) -> Rate:
     """Parse a rate that must lie in [0, 1]."""
-    value = _decimal_string(raw, context)
+    if isinstance(raw, Rate):
+        return raw
+    value = _decimal_string(raw)
     if not Decimal(0) <= value <= Decimal(1):
-        _fail(context, "rates must be fractions between 0 and 1")
+        msg = "rates must be fractions between 0 and 1"
+        raise DataFileError(msg)
     return Rate(value)
 
 
-def _integer(raw: object, context: str, *, minimum: int) -> int:
+def _signed_rate(raw: object) -> Decimal:
+    """Parse an annual rate that may be negative but must exceed -100%.
+
+    Historical returns and inflation are frequently negative and can
+    exceed +100%, so neither the fraction nor the money rule fits;
+    -100% or worse can never be recomposed into a real rate
+    (:mod:`glidepath.core.backtest`).
+    """
+    value = _decimal_string(raw)
+    if value <= Decimal(-1):
+        msg = "rates must be greater than -1 (-100%)"
+        raise DataFileError(msg)
+    return value
+
+
+def _integer(raw: object, *, minimum: int) -> int:
     """Parse an integer of at least ``minimum`` (bools rejected)."""
     if isinstance(raw, bool) or not isinstance(raw, int):
-        _fail(context, f"expected an integer, got {type(raw).__name__}")
+        msg = f"expected an integer, got {type(raw).__name__}"
+        raise DataFileError(msg)
     if raw < minimum:
-        _fail(context, f"must be at least {minimum}")
+        msg = f"must be at least {minimum}"
+        raise DataFileError(msg)
     return raw
 
 
-def _plain_date(raw: object, context: str) -> date:
-    """Parse a TOML local date (a datetime with a time part is an error)."""
-    if isinstance(raw, datetime):
-        _fail(context, "expected a calendar date without a time part")
-    if not isinstance(raw, date):
-        _fail(context, f"expected a TOML date, got {type(raw).__name__}")
-    return raw
+def _positive_int(raw: object) -> int:
+    """Parse an integer of at least one."""
+    return _integer(raw, minimum=1)
 
 
-def _optional_date(raw: object | None, context: str) -> date | None:
-    """Parse an optional TOML local date."""
-    return None if raw is None else _plain_date(raw, context)
+def _non_negative_int(raw: object) -> int:
+    """Parse an integer of at least zero."""
+    return _integer(raw, minimum=0)
 
 
-def _string(raw: object, context: str) -> str:
-    """Parse a non-empty string."""
-    if not isinstance(raw, str):
-        _fail(context, f"expected a string, got {type(raw).__name__}")
-    if not raw:
-        _fail(context, _MUST_NOT_BE_EMPTY)
-    return raw
-
-
-def _array(raw: object, context: str) -> list[object]:
-    """Parse a non-empty TOML array."""
-    if not isinstance(raw, list):
-        _fail(context, f"expected an array, got {type(raw).__name__}")
-    if not raw:
-        _fail(context, _MUST_NOT_BE_EMPTY)
-    return raw
-
-
-def _sources(raw: object, context: str) -> tuple[str, ...]:
-    """Parse the mandatory list of https source URLs."""
-    entries = _array(raw, context)
-    result: list[str] = []
-    for index, entry in enumerate(entries):
-        url = _string(entry, f"{context}[{index}]")
-        if not url.startswith("https://"):
-            _fail(f"{context}[{index}]", "sources must be https:// URLs")
-        result.append(url)
-    return tuple(result)
-
-
-def _load_document(text: str, context: str) -> _Table:
-    """Parse ``text`` as TOML into a strict root table."""
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as error:
-        _fail(context, f"invalid TOML: {error}")
-    return _Table(document, context)
-
-
-def _take_schema_version(root: _Table, context: str) -> int:
-    """Consume ``schema_version``; unsupported versions fail before parsing."""
-    version = _integer(
-        root.take("schema_version"), f"{context}.schema_version", minimum=1
-    )
+def _schema_version_value(raw: object) -> int:
+    """Consume ``schema_version``; unsupported versions fail early."""
+    version = _integer(raw, minimum=1)
     if version != SCHEMA_VERSION:
-        _fail(
-            f"{context}.schema_version",
-            f"schema_version {version} is not supported ({SCHEMA_VERSION})",
-        )
+        msg = f"schema_version {version} is not supported ({SCHEMA_VERSION})"
+        raise DataFileError(msg)
     return version
 
 
-def _parse_file_meta(raw: object, context: str) -> FileMeta:
-    """Parse the ``[meta]`` table of a non-tax-year file."""
-    table = _Table(raw, context)
-    verified_on = _plain_date(table.take("verified_on"), f"{context}.verified_on")
-    sources = _sources(table.take("sources"), f"{context}.sources")
-    table.finish()
-    return FileMeta(verified_on=verified_on, sources=sources)
+def _plain_date(raw: object) -> date:
+    """Parse a TOML local date (a datetime with a time part is an error)."""
+    if isinstance(raw, datetime):
+        msg = "expected a calendar date without a time part"
+        raise DataFileError(msg)
+    if not isinstance(raw, date):
+        msg = f"expected a TOML date, got {type(raw).__name__}"
+        raise DataFileError(msg)
+    return raw
 
 
-def _parse_tax_year_meta(raw: object, context: str) -> TaxYearMeta:
-    """Parse the ``[meta]`` table of a tax-year file."""
-    table = _Table(raw, context)
-    meta = TaxYearMeta(
-        tax_year=_string(table.take("tax_year"), f"{context}.tax_year"),
-        start_date=_plain_date(table.take("start_date"), f"{context}.start_date"),
-        end_date=_plain_date(table.take("end_date"), f"{context}.end_date"),
-        verified_on=_plain_date(table.take("verified_on"), f"{context}.verified_on"),
-        sources=_sources(table.take("sources"), f"{context}.sources"),
-    )
-    table.finish()
-    return meta
+def _non_empty_str(raw: object) -> str:
+    """Parse a non-empty string."""
+    if not isinstance(raw, str):
+        msg = f"expected a string, got {type(raw).__name__}"
+        raise DataFileError(msg)
+    if not raw:
+        raise DataFileError(_MUST_NOT_BE_EMPTY)
+    return raw
 
 
-def _parse_band(raw: object, context: str) -> TaxBand:
-    """Parse one income-tax band."""
-    table = _Table(raw, context)
-    name = _string(table.take("name"), f"{context}.name")
-    rate = _fraction(table.take("rate"), f"{context}.rate")
-    upper_raw = table.take_optional("upper")
-    upper = None if upper_raw is None else _money(upper_raw, f"{context}.upper")
-    table.finish()
-    return TaxBand(name=name, rate=rate, upper=upper)
+def _source_url(raw: object) -> str:
+    """Parse one https source URL."""
+    url = _non_empty_str(raw)
+    if not url.startswith("https://"):
+        msg = "sources must be https:// URLs"
+        raise DataFileError(msg)
+    return url
 
 
-def _parse_income_tax_schedule(raw: object, context: str) -> IncomeTaxSchedule:
-    """Parse one regime's allowance, taper, and band table."""
-    table = _Table(raw, context)
-    personal_allowance = _money(
-        table.take("personal_allowance"), f"{context}.personal_allowance"
-    )
-    pa_taper_threshold = _money(
-        table.take("pa_taper_threshold"), f"{context}.pa_taper_threshold"
-    )
-    pa_taper_rate = _fraction(table.take("pa_taper_rate"), f"{context}.pa_taper_rate")
-    bands_raw = _array(table.take("bands"), f"{context}.bands")
-    bands = tuple(
-        _parse_band(item, f"{context}.bands[{index}]")
-        for index, item in enumerate(bands_raw)
-    )
-    table.finish()
-    return IncomeTaxSchedule(
-        personal_allowance=personal_allowance,
-        pa_taper_threshold=pa_taper_threshold,
-        pa_taper_rate=pa_taper_rate,
-        bands=bands,
-    )
+def _non_empty[T](value: tuple[T, ...]) -> tuple[T, ...]:
+    """Require a non-empty array."""
+    if not value:
+        raise DataFileError(_MUST_NOT_BE_EMPTY)
+    return value
 
 
-def _parse_pension(raw: object, context: str) -> PensionRules:
-    """Parse the ``[pension]`` table."""
-    table = _Table(raw, context)
-    rules = PensionRules(
-        annual_allowance=_money(
-            table.take("annual_allowance"), f"{context}.annual_allowance"
-        ),
-        aa_taper_threshold_income=_money(
-            table.take("aa_taper_threshold_income"),
-            f"{context}.aa_taper_threshold_income",
-        ),
-        aa_taper_adjusted_income=_money(
-            table.take("aa_taper_adjusted_income"),
-            f"{context}.aa_taper_adjusted_income",
-        ),
-        aa_taper_rate=_fraction(
-            table.take("aa_taper_rate"), f"{context}.aa_taper_rate"
-        ),
-        aa_taper_floor=_money(
-            table.take("aa_taper_floor"), f"{context}.aa_taper_floor"
-        ),
-        mpaa=_money(table.take("mpaa"), f"{context}.mpaa"),
-        aa_carry_forward_years=_integer(
-            table.take("aa_carry_forward_years"),
-            f"{context}.aa_carry_forward_years",
-            minimum=0,
-        ),
-        scheme_pays_min_charge=_money(
-            table.take("scheme_pays_min_charge"),
-            f"{context}.scheme_pays_min_charge",
-        ),
-        member_relief_basic_amount=_money(
-            table.take("member_relief_basic_amount"),
-            f"{context}.member_relief_basic_amount",
-        ),
-        member_relief_max_age=_integer(
-            table.take("member_relief_max_age"),
-            f"{context}.member_relief_max_age",
-            minimum=1,
-        ),
-        relief_at_source_rate=_fraction(
-            table.take("relief_at_source_rate"), f"{context}.relief_at_source_rate"
-        ),
-        tax_free_lump_sum_fraction=_fraction(
-            table.take("tax_free_lump_sum_fraction"),
-            f"{context}.tax_free_lump_sum_fraction",
-        ),
-        lump_sum_allowance=_money(
-            table.take("lump_sum_allowance"), f"{context}.lump_sum_allowance"
-        ),
-        lump_sum_death_benefit_allowance=_money(
-            table.take("lump_sum_death_benefit_allowance"),
-            f"{context}.lump_sum_death_benefit_allowance",
-        ),
-        db_valuation_factor=_integer(
-            table.take("db_valuation_factor"),
-            f"{context}.db_valuation_factor",
-            minimum=1,
-        ),
-    )
-    table.finish()
-    return rules
+def _assumption_value(raw: object) -> AssumptionValue:
+    """Parse a default's value: Decimal string, integer, tag, or table."""
+    if isinstance(raw, bool):
+        msg = "booleans are not valid assumption values"
+        raise DataFileError(msg)
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        msg = 'float-typed number; write numeric values as strings ("0.02")'
+        raise DataFileError(msg)
+    if isinstance(raw, str):
+        return _decimal_or_tag(raw)
+    if isinstance(raw, FrozenTable | dict):
+        if not raw:
+            raise DataFileError(_MUST_NOT_BE_EMPTY)
+        return FrozenTable({key: _assumption_value(item) for key, item in raw.items()})
+    msg = f"unsupported value type: {type(raw).__name__}"
+    raise DataFileError(msg)
 
 
-def _parse_isa(raw: object, context: str) -> IsaRules:
-    """Parse the ``[isa]`` table."""
-    table = _Table(raw, context)
-    rules = IsaRules(
-        annual_allowance=_money(
-            table.take("annual_allowance"), f"{context}.annual_allowance"
-        ),
-        lisa_allowance=_money(
-            table.take("lisa_allowance"), f"{context}.lisa_allowance"
-        ),
-        lisa_bonus_rate=_fraction(
-            table.take("lisa_bonus_rate"), f"{context}.lisa_bonus_rate"
-        ),
-        lisa_withdrawal_charge=_fraction(
-            table.take("lisa_withdrawal_charge"), f"{context}.lisa_withdrawal_charge"
-        ),
-    )
-    table.finish()
-    return rules
+def _decimal_or_tag(raw: str) -> Decimal | str:
+    """Parse a string value: numeric strings become ``Decimal``."""
+    if not raw:
+        raise DataFileError(_MUST_NOT_BE_EMPTY)
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        return raw
+    if not value.is_finite():
+        msg = "number must be finite"
+        raise DataFileError(msg)
+    return value
 
 
-def _parse_savings(raw: object, context: str) -> SavingsRules:
-    """Parse the ``[savings]`` table."""
-    table = _Table(raw, context)
-    rules = SavingsRules(
-        starting_rate_limit=_money(
-            table.take("starting_rate_limit"), f"{context}.starting_rate_limit"
-        ),
-        psa_basic=_money(table.take("psa_basic"), f"{context}.psa_basic"),
-        psa_higher=_money(table.take("psa_higher"), f"{context}.psa_higher"),
-        psa_additional=_money(
-            table.take("psa_additional"), f"{context}.psa_additional"
-        ),
-    )
-    table.finish()
-    return rules
+def _uk_assumption_key(raw: object) -> AssumptionKey:
+    """Parse a dotted assumption key from the stable catalogue."""
+    if isinstance(raw, AssumptionKey):
+        return raw
+    text = _non_empty_str(raw)
+    try:
+        return AssumptionKey(text)
+    except ValueError:
+        msg = f"unknown assumption key {text!r}"
+        raise DataFileError(msg) from None
 
 
-def _parse_dividend_rate(raw: object, context: str) -> DividendRate:
-    """Parse one entry of the ``dividend.rates`` array."""
-    table = _Table(raw, context)
-    name = _string(table.take("name"), f"{context}.name")
-    rate = _fraction(table.take("rate"), f"{context}.rate")
-    table.finish()
-    return DividendRate(name=name, rate=rate)
+TomlDecimal = Annotated[Decimal, PlainValidator(_decimal_string)]
+TomlMoney = Annotated[Money, PlainValidator(_money_amount)]
+TomlFraction = Annotated[Rate, PlainValidator(_fraction_rate)]
+TomlSignedRate = Annotated[Decimal, PlainValidator(_signed_rate)]
+PositiveInt = Annotated[int, PlainValidator(_positive_int)]
+NonNegativeInt = Annotated[int, PlainValidator(_non_negative_int)]
+SchemaVersionField = Annotated[int, PlainValidator(_schema_version_value)]
+TomlDate = Annotated[date, PlainValidator(_plain_date)]
+NonEmptyStr = Annotated[str, PlainValidator(_non_empty_str)]
+SourceUrl = Annotated[str, PlainValidator(_source_url)]
+SourcesField = Annotated[tuple[SourceUrl, ...], AfterValidator(_non_empty)]
+AssumptionValueField = Annotated[object, PlainValidator(_assumption_value)]
+"""Typed ``object`` on the wire: pydantic cannot lazily resolve the
+recursive PEP 695 ``AssumptionValue`` alias, so the validator carries
+the real type and the entry model casts at the domain boundary."""
+UkAssumptionKeyField = Annotated[AssumptionKey, PlainValidator(_uk_assumption_key)]
 
 
-def _parse_dividend(raw: object, context: str) -> DividendRules:
-    """Parse the ``[dividend]`` table."""
-    table = _Table(raw, context)
-    allowance = _money(table.take("allowance"), f"{context}.allowance")
-    rates_raw = _array(table.take("rates"), f"{context}.rates")
-    rates = tuple(
-        _parse_dividend_rate(item, f"{context}.rates[{index}]")
-        for index, item in enumerate(rates_raw)
-    )
-    table.finish()
-    return DividendRules(allowance=allowance, rates=rates)
+class _WireTable(BaseModel):
+    """Base wire model: unknown keys rejected."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class WireFileMeta(_WireTable):
+    """The ``[meta]`` table of a non-tax-year file."""
+
+    verified_on: TomlDate
+    sources: SourcesField
+
+    _domain: FileMeta = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema meta record."""
+        self._domain = FileMeta(verified_on=self.verified_on, sources=self.sources)
+        return self
+
+    @property
+    def domain(self) -> FileMeta:
+        """The validated schema meta record."""
+        return self._domain
+
+
+class WireTaxYearMeta(_WireTable):
+    """The ``[meta]`` table of a tax-year file."""
+
+    tax_year: NonEmptyStr
+    start_date: TomlDate
+    end_date: TomlDate
+    verified_on: TomlDate
+    sources: SourcesField
+
+    _domain: TaxYearMeta = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema meta record, surfacing its invariants."""
+        self._domain = TaxYearMeta(
+            tax_year=self.tax_year,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            verified_on=self.verified_on,
+            sources=self.sources,
+        )
+        return self
+
+    @property
+    def domain(self) -> TaxYearMeta:
+        """The validated schema meta record."""
+        return self._domain
+
+
+class WireTaxBand(_WireTable):
+    """One income-tax band."""
+
+    name: NonEmptyStr
+    rate: TomlFraction
+    upper: TomlMoney | None = None
+
+    _domain: TaxBand = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema band, surfacing its invariants."""
+        self._domain = TaxBand(name=self.name, rate=self.rate, upper=self.upper)
+        return self
+
+    @property
+    def domain(self) -> TaxBand:
+        """The validated schema band."""
+        return self._domain
+
+
+class WireIncomeTaxSchedule(_WireTable):
+    """One regime's allowance, taper, and band table."""
+
+    personal_allowance: TomlMoney
+    pa_taper_threshold: TomlMoney
+    pa_taper_rate: TomlFraction
+    bands: Annotated[tuple[WireTaxBand, ...], AfterValidator(_non_empty)]
+
+    _domain: IncomeTaxSchedule = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema schedule, surfacing its invariants."""
+        self._domain = IncomeTaxSchedule(
+            personal_allowance=self.personal_allowance,
+            pa_taper_threshold=self.pa_taper_threshold,
+            pa_taper_rate=self.pa_taper_rate,
+            bands=tuple(band.domain for band in self.bands),
+        )
+        return self
+
+    @property
+    def domain(self) -> IncomeTaxSchedule:
+        """The validated schema schedule."""
+        return self._domain
+
+
+class WireIncomeTax(_WireTable):
+    """The ``[income_tax]`` table: one schedule per regime."""
+
+    ruk: WireIncomeTaxSchedule
+    scotland: WireIncomeTaxSchedule
+
+
+class WirePension(_WireTable):
+    """The ``[pension]`` table."""
+
+    annual_allowance: TomlMoney
+    aa_taper_threshold_income: TomlMoney
+    aa_taper_adjusted_income: TomlMoney
+    aa_taper_rate: TomlFraction
+    aa_taper_floor: TomlMoney
+    mpaa: TomlMoney
+    aa_carry_forward_years: NonNegativeInt
+    scheme_pays_min_charge: TomlMoney
+    member_relief_basic_amount: TomlMoney
+    member_relief_max_age: PositiveInt
+    relief_at_source_rate: TomlFraction
+    tax_free_lump_sum_fraction: TomlFraction
+    lump_sum_allowance: TomlMoney
+    lump_sum_death_benefit_allowance: TomlMoney
+    db_valuation_factor: PositiveInt
+
+    _domain: PensionRules = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema pension rules, surfacing their invariants."""
+        self._domain = PensionRules(
+            annual_allowance=self.annual_allowance,
+            aa_taper_threshold_income=self.aa_taper_threshold_income,
+            aa_taper_adjusted_income=self.aa_taper_adjusted_income,
+            aa_taper_rate=self.aa_taper_rate,
+            aa_taper_floor=self.aa_taper_floor,
+            mpaa=self.mpaa,
+            aa_carry_forward_years=self.aa_carry_forward_years,
+            scheme_pays_min_charge=self.scheme_pays_min_charge,
+            member_relief_basic_amount=self.member_relief_basic_amount,
+            member_relief_max_age=self.member_relief_max_age,
+            relief_at_source_rate=self.relief_at_source_rate,
+            tax_free_lump_sum_fraction=self.tax_free_lump_sum_fraction,
+            lump_sum_allowance=self.lump_sum_allowance,
+            lump_sum_death_benefit_allowance=self.lump_sum_death_benefit_allowance,
+            db_valuation_factor=self.db_valuation_factor,
+        )
+        return self
+
+    @property
+    def domain(self) -> PensionRules:
+        """The validated schema pension rules."""
+        return self._domain
+
+
+class WireIsa(_WireTable):
+    """The ``[isa]`` table."""
+
+    annual_allowance: TomlMoney
+    lisa_allowance: TomlMoney
+    lisa_bonus_rate: TomlFraction
+    lisa_withdrawal_charge: TomlFraction
+
+    _domain: IsaRules = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema ISA rules, surfacing their invariants."""
+        self._domain = IsaRules(
+            annual_allowance=self.annual_allowance,
+            lisa_allowance=self.lisa_allowance,
+            lisa_bonus_rate=self.lisa_bonus_rate,
+            lisa_withdrawal_charge=self.lisa_withdrawal_charge,
+        )
+        return self
+
+    @property
+    def domain(self) -> IsaRules:
+        """The validated schema ISA rules."""
+        return self._domain
+
+
+class WireSavings(_WireTable):
+    """The ``[savings]`` table."""
+
+    starting_rate_limit: TomlMoney
+    psa_basic: TomlMoney
+    psa_higher: TomlMoney
+    psa_additional: TomlMoney
+
+    _domain: SavingsRules = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema savings rules, surfacing their invariants."""
+        self._domain = SavingsRules(
+            starting_rate_limit=self.starting_rate_limit,
+            psa_basic=self.psa_basic,
+            psa_higher=self.psa_higher,
+            psa_additional=self.psa_additional,
+        )
+        return self
+
+    @property
+    def domain(self) -> SavingsRules:
+        """The validated schema savings rules."""
+        return self._domain
+
+
+class WireDividendRate(_WireTable):
+    """One entry of the ``dividend.rates`` array."""
+
+    name: NonEmptyStr
+    rate: TomlFraction
+
+    _domain: DividendRate = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema dividend rate."""
+        self._domain = DividendRate(name=self.name, rate=self.rate)
+        return self
+
+    @property
+    def domain(self) -> DividendRate:
+        """The validated schema dividend rate."""
+        return self._domain
+
+
+class WireDividend(_WireTable):
+    """The ``[dividend]`` table."""
+
+    allowance: TomlMoney
+    rates: Annotated[tuple[WireDividendRate, ...], AfterValidator(_non_empty)]
+
+    _domain: DividendRules = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema dividend rules, surfacing their invariants."""
+        self._domain = DividendRules(
+            allowance=self.allowance,
+            rates=tuple(rate.domain for rate in self.rates),
+        )
+        return self
+
+    @property
+    def domain(self) -> DividendRules:
+        """The validated schema dividend rules."""
+        return self._domain
+
+
+class WireTaxYearDoc(_WireTable):
+    """One whole tax-year TOML document."""
+
+    schema_version: SchemaVersionField
+    meta: WireTaxYearMeta
+    income_tax: WireIncomeTax
+    pension: WirePension
+    isa: WireIsa
+    savings: WireSavings
+    dividend: WireDividend
+
+    _domain: TaxYearFile = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema file, surfacing the §5.3 invariants."""
+        self._domain = TaxYearFile(
+            schema_version=self.schema_version,
+            meta=self.meta.domain,
+            income_tax_ruk=self.income_tax.ruk.domain,
+            income_tax_scotland=self.income_tax.scotland.domain,
+            pension=self.pension.domain,
+            isa=self.isa.domain,
+            savings=self.savings.domain,
+            dividend=self.dividend.domain,
+        )
+        return self
+
+    @property
+    def domain(self) -> TaxYearFile:
+        """The validated schema file."""
+        return self._domain
+
+
+class WireNmpaStep(_WireTable):
+    """One effective-dated NMPA step."""
+
+    age: PositiveInt
+    effective_from: TomlDate | None = None
+
+    _domain: NmpaStep = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema step, surfacing its invariants."""
+        self._domain = NmpaStep(age=self.age, effective_from=self.effective_from)
+        return self
+
+    @property
+    def domain(self) -> NmpaStep:
+        """The validated schema step."""
+        return self._domain
+
+
+class WireNmpa(_WireTable):
+    """The ``[nmpa]`` table."""
+
+    steps: Annotated[tuple[WireNmpaStep, ...], AfterValidator(_non_empty)]
+
+
+class WireSpaAge(_WireTable):
+    """The years-and-months age of an age-based SPA band."""
+
+    years: PositiveInt
+    months: NonNegativeInt = 0
+
+
+class WireSpaBand(_WireTable):
+    """One SPA timetable band (age-based xor date-based)."""
+
+    dob_from: TomlDate | None = None
+    dob_to: TomlDate | None = None
+    age: WireSpaAge | None = None
+    reaches_on: TomlDate | None = None
+
+    _domain: SpaBand = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Require exactly one band form and construct it."""
+        age = self.age
+        reaches_on = self.reaches_on
+        if age is not None and reaches_on is None:
+            self._domain = SpaAgeBand(
+                dob_from=self.dob_from,
+                dob_to=self.dob_to,
+                years=age.years,
+                months=age.months,
+            )
+        elif reaches_on is not None and age is None:
+            self._domain = SpaDateBand(
+                dob_from=self.dob_from, dob_to=self.dob_to, reaches_on=reaches_on
+            )
+        else:
+            msg = "exactly one of 'age' and 'reaches_on' is required"
+            raise DataFileError(msg)
+        return self
+
+    @property
+    def domain(self) -> SpaBand:
+        """The validated schema band."""
+        return self._domain
+
+
+class WireSpa(_WireTable):
+    """The ``[state_pension_age]`` table."""
+
+    bands: Annotated[tuple[WireSpaBand, ...], AfterValidator(_non_empty)]
+
+
+class WireLisa(_WireTable):
+    """The ``[lisa]`` age gates."""
+
+    open_age_min: PositiveInt
+    open_age_max: PositiveInt
+    contribute_until_age: PositiveInt
+    access_age: PositiveInt
+
+    _domain: LisaAges = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema age gates, surfacing their invariants."""
+        self._domain = LisaAges(
+            open_age_min=self.open_age_min,
+            open_age_max=self.open_age_max,
+            contribute_until_age=self.contribute_until_age,
+            access_age=self.access_age,
+        )
+        return self
+
+    @property
+    def domain(self) -> LisaAges:
+        """The validated schema age gates."""
+        return self._domain
+
+
+class WireDeferral(_WireTable):
+    """The ``[state_pension_deferral]`` table."""
+
+    increment_rate: TomlFraction
+    per_weeks: PositiveInt
+
+    _domain: StatePensionDeferral = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema deferral terms."""
+        self._domain = StatePensionDeferral(
+            increment_rate=self.increment_rate, per_weeks=self.per_weeks
+        )
+        return self
+
+    @property
+    def domain(self) -> StatePensionDeferral:
+        """The validated schema deferral terms."""
+        return self._domain
+
+
+class WireAgeRulesDoc(_WireTable):
+    """One whole age-rules TOML document."""
+
+    schema_version: SchemaVersionField
+    meta: WireFileMeta
+    nmpa: WireNmpa
+    state_pension_age: WireSpa
+    lisa: WireLisa
+    state_pension_deferral: WireDeferral
+
+    _domain: AgeRulesFile = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema file, surfacing the §5.3 invariants."""
+        self._domain = AgeRulesFile(
+            schema_version=self.schema_version,
+            meta=self.meta.domain,
+            nmpa=tuple(step.domain for step in self.nmpa.steps),
+            spa_bands=tuple(band.domain for band in self.state_pension_age.bands),
+            lisa=self.lisa.domain,
+            deferral=self.state_pension_deferral.domain,
+        )
+        return self
+
+    @property
+    def domain(self) -> AgeRulesFile:
+        """The validated schema file."""
+        return self._domain
+
+
+class WireHistoryYear(_WireTable):
+    """One observed year of the return series."""
+
+    year: PositiveInt
+    equity: TomlSignedRate
+    bonds: TomlSignedRate
+    cash: TomlSignedRate
+    cpi: TomlSignedRate
+
+    _domain: HistoricalYear = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the core historical year, surfacing its invariants."""
+        self._domain = HistoricalYear(
+            year=self.year,
+            equity=self.equity,
+            bonds=self.bonds,
+            cash=self.cash,
+            cpi=self.cpi,
+        )
+        return self
+
+    @property
+    def domain(self) -> HistoricalYear:
+        """The validated core historical year."""
+        return self._domain
+
+
+class WireReturns(_WireTable):
+    """The ``[returns]`` table holding the observed series."""
+
+    series: Annotated[tuple[WireHistoryYear, ...], AfterValidator(_non_empty)]
+
+    _series: HistoricalSeries = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the core series, surfacing its own invariants."""
+        self._series = HistoricalSeries(
+            years=tuple(year.domain for year in self.series)
+        )
+        return self
+
+    @property
+    def domain(self) -> HistoricalSeries:
+        """The validated core series."""
+        return self._series
+
+
+class WireReturnsDoc(_WireTable):
+    """One whole returns-history TOML document."""
+
+    schema_version: SchemaVersionField
+    meta: WireFileMeta
+    returns: WireReturns
+
+    _domain: ReturnsHistoryFile = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema file, surfacing the §5.3 invariants."""
+        self._domain = ReturnsHistoryFile(
+            schema_version=self.schema_version,
+            meta=self.meta.domain,
+            series=self.returns.domain,
+        )
+        return self
+
+    @property
+    def domain(self) -> ReturnsHistoryFile:
+        """The validated schema file."""
+        return self._domain
+
+
+class WireAssumptionEntry(_WireTable):
+    """One ``[[assumption]]`` entry."""
+
+    key: UkAssumptionKeyField
+    value: AssumptionValueField
+    basis: NonEmptyStr
+
+    _domain: AssumptionDefault = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema default, surfacing its invariants."""
+        self._domain = AssumptionDefault(
+            key=self.key, value=cast("AssumptionValue", self.value), basis=self.basis
+        )
+        return self
+
+    @property
+    def domain(self) -> AssumptionDefault:
+        """The validated schema default."""
+        return self._domain
+
+
+class WireAssumptionsDoc(_WireTable):
+    """One whole default-assumptions TOML document."""
+
+    schema_version: SchemaVersionField
+    meta: WireFileMeta
+    assumption: Annotated[tuple[WireAssumptionEntry, ...], AfterValidator(_non_empty)]
+
+    _domain: AssumptionsFile = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _build(self) -> Self:
+        """Construct the schema file, surfacing the §5.3 invariants."""
+        self._domain = AssumptionsFile(
+            schema_version=self.schema_version,
+            meta=self.meta.domain,
+            defaults=tuple(entry.domain for entry in self.assumption),
+        )
+        return self
+
+    @property
+    def domain(self) -> AssumptionsFile:
+        """The validated schema file."""
+        return self._domain
+
+
+def _load_toml(text: str, context: str) -> dict[str, object]:
+    """Parse ``text`` as TOML into a root table."""
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        _fail(context, f"invalid TOML: {error}")
+
+
+def _validated[M: BaseModel](model: type[M], text: str, context: str) -> M:
+    """Validate a TOML document through one wire model."""
+    raw = _load_toml(text, context)
+    try:
+        return model.model_validate(raw)
+    except ValidationError as error:
+        raise DataFileError(_error_message(error, context)) from error
 
 
 def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFile:
     """Parse and strictly validate one tax-year TOML document."""
-    root = _load_document(text, context)
-    schema_version = _take_schema_version(root, context)
-    meta = _parse_tax_year_meta(root.take("meta"), f"{context}.meta")
-    income_tax = _Table(root.take("income_tax"), f"{context}.income_tax")
-    ruk = _parse_income_tax_schedule(
-        income_tax.take("ruk"), f"{context}.income_tax.ruk"
-    )
-    scotland = _parse_income_tax_schedule(
-        income_tax.take("scotland"), f"{context}.income_tax.scotland"
-    )
-    income_tax.finish()
-    pension = _parse_pension(root.take("pension"), f"{context}.pension")
-    isa = _parse_isa(root.take("isa"), f"{context}.isa")
-    savings = _parse_savings(root.take("savings"), f"{context}.savings")
-    dividend = _parse_dividend(root.take("dividend"), f"{context}.dividend")
-    root.finish()
-    return TaxYearFile(
-        schema_version=schema_version,
-        meta=meta,
-        income_tax_ruk=ruk,
-        income_tax_scotland=scotland,
-        pension=pension,
-        isa=isa,
-        savings=savings,
-        dividend=dividend,
-    )
-
-
-def _parse_nmpa_step(raw: object, context: str) -> NmpaStep:
-    """Parse one effective-dated NMPA step."""
-    table = _Table(raw, context)
-    age = _integer(table.take("age"), f"{context}.age", minimum=1)
-    effective_from = _optional_date(
-        table.take_optional("effective_from"), f"{context}.effective_from"
-    )
-    table.finish()
-    return NmpaStep(age=age, effective_from=effective_from)
-
-
-def _parse_spa_band(raw: object, context: str) -> SpaBand:
-    """Parse one SPA timetable band (age-based xor date-based)."""
-    table = _Table(raw, context)
-    dob_from = _optional_date(table.take_optional("dob_from"), f"{context}.dob_from")
-    dob_to = _optional_date(table.take_optional("dob_to"), f"{context}.dob_to")
-    age_raw = table.take_optional("age")
-    reaches_raw = table.take_optional("reaches_on")
-    table.finish()
-    if (age_raw is None) == (reaches_raw is None):
-        _fail(context, "exactly one of 'age' and 'reaches_on' is required")
-    if age_raw is None:
-        reaches_on = _plain_date(reaches_raw, f"{context}.reaches_on")
-        return SpaDateBand(dob_from=dob_from, dob_to=dob_to, reaches_on=reaches_on)
-    age_table = _Table(age_raw, f"{context}.age")
-    years = _integer(age_table.take("years"), f"{context}.age.years", minimum=1)
-    months_raw = age_table.take_optional("months")
-    months = 0
-    if months_raw is not None:
-        months = _integer(months_raw, f"{context}.age.months", minimum=0)
-    age_table.finish()
-    return SpaAgeBand(dob_from=dob_from, dob_to=dob_to, years=years, months=months)
-
-
-def _parse_lisa(raw: object, context: str) -> LisaAges:
-    """Parse the ``[lisa]`` age gates."""
-    table = _Table(raw, context)
-
-    def gate(key: str) -> int:
-        """Take one required age gate."""
-        return _integer(table.take(key), f"{context}.{key}", minimum=1)
-
-    ages = LisaAges(
-        open_age_min=gate("open_age_min"),
-        open_age_max=gate("open_age_max"),
-        contribute_until_age=gate("contribute_until_age"),
-        access_age=gate("access_age"),
-    )
-    table.finish()
-    return ages
-
-
-def _parse_deferral(raw: object, context: str) -> StatePensionDeferral:
-    """Parse the ``[state_pension_deferral]`` table."""
-    table = _Table(raw, context)
-    deferral = StatePensionDeferral(
-        increment_rate=_fraction(
-            table.take("increment_rate"), f"{context}.increment_rate"
-        ),
-        per_weeks=_integer(table.take("per_weeks"), f"{context}.per_weeks", minimum=1),
-    )
-    table.finish()
-    return deferral
+    return _validated(WireTaxYearDoc, text, context).domain
 
 
 def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRulesFile:
     """Parse and strictly validate an age-rules TOML document."""
-    root = _load_document(text, context)
-    schema_version = _take_schema_version(root, context)
-    meta = _parse_file_meta(root.take("meta"), f"{context}.meta")
-    nmpa_table = _Table(root.take("nmpa"), f"{context}.nmpa")
-    steps_raw = _array(nmpa_table.take("steps"), f"{context}.nmpa.steps")
-    nmpa = tuple(
-        _parse_nmpa_step(item, f"{context}.nmpa.steps[{index}]")
-        for index, item in enumerate(steps_raw)
-    )
-    nmpa_table.finish()
-    spa_table = _Table(root.take("state_pension_age"), f"{context}.state_pension_age")
-    bands_raw = _array(spa_table.take("bands"), f"{context}.state_pension_age.bands")
-    spa_bands = tuple(
-        _parse_spa_band(item, f"{context}.state_pension_age.bands[{index}]")
-        for index, item in enumerate(bands_raw)
-    )
-    spa_table.finish()
-    lisa = _parse_lisa(root.take("lisa"), f"{context}.lisa")
-    deferral = _parse_deferral(
-        root.take("state_pension_deferral"), f"{context}.state_pension_deferral"
-    )
-    root.finish()
-    return AgeRulesFile(
-        schema_version=schema_version,
-        meta=meta,
-        nmpa=nmpa,
-        spa_bands=spa_bands,
-        lisa=lisa,
-        deferral=deferral,
-    )
-
-
-def _signed_rate(raw: object, context: str) -> Decimal:
-    """Parse an annual rate that may be negative but must exceed -100%.
-
-    Historical returns and inflation are frequently negative and can
-    exceed +100%, so neither ``_fraction`` nor ``_money`` fits; -100%
-    or worse can never be recomposed into a real rate
-    (:mod:`glidepath.core.backtest`).
-    """
-    value = _decimal_string(raw, context)
-    if value <= Decimal(-1):
-        _fail(context, "rates must be greater than -1 (-100%)")
-    return value
-
-
-def _parse_history_year(raw: object, context: str) -> HistoricalYear:
-    """Parse one observed year of the return series."""
-    table = _Table(raw, context)
-    year = _integer(table.take("year"), f"{context}.year", minimum=1)
-    equity = _signed_rate(table.take("equity"), f"{context}.equity")
-    bonds = _signed_rate(table.take("bonds"), f"{context}.bonds")
-    cash = _signed_rate(table.take("cash"), f"{context}.cash")
-    cpi = _signed_rate(table.take("cpi"), f"{context}.cpi")
-    table.finish()
-    return HistoricalYear(year=year, equity=equity, bonds=bonds, cash=cash, cpi=cpi)
+    return _validated(WireAgeRulesDoc, text, context).domain
 
 
 def parse_returns_history(
     text: str, *, context: str = "<returns-history data>"
 ) -> ReturnsHistoryFile:
     """Parse and strictly validate a returns-history TOML document."""
-    root = _load_document(text, context)
-    schema_version = _take_schema_version(root, context)
-    meta = _parse_file_meta(root.take("meta"), f"{context}.meta")
-    returns_table = _Table(root.take("returns"), f"{context}.returns")
-    series_context = f"{context}.returns.series"
-    entries_raw = _array(returns_table.take("series"), series_context)
-    years = tuple(
-        _parse_history_year(item, f"{series_context}[{index}]")
-        for index, item in enumerate(entries_raw)
-    )
-    returns_table.finish()
-    root.finish()
-    try:
-        series = HistoricalSeries(years=years)
-    except ValueError as error:
-        _fail(series_context, str(error))
-    return ReturnsHistoryFile(schema_version=schema_version, meta=meta, series=series)
-
-
-def _assumption_value(raw: object, context: str) -> AssumptionValue:
-    """Parse a default's value: Decimal string, integer, tag, or table."""
-    if isinstance(raw, bool):
-        _fail(context, "booleans are not valid assumption values")
-    if isinstance(raw, int):
-        return raw
-    if isinstance(raw, float):
-        _fail(context, 'float-typed number; write numeric values as strings ("0.02")')
-    if isinstance(raw, str):
-        return _decimal_or_tag(raw, context)
-    if isinstance(raw, dict):
-        if not raw:
-            _fail(context, _MUST_NOT_BE_EMPTY)
-        items: dict[str, AssumptionValue] = {
-            key: _assumption_value(item, f"{context}.{key}")
-            for key, item in raw.items()
-        }
-        return FrozenTable(items)
-    _fail(context, f"unsupported value type: {type(raw).__name__}")
-
-
-def _decimal_or_tag(raw: str, context: str) -> Decimal | str:
-    """Parse a string value: numeric strings become ``Decimal``."""
-    if not raw:
-        _fail(context, _MUST_NOT_BE_EMPTY)
-    try:
-        value = Decimal(raw)
-    except InvalidOperation:
-        return raw
-    if not value.is_finite():
-        _fail(context, "number must be finite")
-    return value
-
-
-def _parse_assumption(raw: object, context: str) -> AssumptionDefault:
-    """Parse one ``[[assumption]]`` entry."""
-    table = _Table(raw, context)
-    key_text = _string(table.take("key"), f"{context}.key")
-    try:
-        key = AssumptionKey(key_text)
-    except ValueError:
-        _fail(f"{context}.key", f"unknown assumption key {key_text!r}")
-    value = _assumption_value(table.take("value"), f"{context}.value")
-    basis = _string(table.take("basis"), f"{context}.basis")
-    table.finish()
-    return AssumptionDefault(key=key, value=value, basis=basis)
+    return _validated(WireReturnsDoc, text, context).domain
 
 
 def parse_default_assumptions(
     text: str, *, context: str = "<assumptions data>"
 ) -> AssumptionsFile:
     """Parse and strictly validate a default-assumptions TOML document."""
-    root = _load_document(text, context)
-    schema_version = _take_schema_version(root, context)
-    meta = _parse_file_meta(root.take("meta"), f"{context}.meta")
-    entries = _array(root.take("assumption"), f"{context}.assumption")
-    defaults = tuple(
-        _parse_assumption(item, f"{context}.assumption[{index}]")
-        for index, item in enumerate(entries)
-    )
-    root.finish()
-    return AssumptionsFile(schema_version=schema_version, meta=meta, defaults=defaults)
+    return _validated(WireAssumptionsDoc, text, context).domain
 
 
 def _data_directory() -> Traversable:

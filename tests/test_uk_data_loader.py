@@ -207,7 +207,7 @@ def test_invalid_toml_is_a_load_error() -> None:
 def test_missing_schema_version_is_an_error() -> None:
     """schema_version is mandatory."""
     broken = _mutated(VALID_TAX_YEAR, "schema_version = 2\n", "")
-    with pytest.raises(DataFileError, match="missing required key 'schema_version'"):
+    with pytest.raises(DataFileError, match="schema_version: Field required"):
         parse_tax_year(broken)
 
 
@@ -228,14 +228,14 @@ def test_string_schema_version_is_an_error() -> None:
 def test_missing_meta_is_an_error() -> None:
     """The [meta] table is mandatory (§5.3 acceptance criterion)."""
     broken = _mutated(VALID_TAX_YEAR, TAX_META, "\n")
-    with pytest.raises(DataFileError, match="missing required key 'meta'"):
+    with pytest.raises(DataFileError, match="meta: Field required"):
         parse_tax_year(broken)
 
 
 def test_missing_meta_key_is_an_error() -> None:
     """Every meta field is required."""
     broken = _mutated(VALID_TAX_YEAR, "start_date = 2026-04-06\n", "")
-    with pytest.raises(DataFileError, match="missing required key 'start_date'"):
+    with pytest.raises(DataFileError, match="start_date: Field required"):
         parse_tax_year(broken)
 
 
@@ -244,14 +244,16 @@ def test_unknown_top_level_key_is_an_error() -> None:
     broken = _mutated(
         VALID_TAX_YEAR, "schema_version = 2\n", "schema_version = 2\nmystery = 1\n"
     )
-    with pytest.raises(DataFileError, match="unknown keys: mystery"):
+    with pytest.raises(DataFileError, match="mystery: Extra inputs are not permitted"):
         parse_tax_year(broken)
 
 
 def test_unknown_section_key_is_an_error() -> None:
     """Unknown keys inside a section are load errors."""
     broken = _mutated(VALID_TAX_YEAR, "[pension]\n", '[pension]\nmystery = "1"\n')
-    with pytest.raises(DataFileError, match="pension: unknown keys: mystery"):
+    with pytest.raises(
+        DataFileError, match=r"pension\.mystery: Extra inputs are not permitted"
+    ):
         parse_tax_year(broken)
 
 
@@ -262,7 +264,7 @@ def test_unknown_band_key_is_an_error() -> None:
         '{ name = "basic", rate = "0.20", upper = "37700" }',
         '{ name = "basic", rate = "0.20", upper = "37700", extra = "1" }',
     )
-    with pytest.raises(DataFileError, match="unknown keys: extra"):
+    with pytest.raises(DataFileError, match="extra: Extra inputs are not permitted"):
         parse_tax_year(broken)
 
 
@@ -331,7 +333,7 @@ def test_rate_above_one_is_an_error() -> None:
 def test_missing_section_key_is_an_error() -> None:
     """Every figure in a section is required."""
     broken = _mutated(VALID_TAX_YEAR, 'mpaa = "10000"\n', "")
-    with pytest.raises(DataFileError, match="missing required key 'mpaa'"):
+    with pytest.raises(DataFileError, match="mpaa: Field required"):
         parse_tax_year(broken)
 
 
@@ -356,7 +358,7 @@ def test_non_increasing_band_uppers_are_an_error() -> None:
 def test_non_table_section_is_an_error() -> None:
     """A scalar where a table is expected is a load error."""
     broken = _mutated(VALID_TAX_YEAR, TAX_META, "\nmeta = 1\n")
-    with pytest.raises(DataFileError, match="expected a TOML table, got int"):
+    with pytest.raises(DataFileError, match="Input should be a valid dictionary"):
         parse_tax_year(broken)
 
 
@@ -381,7 +383,7 @@ def test_non_array_sources_are_an_error() -> None:
     broken = _mutated(
         VALID_TAX_YEAR, '["https://example.test/tax"]', '"https://example.test/tax"'
     )
-    with pytest.raises(DataFileError, match="expected an array, got str"):
+    with pytest.raises(DataFileError, match="Input should be a valid tuple"):
         parse_tax_year(broken)
 
 
@@ -637,7 +639,7 @@ def test_empty_basis_is_an_error() -> None:
 def test_missing_basis_is_an_error() -> None:
     """The basis field is mandatory."""
     broken = _mutated(VALID_ASSUMPTIONS, 'basis = "test basis"\n', "")
-    with pytest.raises(DataFileError, match="missing required key 'basis'"):
+    with pytest.raises(DataFileError, match="basis: Field required"):
         parse_default_assumptions(broken)
 
 
@@ -715,7 +717,7 @@ def test_valid_returns_history_parses_into_typed_values() -> None:
 def test_returns_history_gap_is_an_error() -> None:
     """A non-contiguous series would splice unrelated history together."""
     gapped = _mutated(VALID_RETURNS_HISTORY, "year = 1901", "year = 1911")
-    with pytest.raises(DataFileError, match=r"returns\.series.*contiguous"):
+    with pytest.raises(DataFileError, match=r"returns.*contiguous"):
         parse_returns_history(gapped)
 
 
@@ -738,14 +740,14 @@ def test_returns_history_unknown_series_key_is_an_error() -> None:
     extended = _mutated(
         VALID_RETURNS_HISTORY, 'cpi = "0.051"', 'cpi = "0.051", gold = "0.02"'
     )
-    with pytest.raises(DataFileError, match="unknown keys: gold"):
+    with pytest.raises(DataFileError, match="gold: Extra inputs are not permitted"):
         parse_returns_history(extended)
 
 
 def test_returns_history_missing_returns_table_is_an_error() -> None:
     """The [returns] table is mandatory."""
     stripped = VALID_RETURNS_HISTORY.partition("[returns]")[0]
-    with pytest.raises(DataFileError, match="missing required key 'returns'"):
+    with pytest.raises(DataFileError, match="returns: Field required"):
         parse_returns_history(stripped)
 
 
