@@ -11,11 +11,14 @@ policy.
 
 import json
 import sys
+import time
 import tomllib
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from functools import partial
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +28,7 @@ PYPI_REGISTRY = "https://pypi.org/simple"
 _ROOT_SOURCES = ({"virtual": "."}, {"editable": "."})
 _HTTP_TIMEOUT_SECONDS = 30.0
 _MAX_WORKERS = 8
+_RETRY_PAUSES = (5.0, 10.0)
 
 
 class PolicyError(Exception):
@@ -83,13 +87,44 @@ def _locked_artifacts(lock: dict[str, Any]) -> list[tuple[str, str, list[str]]]:
     return packages
 
 
+def _release_payload(name: str, version: str) -> dict[str, Any]:
+    """Fetch one release's JSON document from PyPI."""
+    url = f"https://pypi.org/pypi/{name}/{version}/json"
+    with urllib.request.urlopen(url, timeout=_HTTP_TIMEOUT_SECONDS) as response:
+        payload: dict[str, Any] = json.load(response)
+    return payload
+
+
+def _release_payload_with_retry(name: str, version: str) -> dict[str, Any]:
+    """Fetch a release's JSON, retrying transient failures.
+
+    A network fault or a PyPI server error (5xx) gets one more attempt
+    per pause in ``_RETRY_PAUSES`` before the final try, so a runner
+    blip does not read as a cooldown violation. A client error (4xx) is
+    deterministic and raises immediately, and the last failure always
+    propagates — the caller reports it as a violation, keeping the
+    check fail-closed.
+    """
+    for pause in _RETRY_PAUSES:
+        try:
+            payload = _release_payload(name, version)
+        except urllib.error.HTTPError as exc:
+            if exc.code < HTTPStatus.INTERNAL_SERVER_ERROR:
+                raise
+            print(f"  retrying {name}=={version}: HTTP {exc.code}")
+        except OSError as exc:  # URLError/timeouts are all OSError.
+            print(f"  retrying {name}=={version}: {exc}")
+        else:
+            return payload
+        time.sleep(pause)
+    return _release_payload(name, version)
+
+
 def _verify_package(cutoff: datetime, item: tuple[str, str, list[str]]) -> list[str]:
     """Return violation messages for one locked package (empty if clean)."""
     name, version, filenames = item
-    url = f"https://pypi.org/pypi/{name}/{version}/json"
     try:
-        with urllib.request.urlopen(url, timeout=_HTTP_TIMEOUT_SECONDS) as response:
-            payload = json.load(response)
+        payload = _release_payload_with_retry(name, version)
     except OSError as exc:  # URLError/HTTPError/timeouts are all OSError.
         return [f"{name}=={version}: PyPI query failed: {exc}"]
     uploads = {

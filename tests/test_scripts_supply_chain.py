@@ -15,15 +15,24 @@ minus the cooldown and touch nothing else.
 import io
 import json
 import re
+import time
 import urllib.error
 from datetime import UTC, datetime, timedelta
+from email.message import Message
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 import check_dep_age
 import update_exclude_newer
-from check_dep_age import PolicyError, _cutoff, _locked_artifacts, _verify_package
+from check_dep_age import (
+    _RETRY_PAUSES,
+    PolicyError,
+    _cutoff,
+    _locked_artifacts,
+    _verify_package,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -223,17 +232,75 @@ def test_verify_package_flags_unknown_artifact(
 def test_verify_package_fails_closed_on_network_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A PyPI query failure is a violation, never a silent pass."""
+    """A persistent PyPI failure is a violation once every retry is spent."""
+    attempts: list[str] = []
 
     def broken_urlopen(url: str, timeout: float = 0.0) -> io.BytesIO:
-        del url, timeout
+        del timeout
+        attempts.append(url)
         reason = "connection refused"
         raise urllib.error.URLError(reason)
 
     monkeypatch.setattr("urllib.request.urlopen", broken_urlopen)
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
     violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
     assert len(violations) == 1
     assert "PyPI query failed" in violations[0]
+    assert len(attempts) == 1 + len(_RETRY_PAUSES)
+    assert sleeps == list(_RETRY_PAUSES)
+
+
+def test_verify_package_retries_transient_server_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A PyPI blip (here a 503) is retried and the clean answer verifies."""
+    payload = _payload_bytes([("alpha-1.0.0.tar.gz", "2026-01-01T00:00:00Z")])
+    attempts: list[str] = []
+
+    def flaky_urlopen(url: str, timeout: float = 0.0) -> io.BytesIO:
+        del timeout
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise urllib.error.HTTPError(
+                url,
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "Service Unavailable",
+                Message(),
+                None,
+            )
+        return io.BytesIO(payload)
+
+    monkeypatch.setattr("urllib.request.urlopen", flaky_urlopen)
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
+    assert violations == []
+    assert len(attempts) == 2
+    assert sleeps == [_RETRY_PAUSES[0]]
+
+
+def test_verify_package_does_not_retry_client_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deterministic client error (here a 404) fails without retrying."""
+    attempts: list[str] = []
+
+    def missing_urlopen(url: str, timeout: float = 0.0) -> io.BytesIO:
+        del timeout
+        attempts.append(url)
+        raise urllib.error.HTTPError(
+            url, HTTPStatus.NOT_FOUND, "Not Found", Message(), None
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", missing_urlopen)
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    violations = _verify_package(CUTOFF, ("alpha", "1.0.0", ["alpha-1.0.0.tar.gz"]))
+    assert len(violations) == 1
+    assert "PyPI query failed" in violations[0]
+    assert len(attempts) == 1
+    assert sleeps == []
 
 
 # --- check_dep_age: end to end ----------------------------------------------
