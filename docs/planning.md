@@ -168,7 +168,7 @@ prematurely).
 
 ### 4.5 Persistence
 
-**Decision.** Two stdlib-only formats for two jobs. **User data:** one JSON
+**Decision.** Two text formats for two jobs. **User data:** one JSON
 document per plan, `.glidepath.json` — `schema_version`, sorted keys,
 2-space indent, `\n` endings, `Decimal` as strings, ISO-8601 tz-aware
 datetimes; deterministic output → clean diffs. Stored wherever the user
@@ -178,11 +178,22 @@ citations). User files store only assumption *overrides*; defaults
 re-resolve on load against shipped data, and the file records the data
 version it was last resolved against so default changes surface visibly.
 
-**Why.** Zero runtime dependencies preserved for read and write; JSON is
-the right app-owned canonical format, TOML the right hand-maintained one.
-**Rejected:** TOML for user files (needs `tomli-w`); YAML (dependency +
-coercion footguns); SQLite (opaque, not diffable). **Accepted cost:** a
-versioned migration harness from day one (v1→v1 no-op).
+**Why.** JSON is the right app-owned canonical format, TOML the right
+hand-maintained one. **Rejected:** TOML for user files (needs a writer
+dependency); YAML (coercion footguns); SQLite (opaque, not diffable).
+**Accepted cost:** a versioned migration harness from day one (v1→v1
+no-op).
+
+Revised 2026-08-07: the hand-rolled strict reader/writer and the TOML
+cursor were replaced by pydantic v2 wire models — one validating schema
+(`extra="forbid"`, every key required) serving both directions, so "the
+writer never produces a file the reader rejects" holds by construction.
+This retires the original zero-runtime-dependency constraint for
+persistence (pydantic is a runtime dependency, locked under the
+supply-chain cooldown). The format rules are unchanged: floats are
+banned document-wide, `Decimal`/`Money` travel as strings with their
+exact spellings preserved, datetimes must be tz-aware, enum tokens stay
+stable, and the migration harness stands.
 
 ### 4.6 Engine purity and reproducibility
 
@@ -190,20 +201,18 @@ versioned migration harness from day one (v1→v1 no-op).
 no I/O, no clock reads (`today` is an input), no global state. `Decimal`
 end-to-end — money quantized to pennies (`ROUND_HALF_EVEN`) at every ledger
 write; rates/factors unquantized. Randomness only via an injected
-`RandomSource` protocol wrapping `random.Random(seed)`; the seed lives in
-`RunConfig`; Monte Carlo path *i* uses a substream derived from
-`(seed, i)` so paths are order-independent and individually re-runnable.
-The derivation must be an explicit integer/bytes function (e.g. a
-fixed-width digest of seed and path index): `random.Random((seed, i))` is
-a `TypeError` on our pinned Python (3.11+ restricts seed types to
-None/int/float/str/bytes/bytearray), so the derivation cannot be delegated
-to the seed argument. Normal draws come from `random()` uniforms (the one
-generator sequence Python guarantees stable across versions) transformed
-by Marsaglia's polar method computed in `Decimal` — never the libm-backed
-float distribution methods (`gauss` et al.), whose last-bit rounding
-varies by platform — so identical seeds give bit-identical draws across
-Python versions and operating systems (this checkout runs on both Windows
-and WSL). Reproducibility is defined over a **run manifest**
+`RandomSource` protocol wrapping a seeded numpy generator (PCG64 via
+`numpy.random.default_rng`); the seed lives in `RunConfig`; Monte Carlo
+path *i* uses a substream derived from `(seed, i)` so paths are
+order-independent and individually re-runnable. The derivation is an
+explicit fixed-width digest of seed and identifying parts. Normal draws
+come from numpy's `standard_normal`; each float64 draw converts exactly
+to `Decimal` at the model boundary (binary floats are decimally
+representable), so the engine's tax and ledger arithmetic stays pure
+`Decimal`. Seeded numpy streams are stable for a given numpy version —
+the version the lockfile pins on every platform this checkout runs on
+(Windows and WSL) — so identical seeds give identical draws on the
+locked dependency set. Reproducibility is defined over a **run manifest**
 persisted with every result: effective plan (facts + decisions), effective
 assumptions, the full `RunConfig` (`today`, horizon, mode, path count,
 withdrawal strategy, seed), the region data content version, and the
@@ -212,10 +221,23 @@ property test.
 
 **Why.** Purity makes provenance trustworthy (results depend only on
 declared inputs) and the ≥90% coverage bar cheap (no mocking); seeding
-makes MC debuggable ("re-run path 4711"). **Rejected:** numpy (runtime
-dep, float-based, breaks the Decimal rule); module-level `random`; floats
-internally. **Accepted cost:** Decimal MC is slow — annual steps and small
-state keep it tractable; a measurement task gates any revisit (§8, 7.2).
+makes MC debuggable ("re-run path 4711"). **Rejected:** module-level
+`random`; floats in money, tax, or ledger arithmetic. **Accepted cost:**
+Decimal MC is slow — annual steps and small state keep it tractable; a
+measurement task gates any revisit (§8, 7.2).
+
+Revised 2026-08-07: numpy adopted for the numerics layer — the normal
+draws (PCG64, replacing the Decimal polar method), the correlation
+Cholesky factorisation (`numpy.linalg.cholesky` in float64, converted
+exactly back to `Decimal`), and percentile aggregation (`numpy.percentile`
+over int64 penny arrays via `Money.pennies`/`Money.from_pennies`, the
+exact interchange for quantized ledger values). The original numpy
+rejection is superseded for these numerics only: the Decimal-money
+invariant, the one-step-function rule, and the per-path engine stand,
+and floats never enter tax or ledger arithmetic. Two guarantees
+weakened knowingly: draw reproducibility is per locked numpy version
+rather than correctly-rounded-by-spec, and the Cholesky factor carries
+float64 (~1e-16) rather than context precision.
 Measured 2026-08-03 (roadmap 7.2; Windows 11, Python 3.14.6, via
 `scripts/measure_mc_performance.py`): one stochastic `returns_for` draw
 ≈ 146 µs; one 60-period engine pass ≈ 28 ms; projected per-path cost
@@ -1158,9 +1180,9 @@ and cash kinds activate the deferred wrapper mechanics:
 **Return model and Monte Carlo.** `ReturnModel.returns_for(period, path)`:
 deterministic impl = expected real returns + CPI → nominal, same every
 path; stochastic impl (MC phase) = lognormal draws with assumed
-volatilities and correlation matrix (Cholesky in `Decimal`; performance
-measured before optimising), randomness only from the injected seeded
-source. The mode lives in `RunConfig`: `RunMode.MONTE_CARLO` requires a
+volatilities and correlation matrix (numpy Cholesky converted exactly
+back to `Decimal` — §4.6, revised 2026-08-07), randomness only from the
+injected seeded source. The mode lives in `RunConfig`: `RunMode.MONTE_CARLO` requires a
 seed and resolves the stochastic model inside `run()`, with
 `RunConfig.path` naming the substream — the path runner (roadmap 7.3,
 `run_paths`) projects path *i* under `replace(config, path=i)` and
@@ -1240,7 +1262,8 @@ CC BY-NC-SA 4.0-licensed data, unlike the MIT code — see the file
 header). Loader rules: money/rates are TOML **strings** parsed to
 `Decimal` (bare floats in money positions are load errors); mandatory
 `[meta]` with `verified_on` + `sources`; `schema_version`; strict
-validation into frozen dataclasses, unknown keys error.
+validation into frozen dataclasses through pydantic wire models
+(§4.5, revised 2026-08-07), unknown keys error.
 
 ```toml
 schema_version = 2

@@ -9,6 +9,22 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Changed
+
+- The Monte Carlo numerics now run on numpy (PCG64 normal draws, LAPACK
+  Cholesky, vectorized percentile aggregation over exact int64 penny
+  arrays via a new `Money.pennies`/`Money.from_pennies` interchange).
+  Seeded draw values change with the generator, so Monte Carlo results
+  differ from previous releases at the same seed; reproducibility is
+  now defined per locked numpy version (planning §4.6, revised). The
+  engine's Decimal ledger and tax arithmetic are unchanged.
+- Plan persistence and the UK data-file loader are validated by
+  pydantic v2 wire models instead of the hand-rolled strict
+  reader/writer. File formats and strictness rules are unchanged
+  (floats banned, exact Decimal spellings, unknown keys rejected);
+  error messages now carry pydantic's wording after the familiar
+  document/file path prefix.
+
 ### Added
 
 - "How much can I draw down?" card on the charts screen (#149): the
