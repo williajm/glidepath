@@ -11,7 +11,9 @@ taskbar-to-tile size), so refreshed art is a file swap.
 The chart series palette is a colour-vision-validated categorical
 set (fixed slot order — the ordering is the CVD-safety mechanism);
 the percentile band overlays take an ordered ink ramp so the bands
-read apart from the series fills.
+read apart from the series fills, and the Monte Carlo fan fills one
+brand-green hue at stepped alphas so probability depth reads by
+lightness alone (9.24).
 """
 
 from importlib import resources
@@ -80,6 +82,16 @@ CHART_BAND_INKS = ("#0b0b0b", "#52514e", "#898781")
 """Percentile/backtest band overlays, assigned in band order — one
 neutral ink hue stepped light-ward so the ordered bands read apart
 from every series fill and from each other."""
+
+CHART_FAN_FILL = ACCENT
+"""The Monte Carlo fan's single fill hue — the brand green; depth
+comes from the alpha ramp, so the fan stays colour-vision-safe
+(lightness alone orders the fills)."""
+
+CHART_FAN_ALPHAS = (45, 75, 110, 150)
+"""Fill opacities in fan order, outermost first. The nested fills
+overlap, so the stacked alphas deepen naturally toward the median —
+central probability mass reads as colour depth."""
 
 _ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
@@ -350,6 +362,8 @@ __all__ = [
     "ACCENT_TEXT",
     "CHART_AXIS_LINE",
     "CHART_BAND_INKS",
+    "CHART_FAN_ALPHAS",
+    "CHART_FAN_FILL",
     "CHART_GRID",
     "CHART_LABEL_INK",
     "CHART_SERIES",

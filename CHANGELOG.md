@@ -11,6 +11,20 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Monte Carlo fan chart on its own tab (#146): a held run now draws
+  nested inter-percentile bands (5th-95th through 35th-65th) in a
+  single hue deepening toward the median line, so the probability of
+  each outcome region reads as colour depth — each band is a genuine
+  interval statement ("90% of simulated paths closed inside this
+  region"). The balances chart no longer carries the 10/50/90
+  percentile lines, so neither surface crowds the other; the
+  ending-pot metrics stay on the run-mode card, and the fan joins the
+  PDF report like every chart.
+- Hover tooltips on chart overlay lines (#145): backtest trajectories
+  and the fan's median answer hover with the same exact-amount copy
+  the bar segments already had, snapped to the nearest year; the fan's
+  bands answer with their low-to-high range for the hovered year.
+
 - The annual-allowance charge is now funded from modelled balances
   (#124): Scheme Pays debits the pension pot when the FA 2004 s237B
   mandatory conditions hold (charge over £2,000 — shipped as data —

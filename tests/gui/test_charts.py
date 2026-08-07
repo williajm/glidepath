@@ -4,7 +4,9 @@ The pane is thin by policy, so these tests only check the bindings:
 chart sub-tabs render from the view model, the empty-state message
 gates them, the basis and run-mode toggles forward the selected keys
 back, the Monte Carlo run action forwards the raw seed and path-count
-text, and percentile bands draw as line series over the bars.
+text, overlay bands draw as line series, and the Monte Carlo fan
+chart draws its nested fills as area series on its own tab (9.24)
+with hover tooltips on bars, lines, and fills alike (9.23).
 """
 
 from datetime import UTC, date, datetime
@@ -12,13 +14,20 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtCharts import QBarSet, QChartView, QLineSeries, QStackedBarSeries
-from PySide6.QtCore import Qt
+from PySide6.QtCharts import (
+    QAreaSeries,
+    QBarSet,
+    QChartView,
+    QLineSeries,
+    QStackedBarSeries,
+)
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
 
 from glidepath.app import (
     BACKTEST_RUNNING_MESSAGE,
     BACKTEST_STALE_MESSAGE,
+    MONTE_CARLO_CHART_TITLE,
     MONTE_CARLO_STALE_MESSAGE,
     NO_BACKTEST_MESSAGE,
     NO_MONTE_CARLO_MESSAGE,
@@ -32,6 +41,7 @@ from glidepath.app import (
     build_charts_view_model,
     build_shell_view_model,
     example_facts_form_data,
+    fill_tooltip,
     initial_plan_state,
     monte_carlo_running_status,
     parse_facts_form,
@@ -56,7 +66,13 @@ from glidepath.core import (
 )
 from glidepath.gui import charts as gui_charts
 from glidepath.gui.charts import ChartsPane, ChartsPaneCallbacks
-from glidepath.gui.style import CHART_BAND_INKS, CHART_SERIES, CHART_SURFACE
+from glidepath.gui.style import (
+    CHART_BAND_INKS,
+    CHART_FAN_ALPHAS,
+    CHART_FAN_FILL,
+    CHART_SERIES,
+    CHART_SURFACE,
+)
 from glidepath.gui.widgets import MainWindow
 from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
 
@@ -278,20 +294,35 @@ class TestMonteCarloControls:
         pane.run_button.click()
         assert runs == [("42", "5")]
 
-    def test_a_run_renders_metrics_and_band_lines(self) -> None:
-        """The readout fills and the balances chart gains line series."""
+    def test_a_run_renders_metrics_and_the_fan_tab(self) -> None:
+        """The readout fills and the fan chart binds to its own tab (9.24).
+
+        The balances chart stays clean — the Monte Carlo presentation
+        lives entirely on the fan tab: one area series per fill,
+        outermost first, with the median as the single line series.
+        """
         pane = ChartsPane(callbacks())
         view_model = monte_carlo_view_model()
         pane.refresh(view_model)
         assert "Success rate" in pane.metrics_label.text()
         assert not pane.metrics_label.isHidden()
         assert pane.monte_carlo_message_label.isHidden()
-        view = pane.chart_tabs.widget(0)
+        balances = pane.chart_tabs.widget(0)
+        assert isinstance(balances, QChartView)
+        assert len(balances.chart().series()) == 1
+        fan_index = pane.chart_tabs.count() - 1
+        assert pane.chart_tabs.tabText(fan_index) == MONTE_CARLO_CHART_TITLE
+        view = pane.chart_tabs.widget(fan_index)
         assert isinstance(view, QChartView)
-        series = view.chart().series()
-        assert len(series) == 1 + len(view_model.charts[0].bands)
-        band_names = [entry.name() for entry in series[1:]]
-        assert band_names == [band.label for band in view_model.charts[0].bands]
+        fan = view_model.charts[-1]
+        areas = [
+            entry for entry in view.chart().series() if isinstance(entry, QAreaSeries)
+        ]
+        assert [area.name() for area in areas] == [fill.label for fill in fan.fills]
+        lines = [
+            entry for entry in view.chart().series() if isinstance(entry, QLineSeries)
+        ]
+        assert [line.name() for line in lines] == [band.label for band in fan.bands]
 
 
 class TestBacktestCard:
@@ -437,13 +468,16 @@ class TestChartTheme:
                 assert bar_set.borderColor().name() == CHART_SURFACE
 
     def test_band_lines_wear_the_ordered_inks(self) -> None:
-        """Percentile overlays take the neutral ink ramp, in band order.
+        """Overlay lines take the neutral ink ramp, in band order.
 
         One hue stepped by lightness keeps the ordered bands apart
-        from every series fill and from each other.
+        from every series fill and from each other. The backtest
+        trajectories are the overlay the balances chart still draws
+        (the Monte Carlo lines moved to the fan tab, 9.24).
         """
         pane = ChartsPane(callbacks())
-        pane.refresh(monte_carlo_view_model())
+        state = state_with_backtest(projected_state(), today=TODAY)
+        pane.refresh(build_charts_view_model(state))
         view = pane.chart_tabs.widget(0)
         assert isinstance(view, QChartView)
         bands = view.chart().series()[1:]
@@ -453,6 +487,29 @@ class TestChartTheme:
             pen = line.pen()
             assert pen.color().name() == CHART_BAND_INKS[slot]
             assert pen.width() == 2
+
+    def test_the_fan_wears_the_single_hue_alpha_ramp(self) -> None:
+        """Fan fills take the one fan hue at stepped alphas (9.24).
+
+        Depth by alpha alone keeps the fan colour-vision-safe; the
+        median line wears the darkest band ink over the fills.
+        """
+        pane = ChartsPane(callbacks())
+        pane.refresh(monte_carlo_view_model())
+        view = pane.chart_tabs.widget(pane.chart_tabs.count() - 1)
+        assert isinstance(view, QChartView)
+        areas = [
+            entry for entry in view.chart().series() if isinstance(entry, QAreaSeries)
+        ]
+        assert areas
+        for slot, area in enumerate(areas):
+            colour = area.brush().color()
+            assert colour.name() == CHART_FAN_FILL
+            assert colour.alpha() == CHART_FAN_ALPHAS[slot]
+        [median] = [
+            entry for entry in view.chart().series() if isinstance(entry, QLineSeries)
+        ]
+        assert median.pen().color().name() == CHART_BAND_INKS[0]
 
     def test_the_chart_chrome_is_recessive(self) -> None:
         """White surface, horizontal-only hairline grid, muted axes."""
@@ -471,8 +528,9 @@ class TestChartTheme:
     def test_single_series_charts_drop_the_legend(self) -> None:
         """One unbanded series: the sub-tab title alone names it.
 
-        As soon as a second labelled entry appears (a percentile
-        band), the legend is back — identity is never colour-alone.
+        As soon as a second labelled entry appears (a fan fill, an
+        overlay line), the legend is back — identity is never
+        colour-alone.
         """
         pane = ChartsPane(callbacks())
         pane.refresh(projected_view_model())
@@ -480,9 +538,9 @@ class TestChartTheme:
         assert isinstance(view, QChartView)
         assert not view.chart().legend().isVisible()
         pane.refresh(monte_carlo_view_model())
-        banded = pane.chart_tabs.widget(0)
-        assert isinstance(banded, QChartView)
-        assert banded.chart().legend().isVisible()
+        fan = pane.chart_tabs.widget(pane.chart_tabs.count() - 1)
+        assert isinstance(fan, QChartView)
+        assert fan.chart().legend().isVisible()
 
 
 class _ToolTipRecorder:
@@ -561,6 +619,112 @@ class TestBarTooltips:
         assert tooltips.hides == 1
 
 
+def _fan_view(pane: ChartsPane) -> QChartView:
+    """The last sub-tab's chart view — the fan chart when one is held."""
+    view = pane.chart_tabs.widget(pane.chart_tabs.count() - 1)
+    assert isinstance(view, QChartView)
+    return view
+
+
+class TestOverlayTooltips:
+    """Hovering overlay lines and fan fills pops app-layer copy (9.23)."""
+
+    @pytest.fixture(name="tooltips")
+    def tooltips_fixture(self, monkeypatch: pytest.MonkeyPatch) -> _ToolTipRecorder:
+        """Capture the tooltip calls the charts module makes."""
+        recorder = _ToolTipRecorder()
+        monkeypatch.setattr(gui_charts, "QToolTip", recorder)
+        return recorder
+
+    def test_hovering_the_median_line_shows_its_point_copy(
+        self, tooltips: _ToolTipRecorder
+    ) -> None:
+        """The hover snaps to the nearest category, exact amount shown."""
+        pane = ChartsPane(callbacks())
+        view_model = monte_carlo_view_model()
+        pane.refresh(view_model)
+        [line] = [
+            entry
+            for entry in _fan_view(pane).chart().series()
+            if isinstance(entry, QLineSeries)
+        ]
+        [median] = view_model.charts[-1].bands
+        hovering = True
+        line.hovered.emit(QPointF(1.2, 999.0), hovering)
+        expected = bar_tooltip(view_model.categories[1], median.label, median.values[1])
+        assert tooltips.shown == [expected]
+        assert tooltips.hides == 0
+
+    def test_hovering_a_fill_shows_its_interval_copy(
+        self, tooltips: _ToolTipRecorder
+    ) -> None:
+        """A fan fill answers with its label and low-to-high amounts."""
+        pane = ChartsPane(callbacks())
+        view_model = monte_carlo_view_model()
+        pane.refresh(view_model)
+        areas = [
+            entry
+            for entry in _fan_view(pane).chart().series()
+            if isinstance(entry, QAreaSeries)
+        ]
+        fill = view_model.charts[-1].fills[0]
+        hovering = True
+        areas[0].hovered.emit(QPointF(0.4, 999.0), hovering)
+        expected = fill_tooltip(
+            view_model.categories[0], fill.label, fill.lower[0], fill.upper[0]
+        )
+        assert tooltips.shown == [expected]
+
+    def test_a_backtest_trajectory_answers_hover_too(
+        self, tooltips: _ToolTipRecorder
+    ) -> None:
+        """The balances chart's overlay lines carry the same binding."""
+        pane = ChartsPane(callbacks())
+        state = state_with_backtest(projected_state(), today=TODAY)
+        view_model = build_charts_view_model(state)
+        pane.refresh(view_model)
+        view = pane.chart_tabs.widget(0)
+        assert isinstance(view, QChartView)
+        lines = [
+            entry for entry in view.chart().series() if isinstance(entry, QLineSeries)
+        ]
+        band = view_model.charts[0].bands[0]
+        hovering = True
+        lines[0].hovered.emit(QPointF(0.0, 0.0), hovering)
+        expected = bar_tooltip(view_model.categories[0], band.label, band.values[0])
+        assert tooltips.shown == [expected]
+
+    def test_leaving_a_line_hides_the_tooltip(self, tooltips: _ToolTipRecorder) -> None:
+        """Hover-off dismisses rather than leaving stale copy up."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(monte_carlo_view_model())
+        [line] = [
+            entry
+            for entry in _fan_view(pane).chart().series()
+            if isinstance(entry, QLineSeries)
+        ]
+        hovering = False
+        line.hovered.emit(QPointF(0.0, 0.0), hovering)
+        assert tooltips.shown == []
+        assert tooltips.hides == 1
+
+    def test_an_off_chart_hover_hides_rather_than_misreports(
+        self, tooltips: _ToolTipRecorder
+    ) -> None:
+        """A point past the last category shows nothing."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(monte_carlo_view_model())
+        [line] = [
+            entry
+            for entry in _fan_view(pane).chart().series()
+            if isinstance(entry, QLineSeries)
+        ]
+        hovering = True
+        line.hovered.emit(QPointF(999.0, 0.0), hovering)
+        assert tooltips.shown == []
+        assert tooltips.hides == 1
+
+
 class TestMainWindowChartsFlow:
     """Saving facts populates the charts tab through the app layer."""
 
@@ -598,7 +762,12 @@ class TestMainWindowChartsFlow:
         assert window.charts_pane.chart_tabs.currentIndex() == 2
 
     def test_monte_carlo_run_through_the_window(self, window: MainWindow) -> None:
-        """Mode toggle, seed + paths, run: metrics and bands appear (9.13)."""
+        """Mode toggle, seed + paths, run: metrics and the fan appear.
+
+        The fan chart binds to its own sub-tab (9.24) — one area
+        series per fill plus the median line over the empty bar
+        series — and switching back to deterministic drops the tab.
+        """
         pane = window.charts_pane
         buttons = {button.text(): button for button in pane.findChildren(QRadioButton)}
         buttons["Monte Carlo"].click()
@@ -619,11 +788,17 @@ class TestMainWindowChartsFlow:
         assert "Success rate" in pane.metrics_label.text()
         assert pane.seed_edit.text() == "7"
         assert pane.paths_edit.text() == "2"
+        assert pane.chart_tabs.count() == 4
+        assert pane.chart_tabs.tabText(3) == MONTE_CARLO_CHART_TITLE
         view = pane.chart_tabs.widget(0)
         assert isinstance(view, QChartView)
-        assert len(view.chart().series()) == 4
+        assert len(view.chart().series()) == 1
+        fan_view = pane.chart_tabs.widget(3)
+        assert isinstance(fan_view, QChartView)
+        assert len(fan_view.chart().series()) == 6
         buttons["Deterministic"].click()
         assert pane.seed_edit.isHidden()
+        assert pane.chart_tabs.count() == 3
         deterministic_view = pane.chart_tabs.widget(0)
         assert isinstance(deterministic_view, QChartView)
         assert len(deterministic_view.chart().series()) == 1
@@ -678,6 +853,7 @@ class TestMainWindowChartsFlow:
         window.scenarios_pane.add_scenario_button.click()
         assert pane.metrics_label.isHidden()
         assert pane.monte_carlo_message_label.text() == NO_MONTE_CARLO_MESSAGE
+        assert pane.chart_tabs.count() == 3
         view = pane.chart_tabs.widget(0)
         assert isinstance(view, QChartView)
         assert len(view.chart().series()) == 1
@@ -888,3 +1064,22 @@ class TestChartImage:
                 for y in range(0, image.height(), 8)
             }
             assert len(colours) >= 16, chart.title
+
+    def test_the_fan_chart_renders_with_content_too(self) -> None:
+        """The fan tab rasterises non-blank for the report (9.24).
+
+        The fan chart carries no bar sets, so this also pins that a
+        category axis without bars still lays out the fills.
+        """
+        state = state_with_monte_carlo(example_projected_state(), "7", "3", today=TODAY)
+        view_model = build_charts_view_model(state, mode=RunMode.MONTE_CARLO)
+        chart = view_model.charts[-1]
+        assert chart.title == MONTE_CARLO_CHART_TITLE
+        image = gui_charts.chart_image(chart, view_model.categories)
+        assert not image.isNull()
+        colours = {
+            image.pixel(x, y)
+            for x in range(0, image.width(), 8)
+            for y in range(0, image.height(), 8)
+        }
+        assert len(colours) >= 16

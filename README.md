@@ -23,7 +23,7 @@ nothing is transmitted.
 
 <p align="center">
   <img src="docs/screenshots/charts.png"
-       alt="The charts tab: wrapper balances stacked by tax year with Monte Carlo percentile bands over them, the success-rate readout, and the retirement-age and backtest cards"
+       alt="The charts tab: the Monte Carlo fan chart — nested percentile bands deepening toward the median line — beside the success-rate readout and the retirement-age and backtest cards"
        width="800">
 </p>
 
@@ -40,8 +40,8 @@ What it models today (single person, UK):
 - **Tax** — rUK and Scottish income tax from verified 2026/27 data
   files; pension allowances (AA/taper/MPAA, lump-sum allowance).
 - **Projection** — deterministic or Monte Carlo runs from the app:
-  success rate, probability of ruin, ending-pot percentiles, and
-  10th/median/90th bands on the charts, reproducible from a seed. With
+  success rate, probability of ruin, ending-pot percentiles, and a
+  probability fan chart on its own tab, reproducible from a seed. With
   a de-risking glide path, tax-aware decumulation with optional
   go-go/slow-go/no-go retirement spending multipliers, and annuity
   purchases entered in the facts form. (The engine also models

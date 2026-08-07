@@ -19,16 +19,19 @@ from glidepath.app.backtest import (
 )
 from glidepath.app.charts import (
     DEFAULT_CHART_BASIS,
+    MONTE_CARLO_CHART_TITLE,
     NO_PROJECTION_MESSAGE,
     RUN_FAILED_PREFIX,
     ChartBand,
     ChartBasisOption,
+    ChartFill,
     ChartSeries,
     ChartSpec,
     ChartsViewModel,
     bar_tooltip,
     basis_from_key,
     build_charts_view_model,
+    fill_tooltip,
 )
 from glidepath.app.copy import (
     ABOUT_TITLE,
@@ -198,6 +201,7 @@ __all__ = [
     "HELP_GUIDE_SECTIONS",
     "HELP_GUIDE_TITLE",
     "HELP_MENU_LABEL",
+    "MONTE_CARLO_CHART_TITLE",
     "MONTE_CARLO_NO_PLAN_MESSAGE",
     "MONTE_CARLO_PATHS_MESSAGE",
     "MONTE_CARLO_RUNNING_MESSAGE",
@@ -227,6 +231,7 @@ __all__ = [
     "BacktestPanelViewModel",
     "ChartBand",
     "ChartBasisOption",
+    "ChartFill",
     "ChartSeries",
     "ChartSpec",
     "ChartsViewModel",
@@ -287,6 +292,7 @@ __all__ = [
     "export_cash_flow_csv",
     "facts_form_data_from_household",
     "facts_saved_message",
+    "fill_tooltip",
     "form_cannot_represent",
     "format_date",
     "format_form_errors",

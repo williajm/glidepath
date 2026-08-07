@@ -2,10 +2,11 @@
 
 The Phase 7 core (:func:`~glidepath.core.run_paths`) surfaced per
 planning §4.7: a run-mode control (deterministic | Monte Carlo with
-paths + seed), the success-metrics readout, and the percentile-band
-specs the balances chart draws (the bands themselves are composed in
-:mod:`glidepath.app.charts`). The Monte Carlo run is an explicit user
-action — even at the recorded 9.15 per-path cost (planning §4.6) it is
+paths + seed), the success-metrics readout, and the fan-chart specs
+the Monte Carlo chart tab draws (the fan itself is composed in
+:mod:`glidepath.app.charts`, roadmap 9.24). The Monte Carlo run is an
+explicit user action — even at the recorded 9.15 per-path cost
+(planning §4.6) it is
 far too slow to re-run on every keystroke — and every plan-changing
 transition routes through :func:`~glidepath.app.plan.replanned_state`, which
 drops the held result, so a stale Monte Carlo surface can never be
@@ -129,31 +130,56 @@ _UNKNOWN_MODE_MESSAGE: Final = "unknown run mode key"
 
 @dataclass(frozen=True)
 class BandSpec:
-    """One percentile the Monte Carlo surfaces chart and report (§5.2)."""
+    """One ending-pot percentile the Monte Carlo readout reports (§5.2)."""
 
-    band_label: str
     ending_pot_label: str
     percentile: Decimal
 
 
 BAND_SPECS: Final[tuple[BandSpec, ...]] = (
     BandSpec(
-        band_label="10th percentile",
         ending_pot_label="Ending pot, 10th percentile",
         percentile=Decimal(10),
     ),
     BandSpec(
-        band_label="Median",
         ending_pot_label="Ending pot, median",
         percentile=Decimal(50),
     ),
     BandSpec(
-        band_label="90th percentile",
         ending_pot_label="Ending pot, 90th percentile",
         percentile=Decimal(90),
     ),
 )
-"""The 10/50/90 bands of roadmap 9.13, chart labels and metric labels."""
+"""The 10/50/90 ending-pot metrics of roadmap 9.13."""
+
+
+@dataclass(frozen=True)
+class FanSpec:
+    """One inter-percentile fill of the Monte Carlo fan chart (9.24).
+
+    ``label`` is the legend and tooltip copy; ``lower``/``upper`` are
+    the percentiles bounding the fill, so the fill is a genuine
+    interval statement — the central share of paths that closed
+    between them every period.
+    """
+
+    label: str
+    lower: Decimal
+    upper: Decimal
+
+
+FAN_SPECS: Final[tuple[FanSpec, ...]] = (
+    FanSpec(label="5th-95th percentile", lower=Decimal(5), upper=Decimal(95)),
+    FanSpec(label="15th-85th percentile", lower=Decimal(15), upper=Decimal(85)),
+    FanSpec(label="25th-75th percentile", lower=Decimal(25), upper=Decimal(75)),
+    FanSpec(label="35th-65th percentile", lower=Decimal(35), upper=Decimal(65)),
+)
+"""The fan's nested fills, outermost first — shells step the fill
+colour deeper inward, so central probability mass reads as depth."""
+
+
+FAN_MEDIAN_LABEL: Final = "Median"
+"""The fan chart's single overlay line — the per-period median."""
 
 
 @dataclass(frozen=True)
