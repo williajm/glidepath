@@ -26,7 +26,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from glidepath.core import (
@@ -188,6 +188,51 @@ def modest_households(
     return Household(persons=(person,), spending=plan, planned_outflows=outflows)
 
 
+def taxed_drawdown_household() -> Household:
+    """A retiree whose SIPP draws bear marginal tax (#147).
+
+    Spending far beyond the pot's tax-free element forces taxable
+    draws above the personal allowance — a regime the generated space
+    reaches only rarely, pinned here so every run covers it.
+    """
+    person = Person(
+        id=EntityId("person-1"),
+        date_of_birth=Fact(value=date(1958, 1, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=60, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+        wrappers=(wrapper_of(0, SIPP_KIND, Decimal(500_000), None),),
+    )
+    plan = SpendingPlan(annual_spending_real=money_fact(Decimal(40_000)))
+    return Household(persons=(person,), spending=plan)
+
+
+def penny_taxed_outflow_household() -> Household:
+    """Issue #147's minimal counterexample, pinned verbatim.
+
+    A planned outflow a few pence below the whole SIPP balance drains
+    the pot: the draw's taxable share clears the personal allowance by
+    pennies (11p of tax) and the net delivery lands a penny short
+    (shortfall) — the smallest taxed-draw case Hypothesis found.
+    """
+    person = Person(
+        id=EntityId("person-1"),
+        date_of_birth=Fact(value=date(1971, 1, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=55, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+        wrappers=(
+            wrapper_of(0, ISA_KIND, Decimal(0), None),
+            wrapper_of(1, SIPP_KIND, Decimal("16760.74"), None),
+        ),
+    )
+    outflow = PlannedOutflow(
+        id=EntityId("outflow-1"),
+        label="One-off",
+        amount_real=Decision(value=Money(Decimal("16760.64")), recorded_on=RECORDED),
+        at_age_of=(person.id, 56),
+    )
+    return Household(persons=(person,), planned_outflows=(outflow,))
+
+
 def run_projection(household: Household, years: int) -> ProjectionResult:
     """Project ``household`` deterministically over ``years`` years."""
     config = RunConfig(today=TODAY, horizon_end=date(TODAY.year + years, 8, 1))
@@ -248,17 +293,26 @@ class TestEngineInvariants:
 
     @given(household=modest_households(), years=horizon_years)
     @settings(max_examples=100, deadline=None)
+    @example(household=taxed_drawdown_household(), years=2)
+    @example(household=penny_taxed_outflow_household(), years=1)
     def test_retirement_cash_conservation_every_period(
         self, household: Household, years: int
     ) -> None:
-        """Withdrawals + income - tax - banked + shortfall = need + outflows.
+        """Gross draws + income - tax - banked + shortfall = need + outflows.
 
         The golden scenarios' need identity, over generated plans:
-        every retired period's net need is met by net withdrawals plus
-        income net of the personal tax assessment — excluding the
-        growth tax and the funded annual-allowance charge, which the
-        wrappers fund directly — with any surplus banked and any
-        deficit reported as shortfall.
+        every retired period's need is met by the gross cash the
+        withdrawal step pays out of wrappers plus gross income, net of
+        the personal tax assessment — excluding the growth tax and the
+        funded annual-allowance charge, which the wrappers fund
+        directly — with any surplus banked and any deficit reported as
+        shortfall. The gross form matters (#147): ``net_withdrawn`` is
+        already net of the marginal tax the gross-up prices on draws
+        and ``tax_due`` assesses that same tax, so a net-figure
+        identity would count it twice. The wrapper withdrawal fields
+        also carry the up-front and annuity-purchase tax-free lump
+        sums, already counted in the income term, so those come off
+        the gross figure.
         """
         result = run_projection(household, years)
         for snapshot in result.snapshots:
@@ -269,6 +323,17 @@ class TestEngineInvariants:
                 (entry.growth_tax + entry.aa_charge for entry in person.wrappers),
                 start=ZERO,
             )
+            gross_withdrawn = (
+                sum(
+                    (
+                        entry.withdrawal_tax_free + entry.withdrawal_taxable
+                        for entry in person.wrappers
+                    ),
+                    start=ZERO,
+                )
+                - person.pension_lump_sum
+                - person.annuity_lump_sum
+            )
             income = (
                 person.db_income
                 + person.state_pension_income
@@ -278,7 +343,7 @@ class TestEngineInvariants:
                 + person.pension_lump_sum
             )
             delivered = (
-                person.net_withdrawn
+                gross_withdrawn
                 + income
                 - (person.tax.tax_due - wrapper_funded_tax)
                 - person.banked
