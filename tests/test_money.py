@@ -1,6 +1,7 @@
 """Tests for the Money/Rate rounding policy (planning §4.6, issue 1.1)."""
 
 from decimal import Decimal
+from operator import attrgetter
 
 import pytest
 from hypothesis import given
@@ -105,6 +106,47 @@ def test_sub_penny_amount_is_not_penny_exact() -> None:
     """Sub-penny precision is detectable so ledger writes can assert on it."""
     assert not Money(Decimal("1.005")).is_penny_exact
     assert Money(Decimal("1.5")).is_penny_exact
+
+
+@given(pennies=st.integers(min_value=-(10**14), max_value=10**14))
+def test_pennies_round_trip_is_exact(pennies: int) -> None:
+    """from_pennies and pennies invert each other with no rounding."""
+    money = Money.from_pennies(pennies)
+    assert money.pennies == pennies
+    assert money.is_penny_exact
+
+
+@given(amount=amounts)
+def test_quantized_amount_survives_penny_interchange(amount: Decimal) -> None:
+    """Any ledger value crosses the int-penny boundary and back unchanged."""
+    quantized = Money(amount).quantized()
+    assert Money.from_pennies(quantized.pennies) == quantized
+
+
+def test_pennies_examples() -> None:
+    """Pennies scale by exactly one hundred, sign included."""
+    assert Money(Decimal("12.34")).pennies == 1234
+    assert Money(Decimal("-0.01")).pennies == -1
+    assert Money(Decimal(0)).pennies == 0
+    assert Money.from_pennies(1).amount == Decimal("0.01")
+
+
+def test_pennies_rejects_sub_penny_amounts() -> None:
+    """An unquantized intermediate has no faithful integer form."""
+    money = Money(Decimal("1.005"))
+    read_pennies = attrgetter("pennies")
+    with pytest.raises(ValueError, match="penny-exact"):
+        read_pennies(money)
+
+
+def test_from_pennies_rejects_non_int() -> None:
+    """The penny count is an int — bool and Decimal are refused."""
+    flag = True
+    with pytest.raises(TypeError, match="must be int"):
+        Money.from_pennies(flag)
+    penny_decimal = Decimal(1)
+    with pytest.raises(TypeError, match="must be int"):
+        Money.from_pennies(penny_decimal)  # type: ignore[arg-type]
 
 
 def test_money_rejects_float() -> None:

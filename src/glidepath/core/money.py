@@ -8,6 +8,7 @@ via :meth:`Money.quantized`. Rates and factors are never quantized.
 
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
+from typing import Self
 
 _PENNY = Decimal("0.01")
 
@@ -78,6 +79,41 @@ class Money:
     def is_penny_exact(self) -> bool:
         """Whether the amount is representable in whole pennies."""
         return self.amount == self.amount.quantize(_PENNY, rounding=ROUND_HALF_EVEN)
+
+    @classmethod
+    def from_pennies(cls, pennies: int, /) -> Self:
+        """Build a penny-exact amount from a whole number of pennies.
+
+        The exact inverse of :attr:`pennies` — the int-penny
+        interchange boundary (planning §4.6): quantized ledger values
+        cross into integer form (e.g. int64 arrays for aggregate
+        statistics) and back without ever touching float.
+
+        Raises:
+            TypeError: If ``pennies`` is not an ``int`` (``bool``
+                included — a flag is not a count of pennies).
+        """
+        if isinstance(pennies, bool) or not isinstance(pennies, int):
+            msg = f"pennies must be int, got {type(pennies).__name__}"
+            raise TypeError(msg)
+        return cls(Decimal(pennies).scaleb(-2))
+
+    @property
+    def pennies(self) -> int:
+        """The amount as a whole number of pennies, exactly.
+
+        Defined only for penny-exact amounts — ledger values that have
+        been through :meth:`quantized`. An unquantized intermediate has
+        no faithful integer representation, so asking for one is an
+        error rather than a silent rounding.
+
+        Raises:
+            ValueError: If the amount is not penny-exact.
+        """
+        if not self.is_penny_exact:
+            msg = f"pennies requires a penny-exact amount, got {self.amount}"
+            raise ValueError(msg)
+        return int(self.amount.scaleb(2))
 
 
 @dataclass(frozen=True, slots=True, order=True)
