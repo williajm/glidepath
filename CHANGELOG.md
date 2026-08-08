@@ -9,6 +9,14 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-08
+
+First release published to PyPI. The headline modelling change is the
+annual-allowance charge landing in the balance path (Scheme Pays and
+cash routes); on the charts screen every chart gains a table twin, the
+Monte Carlo fan moves to its own tab, and a "How much can I draw down?"
+card answers the dual of "When can I retire?".
+
 ### Added
 
 - Releases now publish the sdist and wheel to PyPI via trusted
@@ -43,7 +51,6 @@ in the release PR and becomes the GitHub Release notes verbatim.
   and the fan's median answer hover with the same exact-amount copy
   the bar segments already had, snapped to the nearest year; the fan's
   bands answer with their low-to-high range for the hovered year.
-
 - The annual-allowance charge is now funded from modelled balances
   (#124): Scheme Pays debits the pension pot when the FA 2004 s237B
   mandatory conditions hold (charge over £2,000 — shipped as data —
@@ -106,7 +113,6 @@ in the release PR and becomes the GitHub Release notes verbatim.
   a never-shown chart view whose resize Qt only delivers on show. It
   now lays the chart out at the report size directly, so exported PDFs
   carry full-size charts (#133).
-
 - v1-era plan files carrying accumulation-stage spending multipliers
   (`early_accumulation`, `mid_accumulation`, `pre_retirement`) failed
   to load after the tokens were retired without a migration. A new
