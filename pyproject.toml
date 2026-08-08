@@ -7,10 +7,40 @@ readme = "README.md"
 # scope and attribution in LICENSE-DATA).
 license = "MIT AND CC-BY-NC-SA-4.0"
 license-files = ["LICENSE", "LICENSE-DATA"]
+authors = [{ name = "James Williams" }]
 requires-python = ">=3.14"
+keywords = [
+    "retirement",
+    "pension",
+    "financial-planning",
+    "investment",
+    "uk",
+    "sipp",
+    "isa",
+    "monte-carlo",
+]
+# No License :: classifier — PEP 639: the SPDX expression above is the
+# license metadata, and mixing it with license classifiers is deprecated.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
 dependencies = [
     "pyside6>=6.11.1",
 ]
+
+[project.urls]
+Homepage = "https://williajm.github.io/glidepath/"
+Repository = "https://github.com/williajm/glidepath"
+Changelog = "https://github.com/williajm/glidepath/blob/main/CHANGELOG.md"
+Issues = "https://github.com/williajm/glidepath/issues"
 
 [project.gui-scripts]
 glidepath = "glidepath.gui.main:main"
