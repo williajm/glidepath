@@ -11,6 +11,11 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Releases now publish the sdist and wheel to PyPI via trusted
+  publishing (OIDC, no stored credential), so
+  `uv tool install glidepath` / `pipx install glidepath` work from
+  this release onward; the tag/changelog release process is unchanged
+  (planning §4.10).
 - Every chart sub-tab now pairs the graph with its numbers (#156): a
   Chart | Table page pair inside each sub-tab, the table one row per
   period with a money column per stacked series, fan band, and
