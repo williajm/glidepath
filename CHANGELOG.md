@@ -9,6 +9,13 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Added
+
+- PyPI project metadata: trove classifiers (desktop finance app, Qt,
+  Python 3.14), keywords, author, and sidebar URLs (homepage,
+  repository, changelog, issue tracker). No `License ::` classifier —
+  the SPDX license expression is the license metadata under PEP 639.
+
 ## [0.2.0] - 2026-08-08
 
 First release published to PyPI. The headline modelling change is the
