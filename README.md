@@ -92,7 +92,19 @@ based solely on this tool.
 
 ## Run
 
-Requires only [uv](https://docs.astral.sh/uv/):
+Requires only [uv](https://docs.astral.sh/uv/). Install the latest
+release [from PyPI](https://pypi.org/project/glidepath/) and launch it:
+
+```sh
+uv tool install glidepath
+glidepath
+```
+
+(`pipx install glidepath` works too. Glidepath is a desktop app
+distributed through PyPI, not a library — importing `glidepath`
+modules is not a supported API.)
+
+Or run straight from a checkout:
 
 ```sh
 git clone https://github.com/williajm/glidepath.git
@@ -100,8 +112,9 @@ cd glidepath
 uv run glidepath
 ```
 
-The first run creates a virtual environment and installs the locked
-dependencies automatically, then launches the desktop app. Accept the
+The first run from a checkout creates a virtual environment and
+installs the locked dependencies automatically, then launches the
+desktop app. Accept the
 disclaimer and a fresh install
 opens with an example plan already projected, so every tab has
 something to show — replace its values with your own facts, or clear
