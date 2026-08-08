@@ -2085,6 +2085,16 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   multiplied over the search's probe bound rather than candidate
   ages. Answers reproduce from the recorded inputs (and seed) per
   §4.6.*
+- [x] 9.26 Chart data as tables (#156) — *every chart sub-tab pairs
+  the drawn chart with its numbers: a Chart | Table page pair inside
+  the sub-tab, the table one row per period with one column per
+  stacked series, fan fill, and overlay line, in the order the
+  chart's legend reads. Cells are app-layer copy (§4.7) —
+  money-formatted from the same exact `Decimal` amounts the chart
+  draws, a fan fill cell stating its low-to-high interval like the
+  fill tooltip — so the table and the chart can never disagree, and
+  the table follows the money-basis toggle like the chart it mirrors.
+  The page choice survives a refresh alongside the selected sub-tab.*
 
 ## 9. Open questions
 

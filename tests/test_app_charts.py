@@ -14,17 +14,23 @@ import pytest
 from glidepath.app import (
     NO_PROJECTION_MESSAGE,
     RUN_FAILED_PREFIX,
+    ChartBand,
+    ChartFill,
+    ChartSeries,
+    ChartSpec,
     ChartsViewModel,
     PlanState,
     ReportBasis,
     bar_tooltip,
     basis_from_key,
     build_charts_view_model,
+    chart_table,
+    format_money,
     initial_plan_state,
     state_with_household,
     state_with_override,
 )
-from glidepath.app.charts import _category_label
+from glidepath.app.charts import PERIOD_COLUMN_LABEL, _category_label
 from glidepath.core import (
     AnnuityPurchase,
     AssetAllocation,
@@ -407,3 +413,49 @@ class TestBarTooltip:
         """Series label, category, and pounds-and-pence amount."""
         text = bar_tooltip("2043", "State pension", Decimal("12345.67"))
         assert text == "State pension\n2043: £12,345.67"
+
+
+class TestChartTable:
+    """Every chart's numbers re-read as a table (roadmap 9.26)."""
+
+    def test_a_projected_chart_tables_its_series_by_period(
+        self, view_model: ChartsViewModel
+    ) -> None:
+        """Period column first, one money column per stacked series."""
+        chart = view_model.charts[0]
+        table = chart_table(chart, view_model.categories)
+        assert table.columns == (
+            PERIOD_COLUMN_LABEL,
+            *(entry.label for entry in chart.series),
+        )
+        assert len(table.rows) == len(view_model.categories)
+        assert table.rows[0][0] == view_model.categories[0]
+        assert table.rows[0][1] == format_money(Money(chart.series[0].values[0]))
+
+    def test_fills_and_bands_column_in_legend_order(self) -> None:
+        """Fills state their intervals; overlay lines column as money.
+
+        The column order matches the chart legend's reading order —
+        series, then fills, then bands — so the table reads like the
+        graph it mirrors.
+        """
+        chart = ChartSpec(
+            title="fan",
+            y_axis_label="y",
+            y_axis_max=Decimal(10),
+            series=(ChartSeries(label="Series", values=(Decimal(1), Decimal(2))),),
+            bands=(ChartBand(label="Median", values=(Decimal(3), Decimal(4))),),
+            fills=(
+                ChartFill(
+                    label="5th-95th",
+                    lower=(Decimal(5), Decimal(6)),
+                    upper=(Decimal(7), Decimal(8)),
+                ),
+            ),
+        )
+        table = chart_table(chart, ("2026", "2027"))
+        assert table.columns == (PERIOD_COLUMN_LABEL, "Series", "5th-95th", "Median")
+        assert table.rows == (
+            ("2026", "£1.00", "£5.00 to £7.00", "£3.00"),
+            ("2027", "£2.00", "£6.00 to £8.00", "£4.00"),
+        )

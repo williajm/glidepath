@@ -85,6 +85,12 @@ TAX_SERIES_LABEL: Final = "Tax due"
 
 MONTE_CARLO_CHART_TITLE: Final = "Monte Carlo"
 
+CHART_VIEW_LABEL: Final = "Chart"
+
+TABLE_VIEW_LABEL: Final = "Table"
+
+PERIOD_COLUMN_LABEL: Final = "Period"
+
 _BASIS_BY_KEY: Final[Mapping[str, ReportBasis]] = {
     "real": ReportBasis.REAL,
     "nominal": ReportBasis.NOMINAL,
@@ -183,6 +189,21 @@ class ChartSpec:
 
 
 @dataclass(frozen=True)
+class ChartTable:
+    """One chart's amounts as pre-formatted table cells (roadmap 9.26).
+
+    The tabular dual of a :class:`ChartSpec`: one row per period, one
+    column per stacked series, fan fill, and overlay line, in the
+    order the chart's legend reads them. Cells are already display
+    copy — money-formatted from the same exact ``Decimal`` amounts
+    the chart draws, so the table and the chart can never disagree.
+    """
+
+    columns: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
+
+
+@dataclass(frozen=True)
 class ChartsViewModel:
     """The projection charts screen (roadmap 8.4).
 
@@ -262,6 +283,45 @@ def fill_tooltip(category: str, label: str, lower: Decimal, upper: Decimal) -> s
     low = format_money(Money(lower))
     high = format_money(Money(upper))
     return f"{label}\n{category}: {low} to {high}"
+
+
+def _money_cell(value: Decimal) -> str:
+    """One chart amount as a table cell in pounds and pence."""
+    return format_money(Money(value))
+
+
+def _interval_cell(fill: ChartFill, index: int) -> str:
+    """One fan fill's interval at one period, phrased like its tooltip."""
+    low = format_money(Money(fill.lower[index]))
+    high = format_money(Money(fill.upper[index]))
+    return f"{low} to {high}"
+
+
+def chart_table(chart: ChartSpec, categories: tuple[str, ...]) -> ChartTable:
+    """``chart``'s numbers as a table over ``categories`` (roadmap 9.26).
+
+    Shells bind this beside the drawn chart so every graph is also
+    readable as figures. The period column leads; the value columns
+    follow the legend's reading order — stacked series, then fan
+    fills, then overlay lines — and a fill cell states its low-to-high
+    interval like :func:`fill_tooltip`.
+    """
+    columns = (
+        PERIOD_COLUMN_LABEL,
+        *(entry.label for entry in chart.series),
+        *(fill.label for fill in chart.fills),
+        *(band.label for band in chart.bands),
+    )
+    rows = tuple(
+        (
+            category,
+            *(_money_cell(entry.values[index]) for entry in chart.series),
+            *(_interval_cell(fill, index) for fill in chart.fills),
+            *(_money_cell(band.values[index]) for band in chart.bands),
+        )
+        for index, category in enumerate(categories)
+    )
+    return ChartTable(columns=columns, rows=rows)
 
 
 def build_charts_view_model(

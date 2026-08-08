@@ -11,6 +11,12 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Every chart sub-tab now pairs the graph with its numbers (#156): a
+  Chart | Table page pair inside each sub-tab, the table one row per
+  period with a money column per stacked series, fan band, and
+  overlay line in the chart legend's order — the same exact amounts
+  the chart draws, following the money-basis toggle. A fan band's
+  cell states its low-to-high interval like its hover tooltip.
 - "How much can I draw down?" card on the charts screen (#149): the
   dual of "When can I retire?" — choose a retirement age (the plan's
   stated decision by default) and the app answers with the highest
@@ -105,6 +111,11 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Changed
 
+- The Charts tab now gives the chart itself about two thirds of the
+  window: the question cards sit in a scrollable pane above the
+  chart, joined by a draggable splitter, and extra height from
+  enlarging the window goes entirely to the chart. Previously the
+  cards' fixed height squashed the chart into the remainder.
 - The help guide's Facts section and the annuity-purchase form section
   now state the drawdown-by-default model explicitly: anything not
   annuitised stays invested in drawdown, a fraction of 1 annuitises

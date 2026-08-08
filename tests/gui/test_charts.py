@@ -22,11 +22,19 @@ from PySide6.QtCharts import (
     QStackedBarSeries,
 )
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QInputDialog,
+    QRadioButton,
+    QSplitter,
+    QTableWidget,
+    QTabWidget,
+)
 
 from glidepath.app import (
     BACKTEST_RUNNING_MESSAGE,
     BACKTEST_STALE_MESSAGE,
+    CHART_VIEW_LABEL,
     DRAWDOWN_RUNNING_MESSAGE,
     DRAWDOWN_STALE_MESSAGE,
     MONTE_CARLO_CHART_TITLE,
@@ -37,6 +45,7 @@ from glidepath.app import (
     NO_RETIREMENT_MESSAGE,
     RETIREMENT_RUNNING_MESSAGE,
     RETIREMENT_STALE_MESSAGE,
+    TABLE_VIEW_LABEL,
     ChartsViewModel,
     DrawdownRequest,
     PlanState,
@@ -44,6 +53,7 @@ from glidepath.app import (
     bar_tooltip,
     build_charts_view_model,
     build_shell_view_model,
+    chart_table,
     example_facts_form_data,
     fill_tooltip,
     initial_plan_state,
@@ -154,6 +164,19 @@ def wait_for_monte_carlo(window: MainWindow) -> None:
     QApplication.processEvents()
 
 
+def chart_view_at(pane: ChartsPane, index: int) -> QChartView:
+    """The drawn-chart page of the pane's ``index``-th chart sub-tab.
+
+    Each sub-tab pairs the chart with its table (9.26); the chart is
+    the first inner page.
+    """
+    tab = pane.chart_tabs.widget(index)
+    assert isinstance(tab, QTabWidget)
+    view = tab.widget(0)
+    assert isinstance(view, QChartView)
+    return view
+
+
 def retirement_state() -> PlanState:
     """A short-horizon 60-year-old with employment income, solved.
 
@@ -256,6 +279,65 @@ class TestChartsPane:
         ]
         assert tab_labels == [chart.title for chart in view_model.charts]
 
+    def test_each_sub_tab_pairs_the_chart_with_its_table(self) -> None:
+        """The inner pages are the drawn chart and its numbers (9.26).
+
+        The table page binds the app layer's pre-formatted cells over
+        the same amounts the chart draws.
+        """
+        pane = ChartsPane(callbacks())
+        view_model = projected_view_model()
+        pane.refresh(view_model)
+        tab = pane.chart_tabs.widget(0)
+        assert isinstance(tab, QTabWidget)
+        labels = [tab.tabText(index) for index in range(tab.count())]
+        assert labels == [CHART_VIEW_LABEL, TABLE_VIEW_LABEL]
+        table = tab.widget(1)
+        assert isinstance(table, QTableWidget)
+        spec = chart_table(view_model.charts[0], view_model.categories)
+        headers = []
+        for index in range(table.columnCount()):
+            header = table.horizontalHeaderItem(index)
+            assert header is not None
+            headers.append(header.text())
+        assert tuple(headers) == spec.columns
+        assert table.rowCount() == len(spec.rows)
+        cell = table.item(0, 1)
+        assert cell is not None
+        assert cell.text() == spec.rows[0][1]
+
+    def test_the_table_page_choice_survives_a_refresh(self) -> None:
+        """Toggling the basis must not flip a table back to the chart."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        tab = pane.chart_tabs.widget(0)
+        assert isinstance(tab, QTabWidget)
+        tab.setCurrentIndex(1)
+        pane.refresh(projected_view_model())
+        refreshed = pane.chart_tabs.widget(0)
+        assert isinstance(refreshed, QTabWidget)
+        assert refreshed.currentIndex() == 1
+
+    def test_first_layout_seeds_the_split_toward_the_chart(self) -> None:
+        """On first show the chart pane gets about two thirds of the height.
+
+        Without the seeding, the splitter's own first layout falls
+        back to the stretch factors and squashes the cards pane to
+        its minimum — the cards must keep a meaningful share and the
+        chart the majority.
+        """
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        pane.resize(900, 900)
+        pane.show()
+        QApplication.processEvents()
+        splitter = pane.findChild(QSplitter)
+        assert splitter is not None
+        cards_height, charts_height = splitter.sizes()
+        total = cards_height + charts_height
+        assert cards_height >= total // 4
+        assert charts_height > cards_height
+
     def test_refresh_replaces_rather_than_accumulates(self) -> None:
         """A second refresh rebuilds the sub-tabs in place."""
         pane = ChartsPane(callbacks())
@@ -350,13 +432,11 @@ class TestMonteCarloControls:
         assert "Success rate" in pane.metrics_label.text()
         assert not pane.metrics_label.isHidden()
         assert pane.monte_carlo_message_label.isHidden()
-        balances = pane.chart_tabs.widget(0)
-        assert isinstance(balances, QChartView)
+        balances = chart_view_at(pane, 0)
         assert len(balances.chart().series()) == 1
         fan_index = pane.chart_tabs.count() - 1
         assert pane.chart_tabs.tabText(fan_index) == MONTE_CARLO_CHART_TITLE
-        view = pane.chart_tabs.widget(fan_index)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, fan_index)
         fan = view_model.charts[-1]
         areas = [
             entry for entry in view.chart().series() if isinstance(entry, QAreaSeries)
@@ -396,8 +476,7 @@ class TestBacktestCard:
         assert "Success rate" in pane.backtest_metrics_label.text()
         assert not pane.backtest_metrics_label.isHidden()
         assert pane.backtest_message_label.isHidden()
-        view = pane.chart_tabs.widget(0)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, 0)
         series = view.chart().series()
         assert len(series) == 1 + len(view_model.charts[0].bands)
         assert len(view_model.charts[0].bands) == 2
@@ -564,8 +643,7 @@ class TestChartTheme:
         pane = ChartsPane(callbacks())
         pane.refresh(projected_view_model())
         for tab_index in range(pane.chart_tabs.count()):
-            view = pane.chart_tabs.widget(tab_index)
-            assert isinstance(view, QChartView)
+            view = chart_view_at(pane, tab_index)
             [series] = view.chart().series()
             assert isinstance(series, QStackedBarSeries)
             for slot, bar_set in enumerate(series.barSets()):
@@ -583,8 +661,7 @@ class TestChartTheme:
         pane = ChartsPane(callbacks())
         state = state_with_backtest(projected_state(), today=TODAY)
         pane.refresh(build_charts_view_model(state))
-        view = pane.chart_tabs.widget(0)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, 0)
         bands = view.chart().series()[1:]
         assert bands
         for slot, line in enumerate(bands):
@@ -601,8 +678,7 @@ class TestChartTheme:
         """
         pane = ChartsPane(callbacks())
         pane.refresh(monte_carlo_view_model())
-        view = pane.chart_tabs.widget(pane.chart_tabs.count() - 1)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, pane.chart_tabs.count() - 1)
         areas = [
             entry for entry in view.chart().series() if isinstance(entry, QAreaSeries)
         ]
@@ -620,8 +696,7 @@ class TestChartTheme:
         """White surface, horizontal-only hairline grid, muted axes."""
         pane = ChartsPane(callbacks())
         pane.refresh(projected_view_model())
-        view = pane.chart_tabs.widget(0)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, 0)
         chart = view.chart()
         assert chart.backgroundBrush().color().name() == CHART_SURFACE
         assert chart.localizeNumbers()
@@ -639,12 +714,10 @@ class TestChartTheme:
         """
         pane = ChartsPane(callbacks())
         pane.refresh(projected_view_model())
-        view = pane.chart_tabs.widget(0)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, 0)
         assert not view.chart().legend().isVisible()
         pane.refresh(monte_carlo_view_model())
-        fan = pane.chart_tabs.widget(pane.chart_tabs.count() - 1)
-        assert isinstance(fan, QChartView)
+        fan = chart_view_at(pane, pane.chart_tabs.count() - 1)
         assert fan.chart().legend().isVisible()
 
 
@@ -666,8 +739,7 @@ class _ToolTipRecorder:
 
 def _first_bar_set(pane: ChartsPane) -> QBarSet:
     """The first chart's first bar set, fresh from a refresh."""
-    view = pane.chart_tabs.widget(0)
-    assert isinstance(view, QChartView)
+    view = chart_view_at(pane, 0)
     [series] = view.chart().series()
     assert isinstance(series, QStackedBarSeries)
     [bar_set] = series.barSets()
@@ -726,9 +798,7 @@ class TestBarTooltips:
 
 def _fan_view(pane: ChartsPane) -> QChartView:
     """The last sub-tab's chart view — the fan chart when one is held."""
-    view = pane.chart_tabs.widget(pane.chart_tabs.count() - 1)
-    assert isinstance(view, QChartView)
-    return view
+    return chart_view_at(pane, pane.chart_tabs.count() - 1)
 
 
 class TestOverlayTooltips:
@@ -788,8 +858,7 @@ class TestOverlayTooltips:
         state = state_with_backtest(projected_state(), today=TODAY)
         view_model = build_charts_view_model(state)
         pane.refresh(view_model)
-        view = pane.chart_tabs.widget(0)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, 0)
         lines = [
             entry for entry in view.chart().series() if isinstance(entry, QLineSeries)
         ]
@@ -895,17 +964,14 @@ class TestMainWindowChartsFlow:
         assert pane.paths_edit.text() == "2"
         assert pane.chart_tabs.count() == 4
         assert pane.chart_tabs.tabText(3) == MONTE_CARLO_CHART_TITLE
-        view = pane.chart_tabs.widget(0)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, 0)
         assert len(view.chart().series()) == 1
-        fan_view = pane.chart_tabs.widget(3)
-        assert isinstance(fan_view, QChartView)
+        fan_view = chart_view_at(pane, 3)
         assert len(fan_view.chart().series()) == 6
         buttons["Deterministic"].click()
         assert pane.seed_edit.isHidden()
         assert pane.chart_tabs.count() == 3
-        deterministic_view = pane.chart_tabs.widget(0)
-        assert isinstance(deterministic_view, QChartView)
+        deterministic_view = chart_view_at(pane, 0)
         assert len(deterministic_view.chart().series()) == 1
 
     def test_a_second_run_request_while_one_is_in_flight_is_ignored(
@@ -959,8 +1025,7 @@ class TestMainWindowChartsFlow:
         assert pane.metrics_label.isHidden()
         assert pane.monte_carlo_message_label.text() == NO_MONTE_CARLO_MESSAGE
         assert pane.chart_tabs.count() == 3
-        view = pane.chart_tabs.widget(0)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, 0)
         assert len(view.chart().series()) == 1
 
 
@@ -1140,15 +1205,13 @@ class TestMainWindowBacktestFlow:
         assert "Success rate" in text
         assert "Worst starting year" in text
         assert "Best starting year" in text
-        view = pane.chart_tabs.widget(0)
-        assert isinstance(view, QChartView)
+        view = chart_view_at(pane, 0)
         assert len(view.chart().series()) == 3
         # Picking a starting year draws its own trajectory and the
         # selection survives the refresh.
         pane.backtest_year_edit.setText("1973")
         pane.backtest_year_edit.editingFinished.emit()
-        picked_view = pane.chart_tabs.widget(0)
-        assert isinstance(picked_view, QChartView)
+        picked_view = chart_view_at(pane, 0)
         assert len(picked_view.chart().series()) == 4
         assert pane.backtest_year_edit.text() == "1973"
 
