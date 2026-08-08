@@ -35,7 +35,15 @@ from PySide6.QtCharts import (
     QValueAxis,
 )
 from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF, Qt
-from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QCursor,
+    QImage,
+    QPainter,
+    QPen,
+    QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
@@ -44,6 +52,8 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
+    QSplitter,
     QTabWidget,
     QToolTip,
     QVBoxLayout,
@@ -337,7 +347,13 @@ def chart_image(chart: ChartSpec, categories: tuple[str, ...]) -> QImage:
 
 
 class ChartsPane(QWidget):
-    """The charts tab: basis toggle, run-mode control, chart sub-tabs."""
+    """The charts tab: basis toggle, run-mode control, chart sub-tabs.
+
+    The question cards sit in a scrollable pane above the charts, the
+    two joined by a draggable vertical splitter that starts with most
+    of the height on the chart — the cards' natural height would
+    otherwise squash the chart into the remainder of the window.
+    """
 
     def __init__(
         self,
@@ -367,18 +383,54 @@ class ChartsPane(QWidget):
 
         self.chart_tabs = QTabWidget(self)
 
+        cards = QWidget(self)
+        cards_layout = QVBoxLayout(cards)
+        top_row = QHBoxLayout()
+        top_row.addWidget(self._basis_box)
+        top_row.addWidget(self._monte_carlo_box, 1)
+        cards_layout.addLayout(top_row)
+        cards_layout.addWidget(self._retirement_box)
+        cards_layout.addWidget(self._drawdown_box)
+        cards_layout.addWidget(self._backtest_box)
+        cards_layout.addStretch(1)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(cards)
+
+        charts = QWidget(self)
+        charts_layout = QVBoxLayout(charts)
+        charts_layout.setContentsMargins(0, 0, 0, 0)
+        charts_layout.addLayout(busy_row)
+        charts_layout.addWidget(self.allocation_label)
+        charts_layout.addWidget(self.message_label)
+        charts_layout.addWidget(self.chart_tabs, 1)
+
+        self._splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self._splitter.addWidget(scroll)
+        self._splitter.addWidget(charts)
+        self._splitter.setStretchFactor(0, 0)
+        self._splitter.setStretchFactor(1, 1)
+        self._split_seeded = False
+
         layout = QVBoxLayout(self)
-        controls = QHBoxLayout()
-        controls.addWidget(self._basis_box)
-        controls.addWidget(self._monte_carlo_box, 1)
-        layout.addLayout(controls)
-        layout.addWidget(self._retirement_box)
-        layout.addWidget(self._drawdown_box)
-        layout.addWidget(self._backtest_box)
-        layout.addLayout(busy_row)
-        layout.addWidget(self.allocation_label)
-        layout.addWidget(self.message_label)
-        layout.addWidget(self.chart_tabs, 1)
+        layout.addWidget(self._splitter)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        """Seed the splitter with the default split on first layout.
+
+        Sizes set before the pane has a height are discarded by the
+        splitter's own first layout, which falls back to the stretch
+        factors and squashes the cards to their minimum — so the
+        one-third/two-thirds default waits for the first resize that
+        delivers a real height. Later resizes leave the split alone,
+        preserving any position the user has dragged it to.
+        """
+        super().resizeEvent(event)
+        if not self._split_seeded and self._splitter.height() > 0:
+            self._split_seeded = True
+            third = self._splitter.height() // 3
+            self._splitter.setSizes([third, 2 * third])
 
     def refresh(self, view_model: ChartsViewModel) -> None:
         """Re-render the controls, message, and charts from the view model.

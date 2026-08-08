@@ -22,7 +22,7 @@ from PySide6.QtCharts import (
     QStackedBarSeries,
 )
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton
+from PySide6.QtWidgets import QApplication, QInputDialog, QRadioButton, QSplitter
 
 from glidepath.app import (
     BACKTEST_RUNNING_MESSAGE,
@@ -255,6 +255,26 @@ class TestChartsPane:
             pane.chart_tabs.tabText(index) for index in range(pane.chart_tabs.count())
         ]
         assert tab_labels == [chart.title for chart in view_model.charts]
+
+    def test_first_layout_seeds_the_split_toward_the_chart(self) -> None:
+        """On first show the chart pane gets about two thirds of the height.
+
+        Without the seeding, the splitter's own first layout falls
+        back to the stretch factors and squashes the cards pane to
+        its minimum — the cards must keep a meaningful share and the
+        chart the majority.
+        """
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        pane.resize(900, 900)
+        pane.show()
+        QApplication.processEvents()
+        splitter = pane.findChild(QSplitter)
+        assert splitter is not None
+        cards_height, charts_height = splitter.sizes()
+        total = cards_height + charts_height
+        assert cards_height >= total // 4
+        assert charts_height > cards_height
 
     def test_refresh_replaces_rather_than_accumulates(self) -> None:
         """A second refresh rebuilds the sub-tabs in place."""
