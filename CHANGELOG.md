@@ -105,6 +105,12 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Changed
 
+- The help guide's Facts section and the annuity-purchase form section
+  now state the drawdown-by-default model explicitly: anything not
+  annuitised stays invested in drawdown, a fraction of 1 annuitises
+  the whole pot, and several purchases at different ages annuitise in
+  stages — previously a reader had to infer this from the fraction
+  field's hint.
 - The launch example plan now holds together: retirement at 62 (was
   60), a £24,000 net spending need (was £28,000), and £4,800/year into
   the ISA (was £2,500). The old numbers left the deterministic

@@ -62,6 +62,10 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "benefit pension, and "
             "any planned annuity purchase — converting part of your "
             "pension pot into lifetime income at an age you choose. "
+            "Drawdown is the default: anything you do not annuitise "
+            "stays invested, a fraction of 1 annuitises the whole pot, "
+            "and several purchases at different ages annuitise in "
+            "stages. "
             "Add one wrapper, DB, or annuity section per item. Dates can "
             "be typed or picked from the calendar assist, and the "
             '"as of" dates on balances and your state pension forecast '

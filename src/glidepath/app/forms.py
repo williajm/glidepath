@@ -1671,10 +1671,12 @@ def _annuity_purchase_section() -> SectionSpec:
         title="Annuity purchase",
         description=(
             "A plan to convert part of your pension pot into guaranteed "
-            "lifetime income at a chosen age. Everything here is your "
-            "choice; the annuity rates applied are assumptions, shown "
-            "in the stated-vs-assumed view. Single-life products only "
-            "for now."
+            "lifetime income at a chosen age. Anything not annuitised "
+            "stays invested in drawdown; add several purchases at "
+            "different ages to annuitise in stages. Everything here is "
+            "your choice; the annuity rates applied are assumptions, "
+            "shown in the stated-vs-assumed view. Single-life products "
+            "only for now."
         ),
         repeatable=True,
         add_label="Add annuity purchase",
