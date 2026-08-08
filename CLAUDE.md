@@ -84,15 +84,17 @@ releases). Rules:
 ## Release process (details in planning §4.10)
 
 - SemVer 0.x; the version lives in `[project] version`, released as a
-  `vX.Y.Z` tag on `main`. Releases are tag + GitHub Release only — no
-  built artifacts yet (§4.10 records why).
+  `vX.Y.Z` tag on `main`. Releases are tag + GitHub Release + PyPI
+  (sdist/wheel via trusted publishing) — no binary artifacts yet
+  (§4.10 records why).
 - `CHANGELOG.md` (Keep a Changelog format) is curated in the release PR;
   the tagged version's section becomes the GitHub Release notes.
 - To cut a release, on an up-to-date `dev`: `make bump V=X.Y.Z`, move the
   Unreleased items into a dated `## [X.Y.Z]` section, `make check`, PR to
   `main`. After the merge, tag the merge commit `vX.Y.Z` and push the
   tag; `release.yml` validates it (tag on main, version match, changelog
-  section present) and publishes the GitHub Release.
+  section present) and publishes the GitHub Release, then the sdist and
+  wheel to PyPI.
 
 ## Coding conventions
 

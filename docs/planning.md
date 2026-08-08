@@ -385,7 +385,8 @@ mode (a second surface to maintain for no extra information).
 
 **Decision.** Releases are SemVer 0.x tags on `main` plus a GitHub
 Release whose notes come verbatim from a curated `CHANGELOG.md` (Keep
-a Changelog format) — no built artifacts. The version lives in
+a Changelog format), plus an sdist/wheel published to PyPI — no other
+built artifacts. The version lives in
 `[project] version` in `pyproject.toml`; minor bumps carry features
 and behaviour changes (plan-file schema steps ride the §4.5 migration
 harness), patch bumps carry fixes only; 1.0.0 is deferred until the
@@ -400,8 +401,24 @@ after the merge, the merge commit is tagged `vX.Y.Z` and the tag
 pushed. `release.yml` then refuses to publish unless the tagged
 commit is on `main`, the tag matches the pyproject version
 (`scripts/release_notes.py`), and the changelog has a section for it
-— a mistyped or misplaced tag fails loudly instead of shipping.
-**Why tag-only.** The natural desktop artifact — a PyInstaller
+— a mistyped or misplaced tag fails loudly instead of shipping. After
+those gates pass, a second `release.yml` job runs `uv build` and
+`uv publish --trusted-publishing always`: PyPI trusted publishing
+exchanges the job's OIDC token (repo `williajm/glidepath`, workflow
+`release.yml`, environment `pypi` — the trust contract registered on
+PyPI) for a short-lived upload token, so no PyPI credential is stored
+in the repo.
+**Why PyPI.** Reserving the `glidepath` name (first-come-first-served,
+claimed only by an actual upload) and giving technical users a real
+install channel — `uv tool install glidepath` /
+`pipx install glidepath` — without the signing costs of binary
+artifacts. It is an app distribution channel, not a library: nothing
+under `glidepath.*` becomes a public API, and the 0.x line still
+promises no import-level stability (this supersedes the earlier
+rejection of PyPI on those grounds — publication implies no such
+promise as long as the README states the product is the CLI/GUI entry
+point).
+**Why no binary artifacts.** The natural desktop artifact — a PyInstaller
 Windows build — would ship unsigned: SmartScreen interposes a
 "Windows protected your PC" warning on every new release's binary
 (reputation resets per binary) and PyInstaller output is a known
@@ -410,10 +427,10 @@ recurring OV-certificate fee (Azure Trusted Signing is currently
 org-only). At 0.x with a run-from-source audience, that cost buys
 little; packaging (and signing) can be added to `release.yml` later
 without changing the tag/changelog process. **Rejected:** unsigned
-`.exe` zips now (SmartScreen/AV friction documented above);
-PyPI publication (a GUI app is an awkward fit and it implies an API
-stability the 0.x line does not promise); CalVer (clashes with the
-existing 0.1.0 and with SemVer-style schema-migration discipline).
+`.exe` zips now (SmartScreen/AV friction documented above); CalVer
+(clashes with the existing 0.1.0 and with SemVer-style
+schema-migration discipline); long-lived PyPI API tokens in repo
+secrets (trusted publishing removes the stored credential entirely).
 
 ## 5. Design
 

@@ -1,19 +1,18 @@
-# Publishes a GitHub Release when a vX.Y.Z tag is pushed. Releases are
-# tag-only (no built artifacts) per the release process in
-# docs/planning.md §4.10. Actions are pinned to commit SHAs
-# (supply-chain policy — tags can be moved, SHAs cannot).
+# Publishes a GitHub Release when a vX.Y.Z tag is pushed, then the
+# sdist/wheel to PyPI via trusted publishing (OIDC — no stored tokens),
+# per the release process in docs/planning.md §4.10. Actions are pinned
+# to commit SHAs (supply-chain policy — tags can be moved, SHAs cannot).
 name: Release
 
 on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
-
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout (full history — the tag is verified against main)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,3 +37,35 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "glidepath $GITHUB_REF_NAME" \
             --notes-file release-notes.md
+
+  # Publishes the sdist and wheel to PyPI via trusted publishing: the
+  # job's OIDC token is exchanged for a short-lived upload token, so no
+  # PyPI credential is stored in the repo. Gated on the release job so
+  # nothing reaches PyPI unless the tag was verified to be on main and
+  # to match the pyproject version and changelog. The `pypi` environment
+  # name is part of the trust contract registered on PyPI.
+  publish-pypi:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/glidepath/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.32" # Newest uv release >= 7 days old when pinned.
+          enable-cache: true
+
+      # uv_build backend, no dependency sync — the lockfile is untouched.
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Publish to PyPI (trusted publishing)
+        run: uv publish --trusted-publishing always
