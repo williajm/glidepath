@@ -1,6 +1,7 @@
 """The projection chart widgets (§4.7, roadmap 8.4, 9.13, 9.14).
 
-One sub-tab per chart, each bound to the app layer's
+One sub-tab per chart, each pairing the drawn chart with its numbers
+as a read-only table (9.26), bound to the app layer's
 :class:`~glidepath.app.ChartsViewModel`; the money-basis radio toggle
 and the run-mode control forward their selected option keys back, and
 the Monte Carlo run action forwards the raw seed and path-count text.
@@ -60,7 +61,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from glidepath.app import bar_tooltip, fill_tooltip
+from glidepath.app import (
+    CHART_VIEW_LABEL,
+    TABLE_VIEW_LABEL,
+    bar_tooltip,
+    chart_table,
+    fill_tooltip,
+)
 from glidepath.gui.style import (
     CHART_AXIS_LINE,
     CHART_BAND_INKS,
@@ -72,6 +79,7 @@ from glidepath.gui.style import (
     CHART_SURFACE,
     CHART_TEXT_INK,
 )
+from glidepath.gui.tableview import fill_table, read_only_table
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -324,6 +332,24 @@ def chart_view(
     return view
 
 
+def chart_tab(
+    chart: ChartSpec, categories: tuple[str, ...], parent: QWidget | None = None
+) -> QTabWidget:
+    """One chart sub-tab: the drawn chart and its table as inner pages.
+
+    The table page binds the app layer's :func:`chart_table` cells —
+    the same amounts the chart draws, pre-formatted — so every graph
+    is also readable as figures (roadmap 9.26).
+    """
+    tabs = QTabWidget(parent)
+    tabs.addTab(chart_view(chart, categories, tabs), CHART_VIEW_LABEL)
+    table = read_only_table(tabs)
+    spec = chart_table(chart, categories)
+    fill_table(table, spec.columns, list(spec.rows))
+    tabs.addTab(table, TABLE_VIEW_LABEL)
+    return tabs
+
+
 def chart_image(chart: ChartSpec, categories: tuple[str, ...]) -> QImage:
     """Rasterise one chart spec for the plan report (roadmap 9.19).
 
@@ -435,8 +461,9 @@ class ChartsPane(QWidget):
     def refresh(self, view_model: ChartsViewModel) -> None:
         """Re-render the controls, message, and charts from the view model.
 
-        The selected sub-tab survives the rebuild, so toggling the
-        basis or run mode re-presents the chart the user is looking
+        The selected sub-tab survives the rebuild, and so does each
+        sub-tab's chart-or-table page choice, so toggling the basis
+        or run mode re-presents exactly the view the user is looking
         at.
         """
         self._basis_box.setTitle(view_model.basis_heading)
@@ -451,15 +478,19 @@ class ChartsPane(QWidget):
         self.message_label.setVisible(bool(view_model.message))
         self.chart_tabs.setVisible(bool(view_model.charts))
         selected_index = self.chart_tabs.currentIndex()
+        page_choices: list[int] = []
         while self.chart_tabs.count():
             widget = self.chart_tabs.widget(0)
             self.chart_tabs.removeTab(0)
             if widget is not None:
+                if isinstance(widget, QTabWidget):
+                    page_choices.append(widget.currentIndex())
                 widget.deleteLater()
-        for chart in view_model.charts:
-            self.chart_tabs.addTab(
-                chart_view(chart, view_model.categories, self.chart_tabs), chart.title
-            )
+        for position, chart in enumerate(view_model.charts):
+            tab = chart_tab(chart, view_model.categories, self.chart_tabs)
+            if position < len(page_choices):
+                tab.setCurrentIndex(page_choices[position])
+            self.chart_tabs.addTab(tab, chart.title)
         if 0 <= selected_index < self.chart_tabs.count():
             self.chart_tabs.setCurrentIndex(selected_index)
 
@@ -792,6 +823,7 @@ __all__ = [
     "ChartsPane",
     "ChartsPaneCallbacks",
     "chart_image",
+    "chart_tab",
     "chart_view",
     "tooltip_bar_set",
 ]
