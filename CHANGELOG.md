@@ -9,6 +9,10 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-08
+
+Metadata-only release: no code changes since 0.2.0.
+
 ### Added
 
 - PyPI project metadata: trove classifiers (desktop finance app, Qt,
