@@ -47,8 +47,9 @@ releases). Rules:
 - The uv binary itself follows the same cooldown: install/update it only to
   releases at least 7 days old (CI pins the exact version in `ci.yml`).
 - GitHub Actions are pinned to full commit SHAs, never floating tags.
-  Dependabot (`.github/dependabot.yml`) proposes pin updates weekly,
-  with the same 7-day cooldown on fresh action releases.
+  Dependabot (`.github/dependabot.yml`) is security-only: it alerts on
+  action security advisories but proposes no routine version updates —
+  pins are refreshed by hand, honouring the 7-day cooldown.
 - The runtime dependency in `[project] dependencies` is pinned exactly
   (`pyside6==X.Y.Z`, moved only by `make deps`): end users installing
   from PyPI resolve fresh, so a `>=` range would bypass the lockfile

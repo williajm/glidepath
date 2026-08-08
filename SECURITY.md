@@ -23,8 +23,9 @@ the supply chain.
 - Dependencies are locked with hash verification against PyPI only; no
   dependency may be locked to a version published within the last
   7 days (see `CLAUDE.md` for the full policy).
-- GitHub Actions are pinned to commit SHAs; Dependabot proposes
-  updates with the same 7-day cooldown.
+- GitHub Actions are pinned to commit SHAs; Dependabot alerts on
+  security advisories only (routine pin refreshes are manual, under
+  the same 7-day cooldown).
 - Releases are built and smoke-tested in CI, then published to PyPI
   via trusted publishing (OIDC, no stored credentials) with PEP 740
   attestations.

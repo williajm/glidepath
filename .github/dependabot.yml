@@ -1,7 +1,7 @@
-# Keeps the SHA-pinned GitHub Actions current: without this, security
-# patches to the actions arrive only when someone remembers to re-pin.
-# The cooldown mirrors the repo's 7-day supply-chain policy (CLAUDE.md) —
-# a fresh action release is not proposed until it has been public a week.
+# Security-only: `open-pull-requests-limit: 0` disables routine version
+# updates for the SHA-pinned actions, so Dependabot raises alerts (and
+# PRs) only for security advisories. Routine pin refreshes are done by
+# hand when needed, keeping the repo's 7-day cooldown judgement human.
 # Python dependencies are deliberately NOT managed here: `make deps` is
 # the only sanctioned way to touch the lockfile.
 version: 2
@@ -10,5 +10,4 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    cooldown:
-      default-days: 7
+    open-pull-requests-limit: 0
