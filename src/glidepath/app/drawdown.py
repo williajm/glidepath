@@ -254,7 +254,7 @@ def state_with_drawdown(
                 search=search,
                 parallelism=parallelism,
             )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         # Broad by design, exactly as in state_with_monte_carlo: a
         # process-pool failure escaping here would hold the shell's
         # in-flight guard forever, so every failure folds into the

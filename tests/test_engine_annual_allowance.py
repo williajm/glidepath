@@ -13,6 +13,7 @@ planning §6 (AA £60,000; MPAA £10,000; taper to £10,000 past
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
+from factories import money_fact
 from glidepath.core import (
     ContributionSchedule,
     Decision,
@@ -40,11 +41,6 @@ RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 AS_OF = date(2026, 8, 1)
 
 ZERO = Money(Decimal(0))
-
-
-def money_fact(amount: str, as_of: date = AS_OF) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=as_of, recorded_on=RECORDED)
 
 
 def dc_saver(

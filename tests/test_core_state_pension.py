@@ -6,10 +6,10 @@ from types import MappingProxyType
 
 import pytest
 
+from factories import money_fact
 from glidepath.core import (
     Decision,
     EngineError,
-    Fact,
     Money,
     StatePensionEntitlement,
     StatePensionRecord,
@@ -19,7 +19,6 @@ from glidepath.core import (
 )
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
-AS_OF = date(2026, 8, 1)
 
 TRIPLE_LOCK_VALUE = MappingProxyType(
     {
@@ -28,11 +27,6 @@ TRIPLE_LOCK_VALUE = MappingProxyType(
         "deterministic_cpi_margin": Decimal("0.005"),
     }
 )
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated weekly amount."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def record_of(

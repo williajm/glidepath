@@ -18,6 +18,7 @@ ids) is rejected here too.
 
 import contextlib
 import json
+import os
 from typing import TYPE_CHECKING
 
 from glidepath.core import (
@@ -87,21 +88,40 @@ def save_plan(document: PlanDocument, path: Path) -> None:
 
     Serialization completes before any file is opened, so a document
     that cannot be encoded never touches the disk; the text is then
-    written to a sibling temporary file and moved over ``path`` only
-    once the write has closed cleanly, so a mid-write failure (disk
-    full, power loss) can never truncate the last saved plan.
-    ``newline=""`` disables platform newline translation so the file
-    carries LF endings on every platform (planning §4.5).
+    written to a sibling temporary file, flushed to stable storage
+    with ``fsync``, and only then moved over ``path`` — so a mid-write
+    failure (disk full, power loss) can never truncate the last saved
+    plan, and the rename never publishes data still sitting in the OS
+    write cache. ``newline=""`` disables platform newline translation
+    so the file carries LF endings on every platform (planning §4.5).
     """
     text = dumps_plan(document)
     temp = path.with_name(path.name + ".tmp")
     try:
         with temp.open("w", encoding="utf-8", newline="") as handle:
             handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
         temp.replace(path)
+        _fsync_directory(path.parent)
     finally:
         with contextlib.suppress(OSError):
             temp.unlink(missing_ok=True)
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Flush the directory entry so the rename itself survives power loss.
+
+    POSIX only: directories cannot be opened for fsync on Windows,
+    where the ``replace`` above is journalled by NTFS instead.
+    """
+    if os.name != "posix":
+        return
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _document_payload(document: PlanDocument) -> dict[str, object]:

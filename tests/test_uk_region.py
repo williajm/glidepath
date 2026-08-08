@@ -11,6 +11,7 @@ import pickle
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
+from factories import money_fact
 from glidepath.core import (
     AssumptionKey,
     ContributionSchedule,
@@ -42,11 +43,6 @@ from glidepath.regions.uk import (
 TODAY = date(2026, 8, 2)
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 AS_OF = date(2026, 8, 1)
-
-
-def money_fact(amount: str, as_of: date = AS_OF) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=as_of, recorded_on=RECORDED)
 
 
 class TestDefaultAssumptionSet:

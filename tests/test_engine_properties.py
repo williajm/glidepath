@@ -29,6 +29,7 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
+from factories import money_fact
 from glidepath.core import (
     ContributionSchedule,
     Decision,
@@ -94,11 +95,6 @@ income_amounts = st.decimals(
     min_value=0, max_value=120_000, places=2, allow_nan=False, allow_infinity=False
 )
 horizon_years = st.integers(min_value=1, max_value=5)
-
-
-def money_fact(amount: Decimal) -> Fact[Money]:
-    """A user-stated monetary fact dated just before the run start."""
-    return Fact(value=Money(amount), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def wrapper_of(

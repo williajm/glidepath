@@ -189,7 +189,9 @@ class FutureYearsPolicy:
         Scottish band uppers (module docstring).
         """
         if not isinstance(self.mode, FutureYearsMode):
-            type_name = type(self.mode).__name__
+            # Reachable from raw TOML data even though the annotation
+            # lets mypy prove the branch dead.
+            type_name = type(self.mode).__name__  # type: ignore[unreachable]
             _fail(_CONTEXT, f"mode must be a FutureYearsMode member, got {type_name}")
         needs_until = self.mode is FutureYearsMode.FROZEN_THEN_CPI_INDEXED
         if needs_until and self.frozen_until_start_year is None:

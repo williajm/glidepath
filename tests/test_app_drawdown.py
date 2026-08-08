@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 
+from factories import money_fact
 from glidepath.app import (
     DRAWDOWN_AGE_MESSAGE,
     DRAWDOWN_NO_PLAN_MESSAGE,
@@ -69,11 +70,6 @@ MONTE_CARLO_REQUEST = DrawdownRequest(
     paths_text="2",
     success_text="90",
 )
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def household(date_of_birth: date = date(1966, 2, 1)) -> Household:

@@ -15,6 +15,7 @@ from decimal import Decimal
 
 import pytest
 
+from factories import money_fact
 from glidepath.app import (
     MONTE_CARLO_CHART_TITLE,
     MONTE_CARLO_NO_PLAN_MESSAGE,
@@ -57,11 +58,6 @@ from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
 TODAY = date(2026, 8, 2)
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 AS_OF = date(2026, 8, 1)
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def household(balance_as_of: date = AS_OF) -> Household:

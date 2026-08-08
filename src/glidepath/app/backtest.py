@@ -132,7 +132,7 @@ def state_with_backtest(state: PlanState, *, today: date) -> PlanState:
             config,
             series=series,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         # Broad by design, mirroring the Monte Carlo transition: an
         # escape past the shell's worker thread would leave the
         # in-flight guard held (buttons disabled, spinner running)

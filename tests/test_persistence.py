@@ -26,6 +26,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from factories import money_fact
 from glidepath.core import (
     AnnuityBasis,
     AnnuityPurchase,
@@ -106,11 +107,6 @@ ANNUITY_ESCALATING_ID = EntityId("annuity-3")
 OUTFLOW_ID = EntityId("outflow-1")
 
 DATA_VERSION = "test-region data v1"
-
-
-def money_fact(amount: str, recorded: datetime = RECORDED) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=recorded)
 
 
 def fact[T](value: T, recorded: datetime = RECORDED) -> Fact[T]:

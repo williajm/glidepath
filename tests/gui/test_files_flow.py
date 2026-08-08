@@ -7,6 +7,7 @@ remembers the plan for the next launch, and that closing with unsaved
 changes prompts save/discard/cancel (issue #136).
 """
 
+import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -59,6 +60,34 @@ class TestSaveFlow:
         assert plan.exists()
         assert str(plan) in window.statusBar().currentMessage()
         assert load_state(settings).last_plan_path == plan
+
+    def test_save_with_unwritable_settings_saves_and_warns(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A failed settings write must not break the save — but must log."""
+        plan = tmp_path / "my-plan.glidepath.json"
+        window = _window_with_example(tmp_path / "settings.json")
+
+        def unwritable(_settings: Path, _plan: Path) -> None:
+            msg = "config directory is read-only"
+            raise OSError(msg)
+
+        monkeypatch.setattr(widgets, "record_last_plan_path", unwritable)
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(plan), "")),
+        )
+        with caplog.at_level(logging.WARNING):
+            window.save_plan_as_dialog()
+        assert plan.exists()
+        assert any(
+            "Could not remember the plan path" in record.getMessage()
+            for record in caplog.records
+        )
 
     def test_save_as_appends_the_plan_suffix(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -12,9 +12,11 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from decimal import ROUND_DOWN, Decimal
+from functools import partial
 
 import pytest
 
+import factories
 from glidepath.core import (
     AnnualAllowanceFunding,
     AnnualAllowanceMeasurement,
@@ -123,9 +125,8 @@ DEFAULT_SHAPE = {
 }
 
 
-def money_fact(amount: str, as_of: date = AS_OF) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=as_of, recorded_on=RECORDED)
+money_fact = partial(factories.money_fact, as_of=AS_OF)
+"""A user-stated monetary fact dated at the run start (shared factory)."""
 
 
 @dataclass(frozen=True)

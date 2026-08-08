@@ -1,0 +1,14 @@
+# Keeps the SHA-pinned GitHub Actions current: without this, security
+# patches to the actions arrive only when someone remembers to re-pin.
+# The cooldown mirrors the repo's 7-day supply-chain policy (CLAUDE.md) —
+# a fresh action release is not proposed until it has been public a week.
+# Python dependencies are deliberately NOT managed here: `make deps` is
+# the only sanctioned way to touch the lockfile.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7

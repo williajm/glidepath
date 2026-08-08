@@ -402,12 +402,29 @@ pushed. `release.yml` then refuses to publish unless the tagged
 commit is on `main`, the tag matches the pyproject version
 (`scripts/release_notes.py`), and the changelog has a section for it
 — a mistyped or misplaced tag fails loudly instead of shipping. After
-those gates pass, a second `release.yml` job runs `uv build` and
-`uv publish --trusted-publishing always`: PyPI trusted publishing
-exchanges the job's OIDC token (repo `williajm/glidepath`, workflow
-`release.yml`, environment `pypi` — the trust contract registered on
-PyPI) for a short-lived upload token, so no PyPI credential is stored
-in the repo.
+those gates pass, an unprivileged build job runs `uv build` and
+smoke-tests the wheel (clean-venv install; import; the metadata
+version must match the tag) so no artifact reaches PyPI untested. The
+artifacts then flow to a publish job that checks out nothing and runs
+no project code: `pypa/gh-action-pypi-publish` exchanges the job's
+OIDC token (repo `williajm/glidepath`, workflow `release.yml`,
+environment `pypi` — the trust contract registered on PyPI) for a
+short-lived upload token, so no PyPI credential is stored in the
+repo, and generates PEP 740 attestations so every published artifact
+carries verifiable build provenance. The `pypi` environment requires
+manual approval and only `v*` tags may deploy to it (defence in depth
+behind the trusted-publishing contract). The GitHub Release is
+created last, only after PyPI publication succeeds, with the
+published sdist/wheel attached — a failed upload never leaves a
+public release advertising a package that is not on PyPI.
+**Runtime pin.** `uv tool install glidepath` resolves dependencies
+fresh — `uv.lock` and the `exclude-newer` cooldown do not apply to
+end users — so the runtime dependency is pinned exactly
+(`pyside6==X.Y.Z`) and end users install the PySide6 the release was
+tested against. The pin moves only via `make deps`; the accepted
+tradeoff is that users pick up PySide6 fixes only with a new
+glidepath release, which suits an application (not a library)
+distribution.
 **Why PyPI.** Reserving the `glidepath` name (first-come-first-served,
 claimed only by an actual upload) and giving technical users a real
 install channel — `uv tool install glidepath` /

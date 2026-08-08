@@ -316,7 +316,7 @@ def state_with_monte_carlo(
                 paths=paths,
                 parallelism=parallelism,
             )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         # Broad by design: beyond the engine's ValueErrors, the process
         # pool can raise OSError at spawn, pickling TypeErrors, or a
         # BrokenExecutor — an escape here would leave the shell's

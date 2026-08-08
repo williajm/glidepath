@@ -27,13 +27,21 @@ classifiers = [
     "Environment :: X11 Applications :: Qt",
     "Intended Audience :: End Users/Desktop",
     "Intended Audience :: Financial and Insurance Industry",
-    "Operating System :: OS Independent",
+    # The platforms the suite actually runs on (ci.yml); no macOS claim
+    # until it is tested there.
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.14",
     "Topic :: Office/Business :: Financial :: Investment",
+    "Typing :: Typed",
 ]
+# glidepath is an application, not a library: the runtime dependency is
+# pinned exactly so `uv tool install glidepath` installs the same PySide6
+# the release was tested against (uv.lock does not apply to end users).
+# Bump the pin only via `make deps`.
 dependencies = [
-    "pyside6>=6.11.1",
+    "pyside6==6.11.1",
 ]
 
 [project.urls]
@@ -65,7 +73,7 @@ build-backend = "uv_build"
 [tool.uv]
 # Supply-chain cooldown: resolution ignores anything published to PyPI after
 # this timestamp (now minus 7 days). Updated ONLY by `make deps`.
-exclude-newer = "2026-07-30T09:40:45Z"
+exclude-newer = "2026-08-01T17:09:10Z"
 
 # PyPI is the ONLY permitted index (supply-chain policy; see CLAUDE.md).
 [[tool.uv.index]]
@@ -91,33 +99,15 @@ convention = "google"
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
+# BLE001 (app/ slow-run transitions) and PLR0913 (§5.2 runner signatures)
+# are granted inline at the specific lines that earned them, not file-wide,
+# so new violations elsewhere in those modules still fail lint.
 [tool.ruff.lint.per-file-ignores]
 "src/glidepath/core/randomness.py" = [
     "S311", # Seeded Monte Carlo simulation draws, never security material (planning §4.6).
 ]
-"src/glidepath/core/montecarlo.py" = [
-    "PLR0913", # run_paths/sustainable_income take the §5.2 engine quartet plus keyword-only run knobs; bundling would obscure the run(plan, assumptions, region, config) shape.
-]
-"src/glidepath/core/backtest.py" = [
-    "PLR0913", # run_windows and its chunk worker mirror the §5.2 runner signature (see core/montecarlo.py).
-]
 "scripts/build_returns_history.py" = [
     "S314", # xml.etree parses the JST workbook the developer supplies locally, never untrusted input.
-]
-"src/glidepath/core/retirement.py" = [
-    "PLR0913", # earliest_retirement_age mirrors the §5.2 runner signature (see core/montecarlo.py).
-]
-"src/glidepath/app/montecarlo.py" = [
-    "BLE001", # The slow-run transition must fold ANY failure into state (§4.7): an exception escaping past the shell's worker thread holds the in-flight guard forever.
-]
-"src/glidepath/app/retirement.py" = [
-    "BLE001", # Same in-flight-guard rationale as app/montecarlo.py.
-]
-"src/glidepath/app/drawdown.py" = [
-    "BLE001", # Same in-flight-guard rationale as app/montecarlo.py.
-]
-"src/glidepath/app/backtest.py" = [
-    "BLE001", # Same in-flight-guard rationale as app/montecarlo.py.
 ]
 "tests/**" = [
     "S101",    # pytest tests use bare assert by design.
@@ -133,12 +123,15 @@ max-complexity = 10
 # --- mypy -------------------------------------------------------------------
 [tool.mypy]
 strict = true
-warn_unused_ignores = true
+# Not implied by strict: flags code mypy can prove unreachable — high-yield
+# in Decimal/None-narrowing-heavy code.
+warn_unreachable = true
 python_version = "3.14"
 files = ["src", "tests", "scripts"]
 # Lets the tests' top-level script imports (e.g. `import check_dep_age`)
-# resolve to scripts/ — mirrors pytest's pythonpath below.
-mypy_path = ["scripts"]
+# and the shared test factories (`import factories`) resolve — mirrors
+# pytest's pythonpath below.
+mypy_path = ["scripts", "tests"]
 
 # --- pytest / coverage ------------------------------------------------------
 [tool.pytest.ini_options]
@@ -152,9 +145,10 @@ addopts = [
     "--cov-report=xml",
 ]
 testpaths = ["tests"]
-# scripts/ is not a package; tests import the operational scripts (the
-# gates behind `make deps`/`make bump`/releases) as top-level modules.
-pythonpath = ["scripts"]
+# Neither scripts/ nor tests/ is a package; tests import the operational
+# scripts (the gates behind `make deps`/`make bump`/releases) and the
+# shared test-data factories (tests/factories.py) as top-level modules.
+pythonpath = ["scripts", "tests"]
 # Fail a stuck test fast instead of hanging CI for the runner limit: the
 # GUI suite waits on worker pools for up to 60s, so the ceiling sits
 # safely above that while still cutting a wedged run short.
