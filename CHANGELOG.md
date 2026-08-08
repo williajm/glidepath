@@ -9,6 +9,11 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-08
+
+Hardening release: attested PyPI publishing, durable plan saves, and a
+security policy — no modelling changes.
+
 ### Added
 
 - `SECURITY.md`: a private vulnerability-reporting channel and the
