@@ -1,17 +1,17 @@
 """Tests for the Wrapper entity and wrapper-boundary types (issue 3.1)."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
+from factories import money_fact
 from glidepath.core import (
     AssetAllocation,
     ContributionCap,
     ContributionSchedule,
     ContributionTaxTreatment,
     Decision,
-    Fact,
     FeeSchedule,
     GrowthTaxTreatment,
     Money,
@@ -26,13 +26,6 @@ from glidepath.core import (
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 KIND = WrapperKindId("test.dc")
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated balance fact."""
-    return Fact(
-        value=Money(Decimal(amount)), as_of=date(2026, 8, 1), recorded_on=RECORDED
-    )
 
 
 def test_wrapper_holds_balances_as_facts() -> None:

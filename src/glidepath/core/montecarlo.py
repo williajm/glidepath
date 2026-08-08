@@ -242,7 +242,9 @@ class PathParallelism:
             raise ValueError(msg)
 
 
-def run_paths(
+# The §5.2 engine quartet plus keyword-only run knobs; bundling would
+# obscure the run(plan, assumptions, region, config) shape.
+def run_paths(  # noqa: PLR0913
     plan: Household,
     assumptions: AssumptionSet,
     region: Region,
@@ -392,7 +394,8 @@ class SustainableIncomeSearch:
             raise ValueError(msg)
 
 
-def sustainable_income(
+# Mirrors the run_paths signature above.
+def sustainable_income(  # noqa: PLR0913
     plan: Household,
     assumptions: AssumptionSet,
     region: Region,

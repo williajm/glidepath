@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 
+from factories import money_fact
 from glidepath.app import (
     DEFAULT_COMPARISON_METRIC_KEY,
     PlanState,
@@ -77,11 +78,6 @@ OUTFLOW_2_KEY = f"{OUTFLOW_2_ID}:amount_real"
 CPI_KEY = AssumptionKey.INFLATION_CPI.value
 
 SCENARIO = "Retire at 58"
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def outflow(outflow_id: EntityId, age: int) -> PlannedOutflow:

@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+from factories import money_fact
 from glidepath.core import (
     AssumptionKey,
     ContributionSchedule,
@@ -84,11 +85,6 @@ RETIREMENT_INDEX = 25
 """Age 60 is attained on 1 Feb 2051 — after the 2050/51 period's first
 day, so the §4.1 gate keeps that year accumulating and decumulation
 starts with the 2051/52 period, the 26th projected."""
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def golden_household() -> Household:

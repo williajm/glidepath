@@ -15,7 +15,9 @@ _PENNY = Decimal("0.01")
 def _require_finite_decimal(value: Decimal, field_name: str) -> None:
     """Reject non-Decimal and non-finite amounts at construction time."""
     if not isinstance(value, Decimal):
-        msg = f"{field_name} must be Decimal, got {type(value).__name__}"
+        # Reachable from untyped callers (decoded plan JSON, region TOML)
+        # even though the annotation lets mypy prove the branch dead.
+        msg = f"{field_name} must be Decimal, got {type(value).__name__}"  # type: ignore[unreachable]
         raise TypeError(msg)
     if not value.is_finite():
         msg = f"{field_name} must be finite"

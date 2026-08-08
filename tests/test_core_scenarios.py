@@ -13,6 +13,7 @@ from types import MappingProxyType
 
 import pytest
 
+from factories import money_fact
 from glidepath.core import (
     AnnuityBasis,
     AnnuityPurchase,
@@ -63,11 +64,6 @@ DB_ID = EntityId("db-1")
 UNTAKEN_DB_ID = EntityId("db-2")
 ANNUITY_ID = EntityId("annuity-1")
 OUTFLOW_ID = EntityId("outflow-1")
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def decision[T](value: T, note: str | None = None) -> Decision[T]:

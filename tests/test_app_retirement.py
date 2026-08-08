@@ -15,6 +15,7 @@ from decimal import Decimal
 
 import pytest
 
+from factories import money_fact
 from glidepath.app import (
     MONTE_CARLO_PATHS_MESSAGE,
     MONTE_CARLO_SEED_MESSAGE,
@@ -71,11 +72,6 @@ MONTE_CARLO_REQUEST = RetirementRequest(
     paths_text="2",
     success_text="90",
 )
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def household(

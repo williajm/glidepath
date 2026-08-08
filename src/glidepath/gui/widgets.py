@@ -6,6 +6,7 @@ render view models and forward raw user input back.
 """
 
 import contextlib
+import logging
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -104,6 +105,8 @@ from glidepath.gui.style import wordmark_pixmap
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+_logger = logging.getLogger(__name__)
 
 _REPORT_DPI = 96
 """The PDF paint device's resolution.
@@ -582,8 +585,16 @@ class MainWindow(QMainWindow):
         """
         if self._settings_path is None:
             return
-        with contextlib.suppress(OSError):
+        try:
             record_last_plan_path(self._settings_path, path)
+        except OSError:
+            _logger.warning(
+                "Could not remember the plan path %s in %s; the next "
+                "launch will start on the example plan.",
+                path,
+                self._settings_path,
+                exc_info=True,
+            )
 
     def _load_example(self) -> None:
         """Open with the example plan on screen and projected (§4.9).

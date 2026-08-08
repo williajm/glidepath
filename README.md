@@ -1,5 +1,7 @@
+<!-- Image and badge URLs are absolute so the README renders on PyPI,
+     which does not resolve repository-relative paths. -->
 <p align="center">
-  <img src="src/glidepath/gui/assets/wordmark.png" alt="glidepath" width="420">
+  <img src="https://raw.githubusercontent.com/williajm/glidepath/main/src/glidepath/gui/assets/wordmark.png" alt="glidepath" width="420">
 </p>
 
 [![CI](https://github.com/williajm/glidepath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/williajm/glidepath/actions/workflows/ci.yml)
@@ -9,7 +11,7 @@
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
-[![License: MIT](https://img.shields.io/github/license/williajm/glidepath)](LICENSE)
+[![License: MIT + CC BY-NC-SA 4.0 data](https://img.shields.io/badge/license-MIT%20%2B%20CC%20BY--NC--SA%204.0%20data-blue)](https://github.com/williajm/glidepath/blob/main/LICENSE)
 
 <p align="center">
   <a href="https://williajm.github.io/glidepath/"><b>williajm.github.io/glidepath</b></a>
@@ -22,7 +24,7 @@ stated, a **decision** you made, or an **assumption** the app defaulted
 nothing is transmitted.
 
 <p align="center">
-  <img src="docs/screenshots/charts.png"
+  <img src="https://raw.githubusercontent.com/williajm/glidepath/main/docs/screenshots/charts.png"
        alt="The charts tab: the Monte Carlo fan chart — nested percentile bands deepening toward the median line — beside the success-rate readout and the retirement-age and backtest cards"
        width="800">
 </p>
@@ -68,7 +70,7 @@ a choice you make; anything estimated lives in the assumptions
 inspector instead:
 
 <p align="center">
-  <img src="docs/screenshots/facts.png"
+  <img src="https://raw.githubusercontent.com/williajm/glidepath/main/docs/screenshots/facts.png"
        alt="The facts tab: the About you, Household spending, and State pension cards of the entry form, with the example plan's values filled in"
        width="800">
 </p>
@@ -78,7 +80,7 @@ choices in effect, and every assumption the run used with its value,
 default/overridden status, source, and date:
 
 <p align="center">
-  <img src="docs/screenshots/stated_vs_assumed.png"
+  <img src="https://raw.githubusercontent.com/williajm/glidepath/main/docs/screenshots/stated_vs_assumed.png"
        alt="The stated-vs-assumed tab: tables of stated facts, choices in effect, assumptions used with sources, and the plan structure"
        width="800">
 </p>
@@ -143,7 +145,7 @@ fine.)
 ## Everyday commands
 
 ```sh
-make check   # all merge gates: ruff, format, mypy --strict, pytest (>=90% cov), dep age
+make check   # all merge gates: ruff, format, mypy --strict, pytest (>=96% cov), dep age
 make fix     # auto-fix lint issues and reformat
 make test    # tests with coverage
 make deps    # the ONLY way to add/upgrade dependencies (7-day cooldown lock)
@@ -158,9 +160,13 @@ clean `make check` locally does not quite guarantee a green pipeline. See
 
 ## Releases
 
-Releases are `vX.Y.Z` tags on `main`; each GitHub Release carries its
-notes from [`CHANGELOG.md`](CHANGELOG.md). There are no packaged builds
-yet — run from source as above.
+Releases are `vX.Y.Z` tags on `main`. Each one is published to
+[PyPI](https://pypi.org/project/glidepath/) as an sdist and wheel via
+trusted publishing with PEP 740 attestations, and as a GitHub Release
+carrying its notes from
+[`CHANGELOG.md`](https://github.com/williajm/glidepath/blob/main/CHANGELOG.md)
+with the same artifacts attached. There are no packaged binary builds
+(installer/exe) yet — install from PyPI as above.
 
 ## Data licences
 

@@ -1,0 +1,13 @@
+# Security-only: `open-pull-requests-limit: 0` disables routine version
+# updates for the SHA-pinned actions, so Dependabot raises alerts (and
+# PRs) only for security advisories. Routine pin refreshes are done by
+# hand when needed, keeping the repo's 7-day cooldown judgement human.
+# Python dependencies are deliberately NOT managed here: `make deps` is
+# the only sanctioned way to touch the lockfile.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0

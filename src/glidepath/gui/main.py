@@ -4,7 +4,7 @@ The disclaimer must be accepted before the shell opens; declining
 exits without recording anything, so the next launch asks again.
 """
 
-import contextlib
+import logging
 import sys
 from datetime import UTC, datetime
 
@@ -20,6 +20,8 @@ from glidepath.app import (
 from glidepath.gui import widgets
 from glidepath.gui.style import apply_theme
 
+_logger = logging.getLogger(__name__)
+
 
 def run(argv: list[str] | None = None) -> int:
     """Run the desktop shell; returns the process exit code."""
@@ -34,9 +36,17 @@ def run(argv: list[str] | None = None) -> int:
             return 0
         # The acknowledgement file only skips future prompts; an unwritable
         # config directory must not kill the session the user just accepted
-        # (worst case the next launch asks again).
-        with contextlib.suppress(OSError):
+        # (worst case the next launch asks again) — but it must leave a
+        # diagnostic trail for "it keeps asking me" reports.
+        try:
             record_disclaimer_acknowledged(state_path, datetime.now(tz=UTC).date())
+        except OSError:
+            _logger.warning(
+                "Could not record the disclaimer acknowledgement at %s; "
+                "the next launch will ask again.",
+                state_path,
+                exc_info=True,
+            )
     window = widgets.MainWindow(view_model, settings_path=state_path)
     # Reopen the last saved or opened plan; if it fails to load, the
     # launch example stays on screen and the status bar explains.

@@ -11,7 +11,7 @@ PySide6 shell (`glidepath/gui/`) over the UI-agnostic app layer
 
 - `make sync` — install the locked dependencies into the platform venv.
 - `make check` — all merge gates: ruff check, ruff format --check,
-  mypy --strict, pytest with coverage (fail under 90%), dependency age check.
+  mypy --strict, pytest with coverage (fail under 96%), dependency age check.
 - `make fix` — ruff auto-fix + format.
 - `make test` — tests with coverage.
 - `make deps` — the ONLY sanctioned way to add or upgrade dependencies.
@@ -47,13 +47,20 @@ releases). Rules:
 - The uv binary itself follows the same cooldown: install/update it only to
   releases at least 7 days old (CI pins the exact version in `ci.yml`).
 - GitHub Actions are pinned to full commit SHAs, never floating tags.
+  Dependabot (`.github/dependabot.yml`) is security-only: it alerts on
+  action security advisories but proposes no routine version updates —
+  pins are refreshed by hand, honouring the 7-day cooldown.
+- The runtime dependency in `[project] dependencies` is pinned exactly
+  (`pyside6==X.Y.Z`, moved only by `make deps`): end users installing
+  from PyPI resolve fresh, so a `>=` range would bypass the lockfile
+  and the cooldown entirely (planning §4.10).
 
 ## Quality bar (enforced by pre-commit + CI, not optional)
 
 - Ruff with `lint.select = ["ALL"]`; every ignore needs a one-line
   justification in `pyproject.toml`. Prefer fixing code over adding ignores.
 - mypy `--strict`; fully typed code, no untyped `def`s.
-- pytest coverage on `src/glidepath` with `fail_under = 90`;
+- pytest coverage on `src/glidepath` with `fail_under = 96`;
   `coverage.xml` is emitted for SonarQube.
 - SonarQube quality gate runs in CI when `SONAR_TOKEN` is configured.
 - Pre-commit hooks are required locally (`make hooks`); ruff/mypy run via
@@ -93,8 +100,10 @@ releases). Rules:
   Unreleased items into a dated `## [X.Y.Z]` section, `make check`, PR to
   `main`. After the merge, tag the merge commit `vX.Y.Z` and push the
   tag; `release.yml` validates it (tag on main, version match, changelog
-  section present) and publishes the GitHub Release, then the sdist and
-  wheel to PyPI.
+  section present), builds and smoke-tests the sdist/wheel, publishes
+  them to PyPI with PEP 740 attestations once the `pypi` environment
+  deployment is manually approved (GitHub → the run's review prompt),
+  then creates the GitHub Release with the artifacts attached.
 
 ## Coding conventions
 

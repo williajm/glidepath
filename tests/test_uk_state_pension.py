@@ -10,11 +10,11 @@ from decimal import Decimal
 
 import pytest
 
-from glidepath.core import Decision, Fact, Money, StatePensionRecord
+from factories import money_fact
+from glidepath.core import Decision, Money, StatePensionRecord
 from glidepath.regions.uk import UkAgeRules, UkStatePensionError, UkStatePensionScheme
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
-AS_OF = date(2026, 8, 1)
 
 DOB_SPA_67 = date(1970, 6, 15)  # SPA 67 band: reaches SPA on 2037-06-15
 
@@ -24,11 +24,6 @@ WEEKS = Decimal(52)
 def scheme() -> UkStatePensionScheme:
     """The scheme over the shipped age-rules data."""
     return UkStatePensionScheme.from_shipped_data()
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated weekly amount."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def record_of(

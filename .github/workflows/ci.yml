@@ -10,6 +10,11 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: no job here writes to the repo, and checkouts do not
+# persist credentials, so no step after checkout holds a usable token.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -22,6 +27,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -49,7 +55,7 @@ jobs:
       - name: Mypy (strict)
         run: uv run mypy
 
-      - name: Tests with coverage (fail under 90%)
+      - name: Tests with coverage (floor in pyproject [tool.coverage.report])
         run: uv run pytest
 
       - name: Dependency age check (7-day supply-chain cooldown)
@@ -85,6 +91,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0

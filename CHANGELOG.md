@@ -9,6 +9,39 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Added
+
+- `SECURITY.md`: a private vulnerability-reporting channel and the
+  supply-chain measures in one place.
+- Diagnostic logging when the settings file cannot be written (the
+  disclaimer acknowledgement or the last-plan path): the session
+  still continues unaffected, but "it forgot my plan" reports now
+  leave a trail.
+
+### Changed
+
+- The PySide6 runtime dependency is pinned exactly (was `>=`): PyPI
+  installs get the version the release was tested against, since
+  `uv.lock` and the supply-chain cooldown never applied to end-user
+  installs (planning §4.10).
+- Release pipeline hardening (planning §4.10): the sdist/wheel are
+  built and smoke-tested in an unprivileged job, published to PyPI
+  with PEP 740 attestations via the PyPA publish action, and the
+  GitHub Release is created only after PyPI publication succeeds,
+  with the artifacts attached. Publishing now requires manual
+  approval of the `pypi` environment, which only `v*` tags may
+  deploy to.
+- Plan saves now fsync the temporary file (and, on POSIX, the
+  directory) before the atomic rename: the save is power-loss
+  durable, not just crash-safe.
+
+### Fixed
+
+- The README renders correctly on PyPI (absolute image URLs), its
+  release section no longer claims there are no packaged builds, and
+  the licence badge states the real `MIT AND CC-BY-NC-SA-4.0`
+  licensing.
+
 ## [0.2.1] - 2026-08-08
 
 Metadata-only release: no code changes since 0.2.0.

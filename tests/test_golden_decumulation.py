@@ -37,6 +37,7 @@ from pathlib import Path
 
 import pytest
 
+from factories import money_fact
 from glidepath.core import (
     AnnuityPurchase,
     AnnuityType,
@@ -133,11 +134,6 @@ decision moves the start to 1 Aug 2030, 8 whole months into 2030/31."""
 ANNUITY_INDEX = 9
 """Age 72 arrives on 1 May 2035: 40% of the SIPP converts to level
 annuity income, its uncrystallised share paying tax-free cash."""
-
-
-def money_fact(amount: str) -> Fact[Money]:
-    """A user-stated monetary fact."""
-    return Fact(value=Money(Decimal(amount)), as_of=AS_OF, recorded_on=RECORDED)
 
 
 def golden_household() -> Household:

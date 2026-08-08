@@ -113,7 +113,9 @@ class RetirementAgeSearch:
             raise ValueError(msg)
 
 
-def earliest_retirement_age(
+# The §5.2 engine quartet plus keyword-only run knobs; bundling would
+# obscure the run(plan, assumptions, region, config) shape.
+def earliest_retirement_age(  # noqa: PLR0913
     plan: Household,
     assumptions: AssumptionSet,
     region: Region,
@@ -180,7 +182,8 @@ def earliest_retirement_age(
     return None
 
 
-def sustainable_income_at_age(
+# Mirrors the earliest_retirement_age signature above.
+def sustainable_income_at_age(  # noqa: PLR0913
     plan: Household,
     assumptions: AssumptionSet,
     region: Region,

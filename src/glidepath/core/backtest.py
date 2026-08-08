@@ -392,7 +392,9 @@ class BacktestResult:
         )
 
 
-def run_windows(
+# The §5.2 engine quartet plus keyword-only run knobs; bundling would
+# obscure the run(plan, assumptions, region, config) shape.
+def run_windows(  # noqa: PLR0913
     plan: Household,
     assumptions: AssumptionSet,
     region: Region,
@@ -477,7 +479,8 @@ def run_windows(
     )
 
 
-def _run_window_range(
+# Mirrors the run_windows signature above.
+def _run_window_range(  # noqa: PLR0913
     plan: Household,
     assumptions: AssumptionSet,
     region: Region,
