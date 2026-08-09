@@ -4,24 +4,29 @@ A held Monte Carlo run summarised as plain sentences (planning §4.7):
 the likely range of the household's pots at retirement in today's
 money — the middle half of paths, with the 1-in-20 tails spelled out
 rather than hidden — the pension slice an annuity could be bought
-with, that annuity's yearly income at the shipped level single-life
-rates, and the State Pension forecast stacked on top from its own
-start age. Everything is read from results the state already holds
-(the base projection for the period grid and deflators, the Monte
-Carlo outcomes for the percentile bands), so the card needs no run of
-its own and can never disagree with the fan chart beside it.
+with, what a whole-pot purchase would deliver under the engine's own
+5.5 conventions (the tax-free cash paid out first, headroom-capped,
+with the remainder buying income at the shipped level single-life
+rates), and the State Pension forecast stacked on top from its
+month-precise start age, quoted as the run opened it (the §4.8
+roll-forward of a stale forecast). Everything is read from results
+the state already holds (the base projection for the period grid,
+deflators, sub-balance split, and roll-forward disclosures, the
+Monte Carlo outcomes for the percentile bands), so the card needs no
+run of its own and can never disagree with the fan chart beside it.
 
 Pot values are read at the tax-year end immediately before the
 retirement age is attained — the last close before withdrawals can
-begin. A person already at or past their target retirement age reads
-the first projected period's close instead, phrased as "by the end of
-this tax year".
+begin. A person already at or past their target retirement age on
+the run date reads the first projected period's close instead,
+phrased as "by the end of this tax year".
 """
 
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
+from glidepath.app.plan import region_for
 from glidepath.core import (
     AnnuityRateTable,
     AnnuityType,
@@ -31,10 +36,13 @@ from glidepath.core import (
     age_on,
     date_age_attained,
     decimal_assumption_value,
+    whole_months_between,
 )
 from glidepath.regions.uk import UkAgeError, UkStatePensionError, UkStatePensionScheme
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from glidepath.app.plan import PlanState
     from glidepath.core import (
         AssumptionSet,
@@ -42,10 +50,13 @@ if TYPE_CHECKING:
         PeriodSnapshot,
         Person,
         ProjectionResult,
+        RunProvenance,
     )
 
 _ONE = Decimal(1)
 _ZERO_MONEY = Money(Decimal(0))
+_WEEKS_PER_YEAR = Decimal(52)
+_MONTHS_PER_YEAR = 12
 
 OUTLOOK_HEADING: Final = "Retirement outlook"
 
@@ -100,6 +111,23 @@ class _Reading:
     age: int | None
 
 
+@dataclass(frozen=True)
+class _CardContext:
+    """What the income sentences read, bundled once per build.
+
+    All of it comes from state the panel already holds: the effective
+    assumptions, the base run's provenance (for the §4.8 roll-forward
+    disclosures), the person, and the reading snapshot the pots are
+    quoted at.
+    """
+
+    assumptions: AssumptionSet
+    provenance: RunProvenance
+    person: Person
+    snapshot: PeriodSnapshot
+    reading: _Reading
+
+
 def build_outlook_panel(state: PlanState) -> OutlookPanelViewModel:
     """The retirement outlook card for the charts screen (9.27).
 
@@ -129,10 +157,15 @@ def build_outlook_panel(state: PlanState) -> OutlookPanelViewModel:
     deflator = _balance_deflator(snapshot)
     total_row = _deflated(totals, reading.index, deflator)
     pension_row = _deflated(pensions, reading.index, deflator)
-    lines = [_tails_sentence(total_row)]
-    lines.extend(
-        _income_sentences(state.assumptions, person, snapshot, reading, pension_row)
+    context = _CardContext(
+        assumptions=state.assumptions,
+        provenance=result.provenance,
+        person=person,
+        snapshot=snapshot,
+        reading=reading,
     )
+    lines = [_tails_sentence(total_row)]
+    lines.extend(_income_sentences(context, pension_row))
     lines.append(_basis_sentence(monte_carlo))
     return OutlookPanelViewModel(
         heading=OUTLOOK_HEADING,
@@ -156,15 +189,18 @@ def _retirement_reading(result: ProjectionResult, person: Person) -> _Reading | 
     retirement age is attained — the last balance withdrawals cannot
     yet have touched. Retirement inside the first projected period
     reads that period's own close; a retirement age already attained
-    reads the first close too, with the age dropped from the copy
-    (module docstring). ``None`` only when the projection ends before
-    the retirement age — a horizon shorter than the plan's own
-    decisions, which the engine normally refuses upstream.
+    on the run's ``today`` (not the first period's start — the first
+    tax year opens before the run date, so a birthday between the two
+    is already past) reads the first close too, with the age dropped
+    from the copy (module docstring). ``None`` only when the
+    projection ends before the retirement age — a horizon shorter
+    than the plan's own decisions, which the engine normally refuses
+    upstream.
     """
     retirement_age = person.target_retirement_age.value
     attained = date_age_attained(person.date_of_birth.value, retirement_age)
     snapshots = result.snapshots
-    if attained <= snapshots[0].period.start:
+    if attained <= result.config.today:
         return _Reading(index=0, age=None)
     for position, snapshot in enumerate(snapshots):
         if snapshot.period.contains(attained):
@@ -226,57 +262,108 @@ def _tails_sentence(totals: tuple[Money, ...]) -> str:
     )
 
 
-def _income_sentences(
-    assumptions: AssumptionSet,
-    person: Person,
-    snapshot: PeriodSnapshot,
-    reading: _Reading,
-    pensions: tuple[Money, ...],
-) -> list[str]:
+def _income_sentences(context: _CardContext, pensions: tuple[Money, ...]) -> list[str]:
     """The pension-slice, annuity, and State Pension sentences.
 
     Each sentence appears only when it has something true to say: the
     pension slice only when other savings sit alongside it, the
     annuity only when there is pension money to convert and the
     shipped rate table covers the purchase age, the State Pension only
-    when the person holds a usable forecast.
+    when the person holds a usable forecast. The annuity quote follows
+    the engine's whole-pot purchase: the tax-free cash comes out
+    first (:func:`_tax_free_cash`) and only the remainder buys
+    income.
     """
     _, p25, p50, p75, _ = pensions
     lines: list[str] = []
-    if p50 <= _ZERO_MONEY:
-        annuity_income = None
-    else:
-        if any(not wrapper.pension for wrapper in snapshot.persons[0].wrappers):
+    annuity_income = None
+    if p50 > _ZERO_MONEY:
+        if any(not wrapper.pension for wrapper in context.snapshot.persons[0].wrappers):
             lines.append(
                 "Pensions alone — the money an annuity could be bought with —"
                 f" could hold around {_pounds(p50)}, likely between"
                 f" {_pounds(p25)} and {_pounds(p75)}."
             )
         purchase_age = (
-            reading.age
-            if reading.age is not None
-            else age_on(person.date_of_birth.value, snapshot.period.end)
+            context.reading.age
+            if context.reading.age is not None
+            else age_on(context.person.date_of_birth.value, context.snapshot.period.end)
         )
-        annuity_income = _annuity_income(assumptions, p50, purchase_age)
-        if annuity_income is not None:
+        tax_free = _tax_free_cash(context, p50)
+        annuity_income = _annuity_income(
+            context.assumptions, p50 - tax_free, purchase_age
+        )
+        if annuity_income is not None and tax_free > _ZERO_MONEY:
+            lines.append(
+                f"As a level single-life annuity bought at {purchase_age}, the"
+                f" middle pension pot would pay about {_pounds(annuity_income)}"
+                f" a year before tax, alongside around {_pounds(tax_free)} of"
+                " up-front tax-free cash."
+            )
+        elif annuity_income is not None:
             lines.append(
                 f"As a level single-life annuity bought at {purchase_age}, the"
                 f" middle pension pot would pay about {_pounds(annuity_income)}"
                 " a year before tax."
             )
-    state_pension = _state_pension_sentence(person, annuity_income)
+    state_pension = _state_pension_sentence(
+        context.person, annuity_income, context.provenance
+    )
     if state_pension is not None:
         lines.append(state_pension)
     return lines
 
 
-def _annuity_income(assumptions: AssumptionSet, pot: Money, age: int) -> Money | None:
-    """The yearly income ``pot`` buys at the shipped level rates.
+def _tax_free_cash(context: _CardContext, pot: Money) -> Money:
+    """The tax-free cash a whole-pot annuity purchase pays out first.
+
+    The engine's 5.5 convention: crystallising uncrystallised funds
+    delivers the region's tax-free fraction as cash — capped at the
+    remaining lump-sum-allowance headroom — and only the remainder
+    buys income; already-crystallised funds annuitise whole. The
+    uncrystallised share comes from the base projection's reading
+    snapshot (path outcomes keep no sub-balance split), and the
+    headroom uses the person's cumulative tax-free cash at that
+    close, so the estimate follows the engine's own ledger.
+    """
+    person = context.snapshot.persons[0]
+    total = _ZERO_MONEY
+    uncrystallised = _ZERO_MONEY
+    pension_kind = None
+    for wrapper in person.wrappers:
+        if not wrapper.pension:
+            continue
+        if pension_kind is None:
+            pension_kind = wrapper.kind
+        total = total + wrapper.closing_balance
+        uncrystallised = uncrystallised + wrapper.closing_uncrystallised
+    if pension_kind is None or total <= _ZERO_MONEY or uncrystallised <= _ZERO_MONEY:
+        return _ZERO_MONEY
+    region = region_for(context.assumptions)
+    fraction = region.wrappers.tax_treatment(
+        pension_kind, context.snapshot.period
+    ).tax_free_fraction
+    if fraction is None:
+        return _ZERO_MONEY
+    share = uncrystallised.amount / total.amount
+    tax_free = Money(pot.amount * share * fraction.value)
+    allowance = region.wrappers.lump_sum_allowance(context.snapshot.period)
+    if allowance is None:
+        return tax_free
+    headroom = max(allowance - person.lsa_used, _ZERO_MONEY)
+    return min(tax_free, headroom)
+
+
+def _annuity_income(
+    assumptions: AssumptionSet, capital: Money, age: int
+) -> Money | None:
+    """The yearly income ``capital`` buys at the shipped level rates.
 
     The single-life-at-65 base rate scaled by the age-adjustment
-    table, exactly as the engine prices a purchase (roadmap 5.5);
-    ``None`` when the shipped table does not cover ``age`` — the
-    model does not extrapolate (planning §5.3).
+    table — the engine's own rate composition (roadmap 5.5) over the
+    capital left after the purchase's tax-free cash; ``None`` when
+    the shipped table does not cover ``age`` — the model does not
+    extrapolate (planning §5.3).
     """
     try:
         table = AnnuityRateTable.from_assumption_value(
@@ -287,16 +374,20 @@ def _annuity_income(assumptions: AssumptionSet, pot: Money, age: int) -> Money |
         ) * table.age_multiplier(AnnuityType.LEVEL, age)
     except EngineError:
         return None
-    return Money(pot.amount * rate)
+    return Money(capital.amount * rate)
 
 
-def _state_pension_sentence(person: Person, annuity_income: Money | None) -> str | None:
+def _state_pension_sentence(
+    person: Person, annuity_income: Money | None, provenance: RunProvenance
+) -> str | None:
     """The State Pension stacked on top, or ``None`` without a forecast.
 
-    The stated DWP forecast (deferral-uplifted, protected payment
-    included) is already today's money — the §5.1 rule that the
-    official forecast is the fact — so it adds directly onto the
-    annuity's today's-money income.
+    The DWP forecast states today's rates as of its own date; a stale
+    forecast is quoted as the run opened it — the §4.8 roll-forward
+    the engine disclosed — so the card and the projection uprate the
+    same way. Deferral-uplifted and protected payment included, the
+    amount adds directly onto the annuity's today's-money income; the
+    start age keeps the timetable's month-level precision.
     """
     record = person.state_pension
     if record is None:
@@ -307,20 +398,54 @@ def _state_pension_sentence(person: Person, annuity_income: Money | None) -> str
         )
     except UkAgeError, UkStatePensionError:
         return None
-    annual = (entitlement.annual_amount + entitlement.cpi_uprated_annual_amount) * (
-        _ONE + entitlement.deferral_uplift
-    )
-    start_age = age_on(person.date_of_birth.value, entitlement.start_date)
+    weekly = _rolled_forecast_weekly(person, provenance)
+    if weekly is None:
+        base = entitlement.annual_amount + entitlement.cpi_uprated_annual_amount
+    else:
+        base = weekly * _WEEKS_PER_YEAR
+    annual = base * (_ONE + entitlement.deferral_uplift)
+    start = _age_phrase(person.date_of_birth.value, entitlement.start_date)
     if annuity_income is None:
         return (
-            f"Your State Pension forecast adds {_pounds(annual)} a year"
-            f" from age {start_age}."
+            f"Your State Pension forecast adds {_pounds(annual)} a year from {start}."
         )
     combined = annuity_income + annual
     return (
         f"Your State Pension forecast adds {_pounds(annual)} a year from"
-        f" age {start_age} — around {_pounds(combined)} a year all told."
+        f" {start} — around {_pounds(combined)} a year all told."
     )
+
+
+def _rolled_forecast_weekly(person: Person, provenance: RunProvenance) -> Money | None:
+    """The forecast's weekly rate as the run opened it, if rolled (§4.8).
+
+    A stale forecast is uprated to the run start by the engine and the
+    adjustment disclosed as a roll-forward record over the stated
+    weekly rate — its blended factor already covers a protected
+    slice's CPI-only handling — so the card quotes the disclosure
+    rather than re-deriving the roll. ``None`` when no record exists:
+    a forecast stated within a whole month of the run start is quoted
+    as stated.
+    """
+    label = f"person[{person.id}].state_pension.forecast_weekly_amount"
+    for roll in provenance.balance_roll_forwards:
+        if roll.label == label:
+            return roll.opening
+    return None
+
+
+def _age_phrase(date_of_birth: date, on: date) -> str:
+    """An exact age as copy: ``age 67``, or ``age 66 and 9 months``.
+
+    The SPA timetable and deferral both work in whole months, so a
+    start age truncated to whole years could read almost a year early
+    — the months are named whenever they are non-zero.
+    """
+    years, months = divmod(whole_months_between(date_of_birth, on), _MONTHS_PER_YEAR)
+    if months == 0:
+        return f"age {years}"
+    unit = "month" if months == 1 else "months"
+    return f"age {years} and {months} {unit}"
 
 
 def _basis_sentence(monte_carlo: MonteCarloResult) -> str:
