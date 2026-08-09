@@ -43,7 +43,6 @@ from PySide6.QtGui import (
     QImage,
     QPainter,
     QPen,
-    QResizeEvent,
 )
 from PySide6.QtWidgets import (
     QGroupBox,
@@ -54,7 +53,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
-    QSplitter,
     QTabWidget,
     QToolTip,
     QVBoxLayout,
@@ -100,6 +98,11 @@ if TYPE_CHECKING:
 _CATEGORY_LABEL_ANGLE = -90
 
 _REPORT_CHART_SIZE = QSize(880, 460)
+
+_CHART_MIN_HEIGHT = 420
+"""The chart keeps at least this height inside the scrolling page —
+below it the year labels and stacked bars stop being readable, so a
+short window scrolls instead of squashing the chart further."""
 
 _BAR_WIDTH = 0.65
 """Bars fill this share of each category slot — substantial marks
@@ -376,10 +379,10 @@ def chart_image(chart: ChartSpec, categories: tuple[str, ...]) -> QImage:
 class ChartsPane(QWidget):
     """The charts tab: basis toggle, run-mode control, chart sub-tabs.
 
-    The question cards sit in a scrollable pane above the charts, the
-    two joined by a draggable vertical splitter that starts with most
-    of the height on the chart — the cards' natural height would
-    otherwise squash the chart into the remainder of the window.
+    The question cards and the charts share one scrollable page, so
+    the whole tab scrolls as a unit. The chart keeps a minimum height
+    so a short window scrolls the page rather than squashing the chart,
+    while a tall window lets the chart take the spare space.
     """
 
     def __init__(
@@ -411,55 +414,30 @@ class ChartsPane(QWidget):
 
         self.chart_tabs = QTabWidget(self)
 
-        cards = QWidget(self)
-        cards_layout = QVBoxLayout(cards)
+        self.chart_tabs.setMinimumHeight(_CHART_MIN_HEIGHT)
+
+        page = QWidget(self)
+        page_layout = QVBoxLayout(page)
         top_row = QHBoxLayout()
         top_row.addWidget(self._basis_box)
         top_row.addWidget(self._monte_carlo_box, 1)
-        cards_layout.addLayout(top_row)
-        cards_layout.addWidget(self._outlook_box)
-        cards_layout.addWidget(self._retirement_box)
-        cards_layout.addWidget(self._drawdown_box)
-        cards_layout.addWidget(self._backtest_box)
-        cards_layout.addStretch(1)
+        page_layout.addLayout(top_row)
+        page_layout.addWidget(self._outlook_box)
+        page_layout.addWidget(self._retirement_box)
+        page_layout.addWidget(self._drawdown_box)
+        page_layout.addWidget(self._backtest_box)
+        page_layout.addLayout(busy_row)
+        page_layout.addWidget(self.allocation_label)
+        page_layout.addWidget(self.message_label)
+        page_layout.addWidget(self.chart_tabs, 1)
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
-        scroll.setWidget(cards)
-
-        charts = QWidget(self)
-        charts_layout = QVBoxLayout(charts)
-        charts_layout.setContentsMargins(0, 0, 0, 0)
-        charts_layout.addLayout(busy_row)
-        charts_layout.addWidget(self.allocation_label)
-        charts_layout.addWidget(self.message_label)
-        charts_layout.addWidget(self.chart_tabs, 1)
-
-        self._splitter = QSplitter(Qt.Orientation.Vertical, self)
-        self._splitter.addWidget(scroll)
-        self._splitter.addWidget(charts)
-        self._splitter.setStretchFactor(0, 0)
-        self._splitter.setStretchFactor(1, 1)
-        self._split_seeded = False
+        scroll.setWidget(page)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(self._splitter)
-
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
-        """Seed the splitter with the default split on first layout.
-
-        Sizes set before the pane has a height are discarded by the
-        splitter's own first layout, which falls back to the stretch
-        factors and squashes the cards to their minimum — so the
-        one-third/two-thirds default waits for the first resize that
-        delivers a real height. Later resizes leave the split alone,
-        preserving any position the user has dragged it to.
-        """
-        super().resizeEvent(event)
-        if not self._split_seeded and self._splitter.height() > 0:
-            self._split_seeded = True
-            third = self._splitter.height() // 3
-            self._splitter.setSizes([third, 2 * third])
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(scroll)
 
     def refresh(self, view_model: ChartsViewModel) -> None:
         """Re-render the controls, message, and charts from the view model.

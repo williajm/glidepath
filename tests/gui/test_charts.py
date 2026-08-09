@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QInputDialog,
     QRadioButton,
-    QSplitter,
+    QScrollArea,
     QTableWidget,
     QTabWidget,
 )
@@ -319,25 +319,27 @@ class TestChartsPane:
         assert isinstance(refreshed, QTabWidget)
         assert refreshed.currentIndex() == 1
 
-    def test_first_layout_seeds_the_split_toward_the_chart(self) -> None:
-        """On first show the chart pane gets about two thirds of the height.
+    def test_whole_page_scrolls_and_chart_keeps_its_height(self) -> None:
+        """Cards and chart share one scroll area; the chart never squashes.
 
-        Without the seeding, the splitter's own first layout falls
-        back to the stretch factors and squashes the cards pane to
-        its minimum — the cards must keep a meaningful share and the
-        chart the majority.
+        The question cards and the chart sub-tabs live on the same
+        scrolling page, so a short window scrolls the whole tab as one
+        unit while the chart holds a readable minimum height instead
+        of being crushed into the remaining space.
         """
         pane = ChartsPane(callbacks())
         pane.refresh(projected_view_model())
-        pane.resize(900, 900)
+        pane.resize(900, 400)
         pane.show()
         QApplication.processEvents()
-        splitter = pane.findChild(QSplitter)
-        assert splitter is not None
-        cards_height, charts_height = splitter.sizes()
-        total = cards_height + charts_height
-        assert cards_height >= total // 4
-        assert charts_height > cards_height
+        scroll = pane.findChild(QScrollArea)
+        assert scroll is not None
+        page = scroll.widget()
+        assert page is not None
+        assert pane.chart_tabs in page.findChildren(QTabWidget)
+        assert pane.chart_tabs.height() >= pane.chart_tabs.minimumHeight()
+        assert pane.chart_tabs.minimumHeight() > 0
+        assert page.height() > pane.height()
 
     def test_refresh_replaces_rather_than_accumulates(self) -> None:
         """A second refresh rebuilds the sub-tabs in place."""
