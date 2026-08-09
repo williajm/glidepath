@@ -32,6 +32,10 @@ from glidepath.app.montecarlo import (
     MonteCarloPanelViewModel,
     build_monte_carlo_panel,
 )
+from glidepath.app.outlook import (
+    OutlookPanelViewModel,
+    build_outlook_panel,
+)
 from glidepath.app.retirement import (
     RetirementPanelViewModel,
     build_retirement_panel,
@@ -227,6 +231,7 @@ class ChartsViewModel:
     message: str
     allocation_note: str
     monte_carlo: MonteCarloPanelViewModel
+    outlook: OutlookPanelViewModel
     retirement: RetirementPanelViewModel
     drawdown: DrawdownPanelViewModel
     backtest: BacktestPanelViewModel
@@ -366,6 +371,7 @@ def build_charts_view_model(
             monte_carlo=build_monte_carlo_panel(
                 state, mode, ending_pot_deflator=None, basis_suffix=suffix
             ),
+            outlook=build_outlook_panel(state),
             retirement=build_retirement_panel(state, mode),
             drawdown=build_drawdown_panel(state, mode),
             backtest=build_backtest_panel(
@@ -403,6 +409,7 @@ def build_charts_view_model(
             ending_pot_deflator=final_rows[0].balance_deflator,
             basis_suffix=suffix,
         ),
+        outlook=build_outlook_panel(state),
         retirement=build_retirement_panel(state, mode),
         drawdown=build_drawdown_panel(state, mode),
         backtest=build_backtest_panel(

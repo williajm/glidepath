@@ -93,6 +93,7 @@ if TYPE_CHECKING:
         ChartsViewModel,
         DrawdownPanelViewModel,
         MonteCarloPanelViewModel,
+        OutlookPanelViewModel,
         RetirementPanelViewModel,
     )
 
@@ -396,6 +397,7 @@ class ChartsPane(QWidget):
         self._basis_layout = QHBoxLayout(self._basis_box)
 
         self._build_monte_carlo_box()
+        self._build_outlook_box()
         self._build_retirement_box()
         self._build_drawdown_box()
         self._build_backtest_box()
@@ -415,6 +417,7 @@ class ChartsPane(QWidget):
         top_row.addWidget(self._basis_box)
         top_row.addWidget(self._monte_carlo_box, 1)
         cards_layout.addLayout(top_row)
+        cards_layout.addWidget(self._outlook_box)
         cards_layout.addWidget(self._retirement_box)
         cards_layout.addWidget(self._drawdown_box)
         cards_layout.addWidget(self._backtest_box)
@@ -469,6 +472,7 @@ class ChartsPane(QWidget):
         self._basis_box.setTitle(view_model.basis_heading)
         self._sync_basis_buttons(view_model)
         self._sync_monte_carlo(view_model.monte_carlo)
+        self._sync_outlook(view_model.outlook)
         self._sync_retirement(view_model.retirement)
         self._sync_drawdown(view_model.drawdown)
         self._sync_backtest(view_model.backtest)
@@ -538,6 +542,26 @@ class ChartsPane(QWidget):
         self.monte_carlo_message_label = QLabel("", self._monte_carlo_box)
         self.monte_carlo_message_label.setWordWrap(True)
         monte_carlo_layout.addWidget(self.monte_carlo_message_label)
+
+    def _build_outlook_box(self) -> None:
+        """Create the retirement outlook card's widgets (roadmap 9.27).
+
+        A read-only card — headline, detail, and message labels, no
+        controls: it summarises the Monte Carlo panel's held run, so
+        that panel's own controls are its inputs.
+        """
+        self._outlook_box = QGroupBox(self)
+        outlook_layout = QVBoxLayout(self._outlook_box)
+        self.outlook_answer_label = QLabel("", self._outlook_box)
+        self.outlook_answer_label.setObjectName("answerLabel")
+        self.outlook_answer_label.setWordWrap(True)
+        outlook_layout.addWidget(self.outlook_answer_label)
+        self.outlook_detail_label = QLabel("", self._outlook_box)
+        self.outlook_detail_label.setWordWrap(True)
+        outlook_layout.addWidget(self.outlook_detail_label)
+        self.outlook_message_label = QLabel("", self._outlook_box)
+        self.outlook_message_label.setWordWrap(True)
+        outlook_layout.addWidget(self.outlook_message_label)
 
     def _build_retirement_box(self) -> None:
         """Create the "When can I retire?" card's widgets (9.14)."""
@@ -783,6 +807,16 @@ class ChartsPane(QWidget):
         self.backtest_metrics_label.setVisible(bool(metrics))
         self.backtest_message_label.setText(panel.message)
         self.backtest_message_label.setVisible(bool(panel.message))
+
+    def _sync_outlook(self, panel: OutlookPanelViewModel) -> None:
+        """Re-render the retirement outlook card (roadmap 9.27)."""
+        self._outlook_box.setTitle(panel.heading)
+        self.outlook_answer_label.setText(panel.answer)
+        self.outlook_answer_label.setVisible(bool(panel.answer))
+        self.outlook_detail_label.setText(panel.detail)
+        self.outlook_detail_label.setVisible(bool(panel.detail))
+        self.outlook_message_label.setText(panel.message)
+        self.outlook_message_label.setVisible(bool(panel.message))
 
     def _sync_retirement(self, panel: RetirementPanelViewModel) -> None:
         """Re-render the "When can I retire?" card (roadmap 9.14)."""

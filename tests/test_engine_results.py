@@ -91,7 +91,11 @@ def wrapper_result(**overrides: Money) -> WrapperPeriodResult:
     }
     fields.update(overrides)
     return WrapperPeriodResult(
-        wrapper_id=EntityId("wrapper-1"), kind=KIND, allocation=ALLOCATION, **fields
+        wrapper_id=EntityId("wrapper-1"),
+        kind=KIND,
+        allocation=ALLOCATION,
+        pension=False,
+        **fields,
     )
 
 

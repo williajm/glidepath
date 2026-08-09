@@ -182,6 +182,7 @@ def outcome_of(
     ending: str,
     shortfall_year: int | None = None,
     balances: tuple[str, ...] | None = None,
+    pensions: tuple[str, ...] | None = None,
 ) -> PathOutcome:
     """A hand-built path outcome, ruined when a shortfall year is given."""
     period = None
@@ -192,11 +193,15 @@ def outcome_of(
     closing: tuple[Money, ...] = ()
     if balances is not None:
         closing = tuple(Money(Decimal(balance)) for balance in balances)
+    pension_closing: tuple[Money, ...] = ()
+    if pensions is not None:
+        pension_closing = tuple(Money(Decimal(balance)) for balance in pensions)
     return PathOutcome(
         path=path,
         first_shortfall_period=period,
         ending_balance=Money(Decimal(ending)),
         closing_balances=closing,
+        pension_closing_balances=pension_closing,
     )
 
 
@@ -392,6 +397,21 @@ class TestRunPaths:
             assert len(outcome.closing_balances) == 4
             assert outcome.closing_balances[-1] == outcome.ending_balance
             assert all(balance >= ZERO for balance in outcome.closing_balances)
+
+    def test_outcomes_carry_an_aligned_pension_series(self) -> None:
+        """The pension series covers every period (roadmap 9.27).
+
+        The stub region's one kind is wholly tax-free — not a pension
+        — so the series is zero throughout while staying aligned with
+        the household series; the UK-region suites drive the non-zero
+        side through the app layer.
+        """
+        result = run_paths(
+            household_of(), assumptions_with(), stub_region(), mc_config(), paths=2
+        )
+        for outcome in result.outcomes:
+            assert len(outcome.pension_closing_balances) == 4
+            assert all(balance == ZERO for balance in outcome.pension_closing_balances)
 
     def test_records_the_config_and_merged_provenance(self) -> None:
         """The result carries the §4.6 manifest side."""
@@ -652,6 +672,30 @@ class TestMonteCarloMetrics:
         negative = Decimal(-1)
         with pytest.raises(ValueError, match="between 0 and 100"):
             result.balance_percentile(negative)
+
+    def test_pension_percentiles_interpolate_period_by_period(self) -> None:
+        """The pension bands apply the same convention to their series."""
+        result = result_of(
+            outcome_of(0, "50", balances=("100", "50"), pensions=("40", "20")),
+            outcome_of(1, "150", balances=("200", "150"), pensions=("80", "60")),
+            outcome_of(2, "250", balances=("300", "250"), pensions=("120", "100")),
+        )
+        [median] = result.pension_balance_percentiles((Decimal(50),))
+        [floor] = result.pension_balance_percentiles((Decimal(0),))
+        assert median == (Money(Decimal(80)), Money(Decimal(60)))
+        assert floor == (Money(Decimal(40)), Money(Decimal(20)))
+
+    def test_pension_percentiles_reject_mismatched_period_counts(self) -> None:
+        """The pension series carries the same alignment rule."""
+        result = result_of(
+            outcome_of(0, "50", balances=("100", "50"), pensions=("40", "20")),
+            outcome_of(1, "150", balances=("200", "150"), pensions=("60",)),
+        )
+        median = (Decimal(50),)
+        with pytest.raises(
+            ValueError, match="pension_balance_percentiles needs every path"
+        ):
+            result.pension_balance_percentiles(median)
 
     def test_a_percentile_batch_matches_the_single_calls(self) -> None:
         """One sorted vector per period must change no value (9.24).

@@ -73,6 +73,12 @@ class WrapperPeriodResult:
     swept into this wrapper — income or gross draws beyond the
     period's need (planning §5.2). ``growth`` may be negative (a down
     period); every other flow is non-negative.
+
+    ``pension`` marks a wrapper of a partially-tax-free (pension)
+    kind — the same region-supplied treatment the engine's withdrawal
+    and annuity-purchase steps read — so result consumers can split
+    annuity-convertible pension money from other savings without
+    re-deriving region rules (roadmap 9.27).
     """
 
     wrapper_id: EntityId
@@ -97,6 +103,7 @@ class WrapperPeriodResult:
     growth_tax: Money = _ZERO
     aa_charge: Money = _ZERO
     banked_in: Money = _ZERO
+    pension: bool = False
 
     def __post_init__(self) -> None:
         """Reject negative amounts in the non-negative fields."""

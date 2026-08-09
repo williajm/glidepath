@@ -9,6 +9,20 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Added
+
+- Retirement outlook card on the charts screen (roadmap 9.27): a held
+  Monte Carlo run summarised in plain sentences — the likely pot range
+  at retirement in today's money with the 1-in-20 tails stated, the
+  pension slice an annuity could be bought with, the tax-free cash and
+  yearly income a whole-pot purchase would deliver under the engine's
+  own conventions, and the State Pension forecast stacked on top with
+  the combined total, from its month-precise start age at the run's
+  rolled-forward rate.
+- Monte Carlo path outcomes now retain a pension-only closing-balance
+  series alongside the household one (`pension_balance_percentiles`),
+  and each wrapper period result carries the region's pension marker.
+
 ## [0.3.0] - 2026-08-08
 
 Hardening release: attested PyPI publishing, durable plan saves, and a

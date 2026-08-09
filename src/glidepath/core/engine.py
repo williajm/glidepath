@@ -2720,6 +2720,10 @@ class _Projection:
             growth_tax=growth_tax.quantized(),
             aa_charge=aa_charge.quantized(),
             banked_in=ledger.banked_in.quantized(),
+            pension=(
+                ledger.treatment.withdrawals
+                is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+            ),
         )
 
 
