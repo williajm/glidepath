@@ -56,7 +56,7 @@ from glidepath.core.money import Money
 from glidepath.core.provenance import Fact
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
     from concurrent.futures import Executor
 
     from glidepath.core.config import RunConfig
@@ -84,14 +84,19 @@ class PathOutcome:
     period in period order, nominal — what the balances chart's
     percentile bands read (roadmap 9.13) — and ``ending_balance`` is
     its final entry, kept as its own field for the ending-pot metrics.
-    Re-run the path itself with ``run(plan, assumptions, region,
-    replace(config, path=path))``.
+    ``pension_closing_balances`` is the same series restricted to the
+    pension wrappers (the engine's ``pension`` marker on each wrapper
+    result) — what the retirement outlook's annuity-convertible pot
+    range reads (roadmap 9.27); zero every period for a household
+    holding no pension wrapper. Re-run the path itself with
+    ``run(plan, assumptions, region, replace(config, path=path))``.
     """
 
     path: int
     first_shortfall_period: Period | None
     ending_balance: Money
     closing_balances: tuple[Money, ...] = ()
+    pension_closing_balances: tuple[Money, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject a negative path index or inconsistent balances."""
@@ -198,14 +203,57 @@ class MonteCarloResult:
             ValueError: If any percentile lies outside [0, 100], or
                 the outcomes carry differing period counts.
         """
+        return self._series_percentiles(
+            percentiles,
+            lambda outcome: outcome.closing_balances,
+            "balance_percentiles",
+        )
+
+    def pension_balance_percentiles(
+        self, percentiles: Sequence[Decimal]
+    ) -> tuple[tuple[Money, ...], ...]:
+        """:meth:`balance_percentiles` over the pension wrappers only.
+
+        The same per-period order statistics read from each path's
+        ``pension_closing_balances`` — the annuity-convertible slice
+        of the household the retirement outlook quotes (roadmap
+        9.27). Zero every period for a household holding no pension
+        wrapper.
+
+        Raises:
+            ValueError: If any percentile lies outside [0, 100], or
+                the outcomes carry differing period counts.
+        """
+        return self._series_percentiles(
+            percentiles,
+            lambda outcome: outcome.pension_closing_balances,
+            "pension_balance_percentiles",
+        )
+
+    def _series_percentiles(
+        self,
+        percentiles: Sequence[Decimal],
+        series: Callable[[PathOutcome], tuple[Money, ...]],
+        context: str,
+    ) -> tuple[tuple[Money, ...], ...]:
+        """The per-period percentile rows of one per-path balance series.
+
+        One sort per period serves every requested percentile
+        (:meth:`balance_percentiles` docstring); ``context`` names the
+        calling accessor in the period-count error.
+
+        Raises:
+            ValueError: If any percentile lies outside [0, 100], or
+                the outcomes carry differing period counts.
+        """
         for percentile in percentiles:
             _check_percentile(percentile)
-        lengths = {len(outcome.closing_balances) for outcome in self.outcomes}
+        lengths = {len(series(outcome)) for outcome in self.outcomes}
         if len(lengths) != 1:
-            msg = "balance_percentiles needs every path to cover the same periods"
+            msg = f"{context} needs every path to cover the same periods"
             raise ValueError(msg)
         by_period = [
-            sorted(outcome.closing_balances[index] for outcome in self.outcomes)
+            sorted(series(outcome)[index] for outcome in self.outcomes)
             for index in range(lengths.pop())
         ]
         return tuple(
@@ -551,21 +599,27 @@ def _path_outcome(index: int, result: ProjectionResult) -> PathOutcome:
     """Reduce one path's projection to its success signals."""
     first_shortfall = None
     balances = []
+    pension_balances = []
     for snapshot in result.snapshots:
         shortfall = _ZERO
         closing = _ZERO
+        pension_closing = _ZERO
         for person in snapshot.persons:
             shortfall = shortfall + person.shortfall
             for wrapper in person.wrappers:
                 closing = closing + wrapper.closing_balance
+                if wrapper.pension:
+                    pension_closing = pension_closing + wrapper.closing_balance
         if shortfall > _ZERO and first_shortfall is None:
             first_shortfall = snapshot.period
         balances.append(closing)
+        pension_balances.append(pension_closing)
     return PathOutcome(
         path=index,
         first_shortfall_period=first_shortfall,
         ending_balance=balances[-1],
         closing_balances=tuple(balances),
+        pension_closing_balances=tuple(pension_balances),
     )
 
 

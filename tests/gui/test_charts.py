@@ -42,6 +42,7 @@ from glidepath.app import (
     NO_BACKTEST_MESSAGE,
     NO_DRAWDOWN_MESSAGE,
     NO_MONTE_CARLO_MESSAGE,
+    NO_OUTLOOK_MESSAGE,
     NO_RETIREMENT_MESSAGE,
     RETIREMENT_RUNNING_MESSAGE,
     RETIREMENT_STALE_MESSAGE,
@@ -446,6 +447,28 @@ class TestMonteCarloControls:
             entry for entry in view.chart().series() if isinstance(entry, QLineSeries)
         ]
         assert [line.name() for line in lines] == [band.label for band in fan.bands]
+
+
+class TestOutlookCard:
+    """The retirement outlook card bindings (9.27)."""
+
+    def test_no_run_shows_the_empty_state_copy(self) -> None:
+        """Before any run the card carries the no-run message."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        assert pane.outlook_answer_label.isHidden()
+        assert pane.outlook_detail_label.isHidden()
+        assert pane.outlook_message_label.text() == NO_OUTLOOK_MESSAGE
+
+    def test_a_held_run_renders_the_headline_sentences(self) -> None:
+        """The answer and detail show; the no-run message hides."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(monte_carlo_view_model())
+        assert pane.outlook_answer_label.text().startswith("At age 60,")
+        assert not pane.outlook_answer_label.isHidden()
+        assert "middle half of paths" in pane.outlook_detail_label.text()
+        assert not pane.outlook_detail_label.isHidden()
+        assert pane.outlook_message_label.isHidden()
 
 
 class TestBacktestCard:

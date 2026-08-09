@@ -147,6 +147,13 @@ from glidepath.app.montecarlo import (
     run_mode_key,
     state_with_monte_carlo,
 )
+from glidepath.app.outlook import (
+    NO_OUTLOOK_MESSAGE,
+    OUTLOOK_HEADING,
+    OUTLOOK_NO_PLAN_MESSAGE,
+    OutlookPanelViewModel,
+    build_outlook_panel,
+)
 from glidepath.app.plan import (
     OVERRIDE_SOURCE,
     OverrideOutcome,
@@ -235,8 +242,11 @@ __all__ = [
     "NO_BACKTEST_MESSAGE",
     "NO_DRAWDOWN_MESSAGE",
     "NO_MONTE_CARLO_MESSAGE",
+    "NO_OUTLOOK_MESSAGE",
     "NO_PROJECTION_MESSAGE",
     "NO_RETIREMENT_MESSAGE",
+    "OUTLOOK_HEADING",
+    "OUTLOOK_NO_PLAN_MESSAGE",
     "OVERRIDE_SOURCE",
     "REPORT_EXPORT_FAILED_PREFIX",
     "REPORT_NOT_WRITTEN_MESSAGE",
@@ -284,6 +294,7 @@ __all__ = [
     "LoadOutcome",
     "MonteCarloMetric",
     "MonteCarloPanelViewModel",
+    "OutlookPanelViewModel",
     "OverrideOutcome",
     "OverrideRow",
     "PlanEntityIds",
@@ -310,6 +321,7 @@ __all__ = [
     "build_drawdown_panel",
     "build_facts_form_view_model",
     "build_inspector_view_model",
+    "build_outlook_panel",
     "build_plan_report",
     "build_retirement_panel",
     "build_scenarios_view_model",

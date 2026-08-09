@@ -2129,6 +2129,29 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   fill tooltip — so the table and the chart can never disagree, and
   the table follows the money-basis toggle like the chart it mirrors.
   The page choice survives a refresh alongside the selected sub-tab.*
+- [x] 9.27 Retirement outlook card (#163) — *a held Monte Carlo run
+  summarised as plain sentences on a read-only card above the solver
+  cards: the likely pot range at retirement in today's money (the
+  middle half of paths, 25th-75th percentiles) with the 1-in-20 tails
+  stated rather than hidden (5th/95th), the pension slice an annuity
+  could be bought with, that slice's yearly income at the shipped
+  level single-life rates (the engine's own 5.5 pricing: base rate ×
+  age multiplier, never extrapolated past the table), and the State
+  Pension forecast stacked on top from its own start age with the
+  combined total. Pots are read at the tax-year end immediately
+  before the retirement age is attained — the last close withdrawals
+  cannot have touched — from a new pension/household split each
+  `PathOutcome` retains (each wrapper result now carries the region's
+  pension marker), deflated by the base projection's own CPI path
+  (one inflation truth, §5.2). Purely a view over held results — no
+  run of its own, so it can never disagree with the fan chart — with
+  the fan's staleness rule: a run misaligned with the projection
+  reads as no run. Each sentence appears only when true: the pension
+  slice only beside other savings, the annuity only with pension
+  money and a covered purchase age, the State Pension only with an
+  official forecast; a target age already attained anchors at "the
+  end of this tax year". The basis sentence names the run's paths and
+  seed per §4.6.*
 
 ## 9. Open questions
 
