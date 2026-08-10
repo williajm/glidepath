@@ -346,7 +346,8 @@
               "platform": "0.0035"
             },
             "id": "wrapper-1",
-            "kind": "uk.sipp"
+            "kind": "uk.sipp",
+            "label": "Aviva SIPP"
           },
           {
             "allocation": null,
@@ -360,7 +361,8 @@
             "crystallised_balance": null,
             "fees": null,
             "id": "wrapper-2",
-            "kind": "uk.isa"
+            "kind": "uk.isa",
+            "label": null
           }
         ]
       },
@@ -533,5 +535,5 @@
       "overrides": []
     }
   ],
-  "schema_version": 4
+  "schema_version": 5
 }

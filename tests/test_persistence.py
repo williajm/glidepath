@@ -133,6 +133,7 @@ def full_wrapper(balance: str = "100000.00", fee: str = "0.0035") -> Wrapper:
         id=WRAPPER_ID,
         kind=PENSION_KIND,
         balance=money_fact(balance),
+        label="Aviva SIPP",
         crystallised_balance=money_fact("25000.50"),
         contributions=schedule,
         allocation=AssetAllocation(
@@ -707,6 +708,18 @@ class TestRoundTrip:
         spending = loaded.household.spending
         assert spending is not None
         assert spending.stage_multipliers == {LifeStage.DECUMULATION: Decimal("1.10")}
+
+    def test_v4_file_loads_with_unnamed_wrappers(self) -> None:
+        """The 9.28 migration adds the wrapper ``label`` key on load."""
+        payload = payload_of(kitchen_sink_document())
+        for person in payload["household"]["persons"]:
+            for wrapper in person["wrappers"]:
+                del wrapper["label"]
+        payload["schema_version"] = 4
+        loaded = loads_plan(json.dumps(payload))
+        wrappers = loaded.household.persons[0].wrappers
+        assert wrappers
+        assert all(wrapper.label is None for wrapper in wrappers)
 
     @given(
         balance=st.decimals(

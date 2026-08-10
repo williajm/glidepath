@@ -211,6 +211,7 @@ _FORECAST_REQUIRED = (
 _MULTIPLIERS_NEED_SPENDING = (
     "enter the annual spending need for the stage multipliers to scale"
 )
+_DUPLICATE_LABEL_MESSAGE = "another wrapper already carries this name"
 
 _AS_OF_HINT = "YYYY-MM-DD; blank means today"
 
@@ -547,6 +548,7 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
     cash account holds cash: its allocation is fixed at 100% cash
     rather than following the glide path (roadmap 9.2).
     """
+    label = reader.raw("label") or None
     kind = reader.choice("kind", _WRAPPER_KINDS)
     if kind is None:
         reader.error("kind", _REQUIRED_MESSAGE)
@@ -568,6 +570,7 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
             id=entity_id,
             kind=kind,
             balance=balance,
+            label=label,
             crystallised_balance=crystallised,
             contributions=contributions,
             allocation=allocation,
@@ -772,6 +775,29 @@ def _person_from(
         return None
 
 
+def _reject_duplicate_wrapper_labels(
+    context: _FormContext, rows: Sequence[Mapping[str, str]]
+) -> None:
+    """Refuse two wrappers sharing one name (roadmap 9.28).
+
+    A name exists to tell wrappers apart, so a repeat would defeat it —
+    and the display layers would have to number the copies right back.
+    Checked on the raw rows so the error lands even when another field
+    on the row failed to parse; each repeated row errors, first seen
+    keeps the name.
+    """
+    seen: set[str] = set()
+    for index, values in enumerate(rows):
+        label = values.get("label", "").strip()
+        if not label:
+            continue
+        if label in seen:
+            context.errors.append(
+                FormError("wrapper", index, "label", _DUPLICATE_LABEL_MESSAGE)
+            )
+        seen.add(label)
+
+
 def _row_entity_id(values: Mapping[str, str]) -> EntityId:
     """The row's carried entity id, or a fresh one when empty (§4.3).
 
@@ -821,6 +847,7 @@ def parse_facts_form(
     state_pension = _state_pension_from(
         _SectionReader(context, "state_pension", data.state_pension)
     )
+    _reject_duplicate_wrapper_labels(context, data.wrappers)
     wrappers = tuple(
         wrapper
         for index, values in enumerate(data.wrappers)
@@ -1016,6 +1043,7 @@ def _wrapper_values(wrapper: Wrapper) -> dict[str, str]:
     crystallised = wrapper.crystallised_balance
     values = {
         ENTITY_ID_KEY: str(wrapper.id),
+        "label": wrapper.label or "",
         "kind": str(wrapper.kind),
         "balance": str(wrapper.balance.value.amount),
         "crystallised_balance": (
@@ -1487,6 +1515,11 @@ def _wrapper_section() -> SectionSpec:
         add_label="Add wrapper",
         remove_label="Remove this wrapper",
         fields=(
+            FieldSpec(
+                key="label",
+                label="Name (your own label for this account)",
+                hint="e.g. Aviva SIPP; blank shows the kind",
+            ),
             FieldSpec(
                 key="kind",
                 label="Kind",

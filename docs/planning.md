@@ -570,6 +570,8 @@ TaxResidencyId = NewType("TaxResidencyId", str)  # same pattern
 class Wrapper:
     id: EntityId  # stable; override targets (4.3) need it
     kind: WrapperKindId
+    label: str | None  # the user's own name ("Aviva SIPP"); display copy
+    # only, preferred by every naming surface; None derives from kind (9.28)
     balance: Fact[Money]  # pension kinds: uncrystallised value
     crystallised_balance: Fact[Money] | None  # pension kinds: already in drawdown
     allocation: AssetAllocation | None  # None: the glide path supplies it
@@ -2159,6 +2161,23 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   official forecast; a target age already attained on the run date
   anchors at "the end of this tax year". The basis sentence names the
   run's paths and seed per §4.6.*
+- [x] 9.28 Wrapper naming — *each savings wrapper takes an optional
+  user label ("Aviva SIPP"): pure display copy on the core `Wrapper`
+  (keyword-only, so its arrival shifts no positional caller), entered
+  through a new first field on the facts form (blank means unnamed;
+  a name repeated across wrappers is rejected at entry) and preferred
+  by every naming surface — the inspector and scenario manager
+  (`entity_names`), the balances-chart legend, the allocation note,
+  and the cash-flow export's balance columns
+  (`wrapper_display_labels`). Unnamed wrappers keep deriving their
+  names from the kind. Final names are always unique: every surface
+  numbers repeats in first-seen order (`labels.numbered_unique`), so
+  one named and one unnamed ISA read "Aviva ISA" and "ISA", a
+  wrapper named "ISA" beside an unnamed ISA reads "ISA 1" and
+  "ISA 2", and duplicate names in a hand-edited plan file are
+  numbered apart rather than colliding in legends and CSV headings.
+  Persistence schema v5: every wrapper carries a `label` key, `null`
+  for unnamed; the v4→v5 migration adds it on load.*
 
 ## 9. Open questions
 

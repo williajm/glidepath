@@ -211,7 +211,7 @@ def cash_flow_csv(
         return None
     report = build_report(state.result, basis)
     names = entity_names(state.household)
-    wrappers = wrapper_display_labels(report.rows)
+    wrappers = wrapper_display_labels(report.rows, state.household)
     buffer = StringIO()
     writer = csv.writer(buffer)
     writer.writerow(("Plan", plan_name))

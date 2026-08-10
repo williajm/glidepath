@@ -11,6 +11,17 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Wrappers can carry your own name for the account ("Aviva SIPP",
+  roadmap 9.28): a new optional Name field on each savings wrapper,
+  shown everywhere the wrapper is named — the inspector, the scenario
+  manager, the balances chart legend and allocation note, and the
+  cash-flow export's column headings. Blank keeps the kind-derived
+  name; a name repeated across wrappers is rejected at entry, and
+  display names that still collide (say a wrapper named "ISA" beside
+  an unnamed ISA) are numbered apart. Plan files gain schema version
+  5 (every wrapper carries a `label` key); older files load unchanged
+  with unnamed wrappers.
+
 - Retirement outlook card on the charts screen (roadmap 9.27): a held
   Monte Carlo run summarised in plain sentences — the likely pot range
   at retirement in today's money with the 1-in-20 tails stated, the

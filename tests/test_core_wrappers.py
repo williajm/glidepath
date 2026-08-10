@@ -85,6 +85,28 @@ def test_wrapper_defaults_to_glide_path_and_fee_assumptions() -> None:
     assert wrapper.fees is None
 
 
+def test_wrapper_carries_the_users_name_for_the_account() -> None:
+    """The label is the user's own name for the account (roadmap 9.28)."""
+    wrapper = Wrapper(
+        id=new_entity_id(), kind=KIND, balance=money_fact("125000"), label="Aviva SIPP"
+    )
+    assert wrapper.label == "Aviva SIPP"
+
+
+def test_wrapper_defaults_to_no_name() -> None:
+    """None means the display layers derive a name from the kind."""
+    wrapper = Wrapper(id=new_entity_id(), kind=KIND, balance=money_fact("125000"))
+    assert wrapper.label is None
+
+
+def test_wrapper_rejects_a_blank_name() -> None:
+    """A whitespace-only name is a data-entry error; None means unnamed."""
+    wrapper_id = new_entity_id()
+    balance = money_fact("125000")
+    with pytest.raises(ValueError, match="label must not be blank"):
+        Wrapper(id=wrapper_id, kind=KIND, balance=balance, label="   ")
+
+
 def test_wrapper_rejects_negative_balance() -> None:
     """A negative balance is a data-entry error, not a plan."""
     wrapper_id = new_entity_id()

@@ -6,6 +6,7 @@ default-vs-overridden status, decisions in effect — and every default
 is overridable in place with source and date shown.
 """
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -149,6 +150,33 @@ class TestProjectedSession:
         assert dob.recorded == "2026-08-01"
         balance = by_label["Wrapper 1 (ISA) — balance"]
         assert balance.value == "£25,000.00"
+
+    def test_a_named_wrapper_labels_its_rows_with_the_users_name(self) -> None:
+        """The user's own account name replaces "Wrapper N (kind)" (9.28)."""
+        base = household()
+        person = base.persons[0]
+        named = replace(person.wrappers[0], label="Aviva ISA")
+        plan = replace(base, persons=(replace(person, wrappers=(named,)),))
+        state = state_with_household(initial_plan_state(), plan, today=TODAY)
+        view_model = build_inspector_view_model(state)
+        by_label = {row.label: row for row in view_model.facts}
+        assert "Aviva ISA — balance" in by_label
+        assert "Wrapper 1 (ISA) — balance" not in by_label
+
+    def test_two_wrappers_sharing_a_name_are_numbered_apart(self) -> None:
+        """Duplicate names (a hand-edited plan file) stay tellable apart."""
+        base = household()
+        person = base.persons[0]
+        first = replace(person.wrappers[0], label="My pot")
+        second = replace(
+            person.wrappers[0], id=EntityId("inspector-isa-2"), label="My pot"
+        )
+        plan = replace(base, persons=(replace(person, wrappers=(first, second)),))
+        state = state_with_household(initial_plan_state(), plan, today=TODAY)
+        view_model = build_inspector_view_model(state)
+        labels = {row.label for row in view_model.facts}
+        assert "My pot 1 — balance" in labels
+        assert "My pot 2 — balance" in labels
 
     def test_decisions_column_shows_choices_in_effect(
         self, view_model: InspectorViewModel
