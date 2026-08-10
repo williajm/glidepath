@@ -58,6 +58,7 @@ if TYPE_CHECKING:
         AssetAllocation,
         BacktestResult,
         EntityId,
+        Household,
         MonteCarloResult,
         Period,
         PeriodReportRow,
@@ -385,7 +386,7 @@ def build_charts_view_model(
     bands = _chart_bands(state, grouped, backtest_year)
     final_rows = next(reversed(grouped.values()))
     charts = [
-        _balances_chart(grouped, suffix, bands),
+        _balances_chart(grouped, suffix, bands, state.household),
         _income_chart(grouped, suffix),
         _tax_chart(grouped, suffix),
     ]
@@ -500,7 +501,9 @@ def _allocation_note(
     household = state.household
     if household is None:
         return ""
-    labels = wrapper_display_labels(row for rows in grouped.values() for row in rows)
+    labels = wrapper_display_labels(
+        (row for rows in grouped.values() for row in rows), household
+    )
     glide = _glide_note(state)
     parts = []
     for person in household.persons:
@@ -580,24 +583,40 @@ def _chart(
     )
 
 
-def wrapper_display_labels(rows: Iterable[PeriodReportRow]) -> dict[EntityId, str]:
+def wrapper_display_labels(
+    rows: Iterable[PeriodReportRow], household: Household | None = None
+) -> dict[EntityId, str]:
     """A display label per wrapper, in first-seen order.
 
-    The wrapper's kind name alone when unique; numbered in first-seen
-    order when the household holds several of one kind (entity ids are
-    generated UUIDs, so they are never shown as copy). Shared with the
-    cash-flow export (9.19), which columns its balances the same way
-    the balances chart stacks them.
+    A wrapper the user named shows its own label; the rest read their
+    kind name alone when unique among the unnamed, numbered in
+    first-seen order when the household holds several unnamed of one
+    kind (entity ids are generated UUIDs, so they are never shown as
+    copy). Shared with the cash-flow export (9.19), which columns its
+    balances the same way the balances chart stacks them.
     """
+    named: dict[EntityId, str] = {}
+    if household is not None:
+        named = {
+            wrapper.id: wrapper.label
+            for person in household.persons
+            for wrapper in person.wrappers
+            if wrapper.label is not None
+        }
     kinds: dict[EntityId, str] = {}
     for row in rows:
         for entry in row.wrapper_balances:
             kinds.setdefault(entry.wrapper_id, format_wrapper_kind(entry.kind))
-    counts = Counter(kinds.values())
+    counts = Counter(
+        kind for wrapper_id, kind in kinds.items() if wrapper_id not in named
+    )
     numbered: Counter[str] = Counter()
     labels: dict[EntityId, str] = {}
     for wrapper_id, kind in kinds.items():
-        if counts[kind] == 1:
+        name = named.get(wrapper_id)
+        if name is not None:
+            labels[wrapper_id] = name
+        elif counts[kind] == 1:
             labels[wrapper_id] = kind
         else:
             numbered[kind] += 1
@@ -723,10 +742,13 @@ def _balances_chart(
     grouped: dict[Period, list[PeriodReportRow]],
     suffix: str,
     bands: tuple[ChartBand, ...],
+    household: Household | None,
 ) -> ChartSpec:
     """Closing balance per wrapper per period, stacked to the total."""
     series = []
-    labels = wrapper_display_labels(row for rows in grouped.values() for row in rows)
+    labels = wrapper_display_labels(
+        (row for rows in grouped.values() for row in rows), household
+    )
     for wrapper_id, label in labels.items():
         values = []
         for rows in grouped.values():

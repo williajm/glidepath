@@ -87,8 +87,31 @@ def _upgrade_v3_to_v4(raw: RawDocument) -> RawDocument:
     return raw
 
 
+def _upgrade_v4_to_v5(raw: RawDocument) -> RawDocument:
+    """v5 adds ``label`` to every wrapper (roadmap 9.28).
+
+    A v4 file predates wrapper naming, so every wrapper it holds is
+    unnamed — the new key decodes as ``null`` and the display layers
+    keep deriving names from the kind.
+    """
+    household = raw.get("household")
+    persons = household.get("persons") if isinstance(household, dict) else []
+    for person in persons if isinstance(persons, list) else []:
+        wrappers = person.get("wrappers") if isinstance(person, dict) else []
+        for wrapper in wrappers if isinstance(wrappers, list) else []:
+            if isinstance(wrapper, dict):
+                wrapper["label"] = None
+    raw[_VERSION_KEY] = 5
+    return raw
+
+
 UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
-    {1: _upgrade_v1_to_v2, 2: _upgrade_v2_to_v3, 3: _upgrade_v3_to_v4}
+    {
+        1: _upgrade_v1_to_v2,
+        2: _upgrade_v2_to_v3,
+        3: _upgrade_v3_to_v4,
+        4: _upgrade_v4_to_v5,
+    }
 )
 """The registered upgraders, keyed by the version each reads."""
 

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from glidepath.core import AssumptionKey, Household, Scenario
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 """The schema version this build reads and writes (planning §4.5).
 
 v2 (roadmap 9.6): every DB pension carries an ``active_membership``
@@ -32,6 +32,9 @@ v4 (#129): the spending plan loses the accumulation-stage multiplier
 keys (``early_accumulation``, ``mid_accumulation``,
 ``pre_retirement``) — spending is modelled only in retirement, so
 they never bound (#114 retired the tokens without a migration).
+
+v5 (roadmap 9.28): every wrapper carries a ``label`` key — the user's
+own name for the account, ``null`` for an unnamed one.
 """
 
 

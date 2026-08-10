@@ -39,7 +39,7 @@ def entity_names(household: Household | None) -> dict[str, str]:
         names[str(person.id)] = "You"
         for number, wrapper in enumerate(person.wrappers, start=1):
             kind = format_wrapper_kind(wrapper.kind)
-            names[str(wrapper.id)] = f"Wrapper {number} ({kind})"
+            names[str(wrapper.id)] = wrapper.label or f"Wrapper {number} ({kind})"
         for number, pension in enumerate(person.db_pensions, start=1):
             names[str(pension.id)] = f"DB pension {number}"
         for number, purchase in enumerate(person.annuity_purchases, start=1):

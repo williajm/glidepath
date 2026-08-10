@@ -168,7 +168,11 @@ class ContributionTerms:
 class Wrapper:
     """One account a person holds, of an opaque region-defined kind.
 
-    Balances are user-stated facts (planning §5.1). For pension kinds,
+    ``label`` is the user's own name for the account ("Aviva SIPP") —
+    pure display copy, like a planned outflow's label: every screen
+    naming the wrapper prefers it, and ``None`` falls back to the
+    kind-derived name. Balances are user-stated facts (planning §5.1).
+    For pension kinds,
     ``balance`` is the *uncrystallised* value and ``crystallised_balance``
     holds funds already designated to drawdown — making an
     already-in-drawdown user modellable (no fresh tax-free cash on
@@ -184,13 +188,17 @@ class Wrapper:
     id: EntityId
     kind: WrapperKindId
     balance: Fact[Money]
+    label: str | None = None
     crystallised_balance: Fact[Money] | None = None
     contributions: ContributionSchedule | None = None
     allocation: AssetAllocation | None = None
     fees: FeeSchedule | None = None
 
     def __post_init__(self) -> None:
-        """Reject negative balances."""
+        """Reject negative balances and a blank label."""
+        if self.label is not None and not self.label.strip():
+            msg = "Wrapper.label must not be blank; use None for no name"
+            raise ValueError(msg)
         if self.balance.value < _ZERO:
             msg = "Wrapper.balance must be non-negative"
             raise ValueError(msg)

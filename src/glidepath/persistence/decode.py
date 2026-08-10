@@ -431,6 +431,7 @@ def _wrapper(raw: object, path: str) -> Wrapper:
     reader = _Reader(raw, path)
     wrapper_id = _entity_id(reader.take("id"), reader.at("id"))
     kind = WrapperKindId(parse_str(reader.take("kind"), reader.at("kind")))
+    label = _optional_str(reader.take("label"), reader.at("label"))
     balance = _fact(reader.take("balance"), reader.at("balance"), parse_money)
     crystallised = _optional_fact(reader, "crystallised_balance", parse_money)
     contributions = _optional(
@@ -448,6 +449,7 @@ def _wrapper(raw: object, path: str) -> Wrapper:
             id=wrapper_id,
             kind=kind,
             balance=balance,
+            label=label,
             crystallised_balance=crystallised,
             contributions=contributions,
             allocation=allocation,

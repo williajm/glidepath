@@ -100,6 +100,7 @@ class TestFormSpec:
         """Balances (with as_of) and the contribution terms are present."""
         keys = {spec.key for spec in build_facts_form_view_model().wrapper.fields}
         assert keys == {
+            "label",
             "kind",
             "balance",
             "crystallised_balance",
@@ -268,6 +269,38 @@ class TestWrapperParsing:
         assert wrapper.contributions.employer_amount.value == Money(Decimal(2500))
         assert wrapper.contributions.relief_mechanic is ReliefMechanic.RELIEF_AT_SOURCE
         assert wrapper.contributions.escalation is AssumptionKey.EARNINGS_GROWTH_REAL
+
+    def test_a_named_wrapper_round_trips_its_label(self) -> None:
+        """The user's own name for the account survives parse and echo."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {
+                        "label": "  Aviva SIPP  ",
+                        "kind": str(WORKPLACE_DC_KIND),
+                        "balance": "45000",
+                    },
+                ),
+            )
+        )
+        [wrapper] = household.persons[0].wrappers
+        assert wrapper.label == "Aviva SIPP"
+        values = facts_form_data_from_household(household)
+        assert values.wrappers[0]["label"] == "Aviva SIPP"
+
+    def test_a_blank_name_means_an_unnamed_wrapper(self) -> None:
+        """Blank is not a name: the wrapper echoes an empty label field."""
+        household = parse(
+            FactsFormData(
+                person=person_values(),
+                wrappers=({"kind": str(ISA_KIND), "balance": "45000", "label": " "},),
+            )
+        )
+        [wrapper] = household.persons[0].wrappers
+        assert wrapper.label is None
+        values = facts_form_data_from_household(household)
+        assert values.wrappers[0]["label"] == ""
 
     def test_a_stated_equity_percent_becomes_the_allocation(self) -> None:
         """Entering 100 states full equity; the remainder convention gives 0 bonds."""

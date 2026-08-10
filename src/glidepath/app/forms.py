@@ -547,6 +547,7 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
     cash account holds cash: its allocation is fixed at 100% cash
     rather than following the glide path (roadmap 9.2).
     """
+    label = reader.raw("label") or None
     kind = reader.choice("kind", _WRAPPER_KINDS)
     if kind is None:
         reader.error("kind", _REQUIRED_MESSAGE)
@@ -568,6 +569,7 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
             id=entity_id,
             kind=kind,
             balance=balance,
+            label=label,
             crystallised_balance=crystallised,
             contributions=contributions,
             allocation=allocation,
@@ -1016,6 +1018,7 @@ def _wrapper_values(wrapper: Wrapper) -> dict[str, str]:
     crystallised = wrapper.crystallised_balance
     values = {
         ENTITY_ID_KEY: str(wrapper.id),
+        "label": wrapper.label or "",
         "kind": str(wrapper.kind),
         "balance": str(wrapper.balance.value.amount),
         "crystallised_balance": (
@@ -1487,6 +1490,11 @@ def _wrapper_section() -> SectionSpec:
         add_label="Add wrapper",
         remove_label="Remove this wrapper",
         fields=(
+            FieldSpec(
+                key="label",
+                label="Name (your own label for this account)",
+                hint="e.g. Aviva SIPP; blank shows the kind",
+            ),
             FieldSpec(
                 key="kind",
                 label="Kind",

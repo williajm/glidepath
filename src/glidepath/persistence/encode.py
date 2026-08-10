@@ -222,6 +222,7 @@ def _wrapper(wrapper: Wrapper) -> dict[str, object]:
     return {
         "id": _entity_id(wrapper.id),
         "kind": str(wrapper.kind),
+        "label": wrapper.label,
         "balance": _fact(wrapper.balance, _money_value),
         "crystallised_balance": _optional_fact(
             wrapper.crystallised_balance, _money_value
