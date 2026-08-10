@@ -163,6 +163,21 @@ class TestProjectedSession:
         assert "Aviva ISA — balance" in by_label
         assert "Wrapper 1 (ISA) — balance" not in by_label
 
+    def test_two_wrappers_sharing_a_name_are_numbered_apart(self) -> None:
+        """Duplicate names (a hand-edited plan file) stay tellable apart."""
+        base = household()
+        person = base.persons[0]
+        first = replace(person.wrappers[0], label="My pot")
+        second = replace(
+            person.wrappers[0], id=EntityId("inspector-isa-2"), label="My pot"
+        )
+        plan = replace(base, persons=(replace(person, wrappers=(first, second)),))
+        state = state_with_household(initial_plan_state(), plan, today=TODAY)
+        view_model = build_inspector_view_model(state)
+        labels = {row.label for row in view_model.facts}
+        assert "My pot 1 — balance" in labels
+        assert "My pot 2 — balance" in labels
+
     def test_decisions_column_shows_choices_in_effect(
         self, view_model: InspectorViewModel
     ) -> None:

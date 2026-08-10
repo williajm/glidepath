@@ -413,6 +413,25 @@ class TestWrapperLabelDisambiguation:
         assert labels == ["Aviva ISA", "ISA"]
         assert "Aviva ISA:" in view_model.allocation_note
 
+    def test_a_name_colliding_with_a_kind_name_is_numbered(self) -> None:
+        """Final names stay unique even when a label collides.
+
+        A wrapper named "ISA" beside an unnamed ISA would read as two
+        identical series (and two identical CSV columns) — the repeat
+        is numbered in first-seen order like unnamed duplicates.
+        """
+        named = Wrapper(
+            id=EntityId("isa-named-isa"),
+            kind=ISA_KIND,
+            balance=money_fact("150000"),
+            label="ISA",
+        )
+        plan = household((named, wrapper("isa-plain", ISA_KIND, "150000")), None)
+        state = state_with_household(initial_plan_state(), plan, today=TODAY)
+        view_model = build_charts_view_model(state)
+        labels = [series.label for series in view_model.charts[0].series]
+        assert labels == ["ISA 1", "ISA 2"]
+
     def test_all_zero_tax_still_renders_an_axis(
         self, two_isas: ChartsViewModel
     ) -> None:

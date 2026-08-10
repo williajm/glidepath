@@ -10,7 +10,6 @@ inflation source (planning §5.2). Amounts stay ``Decimal`` here:
 converting them to plot coordinates is shell mechanics (§4.7).
 """
 
-from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
@@ -25,6 +24,7 @@ from glidepath.app.drawdown import (
     DrawdownPanelViewModel,
     build_drawdown_panel,
 )
+from glidepath.app.labels import numbered_unique
 from glidepath.app.montecarlo import (
     DEFAULT_RUN_MODE,
     FAN_MEDIAN_LABEL,
@@ -589,10 +589,12 @@ def wrapper_display_labels(
     """A display label per wrapper, in first-seen order.
 
     A wrapper the user named shows its own label; the rest read their
-    kind name alone when unique among the unnamed, numbered in
-    first-seen order when the household holds several unnamed of one
-    kind (entity ids are generated UUIDs, so they are never shown as
-    copy). Shared with the cash-flow export (9.19), which columns its
+    kind name (entity ids are generated UUIDs, so they are never shown
+    as copy). Any name repeated across the final set — several unnamed
+    wrappers of one kind, a label colliding with a kind name, or one
+    label given twice in a hand-edited plan file — is numbered in
+    first-seen order (:func:`~glidepath.app.labels.numbered_unique`).
+    Shared with the cash-flow export (9.19), which columns its
     balances the same way the balances chart stacks them.
     """
     named: dict[EntityId, str] = {}
@@ -603,25 +605,12 @@ def wrapper_display_labels(
             for wrapper in person.wrappers
             if wrapper.label is not None
         }
-    kinds: dict[EntityId, str] = {}
+    bases: dict[EntityId, str] = {}
     for row in rows:
         for entry in row.wrapper_balances:
-            kinds.setdefault(entry.wrapper_id, format_wrapper_kind(entry.kind))
-    counts = Counter(
-        kind for wrapper_id, kind in kinds.items() if wrapper_id not in named
-    )
-    numbered: Counter[str] = Counter()
-    labels: dict[EntityId, str] = {}
-    for wrapper_id, kind in kinds.items():
-        name = named.get(wrapper_id)
-        if name is not None:
-            labels[wrapper_id] = name
-        elif counts[kind] == 1:
-            labels[wrapper_id] = kind
-        else:
-            numbered[kind] += 1
-            labels[wrapper_id] = f"{kind} {numbered[kind]}"
-    return labels
+            base = named.get(entry.wrapper_id) or format_wrapper_kind(entry.kind)
+            bases.setdefault(entry.wrapper_id, base)
+    return numbered_unique(bases)
 
 
 def _deflated(

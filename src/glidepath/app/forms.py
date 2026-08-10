@@ -211,6 +211,7 @@ _FORECAST_REQUIRED = (
 _MULTIPLIERS_NEED_SPENDING = (
     "enter the annual spending need for the stage multipliers to scale"
 )
+_DUPLICATE_LABEL_MESSAGE = "another wrapper already carries this name"
 
 _AS_OF_HINT = "YYYY-MM-DD; blank means today"
 
@@ -774,6 +775,29 @@ def _person_from(
         return None
 
 
+def _reject_duplicate_wrapper_labels(
+    context: _FormContext, rows: Sequence[Mapping[str, str]]
+) -> None:
+    """Refuse two wrappers sharing one name (roadmap 9.28).
+
+    A name exists to tell wrappers apart, so a repeat would defeat it —
+    and the display layers would have to number the copies right back.
+    Checked on the raw rows so the error lands even when another field
+    on the row failed to parse; each repeated row errors, first seen
+    keeps the name.
+    """
+    seen: set[str] = set()
+    for index, values in enumerate(rows):
+        label = values.get("label", "").strip()
+        if not label:
+            continue
+        if label in seen:
+            context.errors.append(
+                FormError("wrapper", index, "label", _DUPLICATE_LABEL_MESSAGE)
+            )
+        seen.add(label)
+
+
 def _row_entity_id(values: Mapping[str, str]) -> EntityId:
     """The row's carried entity id, or a fresh one when empty (§4.3).
 
@@ -823,6 +847,7 @@ def parse_facts_form(
     state_pension = _state_pension_from(
         _SectionReader(context, "state_pension", data.state_pension)
     )
+    _reject_duplicate_wrapper_labels(context, data.wrappers)
     wrappers = tuple(
         wrapper
         for index, values in enumerate(data.wrappers)

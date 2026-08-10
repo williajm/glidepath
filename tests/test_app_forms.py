@@ -302,6 +302,26 @@ class TestWrapperParsing:
         values = facts_form_data_from_household(household)
         assert values.wrappers[0]["label"] == ""
 
+    def test_two_wrappers_sharing_a_name_are_rejected(self) -> None:
+        """A repeated name defeats naming; the repeat rows error (9.28)."""
+        result = parse_facts_form(
+            FactsFormData(
+                person=person_values(),
+                wrappers=(
+                    {"label": "My pot", "kind": str(ISA_KIND), "balance": "45000"},
+                    {"label": "My pot", "kind": str(CASH_KIND), "balance": "5000"},
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "wrapper"
+        assert error.index == 1
+        assert error.field_key == "label"
+        assert error.message == "another wrapper already carries this name"
+
     def test_a_stated_equity_percent_becomes_the_allocation(self) -> None:
         """Entering 100 states full equity; the remainder convention gives 0 bonds."""
         household = parse(
