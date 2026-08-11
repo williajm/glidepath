@@ -3264,7 +3264,7 @@ def _plan_segments(
     for source_id in order:
         source = _plan_source(sources, source_id)
         source_bucket = _source_bucket(source)
-        if bucket is not None and source_bucket != bucket and segment:
+        if bucket is not None and source_bucket != bucket:
             yield segment
             segment = []
         bucket = source_bucket
