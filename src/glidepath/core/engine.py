@@ -622,7 +622,6 @@ def run(
     tracked = TrackedAssumptions(assumptions=assumptions, recorder=recorder)
     projection = _Projection(
         plan=plan,
-        person=plan.persons[0],
         region=region,
         tracked=tracked,
         config=config,
@@ -670,50 +669,56 @@ def _return_model(
 
 @dataclass(slots=True)
 class _Projection:
-    """One run's working state: the loop of planning §5.2 over the horizon."""
+    """One run's shared state: the household loop of planning §5.2.
+
+    The engine's per-person split (planning §4.11, roadmap 9.29):
+    everything person-independent — the plan, region, config, return
+    model, the period loop with its shared CPI/nominal factors, and
+    the run-level assumption caches — lives here, while each person's
+    mutable run state lives in a :class:`_PersonProjection`. ``run()``
+    still validates a one-person household, so the person list holds
+    exactly one entry until the 9.30 activation.
+    """
 
     plan: Household
-    person: Person
     region: Region
     tracked: TrackedAssumptions
     config: RunConfig
     model: ReturnModel
-    _balances: dict[str, tuple[Money, Money]] = field(default_factory=dict)
-    _taxable_income: Money = _ZERO
-    _savings_income: Money = _ZERO
-    _dividend_income: Money = _ZERO
-    _relief_at_source: Money = _ZERO
-    _net_pay_deductions: Money = _ZERO
-    _aa_carry_forward: tuple[Money, ...] = ()
-    _aa_charge_unallocated: Money = _ZERO
-    _db_openings: tuple[Money, ...] = ()
-    _mpaa_at_contributions: date | None = None
+    _persons: list[_PersonProjection] = field(init=False)
     _expected_returns: AssetReturns | None = None
-    _db_streams: list[_DbStream] = field(default_factory=list)
-    _sp_stream: _StatePensionStream | None = None
-    _annuity_streams: list[_AnnuityStream] = field(default_factory=list)
     _annuity_table: AnnuityRateTable | None = None
-    _lsa_used: Money = _ZERO
-    _mpaa_triggered_on: date | None = None
-    _roll_forwards: list[BalanceRollForward] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Wrap each of the plan's persons in its per-person run state."""
+        self._persons = [
+            _PersonProjection(run=self, person=person) for person in self.plan.persons
+        ]
 
     @property
     def roll_forwards(self) -> tuple[BalanceRollForward, ...]:
-        """The §4.8 balance adjustments recorded while seeding the ledger."""
-        return tuple(self._roll_forwards)
+        """The §4.8 balance adjustments recorded while seeding the ledgers.
+
+        Person order, each person's records in recording order — for
+        the v1 single person, exactly the order always reported.
+        """
+        return tuple(
+            record for person in self._persons for record in person.roll_forwards
+        )
 
     def execute(self) -> tuple[PeriodSnapshot, ...]:
         """Run the period loop and return the snapshots in order."""
-        if self.person.lsa_used is not None:
-            self._lsa_used = self.person.lsa_used.value
-        if self.person.mpaa_triggered_on is not None:
-            self._mpaa_triggered_on = self.person.mpaa_triggered_on.value
-        self._balances = self._opening_balances()
-        factors = _NominalFactors(self.tracked, self._escalation_keys())
-        self._build_income_streams()
+        for person in self._persons:
+            person.seed()
+        keys: set[AssumptionKey] = set()
+        for person in self._persons:
+            keys |= person.escalation_keys()
+        factors = _NominalFactors(self.tracked, keys)
+        for person in self._persons:
+            person.build_income_streams()
         inflation = _ONE
         snapshots: list[PeriodSnapshot] = []
-        horizon_end = self._horizon_end()
+        horizon_end = self.horizon_end()
         previous_cpi: Decimal | None = None
         previous_fraction = _ONE
         for period in self.region.calendar.periods(self.config.today, horizon_end):
@@ -726,18 +731,269 @@ class _Projection:
                 # fast-forward a whole year of escalation.
                 inflation *= _ONE + previous_cpi * previous_fraction
                 factors.advance(previous_cpi, previous_fraction)
-                for stream in self._db_streams:
-                    stream.advance(previous_cpi, previous_fraction)
-                for annuity in self._annuity_streams:
-                    annuity.advance(previous_cpi, previous_fraction)
-                if self._sp_stream is not None:
-                    self._sp_stream.advance(previous_cpi)
+                for person in self._persons:
+                    person.advance_streams(previous_cpi, previous_fraction)
             snapshots.append(
                 self._project_period(period, returns, inflation, factors, fraction)
             )
             previous_cpi = returns.cpi.value
             previous_fraction = fraction
         return tuple(snapshots)
+
+    def _project_period(
+        self,
+        period: Period,
+        returns: PeriodReturns,
+        inflation: Decimal,
+        factors: _NominalFactors,
+        fraction: Decimal,
+    ) -> PeriodSnapshot:
+        """Assemble one period's snapshot from each person's eight steps."""
+        persons = tuple(
+            person.project_period(period, returns, inflation, factors, fraction)
+            for person in self._persons
+        )
+        return PeriodSnapshot(
+            period=period,
+            returns=returns,
+            inflation_factor=inflation,
+            persons=persons,
+            year_fraction=fraction,
+        )
+
+    def horizon_end(self) -> date:
+        """The configured horizon end, or the planning-age default (§5.2).
+
+        With no configured end the run ends at the latest of the
+        persons' planning-age dates (planning §4.11) — one household
+        end, which for the v1 single person is that person's date.
+        """
+        if self.config.horizon_end is not None:
+            return self.config.horizon_end
+        planning_age = int_assumption_value(
+            self.tracked.get(AssumptionKey.HORIZON_PLANNING_AGE)
+        )
+        horizon_end = max(
+            date_age_attained(person.person.date_of_birth.value, planning_age)
+            for person in self._persons
+        )
+        if horizon_end < self.config.today:
+            msg = (
+                f"planning age {planning_age} was attained before today"
+                f" {self.config.today}; set RunConfig.horizon_end explicitly"
+            )
+            raise EngineError(msg)
+        return horizon_end
+
+    def outflows_due(self, period: Period, inflation: Decimal) -> Money:
+        """The planned outflows landing in ``period``, in nominal money.
+
+        A planned outflow is a dated one-off (roadmap 5.4): it hits the
+        period containing the date its person attains the stated age —
+        whole, never pro-rated, the DB lump-sum convention — and only
+        when that date lies inside the run window; an outflow already
+        past lives in the stated balances, not the model. The real
+        amount is inflated by the period-start price level, the same
+        single inflation truth the spending need uses (§5.2).
+        """
+        total = _ZERO
+        if not self.plan.planned_outflows:
+            return total
+        horizon_end = self.horizon_end()
+        births = {person.id: person.date_of_birth.value for person in self.plan.persons}
+        for outflow in self.plan.planned_outflows:
+            person_id, age = outflow.at_age_of
+            due = date_age_attained(births[person_id], age)
+            if period.contains(due) and self.config.today <= due <= horizon_end:
+                total = total + outflow.amount_real.value * inflation
+        return total
+
+    def fees_for(self, wrapper: Wrapper) -> FeeSchedule:
+        """The wrapper's fee schedule, or the shipped fee assumptions.
+
+        A kind the region exempts from the default fees — a bare cash
+        savings account, whose rate already is the whole deal — pays
+        nothing unless the wrapper states its own schedule; the fee
+        assumption keys are then never read, so they stay out of the
+        run's provenance (issue #118).
+        """
+        if wrapper.fees is not None:
+            return wrapper.fees
+        if not self.region.wrappers.bears_default_fees(wrapper.kind):
+            return _NO_FEES
+        return FeeSchedule(
+            platform=Rate(
+                decimal_assumption_value(self.tracked.get(AssumptionKey.FEES_PLATFORM))
+            ),
+            fund=Rate(
+                decimal_assumption_value(self.tracked.get(AssumptionKey.FEES_FUND))
+            ),
+        )
+
+    def expected_nominal_rate(self, allocation: AssetAllocation) -> Decimal:
+        """The allocation-weighted expected nominal annual return (§4.8).
+
+        The deterministic composition of each class's real-return
+        assumption with CPI — the expectation both return models are
+        built from — whatever the run mode: the pre-``today`` span is
+        never path-modelled, exactly as CPI stays deterministic across
+        Monte Carlo paths (planning §4.8).
+        """
+        cpi = decimal_assumption_value(self.tracked.get(AssumptionKey.INFLATION_CPI))
+        weighted = Decimal(0)
+        for weight, key in (
+            (allocation.equity, AssumptionKey.RETURNS_EQUITY_REAL),
+            (allocation.bonds, AssumptionKey.RETURNS_BONDS_REAL),
+            (allocation.cash, AssumptionKey.RETURNS_CASH_REAL),
+        ):
+            real = decimal_assumption_value(self.tracked.get(key))
+            weighted += weight * nominal_rate(real, cpi).value
+        return weighted
+
+    def expected_asset_returns(self) -> AssetReturns:
+        """The return model's per-class expectation, read once on first use.
+
+        The Fisher composition of each class's real-return assumption
+        with CPI — exactly the rates ``DeterministicReturnModel``
+        returns and the mean the stochastic model's lognormal draws
+        are matched to — so a period return's deviation from these is
+        the pure stochastic shock (issue #115), identically zero in a
+        deterministic run. Both models read the same keys, so no new
+        assumption enters the run's provenance here.
+        """
+        if self._expected_returns is None:
+            cpi = decimal_assumption_value(
+                self.tracked.get(AssumptionKey.INFLATION_CPI)
+            )
+            equity, bonds, cash = (
+                nominal_rate(decimal_assumption_value(self.tracked.get(key)), cpi)
+                for key in (
+                    AssumptionKey.RETURNS_EQUITY_REAL,
+                    AssumptionKey.RETURNS_BONDS_REAL,
+                    AssumptionKey.RETURNS_CASH_REAL,
+                )
+            )
+            self._expected_returns = AssetReturns(equity=equity, bonds=bonds, cash=cash)
+        return self._expected_returns
+
+    def portfolio_yield(self, allocation: AssetAllocation) -> Decimal:
+        """The allocation-weighted annual natural yield (roadmap 5.3).
+
+        The income an invested balance throws off per year — dividends,
+        coupons, interest — priced from the per-asset ``yield.*``
+        assumptions (planning §7); nominal, like the balances it
+        applies to.
+        """
+        return (
+            allocation.equity
+            * decimal_assumption_value(self.tracked.get(AssumptionKey.YIELD_EQUITY))
+            + allocation.bonds
+            * decimal_assumption_value(self.tracked.get(AssumptionKey.YIELD_BONDS))
+            + allocation.cash
+            * decimal_assumption_value(self.tracked.get(AssumptionKey.YIELD_CASH))
+        )
+
+    def annuity_rate_for(
+        self, annuity_type: AnnuityType, purchase: AnnuityPurchase
+    ) -> Decimal:
+        """The annual income per pound of purchase capital (planning §7).
+
+        The single-life-at-65 base rate for the type, shaped by the
+        ``annuity.age_adjustment`` table's per-age multiplier and — on
+        a joint basis — its joint-life factor. Read through the
+        tracked view only when a purchase actually fires, so the rate
+        assumptions enter provenance exactly when they enter the
+        result.
+        """
+        table = self.annuity_pricing_table()
+        base = decimal_assumption_value(
+            self.tracked.get(annuity_base_rate_key(annuity_type))
+        )
+        multiplier = table.age_multiplier(annuity_type, purchase.at_age.value)
+        return base * multiplier * table.basis_factor(purchase.basis)
+
+    def annuity_pricing_table(self) -> AnnuityRateTable:
+        """The parsed age-adjustment table, read once per run on first use."""
+        if self._annuity_table is None:
+            self._annuity_table = AnnuityRateTable.from_assumption_value(
+                mapping_assumption_value(
+                    self.tracked.get(AssumptionKey.ANNUITY_AGE_ADJUSTMENT)
+                )
+            )
+        return self._annuity_table
+
+
+@dataclass(slots=True)
+class _PersonProjection:
+    """One person's mutable state through the run (planning §4.11).
+
+    The per-person half of the 9.29 engine split: wrapper balances,
+    the period's categorised income and relief, the annual-allowance
+    carry-forward and charge routing, the LSA/MPAA ledgers, and the
+    DB/state-pension/annuity income streams. Shared, person-independent
+    state stays on :class:`_Projection`, reached through ``run``.
+    """
+
+    run: _Projection
+    person: Person
+    _balances: dict[str, tuple[Money, Money]] = field(default_factory=dict)
+    _taxable_income: Money = _ZERO
+    _savings_income: Money = _ZERO
+    _dividend_income: Money = _ZERO
+    _relief_at_source: Money = _ZERO
+    _net_pay_deductions: Money = _ZERO
+    _aa_carry_forward: tuple[Money, ...] = ()
+    _aa_charge_unallocated: Money = _ZERO
+    _db_openings: tuple[Money, ...] = ()
+    _mpaa_at_contributions: date | None = None
+    _db_streams: list[_DbStream] = field(default_factory=list)
+    _sp_stream: _StatePensionStream | None = None
+    _annuity_streams: list[_AnnuityStream] = field(default_factory=list)
+    _lsa_used: Money = _ZERO
+    _mpaa_triggered_on: date | None = None
+    _roll_forwards: list[BalanceRollForward] = field(default_factory=list)
+
+    @property
+    def region(self) -> Region:
+        """The run's region (shared state, :class:`_Projection`)."""
+        return self.run.region
+
+    @property
+    def config(self) -> RunConfig:
+        """The run's config (shared state, :class:`_Projection`)."""
+        return self.run.config
+
+    @property
+    def tracked(self) -> TrackedAssumptions:
+        """The run's tracked assumption view (:class:`_Projection`)."""
+        return self.run.tracked
+
+    @property
+    def plan(self) -> Household:
+        """The household plan (shared state, :class:`_Projection`)."""
+        return self.run.plan
+
+    @property
+    def roll_forwards(self) -> tuple[BalanceRollForward, ...]:
+        """The §4.8 adjustments recorded seeding this person's ledger."""
+        return tuple(self._roll_forwards)
+
+    def seed(self) -> None:
+        """Seed the LSA/MPAA ledgers and opening balances from facts."""
+        if self.person.lsa_used is not None:
+            self._lsa_used = self.person.lsa_used.value
+        if self.person.mpaa_triggered_on is not None:
+            self._mpaa_triggered_on = self.person.mpaa_triggered_on.value
+        self._balances = self._opening_balances()
+
+    def advance_streams(self, cpi: Decimal, fraction: Decimal) -> None:
+        """Compound one completed period's growth into each stream (§5.2)."""
+        for stream in self._db_streams:
+            stream.advance(cpi, fraction)
+        for annuity in self._annuity_streams:
+            annuity.advance(cpi, fraction)
+        if self._sp_stream is not None:
+            self._sp_stream.advance(cpi)
 
     def _opening_balances(self) -> dict[str, tuple[Money, Money]]:
         """Seed each wrapper's opening sub-balances at ``today`` (§4.8).
@@ -795,8 +1051,8 @@ class _Projection:
         months = whole_months_between(fact.as_of, today)
         if months == 0:
             return fact.value
-        nominal = self._expected_nominal_rate(self._opening_allocation(wrapper))
-        kept_after_fees = _ONE - self._fees_for(wrapper).total_rate.value
+        nominal = self.run.expected_nominal_rate(self._opening_allocation(wrapper))
+        kept_after_fees = _ONE - self.run.fees_for(wrapper).total_rate.value
         rate = (_ONE + nominal) * kept_after_fees - _ONE
         if rate <= _MINUS_ONE:
             msg = (
@@ -819,53 +1075,6 @@ class _Projection:
         )
         return opening
 
-    def _expected_nominal_rate(self, allocation: AssetAllocation) -> Decimal:
-        """The allocation-weighted expected nominal annual return (§4.8).
-
-        The deterministic composition of each class's real-return
-        assumption with CPI — the expectation both return models are
-        built from — whatever the run mode: the pre-``today`` span is
-        never path-modelled, exactly as CPI stays deterministic across
-        Monte Carlo paths (planning §4.8).
-        """
-        cpi = decimal_assumption_value(self.tracked.get(AssumptionKey.INFLATION_CPI))
-        weighted = Decimal(0)
-        for weight, key in (
-            (allocation.equity, AssumptionKey.RETURNS_EQUITY_REAL),
-            (allocation.bonds, AssumptionKey.RETURNS_BONDS_REAL),
-            (allocation.cash, AssumptionKey.RETURNS_CASH_REAL),
-        ):
-            real = decimal_assumption_value(self.tracked.get(key))
-            weighted += weight * nominal_rate(real, cpi).value
-        return weighted
-
-    def _expected_asset_returns(self) -> AssetReturns:
-        """The return model's per-class expectation, read once on first use.
-
-        The Fisher composition of each class's real-return assumption
-        with CPI — exactly the rates ``DeterministicReturnModel``
-        returns and the mean the stochastic model's lognormal draws
-        are matched to — so a period return's deviation from these is
-        the pure stochastic shock (:meth:`_close_wrapper`, issue
-        #115), identically zero in a deterministic run. Both models
-        read the same keys, so no new assumption enters the run's
-        provenance here.
-        """
-        if self._expected_returns is None:
-            cpi = decimal_assumption_value(
-                self.tracked.get(AssumptionKey.INFLATION_CPI)
-            )
-            equity, bonds, cash = (
-                nominal_rate(decimal_assumption_value(self.tracked.get(key)), cpi)
-                for key in (
-                    AssumptionKey.RETURNS_EQUITY_REAL,
-                    AssumptionKey.RETURNS_BONDS_REAL,
-                    AssumptionKey.RETURNS_CASH_REAL,
-                )
-            )
-            self._expected_returns = AssetReturns(equity=equity, bonds=bonds, cash=cash)
-        return self._expected_returns
-
     def _opening_allocation(self, wrapper: Wrapper) -> AssetAllocation:
         """The allocation the wrapper opens the first period with (§4.8).
 
@@ -876,8 +1085,9 @@ class _Projection:
         """
         if wrapper.allocation is not None:
             return wrapper.allocation
+        horizon_end = self.run.horizon_end()
         first_period = next(
-            iter(self.region.calendar.periods(self.config.today, self._horizon_end()))
+            iter(self.region.calendar.periods(self.config.today, horizon_end))
         )
         ytr = years_to_target_retirement(
             self.person.date_of_birth.value,
@@ -886,7 +1096,7 @@ class _Projection:
         )
         return self._glide().allocation_at(ytr)
 
-    def _build_income_streams(self) -> None:
+    def build_income_streams(self) -> None:
         """Resolve the person's DB and state pension income streams.
 
         DB amounts are revalued from the statement date to ``today``
@@ -1105,23 +1315,7 @@ class _Projection:
             raise EngineError(msg)
         return whole_months_between(fact.as_of, today)
 
-    def _horizon_end(self) -> date:
-        """The configured horizon end, or the planning-age default (§5.2)."""
-        if self.config.horizon_end is not None:
-            return self.config.horizon_end
-        planning_age = int_assumption_value(
-            self.tracked.get(AssumptionKey.HORIZON_PLANNING_AGE)
-        )
-        horizon_end = date_age_attained(self.person.date_of_birth.value, planning_age)
-        if horizon_end < self.config.today:
-            msg = (
-                f"planning age {planning_age} was attained before today"
-                f" {self.config.today}; set RunConfig.horizon_end explicitly"
-            )
-            raise EngineError(msg)
-        return horizon_end
-
-    def _escalation_keys(self) -> set[AssumptionKey]:
+    def escalation_keys(self) -> set[AssumptionKey]:
         """The real-growth assumption keys this plan escalates by."""
         keys: set[AssumptionKey] = set()
         if self.person.employment_income is not None or any(
@@ -1145,37 +1339,15 @@ class _Projection:
         )
         return glide_path_from_shape(shape)
 
-    def _fees_for(self, wrapper: Wrapper) -> FeeSchedule:
-        """The wrapper's fee schedule, or the shipped fee assumptions.
-
-        A kind the region exempts from the default fees — a bare cash
-        savings account, whose rate already is the whole deal — pays
-        nothing unless the wrapper states its own schedule; the fee
-        assumption keys are then never read, so they stay out of the
-        run's provenance (issue #118).
-        """
-        if wrapper.fees is not None:
-            return wrapper.fees
-        if not self.region.wrappers.bears_default_fees(wrapper.kind):
-            return _NO_FEES
-        return FeeSchedule(
-            platform=Rate(
-                decimal_assumption_value(self.tracked.get(AssumptionKey.FEES_PLATFORM))
-            ),
-            fund=Rate(
-                decimal_assumption_value(self.tracked.get(AssumptionKey.FEES_FUND))
-            ),
-        )
-
-    def _project_period(
+    def project_period(
         self,
         period: Period,
         returns: PeriodReturns,
         inflation: Decimal,
         factors: _NominalFactors,
         fraction: Decimal,
-    ) -> PeriodSnapshot:
-        """Run the eight steps of planning §5.2 for one period.
+    ) -> PersonPeriodResult:
+        """Run the eight steps of planning §5.2 for one person's period.
 
         ``fraction`` is the whole-month share of the period inside the
         run window (roadmap 4.6): flows and the annual growth/fee rates
@@ -1232,7 +1404,7 @@ class _Projection:
         # (planning §5.2).
         self._mpaa_at_contributions = self._mpaa_triggered_on
         need = _ZERO
-        outflows = self._outflows_due(period, inflation)
+        outflows = self.run.outflows_due(period, inflation)
         pension_lump_sum = _ZERO
         income = _PeriodIncome(
             employment=employment,
@@ -1288,7 +1460,7 @@ class _Projection:
                 unfunded_tax + ledger.growth_tax_unfunded + ledger.aa_charge_unfunded
             )
         shortfall = max(wrapper_need - delivered, _ZERO) + unfunded_tax
-        person_result = PersonPeriodResult(
+        return PersonPeriodResult(
             person_id=person.id,
             age_at_period_start=age,
             years_to_retirement=ytr,
@@ -1310,13 +1482,6 @@ class _Projection:
             mpaa_triggered_on=self._mpaa_triggered_on,
             banked=banked.quantized(),
         )
-        return PeriodSnapshot(
-            period=period,
-            returns=returns,
-            inflation_factor=inflation,
-            persons=(person_result,),
-            year_fraction=fraction,
-        )
 
     def _accrue_db_step(self, period: Period, factors: _NominalFactors) -> None:
         """Credit each active DB stream's accrual for ``period`` (§5.1).
@@ -1329,7 +1494,7 @@ class _Projection:
         employment income).
         """
         today = self.config.today
-        horizon_end = self._horizon_end()
+        horizon_end = self.run.horizon_end()
         for stream in self._db_streams:
             accrual = stream.accrual
             if accrual is None:
@@ -1354,7 +1519,7 @@ class _Projection:
         income = _ZERO
         lump_sum = _ZERO
         today = self.config.today
-        horizon_end = self._horizon_end()
+        horizon_end = self.run.horizon_end()
         for stream in self._db_streams:
             share = entitlement_active_fraction(
                 stream.start, period, today, horizon_end
@@ -1379,7 +1544,7 @@ class _Projection:
             stream.entitlement.start_date,
             period,
             self.config.today,
-            self._horizon_end(),
+            self.run.horizon_end(),
         )
         if share <= Decimal(0):
             return _ZERO
@@ -1409,7 +1574,7 @@ class _Projection:
                 outside the shipped rate table.
         """
         total_lump_sum = _ZERO
-        horizon_end = self._horizon_end()
+        horizon_end = self.run.horizon_end()
         for purchase in self.person.annuity_purchases:
             due = annuity_start_date(purchase, self.person.date_of_birth.value)
             if period.contains(due) and due <= horizon_end:
@@ -1432,7 +1597,7 @@ class _Projection:
         priced rate. A zero-pot purchase converts nothing and opens no
         stream — a depleted pot is a legitimate simulation outcome.
         """
-        rate = self._annuity_rate_for(purchase.annuity_type, purchase)
+        rate = self.run.annuity_rate_for(purchase.annuity_type, purchase)
         capital = _ZERO
         lump_sum = _ZERO
         for ledger in ledgers:
@@ -1451,9 +1616,9 @@ class _Projection:
                     annuity_type=purchase.annuity_type,
                     start=due,
                     base_annual=capital * rate,
-                    escalation=self._annuity_pricing_table().escalation,
+                    escalation=self.run.annuity_pricing_table().escalation,
                     purchase_period_share=entitlement_active_fraction(
-                        due, period, self.config.today, self._horizon_end()
+                        due, period, self.config.today, self.run.horizon_end()
                     ),
                 )
             )
@@ -1501,35 +1666,6 @@ class _Projection:
         ledger.annuity_purchase = ledger.annuity_purchase + annuitised
         return annuitised, tax_free
 
-    def _annuity_rate_for(
-        self, annuity_type: AnnuityType, purchase: AnnuityPurchase
-    ) -> Decimal:
-        """The annual income per pound of purchase capital (planning §7).
-
-        The single-life-at-65 base rate for the type, shaped by the
-        ``annuity.age_adjustment`` table's per-age multiplier and — on
-        a joint basis — its joint-life factor. Read through the
-        tracked view only when a purchase actually fires, so the rate
-        assumptions enter provenance exactly when they enter the
-        result.
-        """
-        table = self._annuity_pricing_table()
-        base = decimal_assumption_value(
-            self.tracked.get(annuity_base_rate_key(annuity_type))
-        )
-        multiplier = table.age_multiplier(annuity_type, purchase.at_age.value)
-        return base * multiplier * table.basis_factor(purchase.basis)
-
-    def _annuity_pricing_table(self) -> AnnuityRateTable:
-        """The parsed age-adjustment table, read once per run on first use."""
-        if self._annuity_table is None:
-            self._annuity_table = AnnuityRateTable.from_assumption_value(
-                mapping_assumption_value(
-                    self.tracked.get(AssumptionKey.ANNUITY_AGE_ADJUSTMENT)
-                )
-            )
-        return self._annuity_table
-
     def _annuity_amount(self, period: Period) -> Money:
         """Step 2: purchased annuity income in payment for ``period``.
 
@@ -1539,36 +1675,13 @@ class _Projection:
         income (planning §5.1).
         """
         total = _ZERO
-        horizon_end = self._horizon_end()
+        horizon_end = self.run.horizon_end()
         for stream in self._annuity_streams:
             share = entitlement_active_fraction(
                 stream.start, period, self.config.today, horizon_end
             )
             if share > Decimal(0):
                 total = total + stream.base_annual * (stream.factor * share)
-        return total
-
-    def _outflows_due(self, period: Period, inflation: Decimal) -> Money:
-        """The planned outflows landing in ``period``, in nominal money.
-
-        A planned outflow is a dated one-off (roadmap 5.4): it hits the
-        period containing the date its person attains the stated age —
-        whole, never pro-rated, the DB lump-sum convention — and only
-        when that date lies inside the run window; an outflow already
-        past lives in the stated balances, not the model. The real
-        amount is inflated by the period-start price level, the same
-        single inflation truth the spending need uses (§5.2).
-        """
-        total = _ZERO
-        if not self.plan.planned_outflows:
-            return total
-        horizon_end = self._horizon_end()
-        births = {person.id: person.date_of_birth.value for person in self.plan.persons}
-        for outflow in self.plan.planned_outflows:
-            person_id, age = outflow.at_age_of
-            due = date_age_attained(births[person_id], age)
-            if period.contains(due) and self.config.today <= due <= horizon_end:
-                total = total + outflow.amount_real.value * inflation
         return total
 
     def _open_ledger(
@@ -1712,7 +1825,7 @@ class _Projection:
         window closes must contribute zero).
         """
         start = max(self.config.today, window.start)
-        end = min(self._horizon_end(), window.end)
+        end = min(self.run.horizon_end(), window.end)
         if end < start:
             return Decimal(0)
         return period_active_fraction(period, start, end)
@@ -1849,7 +1962,7 @@ class _Projection:
             natural_yield = _ZERO
             if price_yield and source.available > _ZERO:
                 natural_yield = source.available * (
-                    self._portfolio_yield(source.ledger.allocation) * fraction
+                    self.run.portfolio_yield(source.ledger.allocation) * fraction
                 )
             views.append(source.view(natural_yield=natural_yield))
         state = WithdrawalState(
@@ -1861,23 +1974,6 @@ class _Projection:
         if isinstance(plan, NetWithdrawalPlan):
             return self._execute_net_plan(sources, period, plan), plan.target
         return self._execute_gross_plan(sources, period, plan), need
-
-    def _portfolio_yield(self, allocation: AssetAllocation) -> Decimal:
-        """The allocation-weighted annual natural yield (roadmap 5.3).
-
-        The income an invested balance throws off per year — dividends,
-        coupons, interest — priced from the per-asset ``yield.*``
-        assumptions (planning §7); nominal, like the balances it
-        applies to.
-        """
-        return (
-            allocation.equity
-            * decimal_assumption_value(self.tracked.get(AssumptionKey.YIELD_EQUITY))
-            + allocation.bonds
-            * decimal_assumption_value(self.tracked.get(AssumptionKey.YIELD_BONDS))
-            + allocation.cash
-            * decimal_assumption_value(self.tracked.get(AssumptionKey.YIELD_CASH))
-        )
 
     def _withdrawal_sources(
         self, ledgers: list[_WrapperLedger], period: Period
@@ -2638,7 +2734,7 @@ class _Projection:
         funds first, then crystallised — with the unfunded remainder
         joining the person's shortfall (#124).
         """
-        fees = self._fees_for(ledger.wrapper)
+        fees = self.run.fees_for(ledger.wrapper)
         opening_total = ledger.opening_uncrystallised + ledger.opening_crystallised
         after_total = ledger.uncrystallised + ledger.crystallised
         fee_total = period_fee(opening_total, after_total, fees, fraction)
@@ -2653,7 +2749,7 @@ class _Projection:
             growth_rate = annual_rate
         else:
             expected_rate = (
-                self._expected_asset_returns().portfolio_growth_factor(
+                self.run.expected_asset_returns().portfolio_growth_factor(
                     ledger.allocation
                 )
                 - _ONE
