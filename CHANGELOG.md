@@ -11,6 +11,21 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- The projection engine models two-person households (roadmap 9.30,
+  planning §4.11): one pooled withdrawal step per period funds the
+  household's spending and planned outflows from both persons'
+  wrappers, draining tax-bearing sources greedily by marginal cost so
+  both personal allowances and both basic-rate bands fill naturally;
+  tax-free cash headroom is tracked per person (the lump sum
+  allowance is an individual cap), aggregate-pot strategies (fixed-%,
+  guardrails) read the household pot, the run's horizon ends at the
+  latest planning-age date, and mixed rUK/Scotland residency assesses
+  each person under their own schedule. Household spending begins once
+  every person has retired; a retired partner's income meanwhile
+  banks like any pre-decumulation income. Single-person plans are
+  unchanged (bit-identical results), and the facts form still edits
+  one person until the partner entry lands (roadmap 9.31).
+
 - Wrappers can carry your own name for the account ("Aviva SIPP",
   roadmap 9.28): a new optional Name field on each savings wrapper,
   shown everywhere the wrapper is named — the inspector, the scenario

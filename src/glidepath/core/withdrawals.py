@@ -1,10 +1,12 @@
 """Withdrawal strategies and plans (roadmap 5.1; planning §5.2 step 4).
 
 A :class:`WithdrawalStrategy` decides how a decumulation period's net
-spending need is met from the person's wrappers. The engine builds a
-:class:`WithdrawalState` — every drawable sub-balance with its balance,
-tax-free fraction, and access-gate position — and the strategy returns a
-:class:`WithdrawalPlan` for the engine to execute:
+spending need is met from the household's wrappers — one pooled step
+per period, every person's sources in one state (planning §4.11). The
+engine builds a :class:`WithdrawalState` — every drawable sub-balance
+with its owner, balance, tax-free fraction, and access-gate position —
+and the strategy returns a :class:`WithdrawalPlan` for the engine to
+execute:
 
 - a :class:`NetWithdrawalPlan` states a **net (after-tax) target** and an
   ordered source list; the engine grosses each draw up against the
@@ -26,7 +28,7 @@ the generic tax-treatment vocabulary of :mod:`glidepath.core.wrappers`,
 so no account kind is ever named (planning §4.2).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum, auto
 from typing import TYPE_CHECKING, ClassVar, Protocol
@@ -34,7 +36,7 @@ from typing import TYPE_CHECKING, ClassVar, Protocol
 from glidepath.core.money import Money, Rate
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
     from glidepath.core.entities import EntityId
     from glidepath.core.wrappers import WrapperKindId
@@ -126,6 +128,12 @@ class WithdrawalSource:
     :attr:`WithdrawalStrategy.uses_natural_yield`, so runs that never
     read the yield assumptions never record them in provenance; other
     strategies see zero.
+
+    ``person_id`` names the person whose wrapper holds this
+    sub-balance (planning §4.11): the household withdrawal step pools
+    every person's sources into one state, and a draw prices against —
+    and updates — the owner's own tax position, lump-sum-allowance
+    headroom, and flexible-access marker.
     """
 
     id: WithdrawalSourceId
@@ -133,6 +141,7 @@ class WithdrawalSource:
     available: Money
     tax_free_fraction: Decimal
     access_open: bool
+    person_id: EntityId
     natural_yield: Money = _ZERO
     growth_taxable: bool = False
     """Whether the wrapper's growth is taxed as it arises (roadmap 9.2).
@@ -161,30 +170,35 @@ class WithdrawalSource:
 class WithdrawalState:
     """What a strategy may read when planning a period's withdrawals.
 
-    ``sources`` lists every sub-balance in plan (wrapper) order —
-    gate-closed sources included, flagged, so a strategy can see the
-    whole pot; ``year_fraction`` is the period's active fraction
-    (roadmap 4.6), by which gross-defined annual amounts scale.
-    ``tax_free_cash_headroom`` is the tax-free cash still allowed
-    under the region's lifetime cap as the withdrawal step opens —
-    cumulative usage (the ``lsa_used`` fact plus everything this run
-    has paid, income lump sums included) already deducted — or
-    ``None`` where the region has no cap (roadmap 5.2), so a
-    tax-aware strategy can size pension draws against the cap the
-    engine will actually enforce.
+    ``sources`` lists every sub-balance of every person in the
+    household — person order, then plan (wrapper) order (planning
+    §4.11) — gate-closed sources included, flagged, so a strategy can
+    see the whole household pot; ``year_fraction`` is the period's
+    active fraction (roadmap 4.6), by which gross-defined annual
+    amounts scale. ``tax_free_cash_headroom`` maps each person's id to
+    the tax-free cash still allowed under the region's lifetime cap as
+    the withdrawal step opens — the cap is an individual one (planning
+    §4.11), with cumulative usage (the ``lsa_used`` fact plus
+    everything this run has paid, income lump sums included) already
+    deducted — or ``None`` where the region has no cap (roadmap 5.2),
+    so a tax-aware strategy can size pension draws against the caps
+    the engine will actually enforce.
     """
 
     sources: tuple[WithdrawalSource, ...]
     year_fraction: Decimal
-    tax_free_cash_headroom: Money | None = None
+    tax_free_cash_headroom: Mapping[EntityId, Money | None] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
-        """Require a fraction in [0, 1] and non-negative headroom."""
+        """Require a fraction in [0, 1] and non-negative headrooms."""
         if not _ZERO_FRACTION <= self.year_fraction <= _ONE:
             msg = "WithdrawalState.year_fraction must lie between 0 and 1"
             raise ValueError(msg)
-        if self.tax_free_cash_headroom is not None and (
-            self.tax_free_cash_headroom < _ZERO
+        if any(
+            headroom is not None and headroom < _ZERO
+            for headroom in self.tax_free_cash_headroom.values()
         ):
             msg = "WithdrawalState.tax_free_cash_headroom must be non-negative"
             raise ValueError(msg)
@@ -331,7 +345,9 @@ class FixedPercentWithdrawalStrategy:
     """Fixed percentage of the pot, gross-defined (planning §5.2).
 
     Each period draws ``rate`` of the *accessible* pot — every source
-    the default tax-aware order may touch, gate-closed funds excluded —
+    the default tax-aware order may touch, across the whole household
+    (the §4.11 meaning change from "my pot" to "our pot"), gate-closed
+    funds excluded —
     scaled by the period's active fraction, allocated across sources in
     that same order. Gross-defined by declaration: the plan states
     exact gross amounts and the engine skips the net gross-up
@@ -374,7 +390,8 @@ class GuardrailsWithdrawalStrategy:
     The need the engine passes in — the CPI-inflated spending decision,
     net of pension income — is the baseline; the strategy annualises
     the withdrawal rate it implies (need over the period's active
-    fraction, over the accessible pot) and adjusts spending when that
+    fraction, over the accessible household pot — planning §4.11) and
+    adjusts spending when that
     rate crosses a configured guardrail: above ``upper_guardrail`` the
     target is cut by ``cut_fraction`` (the capital-preservation rule),
     below ``lower_guardrail`` it rises by ``rise_fraction`` (the

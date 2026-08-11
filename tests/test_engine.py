@@ -262,6 +262,44 @@ class AllowanceTaxSystem:
         return ()
 
 
+OTHER_RESIDENCY = TaxResidencyId("test.other")
+
+
+@dataclass(frozen=True)
+class ResidencyTaxSystem:
+    """Flat 25% for the main residency, nothing for the other.
+
+    Pins the §4.11 mixed-residency contract: each person's assessment
+    runs under their own opaque residency id.
+    """
+
+    def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:
+        """The flat rate for the main residency; zero otherwise."""
+        del period
+        taxed = (
+            tax_input.non_savings_income
+            + tax_input.savings_income
+            + tax_input.dividend_income
+        )
+        rate = TAX_RATE if tax_input.residency == RESIDENCY else Decimal(0)
+        if taxed <= ZERO or rate <= Decimal(0):
+            return TaxResult(
+                tax_due=ZERO, taxable_income=taxed, tax_free_allowance=ZERO, lines=()
+            )
+        tax = Money((rate * taxed.amount).quantize(PENNY, rounding=ROUND_DOWN))
+        line = TaxLine(band="residency_flat", rate=Rate(rate), taxed=taxed, tax=tax)
+        return TaxResult(
+            tax_due=tax, taxable_income=taxed, tax_free_allowance=ZERO, lines=(line,)
+        )
+
+    def annual_allowance_charge(
+        self, period: Period, tax_input: TaxInput, excess: Money
+    ) -> tuple[TaxLine, ...]:
+        """No annual-allowance charge in this region."""
+        del period, tax_input, excess
+        return ()
+
+
 @dataclass(frozen=True)
 class FixedReturnModel:
     """Every period returns the same all-equity nominal rate at zero CPI."""
@@ -532,7 +570,11 @@ def stub_region(
     free_window: Period | None = None,
     sub_kind_cap: Money | None = None,
     fee_free_kinds: frozenset[WrapperKindId] = frozenset(),
-    tax_system: FlatTaxSystem | TieredTaxSystem | AllowanceTaxSystem | None = None,
+    tax_system: FlatTaxSystem
+    | TieredTaxSystem
+    | AllowanceTaxSystem
+    | ResidencyTaxSystem
+    | None = None,
 ) -> Region:
     """A calendar-year region over the stub implementations."""
     return Region(
@@ -712,6 +754,43 @@ def household_of(person: Person, *, spending: str | None = None) -> Household:
     if spending is not None:
         plan = SpendingPlan(annual_spending_real=money_fact(spending))
     return Household(persons=(person,), spending=plan)
+
+
+def partner_of(
+    wrappers: tuple[Wrapper, ...],
+    *,
+    date_of_birth: date = date(1962, 1, 1),
+    retire_at: int = 60,
+    employment: str | None = None,
+    lsa_used: str | None = None,
+    residency: TaxResidencyId = RESIDENCY,
+) -> Person:
+    """A second person (``person-2``) for two-person households (§4.11)."""
+    return Person(
+        id=EntityId("person-2"),
+        date_of_birth=Fact(value=date_of_birth, as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=retire_at, recorded_on=RECORDED),
+        tax_residency=residency,
+        employment_income=None if employment is None else money_fact(employment),
+        lsa_used=None if lsa_used is None else money_fact(lsa_used),
+        wrappers=wrappers,
+    )
+
+
+def couple_of(
+    first: Person,
+    second: Person,
+    *,
+    spending: str | None = None,
+    planned_outflows: tuple[PlannedOutflow, ...] = (),
+) -> Household:
+    """A two-person household, optionally with a spending plan."""
+    plan = None
+    if spending is not None:
+        plan = SpendingPlan(annual_spending_real=money_fact(spending))
+    return Household(
+        persons=(first, second), spending=plan, planned_outflows=planned_outflows
+    )
 
 
 def one_period_config() -> RunConfig:
@@ -1682,11 +1761,12 @@ class TestTaxFreeCash:
         assert person_result.net_withdrawn == Money(Decimal("600.00"))
 
     def test_strategy_state_reports_remaining_headroom(self) -> None:
-        """Strategies see the headroom the engine will enforce.
+        """Strategies see the per-person headroom the engine enforces.
 
         With a 1,500 cap and 1,100 already used, the withdrawal step
-        opens with 400 of headroom; with no cap the state reports
-        ``None``.
+        opens with 400 of headroom against the person's id (the LSA
+        is an individual cap, planning §4.11); with no cap the state
+        reports ``None``.
         """
         recording_capped = RecordingWithdrawalStrategy()
         pension = wrapper_of(PENSION, "100000")
@@ -1709,7 +1789,9 @@ class TestTaxFreeCash:
                 withdrawal_strategy=recording_capped,
             ),
         )
-        assert recording_capped.states[0].tax_free_cash_headroom == Money(Decimal(400))
+        assert recording_capped.states[0].tax_free_cash_headroom == {
+            EntityId("person-1"): Money(Decimal(400))
+        }
         recording_uncapped = RecordingWithdrawalStrategy()
         run(
             retiree_plan((wrapper_of(PENSION, "100000"),), spending="600"),
@@ -1721,7 +1803,9 @@ class TestTaxFreeCash:
                 withdrawal_strategy=recording_uncapped,
             ),
         )
-        assert recording_uncapped.states[0].tax_free_cash_headroom is None
+        assert recording_uncapped.states[0].tax_free_cash_headroom == {
+            EntityId("person-1"): None
+        }
 
     def test_gross_defined_plans_resolve_as_split_payments(self) -> None:
         """A fixed-% draw splits at the cap boundary, phased modes aside.
@@ -3495,26 +3579,320 @@ class TestPlannedOutflows:
         assert person_result.shortfall == ZERO
 
 
+class TestTwoPersonHousehold:
+    """The 9.30 activation: pooled household decumulation (planning §4.11)."""
+
+    def test_two_person_plan_projects_end_to_end(self) -> None:
+        """A couple projects deterministically through the pooled step.
+
+        Both retired, one household need of 12,000: the tax-free group
+        draws in listed (person, wrapper) order, so the first person's
+        free account delivers the whole need. The need and its
+        delivery attribution sum to the household truth.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(FREE, "50000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+            ),
+            partner_of((wrapper_of(FREE, "40000"),)),
+            spending="12000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        first, second = result.snapshots[0].persons
+        assert first.spending_need == Money(Decimal("12000.00"))
+        assert second.spending_need == ZERO
+        assert first.net_withdrawn == Money(Decimal("12000.00"))
+        assert second.net_withdrawn == ZERO
+        assert first.shortfall == ZERO
+        assert second.shortfall == ZERO
+
+    def test_greedy_draws_fill_both_lower_bands(self) -> None:
+        """Tax-bearing draws split by marginal cost across the couple.
+
+        Tiered tax (20% to 10,000, 40% above), both persons holding
+        crystallised pension funds, household need 30,000 net: the
+        pooled step fills both persons' 20% tiers before touching the
+        40% rate — the second person's 10,000 pot is drained entirely
+        at 20% — where a single-person-ordered drain would have paid
+        40% on everything past the first tier.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "0", crystallised="100000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+            ),
+            partner_of((wrapper_of(PENSION, "0", crystallised="10000"),)),
+            spending="30000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(tax_system=TieredTaxSystem()),
+            one_period_config(),
+        )
+        first, second = result.snapshots[0].persons
+        [second_pension] = second.wrappers
+        assert second_pension.withdrawal_taxable == Money(Decimal("10000.00"))
+        [first_pension] = first.wrappers
+        assert Money(Decimal(33300)) <= first_pension.withdrawal_taxable
+        assert first_pension.withdrawal_taxable <= Money(Decimal(33370))
+        delivered = first.net_withdrawn + second.net_withdrawn
+        assert Money(Decimal("29999.99")) <= delivered
+        assert delivered <= Money(Decimal("30000.01"))
+        household_tax = first.tax.tax_due + second.tax.tax_due
+        assert Money(Decimal(13320)) <= household_tax
+        assert household_tax <= Money(Decimal(13345))
+        assert first.shortfall == ZERO
+        assert second.shortfall == ZERO
+
+    def test_tax_free_cash_headroom_is_reported_per_person(self) -> None:
+        """The LSA is an individual cap: one headroom entry per person.
+
+        With a 1,500 cap, 1,100 already used by the first person and
+        nothing by the second, the strategy state maps each person's
+        id to their own remaining headroom (planning §4.11).
+        """
+        recording = RecordingWithdrawalStrategy()
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "50000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                lsa_used="1100",
+            ),
+            partner_of((wrapper_of(PENSION, "50001"),)),
+            spending="600",
+        )
+        run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(1500))),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                withdrawal_strategy=recording,
+            ),
+        )
+        assert recording.states[0].tax_free_cash_headroom == {
+            EntityId("person-1"): Money(Decimal(400)),
+            EntityId("person-2"): Money(Decimal(1500)),
+        }
+
+    def test_fixed_percent_reads_the_household_pot(self) -> None:
+        """An aggregate-pot strategy draws its rate of *our* pot (§4.11).
+
+        4% of the 100,000 household pot is 4,000 — twice what either
+        50,000 account alone would yield — allocated across sources in
+        the tax-aware order, so the first person's account pays it.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(FREE, "50000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+            ),
+            partner_of((wrapper_of(FREE, "50001"),)),
+            spending="4000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                withdrawal_strategy=FixedPercentWithdrawalStrategy(
+                    rate=Rate(Decimal("0.04"))
+                ),
+            ),
+        )
+        first, second = result.snapshots[0].persons
+        [first_free] = first.wrappers
+        assert first_free.withdrawal_tax_free == Money(Decimal("4000.04"))
+        assert second.net_withdrawn == ZERO
+
+    def test_planned_outflows_fund_once_and_land_on_their_person(self) -> None:
+        """A household outflow is funded once, shown on its dating person.
+
+        The outflow is dated by the first person's age but the second
+        person holds the only account: the pooled step funds it from
+        that account while the outflow column stays on the person
+        whose age dated it.
+        """
+        plan = couple_of(
+            person_of((), date_of_birth=date(1960, 1, 1), retire_at=60),
+            partner_of((wrapper_of(FREE, "50000"),)),
+            planned_outflows=(outflow_at(66),),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            one_period_config(),
+        )
+        first, second = result.snapshots[0].persons
+        assert first.planned_outflows == Money(Decimal("10000.00"))
+        assert second.planned_outflows == ZERO
+        assert first.net_withdrawn == ZERO
+        assert second.net_withdrawn == Money(Decimal("10000.00"))
+        assert first.shortfall == ZERO
+        assert second.shortfall == ZERO
+
+    def test_household_spending_waits_for_the_second_retirement(self) -> None:
+        """Spending withdrawals start once every person has retired.
+
+        The first person retires before the run starts; the second
+        works until 2035. The household need stays zero — net pay
+        funds working-life spending outside the model — until the
+        period in which the second retirement is attained.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(FREE, "200000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+            ),
+            partner_of((), date_of_birth=date(1970, 1, 1), retire_at=65),
+            spending="12000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2036, 12, 31)),
+        )
+        by_year = {
+            snapshot.period.start.year: snapshot.persons
+            for snapshot in result.snapshots
+        }
+        assert by_year[2034][0].spending_need == ZERO
+        assert by_year[2034][0].net_withdrawn == ZERO
+        assert by_year[2035][0].spending_need == Money(Decimal("12000.00"))
+        assert by_year[2035][0].net_withdrawn == Money(Decimal("12000.00"))
+
+    def test_surplus_banks_into_the_households_first_taxable_wrapper(self) -> None:
+        """Surplus income sweeps household-wide (roadmap 9.2, §4.11).
+
+        The first person's state pension exceeds the (absent) spending
+        need; only the second person holds a bare taxable account, so
+        the net 7,500 banks there and is recorded on that person.
+        """
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1958, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(),
+            ),
+            partner_of((wrapper_of(TAXABLE, "1000"),)),
+        )
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "returns.equity.real": Decimal(0),
+                    "policy.state_pension.uprating": TRIPLE_LOCK,
+                    "yield.equity": Decimal(0),
+                    "yield.bonds": Decimal(0),
+                    "yield.cash": Decimal(0),
+                }
+            ),
+            stub_region(state_pension=StubStatePension(annual=Money(Decimal(10000)))),
+            one_period_config(),
+        )
+        first, second = result.snapshots[0].persons
+        assert first.state_pension_income == Money(Decimal("10000.00"))
+        assert first.banked == ZERO
+        assert second.banked == Money(Decimal("7500.00"))
+        [taxable_result] = second.wrappers
+        assert taxable_result.banked_in == Money(Decimal("7500.00"))
+
+    def test_each_person_is_assessed_under_their_own_residency(self) -> None:
+        """Mixed residency works: assessments stay strictly per person."""
+        plan = couple_of(
+            person_of((), employment="10000"),
+            partner_of(
+                (),
+                date_of_birth=date(1990, 1, 1),
+                retire_at=65,
+                employment="10000",
+                residency=OTHER_RESIDENCY,
+            ),
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(tax_system=ResidencyTaxSystem()),
+            one_period_config(),
+        )
+        first, second = result.snapshots[0].persons
+        assert first.tax.tax_due == Money(Decimal("2500.00"))
+        assert second.tax.tax_due == ZERO
+
+    def test_horizon_runs_to_the_latest_planning_age(self) -> None:
+        """The run ends at the later of the persons' planning-age dates."""
+        plan = couple_of(
+            person_of(
+                (wrapper_of(FREE, "50000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+            ),
+            partner_of((), date_of_birth=date(1970, 6, 15), retire_at=60),
+            spending="1000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1)),
+        )
+        assert result.snapshots[-1].period.start.year == 2065
+
+    def test_two_person_monte_carlo_path_projects(self) -> None:
+        """A seeded stochastic path runs the pooled step end-to-end."""
+        plan = couple_of(
+            person_of(
+                (wrapper_of(FREE, "50000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+            ),
+            partner_of((wrapper_of(FREE, "40000"),)),
+            spending="6000",
+        )
+        result = run(
+            plan,
+            assumptions_with(
+                {
+                    "volatility.equity": Decimal("0.15"),
+                    "volatility.bonds": Decimal(0),
+                    "volatility.cash": Decimal(0),
+                    "correlation.equity_bonds": Decimal(0),
+                    "correlation.equity_cash": Decimal(0),
+                    "correlation.bonds_cash": Decimal(0),
+                }
+            ),
+            stub_region(),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2030, 12, 31),
+                mode=RunMode.MONTE_CARLO,
+                seed=7,
+            ),
+        )
+        assert len(result.snapshots) == 5
+        assert all(len(snapshot.persons) == 2 for snapshot in result.snapshots)
+
+
 class TestEngineErrors:
     """Requests the engine must refuse loudly."""
-
-    def test_two_person_household_is_rejected(self) -> None:
-        """v1 projects exactly one person (planning §4.4)."""
-        first = person_of(())
-        second = Person(
-            id=EntityId("person-2"),
-            date_of_birth=Fact(
-                value=date(1992, 3, 4), as_of=AS_OF, recorded_on=RECORDED
-            ),
-            target_retirement_age=Decision(value=65, recorded_on=RECORDED),
-            tax_residency=RESIDENCY,
-        )
-        plan = Household(persons=(first, second))
-        assumptions = assumptions_with()
-        region = stub_region()
-        config = one_period_config()
-        with pytest.raises(EngineError, match="one person"):
-            run(plan, assumptions, region, config)
 
     def test_horizon_before_today_is_rejected(self) -> None:
         """A horizon that ends before it starts is a config error."""

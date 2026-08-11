@@ -460,9 +460,10 @@ comparison and exports **already two-person generic**; the work
 concentrates in the engine's per-person run state, the facts form, and
 the decisions recorded here. Couples ship in increments (roadmap
 9.29–9.34), each independently mergeable behind the existing gates:
-`run()` and `parse_facts_form` keep validating one person until their
-increment activates two, so a partially activated build refuses a
-two-person plan rather than mis-modelling it.
+the engine accepts two persons as of 9.30, while `parse_facts_form`
+keeps validating one person until 9.31 activates the partner entry, so
+a partially activated build refuses a two-person plan rather than
+mis-modelling it.
 
 **Scope.** A household is one or two adults planning together; the
 partner is **strictly optional everywhere** — a one-person household
@@ -2340,7 +2341,7 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   numbered apart rather than colliding in legends and CSV headings.
   Persistence schema v5: every wrapper carries a `label` key, `null`
   for unnamed; the v4→v5 migration adds it on load.*
-- [ ] 9.29 Couples: per-person engine state extraction — *pure refactor,
+- [x] 9.29 Couples: per-person engine state extraction — *pure refactor,
   no behaviour change: the per-person mutable state of `_Projection`
   (wrapper ledgers, income ladders, relief, AA carry-forward/charge,
   LSA/MPAA ledgers, DB/state-pension/annuity streams) moves into a
@@ -2349,7 +2350,7 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   list; `run()` still validates one person. Golden scenario and full
   suite unchanged — this is the low-risk half of the §4.11 engine
   work, isolated so 9.30's diff is reviewable.*
-- [ ] 9.30 Couples: two-person engine activation — *`run()` accepts two
+- [x] 9.30 Couples: two-person engine activation — *`run()` accepts two
   persons (`validate_household_v1` retired from the engine; the form
   keeps its gate until 9.31). Pooled decumulation per §4.11:
   `WithdrawalSource` gains `person_id`, per-person tax-free-cash
