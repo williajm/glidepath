@@ -43,7 +43,7 @@ decumulation — under explicit, inspectable inputs.
 | | Contents |
 | --- | --- |
 | **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions: deferred/accrued entitlements, plus active membership with CARE-style accrual (accrual rate, pensionable salary, service projection — 9.6). State pension incl. deferral. Deterministic and Monte Carlo annual projection (one step function, two return models — §5.2). Withdrawal strategies: fixed real, fixed %, guardrails, natural yield. Annuity purchases incl. partial annuitisation. "When can I retire?" solver: earliest retirement age meeting a replacement-rate target, deterministic or Monte Carlo (§5.2, 9.14). Scenarios + comparison. JSON persistence. |
-| **Deferred (phased)** | Couples activation (the 9.4 spike scopes it first); announced future rules shipping as data in their year's files (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs); final-salary linkage and split deferment/in-payment revaluation bases for DB schemes (9.6 ships CARE-style accrual on the single basis). |
+| **Deferred (phased)** | Couples activation in increments per the §4.11 decision record (spike run 2026-08-11; roadmap 9.29–9.34 — optional partner, pooled decumulation, marriage allowance, deterministic survivor modelling, joint-life annuities); announced future rules shipping as data in their year's files (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs); final-salary linkage and split deferment/in-payment revaluation bases for DB schemes (9.6 ships CARE-style accrual on the single basis). |
 | **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy); capital gains tax — the GIA models dividend and savings *income* only (9.2), never disposals. |
 
 ## 3. Architecture
@@ -157,7 +157,8 @@ pension, tax assessment) hangs off a `Person`; shared economics (spending
 plan, one-off outflows, success metrics) hang off the `Household`. v1
 validates `len(persons) == 1`. No couples UI, transfers, or
 survivor/death modelling until a later couples spike adds its own decision
-record.
+record. *The spike has since run — §4.11 records the activation
+decisions (roadmap 9.29–9.34).*
 
 **Why.** UK tax is individual, so computation is per-person anyway; the
 expensive-to-retrofit fork is where spending and goals live, and placing
@@ -448,6 +449,141 @@ without changing the tag/changelog process. **Rejected:** unsigned
 (clashes with the existing 0.1.0 and with SemVer-style
 schema-migration discipline); long-lived PyPI API tokens in repo
 secrets (trusted publishing removes the stored credential entirely).
+
+### 4.11 Couples activation (the 9.4 spike's decision record)
+
+Spike run 2026-08-11 (#45); policy facts live-verified the same day
+(§6 "Couples"). The single-person audit found the schema, persistence
+(the JSON already carries `persons` as an array — no migration),
+scenario overrides (entity-id addressed), Monte Carlo, reporting,
+comparison and exports **already two-person generic**; the work
+concentrates in the engine's per-person run state, the facts form, and
+the decisions recorded here. Couples ship in increments (roadmap
+9.29–9.34), each independently mergeable behind the existing gates:
+`run()` and `parse_facts_form` keep validating one person until their
+increment activates two, so a partially activated build refuses a
+two-person plan rather than mis-modelling it.
+
+**Scope.** A household is one or two adults planning together; the
+partner is **strictly optional everywhere** — a one-person household
+stays the default and behaves exactly as today. The tax mechanics that
+require marriage/civil partnership (marriage allowance, death
+transfers at spouse exemption, ISA APS) assume the two persons qualify;
+the UI says so in copy rather than modelling cohabitation separately
+(a cohabiting couple simply leaves the marriage allowance unclaimed
+and loses the death-transfer treatment — a labelled limitation, not a
+modelling target). Mixed rUK/Scottish residency already works —
+`tax_residency` is per-person.
+
+**Pooled decumulation — the central engine decision.** One withdrawal
+step per period for the whole household, not two person-scoped steps.
+`WithdrawalSource` gains a `person_id`; the single
+`tax_free_cash_headroom` becomes per-person (the LSA is an individual
+cap); the tax-treatment ordering (taxable-growth → tax-free →
+crystallised → uncrystallised, §5.2) is unchanged. Within a
+tax-bearing treatment group the engine drains the household need
+greedily by marginal cost: it prices the next tranche from each
+person's frontier source through the existing incremental-tax
+machinery and draws from whichever person's tranche is cheaper — so
+both personal allowances and both basic bands fill naturally, with no
+optimizer and no new tax model. Tax-free groups keep drawing in
+wrapper order. Aggregate-pot strategies (fixed-%, guardrails) read the
+household pot — a documented meaning change from "my pot" to "our
+pot". **Rejected:** splitting the household need per person up front
+(any split ratio is arbitrary and wastes the second personal allowance
+— the main financial win of couples modelling); a cross-person
+optimizer over the whole horizon (advice-shaped, untestable against a
+published rule). Engine shape: extract the per-person mutable state
+of `_Projection` (balances, income ladders, AA/LSA/MPAA ledgers, DB/
+state-pension/annuity streams) into a `_PersonProjection`; the run
+advances shared factors (CPI, returns) once and steps each person,
+then pools the withdrawal step.
+
+**Horizon.** The run ends at the *latest* of the persons'
+`horizon.planning_age` dates (per-person ages, one household end).
+Both persons are alive to the horizon unless a death age says
+otherwise (below). Chart categories label both ages (`2032 · 60/58`).
+
+**Survivor modelling — deterministic and optional.** Each person gains
+`death_age: Decision[int] | None`, default `None` (alive to horizon).
+It is a Decision, so it is scenario-overridable: "what if I die at 75"
+becomes an ordinary scenario diff. Death lands at the period the age
+is attained (§4.1 gate convention). From that period, verified rules
+(§6 "Couples"):
+
+- **DC pensions** pass to the survivor as beneficiary drawdown: the
+  pot merges into a survivor-held crystallised sub-balance flagged
+  income-tax-free when death precedes age 75, taxed at the survivor's
+  marginal rate otherwise. Inherited funds carry no NMPA gate, earn no
+  new tax-free cash, and consume no survivor LSA. Death lump sums are
+  never modelled (beneficiary drawdown only), so no LSDBA test arises
+  — a recorded simplification.
+- **ISAs/LISAs** merge into the survivor's ISA via the additional
+  permitted subscription (value passes with tax-free status; the APS
+  is additional to the survivor's own allowance, so no allowance
+  interaction needs modelling).
+- **GIA/cash** merge into the survivor's equivalents (spouse
+  exemption; CGT is out of scope anyway).
+- **DB pensions** continue at the scheme's survivor fraction — a new
+  per-scheme `survivor_fraction` fact defaulting to the
+  `db.survivor_fraction` assumption (50%, §6 basis) when unstated.
+- **State pension**: the deceased's stream stops. Nothing is
+  inherited in v-couples — the new state pension passes on only 50%
+  of a protected payment under narrow pre-2016-marriage conditions
+  (§6), and protected payments are not modelled.
+- **Annuities**: single-life streams stop; joint-life streams
+  continue at the purchase's survivor fraction (9.34).
+- **Marriage allowance** lapses from the tax year after death.
+- **Spending**: the household spending plan scales by a
+  `spending.survivor_multiplier` assumption (default 0.70; basis to
+  be pinned against the PLSA single-vs-couple budget ratio at
+  implementation — §9 open question 9).
+
+**Rejected:** stochastic mortality in Monte Carlo (death ages are
+deterministic across paths, exactly as CPI is — §5.2; longevity *risk*
+stays expressed through the planning-age horizon); modelling IHT on
+death transfers (the FA 2026 pensions-into-IHT change taxes deaths
+from 6 April 2027, but the spouse exemption is explicitly maintained
+(§6), so transfers between partners — the only death this model has —
+stay IHT-free; non-spouse bequests remain out of scope).
+
+**Marriage allowance.** A household-level `Decision[bool]` ("claim
+marriage allowance when eligible", default claimed): each tax year the
+engine checks eligibility — transferor's taxable income below their
+personal allowance; recipient liable at no more than basic rate (rUK)
+or intermediate rate (Scotland) — picks the direction automatically,
+and applies it as ITA 2007 s55B specifies: a **tax reducer** of the
+basic-rate percentage of the transferable amount (£1,260 → up to
+£252/yr), capped at the recipient's liability, never a PA transfer in
+computation. `TaxSystem.assess` stays strictly per-person; the region
+gains a small household adjustment step that runs after both
+assessments — the one deliberate crack in the person-isolated tax
+contract, kept at the region layer. Figures ship as data
+(`marriage_allowance` keys in the tax-year files), never hardcoded.
+
+**Transfers between living partners — deferred.** No modelled
+inter-spousal asset moves or third-party pension/ISA contributions in
+the activation increments: the user can restate facts under either
+person (CGT out of scope makes GIA moves cost-free anyway), and
+contribution routing to the lower-taxed partner is advice-shaped
+optimization. The verified third-party-contribution rules (§6) are
+recorded for any future increment.
+
+**Facts form.** The form gains an optional second person: form data
+carries `persons: tuple` (1–2), every repeatable row (wrappers, DB
+pensions, annuities) gains an owner key, and the copy reads "About
+you" / "About your partner". Adding a partner is one explicit action;
+removing one deletes their rows after confirmation. With no partner
+the form renders and parses exactly as today. `form_cannot_represent`
+drops its extra-person and joint-life refusals as the increments land
+and keeps refusing only what remains unrepresentable.
+
+**Solver and cards framing.** The retirement solver (9.14) varies one
+selected person's retirement age with the partner's decision held
+fixed, and measures the replacement-rate target against household
+employment income; the outlook/drawdown cards speak at household
+level. Per-person chart series stay optional future work — household
+aggregation remains the default presentation.
 
 ## 5. Design
 
@@ -1560,6 +1696,24 @@ the GIA/cash wrappers bring these into the model).
 | SPA review | third review launched July 2025, ongoing; no change legislated as of 2026-08-01 | [third SPA review](https://www.gov.uk/government/collections/third-state-pension-age-review) |
 | Triple lock | committed "for this parliament" (~2029); nothing legislated beyond | [Budget 2025 fact sheet](https://www.gov.uk/government/news/budget-2025-fact-sheet-cutting-the-cost-of-living) |
 
+### Couples
+
+Verified **2026-08-11** from live-fetched primary pages (the 9.4 spike —
+these figures back the §4.11 decision record and become data keys as the
+9.29–9.34 increments ship).
+
+| Figure | Value | Source |
+| --- | --- | --- |
+| Marriage allowance mechanics | A **tax reducer**, not a PA transfer: the recipient's tax is reduced by the basic-rate percentage of the transferable amount (£1,260, statutorily 10% of the PA), max £252/yr. Transferor's income must be below their PA; recipient liable at no more than basic rate (rUK) or the starter/basic/intermediate rates (Scotland) | [gov.uk/marriage-allowance](https://www.gov.uk/marriage-allowance); [ITA 2007 s55B](https://www.legislation.gov.uk/ukpga/2007/3/section/55B) |
+| New state pension inheritance | A survivor inherits **half the deceased's protected payment** only if the marriage/CP began before 6 April 2016 and the deceased reached SPA (and died) on/after that date; inherited additional state pension and deferral-increment inheritance attach only to pre-2016 SPA cases; remarriage before the survivor's own SPA disqualifies. Net: a post-2016 couple with no protected payment passes on **nothing** | [inheriting state pension](https://www.gov.uk/new-state-pension/inheriting-or-increasing-state-pension-from-a-spouse-or-civil-partner) |
+| DC death benefits | Death **before 75**: beneficiary drawdown income tax-free (funds first designated post-April 2015); lump sums tax-free up to the deceased's LSDBA (£1,073,100). Death **at/after 75**: income and lump sums taxed at the beneficiary's marginal rate. Lump sums paid >2 years after notification taxed regardless | [tax on pension death benefits](https://www.gov.uk/tax-on-pension-death-benefits); [individual lump sum allowances](https://www.gov.uk/guidance/find-out-the-rules-around-individual-lump-sum-allowances) |
+| Pensions into IHT | **Enacted** (FA 2026, Royal Assent 18 March 2026): unused pension funds and death benefits join the estate for deaths on/after **6 April 2027**; death-in-service and DB dependants' scheme pensions excluded; the **spouse/civil-partner exemption is maintained**, so partner-to-partner transfers stay IHT-free (§4.11 keeps IHT out of scope on that basis) | [technical note (upd. 29 May 2026)](https://www.gov.uk/government/publications/inheritance-tax-on-pensions-technical-note/technical-note-inheritance-tax-on-pensions); [policy paper](https://www.gov.uk/government/publications/inheritance-tax-unused-pension-funds-and-death-benefits/inheritance-tax-unused-pension-funds-and-death-benefits) |
+| ISA additional permitted subscription | Surviving spouse/CP gets a one-off extra ISA allowance equal to the deceased's ISA value at death (or closure, deaths on/after 6 April 2018), **in addition to** their own annual allowance, independent of who inherits the assets; spouses/CPs only | [inheriting an ISA](https://www.gov.uk/individual-savings-accounts/inheriting-an-isa-from-your-spouse-civil-partner); [if you die](https://www.gov.uk/individual-savings-accounts/if-you-die) |
+| DB survivor pensions | **No statutory fraction for private schemes** — scheme rules govern (PPF). Public-service context: Civil Service Classic, NHS 1995, Teachers' NPA60, Police 1987, Firefighters 1992, AFPS 1975 all pay 50% of the member's pension; LGPS accrues survivor pension at 1/160th of service. Ships as the `db.survivor_fraction` **assumption** (default 50%), overridable per scheme | [PPF on DB beliefs](https://www.ppf.co.uk/blog-posts/defined-benefit-pension-beliefs); [DWP survivor-benefits annex (PDF)](https://assets.publishing.service.gov.uk/media/5a7ee054e5274a2e8ab48c2b/survivor-benefits-in-occupational-pension-schemes-annex-a.pdf) |
+| Joint-life annuities | Survivor income settable at **100%, 66% or 50%** of the initial rate; starting income lower than the single-life equivalent (the §7 `annuity.age_adjustment` joint factor 0.92 prices this) | [FCA annuities review (PDF, option structure)](https://www.fca.org.uk/publication/research/annuities-consumer-behaviour-review.pdf); [MoneyHelper annuities](https://www.moneyhelper.org.uk/en/pensions-and-retirement/taking-your-pension/guaranteed-retirement-income-annuities-explained) |
+| Spousal transfers (living) | Gifts between spouses/CPs: **no CGT** (no gain/no loss, base cost carries) unless separated all year; **no IHT** (unlimited exemption). **No sharing of allowances between living spouses**: pension AA, LSA/LSDBA and the ISA allowance are strictly per person (verified by absence of any transfer mechanism on the primary pages; marriage allowance is the sole PA-related spousal mechanism) | [CGT gifts](https://www.gov.uk/capital-gains-tax/gifts); [IHT](https://www.gov.uk/inheritance-tax); [annual allowance](https://www.gov.uk/tax-on-your-private-pension/annual-allowance); [lump sum allowances](https://www.gov.uk/guidance/find-out-the-rules-around-individual-lump-sum-allowances); [ISAs](https://www.gov.uk/individual-savings-accounts) |
+| Third-party pension contributions | Anyone may pay into another person's pension; relief goes to the **member** at the member's rate (relief at source, higher rates via assessment); non-earners keep the £3,600 gross (£2,880 net) basic amount. Recorded for a future increment — not modelled in 9.29–9.34 (§4.11) | [pension tax relief](https://www.gov.uk/tax-on-your-private-pension/pension-tax-relief) |
+
 ## 7. Default assumptions
 
 Every row is a shipped default the user can override; each carries its
@@ -1784,8 +1938,16 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   decumulation surplus banking (§5.2). CGT stays out of scope (§2).*
 - [ ] 9.3 New tax-year data file after each Budget — *recurring; process in
   §5.3.*
-- [ ] 9.4 Couples activation spike — *survivor benefits, marriage allowance,
-  joint annuities scoped; new decision record in §4 before any code.*
+- [x] 9.4 Couples activation spike (#45) — *survivor benefits, marriage
+  allowance, joint annuities and transfers scoped; decision record
+  §4.11, verified figures §6 "Couples", implementation raised as
+  9.29–9.34. Headline decisions: partner strictly optional; pooled
+  household decumulation with a greedy marginal-cost split; horizon at
+  the later planning age; deterministic optional death ages driving
+  survivor transfers (beneficiary drawdown, ISA APS, DB survivor
+  fraction, joint-life continuation); marriage allowance as the s55B
+  tax reducer via a region-level household adjustment step; living
+  transfers and IHT deferred with rationale.*
 - [x] 9.5 AA carry-forward — *3-year rule per gov.uk guidance. Shipped:
   `aa_carry_forward_years` (3) in the tax-year data; the assessment
   records its inputs and exposes the year's carry-forward-able unused
@@ -2178,6 +2340,67 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   numbered apart rather than colliding in legends and CSV headings.
   Persistence schema v5: every wrapper carries a `label` key, `null`
   for unnamed; the v4→v5 migration adds it on load.*
+- [ ] 9.29 Couples: per-person engine state extraction — *pure refactor,
+  no behaviour change: the per-person mutable state of `_Projection`
+  (wrapper ledgers, income ladders, relief, AA carry-forward/charge,
+  LSA/MPAA ledgers, DB/state-pension/annuity streams) moves into a
+  `_PersonProjection`; `_Projection` keeps plan, region, config,
+  return model, shared CPI/nominal factors and a one-element person
+  list; `run()` still validates one person. Golden scenario and full
+  suite unchanged — this is the low-risk half of the §4.11 engine
+  work, isolated so 9.30's diff is reviewable.*
+- [ ] 9.30 Couples: two-person engine activation — *`run()` accepts two
+  persons (`validate_household_v1` retired from the engine; the form
+  keeps its gate until 9.31). Pooled decumulation per §4.11:
+  `WithdrawalSource` gains `person_id`, per-person tax-free-cash
+  headroom, greedy marginal-cost draws within tax-bearing treatment
+  groups via the existing incremental-tax pricing; aggregate-pot
+  strategies read the household pot; household spending and planned
+  outflows funded from the pooled step; horizon at the latest
+  planning-age date; per-person AA/MPAA/LSA, DB, state pension and
+  contribution machinery runs per person unchanged. Monte Carlo,
+  reporting, comparison and exports flow through (already
+  household-generic).*
+- [ ] 9.31 Couples: partner in the facts form — *optional second person
+  per §4.11: form data `persons: tuple` (1–2), owner key on every
+  repeatable row, "About you"/"About your partner" copy, explicit
+  add/remove-partner actions (removal confirms and deletes the
+  partner's rows); `parse_facts_form` and `form_cannot_represent`
+  drop their extra-person refusals; `entity_names` distinguishes the
+  two persons (no more double "You"); the `persons[0]` narrative
+  sites (outlook, retirement, drawdown cards) take household framing
+  and the solver varies one selected person's age against household
+  employment income; chart categories label both ages
+  (`2032 · 60/58`).*
+- [ ] 9.32 Couples: marriage allowance — *the §4.11 household-level
+  claim Decision (default claimed-when-eligible): per-tax-year
+  eligibility check (transferor below PA; recipient ≤ basic rate rUK /
+  ≤ intermediate Scotland), automatic direction, applied as the ITA
+  2007 s55B tax reducer (basic-rate % of the transferable amount,
+  capped at the recipient's liability, never refundable);
+  `marriage_allowance` keys (£1,260) in the tax-year data files;
+  `TaxSystem.assess` stays per-person — the region gains the §4.11
+  household adjustment step.*
+- [ ] 9.33 Couples: survivor modelling — *optional per-person
+  `death_age: Decision[int]` per §4.11 (scenario-overridable; death at
+  the §4.1 period gate): DC pots merge to the survivor as beneficiary
+  drawdown (income-tax-free below age-75 deaths, marginal rate at/after
+  75; no NMPA gate, no new tax-free cash, no LSA consumption, no death
+  lump sums); ISA/LISA merge via APS; GIA/cash merge; DB continues at
+  the new per-scheme `survivor_fraction` fact defaulting to the
+  `db.survivor_fraction` assumption (50%); the deceased's state
+  pension stops (nothing inherited — §6); marriage allowance lapses
+  the following tax year; spending scales by
+  `spending.survivor_multiplier` (default 0.70, basis pinned per §9
+  open question 9). Both new assumption keys land in §7 + the
+  defaults file with this issue (doc-sync).*
+- [ ] 9.34 Couples: joint-life annuities end-to-end — *the purchase
+  gains a survivor-fraction decision (50/66/100%, §6); the facts form
+  enters joint-life purchases (`form_cannot_represent` drops its last
+  couples refusal); on the buyer's death (9.33) the stream continues
+  to the survivor at that fraction; single joint pricing factor (0.92)
+  regardless of fraction recorded as a labelled v1 limitation of the
+  §7 age-adjustment table.*
 
 ## 9. Open questions
 
@@ -2224,3 +2447,9 @@ Carried from the 2026-08-01 research pass:
    up the alternative AA but never the MPAA. Verified on
    [HS345 (2026)](https://www.gov.uk/government/publications/pensions-tax-charges-on-any-excess-over-the-lifetime-allowance-annual-allowance-special-annual-allowance-and-on-unauthorised-payments-hs345-self/hs345-pension-savings-tax-charges-2026)
    (§6).
+9. **Survivor spending multiplier basis** (from the 2026-08-11 couples
+   spike) — the §4.11 default of 0.70 is a placeholder ratio; pin it
+   against the PLSA Retirement Living Standards single-vs-couple
+   budgets (fetch the current-year figures) when 9.33 ships the
+   `spending.survivor_multiplier` key — natural companion to the PLSA
+   benchmarks work in #165.
