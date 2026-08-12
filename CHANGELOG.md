@@ -11,6 +11,24 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- The facts form gains an optional partner (roadmap 9.31, planning
+  §4.11): one explicit "Add a partner" action reveals an "About your
+  partner" section plus the partner's own state pension, wrappers, DB
+  pensions, and annuity purchases; removing the partner confirms
+  first, then deletes their entries. Two-person plan files now open
+  in the form instead of being refused, with every row keeping its
+  stable entity id for both persons. The inspector, scenario manager,
+  and cash-flow export name the persons "You" / "Your partner" (owned
+  entities read "Your …" / "Partner's …"), chart categories label
+  both ages ("2032 · 60/58"), the retirement outlook card reads the
+  household's pots at the later retirement date with each person's
+  annuity slice and State Pension spelled out, and the "When can I
+  retire?" and "How much can I draw down?" cards gain a whose-age
+  selector — the search varies one person's retirement age with the
+  partner's held fixed, measured against household employment income.
+  A plan without a partner renders, parses, and projects exactly as
+  before.
+
 - The projection engine models two-person households (roadmap 9.30,
   planning §4.11): one pooled withdrawal step per period funds the
   household's spending and planned outflows from both persons'
@@ -23,8 +41,7 @@ in the release PR and becomes the GitHub Release notes verbatim.
   each person under their own schedule. Household spending begins once
   every person has retired; a retired partner's income meanwhile
   banks like any pre-decumulation income. Single-person plans are
-  unchanged (bit-identical results), and the facts form still edits
-  one person until the partner entry lands (roadmap 9.31).
+  unchanged (bit-identical results).
 
 - Wrappers can carry your own name for the account ("Aviva SIPP",
   roadmap 9.28): a new optional Name field on each savings wrapper,

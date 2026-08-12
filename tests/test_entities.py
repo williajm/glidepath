@@ -13,7 +13,6 @@ from glidepath.core.entities import (
     Sex,
     TaxResidencyId,
     new_entity_id,
-    validate_household_v1,
 )
 from glidepath.core.glide import GlidePathConfig, GlidePathPoint
 from glidepath.core.investments import AssetAllocation
@@ -130,19 +129,16 @@ def test_new_entity_ids_are_unique_strings() -> None:
     assert isinstance(first, str)
 
 
-def test_single_person_household_is_valid_for_v1() -> None:
-    """One person passes both the schema bound and the v1 validator."""
+def test_single_person_household_is_valid() -> None:
+    """One person satisfies the schema bound."""
     household = Household(persons=(make_person(),))
-    validate_household_v1(household)
     assert household.persons[0].employment_income is None
 
 
-def test_two_person_household_representable_but_rejected_by_v1() -> None:
-    """Planning §4.4: the schema holds couples now; v1 refuses to run them."""
+def test_two_person_household_is_valid() -> None:
+    """Planning §4.4, §4.11: the schema holds couples, valid everywhere."""
     household = Household(persons=(make_person(), make_person()))
     assert len(household.persons) == 2
-    with pytest.raises(ValueError, match="exactly one person"):
-        validate_household_v1(household)
 
 
 def test_household_rejects_zero_and_three_persons() -> None:

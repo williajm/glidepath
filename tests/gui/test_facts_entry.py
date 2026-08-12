@@ -5,20 +5,30 @@ spec fields become editors, raw text collects back keyed like the
 specs, and repeatable sections add and remove instances.
 """
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QDate, QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+)
 
 from glidepath.app import (
     ENTITY_ID_KEY,
+    OWNER_KEY,
     FactsFormData,
     FieldKind,
+    PersonFormData,
     PlanEntityIds,
     build_facts_form_view_model,
 )
+from glidepath.gui import forms as forms_module
 from glidepath.gui.forms import (
     DateEntry,
     FactsEntryPane,
@@ -222,6 +232,21 @@ class TestRepeatableSection:
         with pytest.raises(KeyError):
             first.editor(ENTITY_ID_KEY)
 
+    def test_owner_keys_are_ignored_rather_than_rendered(self) -> None:
+        """Seeded owner stamps never become editors or collected values.
+
+        The owner is the pane's section placement (roadmap 9.31), so a
+        section fed combined rows must swallow the reserved key.
+        """
+        section = RepeatableSection(build_facts_form_view_model().wrapper)
+        section.set_values_list(({OWNER_KEY: "1", "balance": "1111"},))
+        [values] = section.values_list()
+        assert values.get(OWNER_KEY) is None
+        assert values["balance"] == "1111"
+        [form] = section.forms
+        with pytest.raises(KeyError):
+            form.editor(OWNER_KEY)
+
     def test_removing_a_row_removes_its_id(self) -> None:
         """The id travels with its row, never with its position (§4.3)."""
         spec = build_facts_form_view_model().wrapper
@@ -288,10 +313,13 @@ class TestFactsEntryPane:
         annuity_form.set_value("at_age", "68")
         pane.submit_button.click()
         [data] = received
-        assert data.person["date_of_birth"] == "1984-05-20"
+        [person] = data.persons
+        assert person.person["date_of_birth"] == "1984-05-20"
         assert data.wrappers[0]["balance"] == "25000"
+        assert data.wrappers[0][OWNER_KEY] == "0"
         assert data.db_pensions == ()
         assert data.annuity_purchases[0]["at_age"] == "68"
+        assert data.annuity_purchases[0][OWNER_KEY] == "0"
         assert pane.status_label.text() == "status text"
 
     def test_set_form_data_populates_every_section(self) -> None:
@@ -299,14 +327,14 @@ class TestFactsEntryPane:
         pane = _pane()
         pane.set_form_data(
             FactsFormData(
-                person={"date_of_birth": "1991-06-15"},
+                persons=(PersonFormData(person={"date_of_birth": "1991-06-15"}),),
                 spending={"annual_spending_real": "28000"},
                 wrappers=({"balance": "48000"}, {"balance": "16500"}),
                 annuity_purchases=({"at_age": "68", "fraction_of_pot": "0.5"},),
             )
         )
         data = pane.form_data()
-        assert data.person["date_of_birth"] == "1991-06-15"
+        assert data.persons[0].person["date_of_birth"] == "1991-06-15"
         assert data.spending["annual_spending_real"] == "28000"
         assert [values["balance"] for values in data.wrappers] == ["48000", "16500"]
         assert data.annuity_purchases[0]["fraction_of_pot"] == "0.5"
@@ -316,9 +344,13 @@ class TestFactsEntryPane:
         pane = _pane()
         pane.person_form.set_value("employment_income", "52000")
         pane.wrappers.add_entry().set_value("balance", "111")
-        pane.set_form_data(FactsFormData(person={"date_of_birth": "1991-06-15"}))
+        pane.set_form_data(
+            FactsFormData(
+                persons=(PersonFormData(person={"date_of_birth": "1991-06-15"}),)
+            )
+        )
         data = pane.form_data()
-        assert data.person["employment_income"] == ""
+        assert data.persons[0].person["employment_income"] == ""
         assert data.wrappers == ()
 
     def test_set_entity_ids_seeds_every_repeatable_section(self) -> None:
@@ -340,6 +372,173 @@ class TestFactsEntryPane:
         pane.person_form.set_value("date_of_birth", "1984-05-20")
         pane.wrappers.add_entry().set_value("balance", "25000")
         pane.clear_button.click()
-        assert pane.form_data().person["date_of_birth"] == ""
+        assert pane.form_data().persons[0].person["date_of_birth"] == ""
         assert pane.form_data().wrappers == ()
         assert pane.status_label.text() == "cleared status"
+
+
+def _message_box_answering(choice: QMessageBox.StandardButton) -> SimpleNamespace:
+    """A QMessageBox stand-in whose question always answers ``choice``."""
+    return SimpleNamespace(
+        StandardButton=QMessageBox.StandardButton,
+        question=lambda *_args: choice,
+    )
+
+
+def _pane_with_partner_entries() -> FactsEntryPane:
+    """A pane with values and one row typed under each person."""
+    pane = _pane()
+    pane.person_form.set_value("date_of_birth", "1984-05-20")
+    pane.wrappers.add_entry().set_value("balance", "1111")
+    pane.add_partner()
+    pane.partner_form.set_value("date_of_birth", "1986-03-02")
+    pane.partner_state_pension_form.set_value("forecast_weekly_amount", "230.25")
+    pane.partner_wrappers.add_entry().set_value("balance", "2222")
+    return pane
+
+
+class TestFactsEntryPanePartner:
+    """The optional partner sections and their owner routing (9.31)."""
+
+    def test_the_partner_starts_off_the_form(self) -> None:
+        """No partner until asked: sections hidden, add action shown."""
+        pane = _pane()
+        assert not pane.has_partner
+        assert pane.add_partner_button.isVisibleTo(pane)
+        assert not pane.partner_form.isVisibleTo(pane)
+        assert not pane.partner_wrappers.isVisibleTo(pane)
+        data = pane.form_data()
+        assert len(data.persons) == 1
+
+    def test_add_partner_shows_the_sections(self) -> None:
+        """The one explicit action swaps the button for the sections."""
+        pane = _pane()
+        pane.add_partner()
+        assert pane.has_partner
+        assert not pane.add_partner_button.isVisibleTo(pane)
+        assert pane.partner_form.isVisibleTo(pane)
+        assert pane.partner_state_pension_form.isVisibleTo(pane)
+        assert pane.partner_wrappers.isVisibleTo(pane)
+        assert pane.remove_partner_button.isVisibleTo(pane)
+
+    def test_partner_entries_land_in_form_data(self) -> None:
+        """Two persons submit, partner rows owner-stamped after mine."""
+        pane = _pane_with_partner_entries()
+        data = pane.form_data()
+        assert len(data.persons) == 2
+        assert data.persons[1].person["date_of_birth"] == "1986-03-02"
+        assert data.persons[1].state_pension["forecast_weekly_amount"] == "230.25"
+        owners = [(row[OWNER_KEY], row["balance"]) for row in data.wrappers]
+        assert owners == [("0", "1111"), ("1", "2222")]
+
+    def test_set_form_data_routes_rows_by_owner(self) -> None:
+        """A two-person payload activates the partner and splits rows."""
+        pane = _pane()
+        pane.set_form_data(
+            FactsFormData(
+                persons=(
+                    PersonFormData(person={"date_of_birth": "1984-05-20"}),
+                    PersonFormData(
+                        person={"date_of_birth": "1986-03-02"},
+                        state_pension={"forecast_weekly_amount": "230.25"},
+                    ),
+                ),
+                wrappers=(
+                    {"balance": "1111"},
+                    {OWNER_KEY: "1", "balance": "2222"},
+                ),
+            )
+        )
+        assert pane.has_partner
+        assert pane.partner_form.values()["date_of_birth"] == "1986-03-02"
+        partner_pension = pane.partner_state_pension_form.values()
+        assert partner_pension["forecast_weekly_amount"] == "230.25"
+        [mine] = pane.wrappers.values_list()
+        assert mine["balance"] == "1111"
+        [theirs] = pane.partner_wrappers.values_list()
+        assert theirs["balance"] == "2222"
+
+    def test_set_form_data_with_one_person_deactivates_the_partner(self) -> None:
+        """A single-person payload takes the partner off the form."""
+        pane = _pane_with_partner_entries()
+        payload = FactsFormData(
+            persons=(PersonFormData(person={"date_of_birth": "1984-05-20"}),)
+        )
+        pane.set_form_data(payload)
+        assert not pane.has_partner
+        assert pane.partner_form.values()["date_of_birth"] == ""
+        assert pane.partner_wrappers.values_list() == ()
+
+    def test_clear_empties_the_partner_sections(self) -> None:
+        """The clear button leaves no partner residue behind."""
+        pane = _pane_with_partner_entries()
+        pane.clear_button.click()
+        assert not pane.has_partner
+        assert pane.partner_form.values()["date_of_birth"] == ""
+        assert pane.partner_state_pension_form.values()["forecast_weekly_amount"] == ""
+        assert pane.partner_wrappers.values_list() == ()
+        assert len(pane.form_data().persons) == 1
+
+    def test_remove_partner_deletes_their_values_and_rows(self) -> None:
+        """Removal empties the partner sections and hides them again."""
+        pane = _pane_with_partner_entries()
+        pane.remove_partner()
+        assert not pane.has_partner
+        assert pane.add_partner_button.isVisibleTo(pane)
+        assert pane.partner_form.values()["date_of_birth"] == ""
+        assert pane.partner_wrappers.values_list() == ()
+        data = pane.form_data()
+        assert len(data.persons) == 1
+        assert [row["balance"] for row in data.wrappers] == ["1111"]
+
+    def test_remove_button_confirms_before_deleting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Answering Yes to the prompt removes the partner."""
+        pane = _pane_with_partner_entries()
+        monkeypatch.setattr(
+            forms_module,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.Yes),
+        )
+        pane.remove_partner_button.click()
+        assert not pane.has_partner
+        assert pane.partner_wrappers.values_list() == ()
+
+    def test_declining_the_confirm_keeps_the_partner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Answering No leaves the partner and their rows in place."""
+        pane = _pane_with_partner_entries()
+        monkeypatch.setattr(
+            forms_module,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.No),
+        )
+        pane.remove_partner_button.click()
+        assert pane.has_partner
+        assert pane.partner_form.values()["date_of_birth"] == "1986-03-02"
+        [row] = pane.partner_wrappers.values_list()
+        assert row["balance"] == "2222"
+
+    def test_set_entity_ids_splits_the_combined_ids_by_row_count(self) -> None:
+        """Ids arrive mine-first and land on the owning sections."""
+        pane = _pane()
+        pane.wrappers.add_entry()
+        pane.wrappers.add_entry()
+        pane.add_partner()
+        pane.partner_wrappers.add_entry()
+        pane.partner_annuity_purchases.add_entry()
+        pane.set_entity_ids(
+            PlanEntityIds(
+                wrappers=("id-w0", "id-w1", "id-pw0"),
+                annuity_purchases=("id-pa0",),
+            )
+        )
+        data = pane.form_data()
+        assert [row[ENTITY_ID_KEY] for row in data.wrappers] == [
+            "id-w0",
+            "id-w1",
+            "id-pw0",
+        ]
+        assert [row[ENTITY_ID_KEY] for row in data.annuity_purchases] == ["id-pa0"]

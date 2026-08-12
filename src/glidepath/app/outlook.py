@@ -16,10 +16,15 @@ Monte Carlo outcomes for the percentile bands), so the card needs no
 run of its own and can never disagree with the fan chart beside it.
 
 Pot values are read at the tax-year end immediately before the
-retirement age is attained — the last close before withdrawals can
-begin. A person already at or past their target retirement age on
-the run date reads the first projected period's close instead,
-phrased as "by the end of this tax year".
+household is fully retired — the last close before withdrawals can
+begin (household spending starts once every person has retired,
+planning §4.11), which for a couple is the later of the two target
+retirement dates. A household already at or past that point on the
+run date reads the first projected period's close instead, phrased
+as "by the end of this tax year". The card speaks at household level
+throughout (roadmap 9.31): pots are the household's pots, the annuity
+quote buys each person's pension slice at their own age, and each
+person's State Pension forecast stacks on separately.
 """
 
 from dataclasses import dataclass
@@ -46,9 +51,11 @@ if TYPE_CHECKING:
     from glidepath.app.plan import PlanState
     from glidepath.core import (
         AssumptionSet,
+        EntityId,
         MonteCarloResult,
         PeriodSnapshot,
         Person,
+        PersonPeriodResult,
         ProjectionResult,
         RunProvenance,
     )
@@ -102,13 +109,13 @@ class _Reading:
     """Where on the period grid the card reads the pots.
 
     ``index`` is the snapshot whose closing balances are quoted;
-    ``age`` is the retirement age the copy names, or ``None`` for a
-    person already at or past it — the "by the end of this tax year"
-    phrasing.
+    ``ages`` are each person's age at the reading (household order) the
+    copy names, or ``None`` for a household already fully retired —
+    the "by the end of this tax year" phrasing.
     """
 
     index: int
-    age: int | None
+    ages: tuple[int, ...] | None
 
 
 @dataclass(frozen=True)
@@ -117,13 +124,13 @@ class _CardContext:
 
     All of it comes from state the panel already holds: the effective
     assumptions, the base run's provenance (for the §4.8 roll-forward
-    disclosures), the person, and the reading snapshot the pots are
-    quoted at.
+    disclosures), the household's persons, and the reading snapshot
+    the pots are quoted at.
     """
 
     assumptions: AssumptionSet
     provenance: RunProvenance
-    person: Person
+    persons: tuple[Person, ...]
     snapshot: PeriodSnapshot
     reading: _Reading
 
@@ -143,8 +150,7 @@ def build_outlook_panel(state: PlanState) -> OutlookPanelViewModel:
     monte_carlo = state.monte_carlo
     if result is None or monte_carlo is None:
         return _message_panel(NO_OUTLOOK_MESSAGE)
-    person = household.persons[0]
-    reading = _retirement_reading(result, person)
+    reading = _retirement_reading(result, household.persons)
     try:
         totals = monte_carlo.balance_percentiles(_PERCENTILES)
         pensions = monte_carlo.pension_balance_percentiles(_PERCENTILES)
@@ -160,7 +166,7 @@ def build_outlook_panel(state: PlanState) -> OutlookPanelViewModel:
     context = _CardContext(
         assumptions=state.assumptions,
         provenance=result.provenance,
-        person=person,
+        persons=household.persons,
         snapshot=snapshot,
         reading=reading,
     )
@@ -182,29 +188,40 @@ def _message_panel(message: str) -> OutlookPanelViewModel:
     )
 
 
-def _retirement_reading(result: ProjectionResult, person: Person) -> _Reading | None:
+def _retirement_reading(
+    result: ProjectionResult, persons: tuple[Person, ...]
+) -> _Reading | None:
     """The period the pots are read at, or ``None`` off the grid.
 
-    The close immediately before the period in which the target
-    retirement age is attained — the last balance withdrawals cannot
-    yet have touched. Retirement inside the first projected period
-    reads that period's own close; a retirement age already attained
-    on the run's ``today`` (not the first period's start — the first
-    tax year opens before the run date, so a birthday between the two
-    is already past) reads the first close too, with the age dropped
-    from the copy (module docstring). ``None`` only when the
-    projection ends before the retirement age — a horizon shorter
-    than the plan's own decisions, which the engine normally refuses
-    upstream.
+    The close immediately before the period in which the household is
+    fully retired — the last balance withdrawals cannot yet have
+    touched (spending starts once every person has retired, §4.11),
+    so a couple reads at the *later* target retirement date, and the
+    copy names each person's age at that moment. Retirement inside
+    the first projected period reads that period's own close; a
+    household already fully retired on the run's ``today`` (not the
+    first period's start — the first tax year opens before the run
+    date, so a birthday between the two is already past) reads the
+    first close too, with the ages dropped from the copy (module
+    docstring). ``None`` only when the projection ends before the
+    retirement date — a horizon shorter than the plan's own
+    decisions, which the engine normally refuses upstream.
     """
-    retirement_age = person.target_retirement_age.value
-    attained = date_age_attained(person.date_of_birth.value, retirement_age)
+    attained = max(
+        date_age_attained(
+            person.date_of_birth.value, person.target_retirement_age.value
+        )
+        for person in persons
+    )
     snapshots = result.snapshots
     if attained <= result.config.today:
-        return _Reading(index=0, age=None)
+        return _Reading(index=0, ages=None)
     for position, snapshot in enumerate(snapshots):
         if snapshot.period.contains(attained):
-            return _Reading(index=max(position - 1, 0), age=retirement_age)
+            ages = tuple(
+                age_on(person.date_of_birth.value, attained) for person in persons
+            )
+            return _Reading(index=max(position - 1, 0), ages=ages)
     return None
 
 
@@ -239,13 +256,20 @@ def _pounds(value: Money) -> str:
     return f"£{value.amount:,.0f}"
 
 
+def _ages_phrase(ages: tuple[int, ...]) -> str:
+    """The reading's ages as copy: ``age 62``, or ``ages 65 and 60``."""
+    if len(ages) == 1:
+        return f"age {ages[0]}"
+    return f"ages {ages[0]} and {ages[1]}"
+
+
 def _pot_sentence(reading: _Reading, totals: tuple[Money, ...]) -> str:
     """The headline: the median pot with its likely range."""
     _, p25, p50, p75, _ = totals
     anchor = (
         "By the end of this tax year"
-        if reading.age is None
-        else f"At age {reading.age}"
+        if reading.ages is None
+        else f"At {_ages_phrase(reading.ages)}"
     )
     return (
         f"{anchor}, your pots could be worth around {_pounds(p50)} in"
@@ -268,65 +292,143 @@ def _income_sentences(context: _CardContext, pensions: tuple[Money, ...]) -> lis
     Each sentence appears only when it has something true to say: the
     pension slice only when other savings sit alongside it, the
     annuity only when there is pension money to convert and the
-    shipped rate table covers the purchase age, the State Pension only
-    when the person holds a usable forecast. The annuity quote follows
-    the engine's whole-pot purchase: the tax-free cash comes out
-    first (:func:`_tax_free_cash`) and only the remainder buys
-    income.
+    shipped rate table covers every purchase age, a State Pension only
+    for a person holding a usable forecast. The annuity quote follows
+    the engine's whole-pot purchase per person: each person's slice of
+    the household pension pot pays its tax-free cash out first
+    (:func:`_tax_free_cash`) and only the remainder buys income at
+    that person's own age.
     """
     _, p25, p50, p75, _ = pensions
     lines: list[str] = []
-    annuity_income = None
+    quote = None
     if p50 > _ZERO_MONEY:
-        if any(not wrapper.pension for wrapper in context.snapshot.persons[0].wrappers):
+        if any(
+            not wrapper.pension
+            for person in context.snapshot.persons
+            for wrapper in person.wrappers
+        ):
             lines.append(
                 "Pensions alone — the money an annuity could be bought with —"
                 f" could hold around {_pounds(p50)}, likely between"
                 f" {_pounds(p25)} and {_pounds(p75)}."
             )
-        purchase_age = (
-            context.reading.age
-            if context.reading.age is not None
-            else age_on(context.person.date_of_birth.value, context.snapshot.period.end)
-        )
-        tax_free = _tax_free_cash(context, p50)
-        annuity_income = _annuity_income(
-            context.assumptions, p50 - tax_free, purchase_age
-        )
-        if annuity_income is not None and tax_free > _ZERO_MONEY:
-            lines.append(
-                f"As a level single-life annuity bought at {purchase_age}, the"
-                f" middle pension pot would pay about {_pounds(annuity_income)}"
-                f" a year before tax, alongside around {_pounds(tax_free)} of"
-                " up-front tax-free cash."
-            )
-        elif annuity_income is not None:
-            lines.append(
-                f"As a level single-life annuity bought at {purchase_age}, the"
-                f" middle pension pot would pay about {_pounds(annuity_income)}"
-                " a year before tax."
-            )
-    state_pension = _state_pension_sentence(
-        context.person, annuity_income, context.provenance
-    )
-    if state_pension is not None:
-        lines.append(state_pension)
+        quote = _annuity_quote(context, p50)
+        if quote is not None:
+            lines.append(_annuity_sentence(quote))
+    annuity_income = None if quote is None else quote.income
+    lines.extend(_state_pension_lines(context, annuity_income))
     return lines
 
 
-def _tax_free_cash(context: _CardContext, pot: Money) -> Money:
-    """The tax-free cash a whole-pot annuity purchase pays out first.
+@dataclass(frozen=True)
+class _AnnuityQuote:
+    """A whole-pot annuity purchase: income, up-front cash, and ages."""
+
+    income: Money
+    tax_free: Money
+    ages: tuple[int, ...]
+
+
+def _annuity_sentence(quote: _AnnuityQuote) -> str:
+    """The annuity quote as copy, single or couple phrasing."""
+    if len(quote.ages) == 1:
+        product = f"a level single-life annuity bought at {quote.ages[0]}"
+    else:
+        product = f"level single-life annuities bought at {_ages_phrase(quote.ages)}"
+    sentence = (
+        f"As {product}, the middle pension pot would pay about"
+        f" {_pounds(quote.income)} a year before tax"
+    )
+    if quote.tax_free > _ZERO_MONEY:
+        return (
+            f"{sentence}, alongside around {_pounds(quote.tax_free)} of"
+            " up-front tax-free cash."
+        )
+    return f"{sentence}."
+
+
+def _purchase_age(context: _CardContext, position: int) -> int:
+    """The person's age when the card's annuity purchase happens."""
+    ages = context.reading.ages
+    if ages is not None:
+        return ages[position]
+    person = context.persons[position]
+    return age_on(person.date_of_birth.value, context.snapshot.period.end)
+
+
+def _annuity_quote(context: _CardContext, pot: Money) -> _AnnuityQuote | None:
+    """The household's whole-pot purchase, or ``None`` off the rate table.
+
+    The median household pension pot splits between the persons by
+    their pension balances at the reading snapshot (the base
+    projection keeps the per-person split; path outcomes do not), and
+    each person's slice buys a single-life annuity at their own age
+    after paying out its tax-free cash. A household whose base
+    snapshot holds no pension balance reads as the first person's
+    whole pot — the degenerate single-person behaviour. ``None``
+    whenever a purchasing person's age falls outside the shipped
+    age-adjustment table — the model does not extrapolate (§5.3).
+    """
+    balances = tuple(
+        _pension_closing_balance(_snapshot_person(context, person.id))
+        for person in context.persons
+    )
+    total = sum((balance for balance in balances), _ZERO_MONEY)
+    if total > _ZERO_MONEY:
+        slices = tuple(
+            Money(pot.amount * balance.amount / total.amount) for balance in balances
+        )
+    else:
+        slices = (pot, *(_ZERO_MONEY,) * (len(context.persons) - 1))
+    income = _ZERO_MONEY
+    tax_free = _ZERO_MONEY
+    ages: list[int] = []
+    for position, pot_slice in enumerate(slices):
+        if pot_slice <= _ZERO_MONEY and total > _ZERO_MONEY:
+            continue
+        age = _purchase_age(context, position)
+        cash = _tax_free_cash(context, position, pot_slice)
+        slice_income = _annuity_income(context.assumptions, pot_slice - cash, age)
+        if slice_income is None:
+            return None
+        income = income + slice_income
+        tax_free = tax_free + cash
+        ages.append(age)
+    return _AnnuityQuote(income=income, tax_free=tax_free, ages=tuple(ages))
+
+
+def _snapshot_person(context: _CardContext, person_id: EntityId) -> PersonPeriodResult:
+    """The reading snapshot's results for the person with ``person_id``."""
+    for person in context.snapshot.persons:
+        if person.person_id == person_id:
+            return person
+    msg = f"person {person_id} is missing from the reading snapshot"
+    raise ValueError(msg)
+
+
+def _pension_closing_balance(person: PersonPeriodResult) -> Money:
+    """The person's pension wrappers' closing balance at the reading."""
+    balances = (
+        wrapper.closing_balance for wrapper in person.wrappers if wrapper.pension
+    )
+    return sum(balances, _ZERO_MONEY)
+
+
+def _tax_free_cash(context: _CardContext, position: int, pot: Money) -> Money:
+    """The tax-free cash one person's annuity slice pays out first.
 
     The engine's 5.5 convention: crystallising uncrystallised funds
     delivers the region's tax-free fraction as cash — capped at the
-    remaining lump-sum-allowance headroom — and only the remainder
-    buys income; already-crystallised funds annuitise whole. The
-    uncrystallised share comes from the base projection's reading
-    snapshot (path outcomes keep no sub-balance split), and the
-    headroom uses the person's cumulative tax-free cash at that
-    close, so the estimate follows the engine's own ledger.
+    remaining lump-sum-allowance headroom, an individual cap (§4.11)
+    — and only the remainder buys income; already-crystallised funds
+    annuitise whole. The uncrystallised share comes from the base
+    projection's reading snapshot (path outcomes keep no sub-balance
+    split), and the headroom uses the person's cumulative tax-free
+    cash at that close, so the estimate follows the engine's own
+    ledger.
     """
-    person = context.snapshot.persons[0]
+    person = _snapshot_person(context, context.persons[position].id)
     total = _ZERO_MONEY
     uncrystallised = _ZERO_MONEY
     pension_kind = None
@@ -377,17 +479,51 @@ def _annuity_income(
     return Money(capital.amount * rate)
 
 
-def _state_pension_sentence(
-    person: Person, annuity_income: Money | None, provenance: RunProvenance
-) -> str | None:
-    """The State Pension stacked on top, or ``None`` without a forecast.
+_FORECAST_PREFIXES = ("Your", "Your partner's")
+"""State Pension sentence openers by household position (9.31)."""
+
+
+def _state_pension_lines(
+    context: _CardContext, annuity_income: Money | None
+) -> list[str]:
+    """Each person's State Pension stacked on top, in household order.
+
+    One sentence per person holding a usable forecast, opened "Your" /
+    "Your partner's"; the closing "all told" figure lands on the last
+    sentence and combines the annuity income with *every* forecast —
+    the household's whole guaranteed layer (§4.11).
+    """
+    quotes = [
+        (position, quote)
+        for position, person in enumerate(context.persons)
+        if (quote := _state_pension_quote(person, context.provenance)) is not None
+    ]
+    total = sum((annual for _, (annual, _) in quotes), _ZERO_MONEY)
+    lines = []
+    for count, (position, (annual, start)) in enumerate(quotes, start=1):
+        prefix = _FORECAST_PREFIXES[position]
+        sentence = (
+            f"{prefix} State Pension forecast adds {_pounds(annual)}"
+            f" a year from {start}"
+        )
+        if count == len(quotes) and annuity_income is not None:
+            combined = annuity_income + total
+            sentence = f"{sentence} — around {_pounds(combined)} a year all told"
+        lines.append(f"{sentence}.")
+    return lines
+
+
+def _state_pension_quote(
+    person: Person, provenance: RunProvenance
+) -> tuple[Money, str] | None:
+    """One person's (annual amount, start-age phrase), or ``None``.
 
     The DWP forecast states today's rates as of its own date; a stale
     forecast is quoted as the run opened it — the §4.8 roll-forward
     the engine disclosed — so the card and the projection uprate the
-    same way. Deferral-uplifted and protected payment included, the
-    amount adds directly onto the annuity's today's-money income; the
-    start age keeps the timetable's month-level precision.
+    same way. Deferral-uplifted and protected payment included; the
+    start age keeps the timetable's month-level precision. ``None``
+    without a usable forecast.
     """
     record = person.state_pension
     if record is None:
@@ -405,15 +541,7 @@ def _state_pension_sentence(
         base = weekly * _WEEKS_PER_YEAR
     annual = base * (_ONE + entitlement.deferral_uplift)
     start = _age_phrase(person.date_of_birth.value, entitlement.start_date)
-    if annuity_income is None:
-        return (
-            f"Your State Pension forecast adds {_pounds(annual)} a year from {start}."
-        )
-    combined = annuity_income + annual
-    return (
-        f"Your State Pension forecast adds {_pounds(annual)} a year from"
-        f" {start} — around {_pounds(combined)} a year all told."
-    )
+    return annual, start
 
 
 def _rolled_forecast_weekly(person: Person, provenance: RunProvenance) -> Money | None:

@@ -14,9 +14,10 @@ actually probed, never interpolated. A candidate whose retirement
 date falls at or past the run's horizon has no retired period to test
 the income in — it fails rather than succeeding vacuously.
 
-Each probe replaces the (v1 single) person's retirement-age decision
-with the candidate and the household's spending plan with the target
-income, then runs the plan under the given config. Under a
+Each probe replaces the *selected* person's retirement-age decision
+with the candidate — a partner's decision is held fixed (planning
+§4.11) — and the household's spending plan with the target income,
+then runs the plan under the given config. Under a
 deterministic config a candidate succeeds when no period's need goes
 unmet — the same per-period ``shortfall`` ruin signal the Monte Carlo
 metrics read (planning §5.2). Under a seeded Monte Carlo config the
@@ -28,8 +29,9 @@ alone (§4.6), and probe plans never leave the search.
 
 :func:`sustainable_income_at_age` is the same question asked the
 other way around (roadmap 9.25): "how much can I draw down if I
-retire at this age?" — the retirement-age decision is fixed at the
-chosen age and the spending level is searched, delegating to the
+retire at this age?" — the selected person's retirement-age decision
+is fixed at the chosen age and the spending level is searched,
+delegating to the
 7.3 income search under the same exposure gate: an age with no
 retired period inside the run's horizon has nothing to test the
 income in, so it answers ``None`` rather than succeeding vacuously.
@@ -55,7 +57,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from glidepath.core.config import RunConfig
-    from glidepath.core.entities import Household, Person
+    from glidepath.core.entities import EntityId, Household, Person
     from glidepath.core.montecarlo import PathParallelism, SustainableIncomeSearch
     from glidepath.core.periods import Period
     from glidepath.core.provenance import AssumptionSet
@@ -87,6 +89,13 @@ class RetirementAgeSearch:
     maximum_age: int
     paths: int = 1
     target_success_rate: Decimal = _ONE
+    person_id: EntityId | None = None
+    """Whose retirement age the search varies (planning §4.11).
+
+    ``None`` selects the household's first person — the only person of
+    a single household. A partner's retirement-age decision is held
+    fixed through every probe.
+    """
 
     def __post_init__(self) -> None:
         """Reject an empty target, a backwards bracket, or off-range knobs."""
@@ -146,10 +155,12 @@ def earliest_retirement_age(  # noqa: PLR0913
     per age.
 
     Raises:
+        ValueError: If the search selects a person not in the plan.
         EngineError: If a probe is rejected by the engine — including a
             Monte Carlo config without a seed (planning §5.2).
     """
-    date_of_birth = plan.persons[0].date_of_birth.value
+    selected = _selected_person(plan, search.person_id)
+    date_of_birth = selected.date_of_birth.value
     periods = _projected_periods(plan, assumptions, region, config)
 
     def has_retired_period(age: int) -> bool:
@@ -162,7 +173,7 @@ def earliest_retirement_age(  # noqa: PLR0913
     def meets(age: int) -> bool:
         """Whether retiring at ``age`` sustains the target income."""
         probe = _with_retirement_age(
-            probe_with_spending(plan, search.target_income, config), age
+            probe_with_spending(plan, search.target_income, config), age, selected.id
         )
         if config.mode is RunMode.MONTE_CARLO:
             result = run_paths(
@@ -191,13 +202,16 @@ def sustainable_income_at_age(  # noqa: PLR0913
     *,
     age: int,
     search: SustainableIncomeSearch,
+    person_id: EntityId | None = None,
     parallelism: PathParallelism | None = None,
 ) -> Money | None:
     """The highest income sustainable when retiring at ``age`` (9.25).
 
-    The drawdown dual of :func:`earliest_retirement_age`: the (v1
-    single) person's retirement-age decision is replaced with ``age``
-    and the spending level is searched through
+    The drawdown dual of :func:`earliest_retirement_age`: the selected
+    person's retirement-age decision is replaced with ``age`` — a
+    partner's decision is held fixed (planning §4.11); ``person_id``
+    ``None`` selects the household's first person — and the spending
+    level is searched through
     :func:`~glidepath.core.montecarlo.sustainable_income` — the same
     scan-plus-bisection over the search's bracket, the same success
     reading per probe (no unmet need under a deterministic config;
@@ -218,14 +232,16 @@ def sustainable_income_at_age(  # noqa: PLR0913
     by it: not even zero spending survives the plan's outflows.
 
     Raises:
-        ValueError: If ``age`` is negative.
+        ValueError: If ``age`` is negative, or ``person_id`` selects a
+            person not in the plan.
         EngineError: If a probe is rejected by the engine — including
             a Monte Carlo config without a seed (planning §5.2).
     """
     if age < 0:
         msg = f"age must be non-negative, got {age}"
         raise ValueError(msg)
-    date_of_birth = plan.persons[0].date_of_birth.value
+    selected = _selected_person(plan, person_id)
+    date_of_birth = selected.date_of_birth.value
     exposed = any(
         is_age_attained_by_period_start(date_of_birth, age, period)
         for period in _projected_periods(plan, assumptions, region, config)
@@ -233,7 +249,7 @@ def sustainable_income_at_age(  # noqa: PLR0913
     if not exposed:
         return None
     return sustainable_income(
-        _with_retirement_age(plan, age),
+        _with_retirement_age(plan, age, selected.id),
         assumptions,
         region,
         config,
@@ -262,26 +278,46 @@ def _horizon_end(
 
     The same resolution the engine applies (planning §5.2), computed
     here so the exposure gate can see the periods a probe would
-    project. v1 households hold one person (§4.4), whose date of birth
-    anchors the default.
+    project: the latest of the persons' planning-age dates — one
+    household end (planning §4.11).
     """
     if config.horizon_end is not None:
         return config.horizon_end
     planning_age = int_assumption_value(
         assumptions.get(AssumptionKey.HORIZON_PLANNING_AGE)
     )
-    return date_age_attained(plan.persons[0].date_of_birth.value, planning_age)
+    return max(
+        date_age_attained(person.date_of_birth.value, planning_age)
+        for person in plan.persons
+    )
 
 
-def _with_retirement_age(plan: Household, age: int) -> Household:
-    """The plan with every person's retirement-age decision at ``age``.
+def _selected_person(plan: Household, person_id: EntityId | None) -> Person:
+    """The person a search varies: by id, or the household's first.
 
-    v1 households hold one person (§4.4), so this is *the* person's
-    decision; the decision's recorded-on metadata carries over, exactly
-    as a scenario override resolves (§4.3). Couples activation (9.4)
-    will need a per-person target here.
+    Raises:
+        ValueError: If ``person_id`` names nobody in the plan.
     """
-    persons = tuple(_person_at_retirement_age(person, age) for person in plan.persons)
+    if person_id is None:
+        return plan.persons[0]
+    for person in plan.persons:
+        if person.id == person_id:
+            return person
+    msg = f"person {person_id} is not in the household"
+    raise ValueError(msg)
+
+
+def _with_retirement_age(plan: Household, age: int, person_id: EntityId) -> Household:
+    """The plan with one person's retirement-age decision at ``age``.
+
+    Only the selected person's decision moves — a partner's is held
+    fixed (planning §4.11); the decision's recorded-on metadata carries
+    over, exactly as a scenario override resolves (§4.3).
+    """
+    persons = tuple(
+        _person_at_retirement_age(person, age) if person.id == person_id else person
+        for person in plan.persons
+    )
     changes: dict[str, Any] = {"persons": persons}
     return replace(plan, **changes) if changes else plan
 

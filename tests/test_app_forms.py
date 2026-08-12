@@ -14,14 +14,18 @@ import pytest
 
 from glidepath.app import (
     ENTITY_ID_KEY,
+    OWNER_KEY,
     FactsFormData,
     FieldKind,
+    FormError,
+    PersonFormData,
     build_facts_form_view_model,
     example_facts_form_data,
     facts_form_data_from_household,
     form_cannot_represent,
     format_form_errors,
     parse_facts_form,
+    plan_entity_ids,
 )
 from glidepath.core import (
     AnnuityBasis,
@@ -70,6 +74,65 @@ def person_values(**overrides: str) -> dict[str, str]:
     }
     values.update(overrides)
     return values
+
+
+def partner_values(**overrides: str) -> dict[str, str]:
+    """A minimal valid partner section, with overrides."""
+    values = {
+        "date_of_birth": "1986-09-12",
+        "tax_residency": str(RUK_RESIDENCY),
+        "target_retirement_age": "60",
+    }
+    values.update(overrides)
+    return values
+
+
+def form_data(
+    person: dict[str, str] | None = None,
+    state_pension: dict[str, str] | None = None,
+    *,
+    spending: dict[str, str] | None = None,
+    wrappers: tuple[dict[str, str], ...] = (),
+    db_pensions: tuple[dict[str, str], ...] = (),
+    annuity_purchases: tuple[dict[str, str], ...] = (),
+) -> FactsFormData:
+    """A single-person submission in the ``persons`` shape (9.31)."""
+    return FactsFormData(
+        persons=(
+            PersonFormData(
+                person=person if person is not None else {},
+                state_pension=state_pension if state_pension is not None else {},
+            ),
+        ),
+        spending=spending if spending is not None else {},
+        wrappers=wrappers,
+        db_pensions=db_pensions,
+        annuity_purchases=annuity_purchases,
+    )
+
+
+def couple_form_data(
+    partner: dict[str, str] | None = None,
+    partner_state_pension: dict[str, str] | None = None,
+    wrappers: tuple[dict[str, str], ...] = (),
+    db_pensions: tuple[dict[str, str], ...] = (),
+    annuity_purchases: tuple[dict[str, str], ...] = (),
+) -> FactsFormData:
+    """A minimal two-person submission; rows name owners themselves."""
+    return FactsFormData(
+        persons=(
+            PersonFormData(person=person_values()),
+            PersonFormData(
+                person=partner if partner is not None else partner_values(),
+                state_pension=(
+                    partner_state_pension if partner_state_pension is not None else {}
+                ),
+            ),
+        ),
+        wrappers=wrappers,
+        db_pensions=db_pensions,
+        annuity_purchases=annuity_purchases,
+    )
 
 
 def parse(data: FactsFormData) -> Household:
@@ -182,13 +245,64 @@ class TestFormSpec:
         assert not form.spending.repeatable
         assert not form.state_pension.repeatable
 
+    def test_sections_appends_the_partner_specs(self) -> None:
+        """The sweep sees all 11 sections, partner specs last (9.31)."""
+        form = build_facts_form_view_model()
+        assert [section.key for section in form.sections] == [
+            "person",
+            "spending",
+            "state_pension",
+            "wrapper",
+            "db_pension",
+            "annuity_purchase",
+            "partner",
+            "partner_state_pension",
+            "partner_wrapper",
+            "partner_db_pension",
+            "partner_annuity_purchase",
+        ]
+
+    def test_partner_sections_mirror_their_base_field_lists(self) -> None:
+        """Each partner spec carries its base section's exact fields."""
+        form = build_facts_form_view_model()
+        pairs = (
+            (form.partner, form.person, "About your partner"),
+            (
+                form.partner_state_pension,
+                form.state_pension,
+                "Partner's state pension",
+            ),
+            (form.partner_wrapper, form.wrapper, "Partner's savings wrapper"),
+            (
+                form.partner_db_pension,
+                form.db_pension,
+                "Partner's defined benefit pension",
+            ),
+            (
+                form.partner_annuity_purchase,
+                form.annuity_purchase,
+                "Partner's annuity purchase",
+            ),
+        )
+        for partner_spec, base_spec, title in pairs:
+            assert partner_spec.title == title
+            assert partner_spec.fields == base_spec.fields
+            assert partner_spec.repeatable == base_spec.repeatable
+
+    def test_partner_actions_carry_their_copy(self) -> None:
+        """The add/remove-partner actions and the removal warning exist."""
+        form = build_facts_form_view_model()
+        assert form.add_partner_label == "Add a partner"
+        assert form.remove_partner_label == "Remove partner"
+        assert "deleted" in form.remove_partner_confirm
+
 
 class TestPersonParsing:
     """The person section round-trips into provenance-wrapped values."""
 
     def test_minimal_person(self) -> None:
         """DOB, residency, and retirement age are enough for a household."""
-        household = parse(FactsFormData(person=person_values()))
+        household = parse(form_data(person=person_values()))
         [person] = household.persons
         assert person.date_of_birth.value == date(1984, 5, 20)
         assert person.date_of_birth.as_of == TODAY
@@ -203,7 +317,7 @@ class TestPersonParsing:
     def test_full_person_facts(self) -> None:
         """Optional person facts parse, dated the day they were entered."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(
                     sex_for_longevity="female",
                     employment_income="£52,000",
@@ -230,7 +344,7 @@ class TestPersonParsing:
     def test_scottish_residency_is_enterable(self) -> None:
         """Scotland parses into the Scottish residency id."""
         household = parse(
-            FactsFormData(person=person_values(tax_residency=str(SCOTLAND_RESIDENCY)))
+            form_data(person=person_values(tax_residency=str(SCOTLAND_RESIDENCY)))
         )
         assert household.persons[0].tax_residency == SCOTLAND_RESIDENCY
 
@@ -241,7 +355,7 @@ class TestWrapperParsing:
     def test_wrapper_with_contributions(self) -> None:
         """Balances are facts; the employee contribution is a decision."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {
@@ -273,7 +387,7 @@ class TestWrapperParsing:
     def test_a_named_wrapper_round_trips_its_label(self) -> None:
         """The user's own name for the account survives parse and echo."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {
@@ -292,7 +406,7 @@ class TestWrapperParsing:
     def test_a_blank_name_means_an_unnamed_wrapper(self) -> None:
         """Blank is not a name: the wrapper echoes an empty label field."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=({"kind": str(ISA_KIND), "balance": "45000", "label": " "},),
             )
@@ -305,7 +419,7 @@ class TestWrapperParsing:
     def test_two_wrappers_sharing_a_name_are_rejected(self) -> None:
         """A repeated name defeats naming; the repeat rows error (9.28)."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {"label": "My pot", "kind": str(ISA_KIND), "balance": "45000"},
@@ -325,7 +439,7 @@ class TestWrapperParsing:
     def test_a_stated_equity_percent_becomes_the_allocation(self) -> None:
         """Entering 100 states full equity; the remainder convention gives 0 bonds."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {
@@ -344,7 +458,7 @@ class TestWrapperParsing:
     def test_a_fractional_equity_percent_round_trips(self) -> None:
         """A fractional percent parses exactly and echoes back unchanged."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {
@@ -365,7 +479,7 @@ class TestWrapperParsing:
     def test_blank_equity_percent_follows_the_glide_path(self) -> None:
         """No entry keeps the wrapper on the default glide path."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=({"kind": str(ISA_KIND), "balance": "45000"},),
             )
@@ -376,7 +490,7 @@ class TestWrapperParsing:
     def test_an_equity_percent_on_a_cash_account_is_rejected(self) -> None:
         """Cash accounts always hold cash; an entry is an error, not ignored."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {
@@ -398,7 +512,7 @@ class TestWrapperParsing:
     def test_an_out_of_range_equity_percent_is_rejected(self, percent: str) -> None:
         """The share is a percentage from 0 to 100."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {
@@ -418,7 +532,7 @@ class TestWrapperParsing:
     def test_wrapper_without_contributions(self) -> None:
         """Blank contribution fields mean no schedule at all."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=({"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},),
             )
@@ -438,7 +552,7 @@ class TestWrapperParsing:
         late_evening = datetime(2026, 8, 4, 3, 0, tzinfo=UTC)
         local_today = date(2026, 8, 3)
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=({"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},),
             ),
@@ -454,7 +568,7 @@ class TestWrapperParsing:
     def test_cash_wrapper_defaults_to_a_cash_only_allocation(self) -> None:
         """A cash account holds cash, never the glide path (9.2)."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {"kind": "uk.cash", "balance": "5000"},
@@ -475,7 +589,7 @@ class TestWrapperParsing:
         gate through the always-open crystallised sub-balance.
         """
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {
@@ -496,7 +610,7 @@ class TestWrapperParsing:
     def test_employer_contribution_requires_employee_amount(self) -> None:
         """Employer terms without the employee's own choice are rejected."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {
@@ -521,7 +635,7 @@ class TestDBPensionParsing:
     def test_full_scheme(self) -> None:
         """The statement date dates every scheme fact (§5.1)."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -563,7 +677,7 @@ class TestDBPensionParsing:
     def test_fixed_basis_without_rate_is_rejected(self) -> None:
         """The core cross-field rule surfaces as a section-level error."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -586,7 +700,7 @@ class TestDBPensionParsing:
     def test_uncovered_taken_at_age_is_rejected(self) -> None:
         """Taking at an age the factor table misses is a loud error."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -608,7 +722,7 @@ class TestDBPensionParsing:
     def test_active_membership_parses_with_statement_dated_facts(self) -> None:
         """The accrual rate and salary become facts dated by the statement."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -637,7 +751,7 @@ class TestDBPensionParsing:
     def test_blank_membership_fields_mean_deferred(self) -> None:
         """Leaving the accrual block empty keeps the pension deferred."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -655,7 +769,7 @@ class TestDBPensionParsing:
     def test_salary_without_a_rate_is_rejected(self) -> None:
         """A filled sibling with no accrual rate is an error, not a guess."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -677,7 +791,7 @@ class TestDBPensionParsing:
     def test_a_rate_without_a_salary_is_rejected(self) -> None:
         """Active membership needs both scheme facts."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -699,7 +813,7 @@ class TestDBPensionParsing:
     def test_active_until_beyond_the_taken_age_is_rejected(self) -> None:
         """The core cross-field rule surfaces as a section-level error."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -724,7 +838,7 @@ class TestDBPensionParsing:
     def test_garbled_factor_table_is_rejected(self) -> None:
         """Factor pairs must be age:factor."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -749,7 +863,7 @@ class TestAnnuityPurchaseParsing:
     def test_purchase_parses_into_decisions(self) -> None:
         """Age and fraction are decisions; the form writes single-life."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 annuity_purchases=(
                     {
@@ -779,7 +893,7 @@ class TestAnnuityPurchaseParsing:
     ) -> None:
         """The escalating and inflation-linked products parse too."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 annuity_purchases=(
                     {"at_age": "68", "fraction_of_pot": "1", "annuity_type": key},
@@ -792,7 +906,7 @@ class TestAnnuityPurchaseParsing:
     def test_blank_instance_reports_its_required_fields(self) -> None:
         """An added-but-untouched purchase is field-addressed."""
         result = parse_facts_form(
-            FactsFormData(person=person_values(), annuity_purchases=({},)),
+            form_data(person=person_values(), annuity_purchases=({},)),
             recorded_on=RECORDED,
             today=TODAY,
         )
@@ -807,7 +921,7 @@ class TestAnnuityPurchaseParsing:
     def test_out_of_range_fraction_surfaces_the_core_message(self) -> None:
         """The (0, 1] fraction rule lands as a section-level error."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 annuity_purchases=(
                     {
@@ -829,7 +943,7 @@ class TestAnnuityPurchaseParsing:
     def test_unknown_product_type_is_rejected(self) -> None:
         """A type value outside the option list is rejected on its field."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 annuity_purchases=(
                     {
@@ -854,7 +968,7 @@ class TestStatePensionParsing:
     def test_forecast_facts_parse(self) -> None:
         """The forecast pair parses with its shared as_of date."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 state_pension={
                     "forecast_weekly_amount": "230.25",
@@ -876,7 +990,7 @@ class TestStatePensionParsing:
     def test_blank_section_means_not_modelled(self) -> None:
         """All-blank state pension values leave the record unset."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 state_pension={"forecast_weekly_amount": "", "deferral_years": " "},
             )
@@ -886,7 +1000,7 @@ class TestStatePensionParsing:
     def test_deferral_defaults_to_zero(self) -> None:
         """Deferral defaults to none when blank."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 state_pension={"forecast_weekly_amount": "230.25"},
             )
@@ -898,7 +1012,7 @@ class TestStatePensionParsing:
     def test_entered_section_without_a_forecast_is_refused(self) -> None:
         """The DWP forecast is the only route (§5.1) — demanded by field."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 state_pension={"deferral_years": "1"},
             ),
@@ -912,13 +1026,201 @@ class TestStatePensionParsing:
         assert "check-state-pension" in error.message
 
 
+class TestPartnerParsing:
+    """The optional second person parses under the partner sections (9.31)."""
+
+    def test_minimal_couple_parses(self) -> None:
+        """Two person sections produce a two-person household."""
+        household = parse(couple_form_data())
+        first, second = household.persons
+        assert first.date_of_birth.value == date(1984, 5, 20)
+        assert first.target_retirement_age.value == 62
+        assert second.date_of_birth.value == date(1986, 9, 12)
+        assert second.target_retirement_age.value == 60
+
+    def test_partner_owned_rows_attach_to_the_partner(self) -> None:
+        """OWNER_KEY routes each repeatable row to its person."""
+        household = parse(
+            couple_form_data(
+                wrappers=(
+                    {"kind": str(ISA_KIND), "balance": "1000"},
+                    {OWNER_KEY: "1", "kind": str(CASH_KIND), "balance": "2000"},
+                ),
+            )
+        )
+        first, second = household.persons
+        assert [wrapper.kind for wrapper in first.wrappers] == [ISA_KIND]
+        assert [wrapper.kind for wrapper in second.wrappers] == [CASH_KIND]
+
+    def test_partner_person_errors_land_in_the_partner_section(self) -> None:
+        """The partner's person fields error under "partner"."""
+        result = parse_facts_form(
+            couple_form_data(partner=partner_values(date_of_birth="12/09/1986")),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "partner"
+        assert error.field_key == "date_of_birth"
+
+    def test_partner_state_pension_errors_land_in_their_section(self) -> None:
+        """The partner's forecast demand errors under its own section."""
+        result = parse_facts_form(
+            couple_form_data(partner_state_pension={"deferral_years": "1"}),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "partner_state_pension"
+        assert error.field_key == "forecast_weekly_amount"
+
+    def test_partner_wrapper_errors_use_owner_scoped_indexes(self) -> None:
+        """The row index counts within the partner's rows, not combined."""
+        result = parse_facts_form(
+            couple_form_data(
+                wrappers=(
+                    {"kind": str(ISA_KIND), "balance": "1000"},
+                    {OWNER_KEY: "1", "kind": str(ISA_KIND), "balance": "2000"},
+                    {OWNER_KEY: "1", "kind": str(ISA_KIND), "balance": "bad"},
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "partner_wrapper"
+        assert error.index == 1
+        assert error.field_key == "balance"
+
+    def test_partner_db_pension_errors_land_in_their_section(self) -> None:
+        """A blank partner DB row errors under the partner DB section."""
+        result = parse_facts_form(
+            couple_form_data(db_pensions=({OWNER_KEY: "1"},)),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        assert result.errors
+        assert {error.section for error in result.errors} == {"partner_db_pension"}
+
+    def test_partner_annuity_errors_land_in_their_section(self) -> None:
+        """A blank partner purchase errors under the partner section."""
+        result = parse_facts_form(
+            couple_form_data(annuity_purchases=({OWNER_KEY: "1"},)),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        assert {error.section for error in result.errors} == {
+            "partner_annuity_purchase"
+        }
+        missing = {error.field_key for error in result.errors}
+        assert missing == {"at_age", "fraction_of_pot", "annuity_type"}
+
+    @pytest.mark.parametrize("owner", ["1", "2", "x"])
+    def test_row_owned_by_nobody_on_the_form_is_refused(self, owner: str) -> None:
+        """A single-person form refuses rows owned by an absent partner."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                wrappers=({OWNER_KEY: owner, "kind": str(ISA_KIND), "balance": "1"},),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error == FormError(
+            section="wrapper",
+            index=None,
+            field_key="owner",
+            message="this row's owner is not a person on the form",
+        )
+
+    def test_empty_persons_tuple_is_refused(self) -> None:
+        """No persons at all is a malformed submission, not a crash."""
+        data = FactsFormData(persons=())
+        result = parse_facts_form(data, recorded_on=RECORDED, today=TODAY)
+        assert result.household is None
+        [error] = result.errors
+        assert error == FormError(
+            section="person",
+            index=None,
+            field_key="",
+            message="the form carries one or two persons",
+        )
+
+    def test_three_persons_are_refused(self) -> None:
+        """The form carries at most two persons (planning §4.11)."""
+        persons = tuple(PersonFormData(person=person_values()) for _ in range(3))
+        data = FactsFormData(persons=persons)
+        result = parse_facts_form(data, recorded_on=RECORDED, today=TODAY)
+        assert result.household is None
+        [error] = result.errors
+        assert error.message == "the form carries one or two persons"
+
+    def test_duplicate_wrapper_labels_across_owners_are_refused(self) -> None:
+        """Names label household-wide legends, so the check spans owners."""
+        result = parse_facts_form(
+            couple_form_data(
+                wrappers=(
+                    {"label": "Nest egg", "kind": str(ISA_KIND), "balance": "1000"},
+                    {
+                        OWNER_KEY: "1",
+                        "label": "Nest egg",
+                        "kind": str(ISA_KIND),
+                        "balance": "2000",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "partner_wrapper"
+        assert error.index == 0
+        assert error.field_key == "label"
+        assert error.message == "another wrapper already carries this name"
+
+    def test_duplicate_entity_ids_across_persons_fold_into_an_error(self) -> None:
+        """The household-level id rule surfaces as a person-section error."""
+        result = parse_facts_form(
+            couple_form_data(
+                wrappers=(
+                    {
+                        ENTITY_ID_KEY: "shared-id",
+                        "kind": str(ISA_KIND),
+                        "balance": "1000",
+                    },
+                    {
+                        ENTITY_ID_KEY: "shared-id",
+                        OWNER_KEY: "1",
+                        "kind": str(ISA_KIND),
+                        "balance": "2000",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "person"
+        assert error.field_key == ""
+        assert "distinct EntityIds" in error.message
+
+
 class TestSpendingParsing:
     """Household spending is a fact in today's money."""
 
     def test_spending_round_trips(self) -> None:
         """The spending need parses, dated the day it was entered."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 spending={"annual_spending_real": "28000"},
             )
@@ -932,7 +1234,7 @@ class TestSpendingParsing:
     def test_stage_multipliers_parse_per_retirement_phase(self) -> None:
         """The go-go/slow-go/no-go fields bind to their stages (#114)."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 spending={
                     "annual_spending_real": "28000",
@@ -952,7 +1254,7 @@ class TestSpendingParsing:
     def test_a_blank_multiplier_stays_absent(self) -> None:
         """Only the entered stages appear; blank means a multiplier of 1."""
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 spending={
                     "annual_spending_real": "28000",
@@ -966,7 +1268,7 @@ class TestSpendingParsing:
     def test_multipliers_without_spending_are_rejected(self) -> None:
         """A multiplier with nothing to scale asks for the annual need."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 spending={"go_go_multiplier": "1.2"},
             ),
@@ -981,7 +1283,7 @@ class TestSpendingParsing:
     def test_unparsable_spending_with_a_multiplier_errors_once(self) -> None:
         """Bad amount text keeps its own message; no second prompt piles on."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 spending={
                     "annual_spending_real": "lots",
@@ -999,7 +1301,7 @@ class TestSpendingParsing:
     def test_non_positive_multiplier_surfaces_the_core_message(self) -> None:
         """The spending plan's own multiplier validation lands on the section."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 spending={
                     "annual_spending_real": "28000",
@@ -1032,7 +1334,7 @@ class TestValidationMessages:
     def test_bad_values_are_field_addressed(self) -> None:
         """Unparsable text lands on the field that carried it."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(
                     date_of_birth="20/05/1984",
                     target_retirement_age="sixty",
@@ -1051,7 +1353,7 @@ class TestValidationMessages:
     def test_unknown_choice_value_is_rejected(self) -> None:
         """A choice value outside the option list is rejected."""
         result = parse_facts_form(
-            FactsFormData(person=person_values(sex_for_longevity="other")),
+            form_data(person=person_values(sex_for_longevity="other")),
             recorded_on=RECORDED,
             today=TODAY,
         )
@@ -1062,7 +1364,7 @@ class TestValidationMessages:
     def test_negative_balance_surfaces_the_core_message(self) -> None:
         """Core construction rules surface directly (§5.1 validation)."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=({"kind": str(WORKPLACE_DC_KIND), "balance": "-100"},),
             ),
@@ -1077,7 +1379,7 @@ class TestValidationMessages:
     def test_non_finite_amounts_are_rejected(self) -> None:
         """Infinity and NaN never reach the Decimal domain values."""
         result = parse_facts_form(
-            FactsFormData(person=person_values(lsa_used="Infinity")),
+            form_data(person=person_values(lsa_used="Infinity")),
             recorded_on=RECORDED,
             today=TODAY,
         )
@@ -1089,7 +1391,7 @@ class TestValidationMessages:
     def test_non_finite_decimal_is_rejected(self) -> None:
         """A NaN fraction is rejected at parse time."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -1112,7 +1414,7 @@ class TestValidationMessages:
     def test_blank_repeatable_sections_report_their_required_fields(self) -> None:
         """An added-but-untouched wrapper or DB entry is field-addressed."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=({},),
                 db_pensions=({},),
@@ -1143,7 +1445,7 @@ class TestValidationMessages:
     def test_negative_spending_surfaces_the_core_message(self) -> None:
         """The spending plan's own validation lands on its section."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 spending={"annual_spending_real": "-1"},
             ),
@@ -1158,7 +1460,7 @@ class TestValidationMessages:
     def test_protected_payment_without_forecast_is_rejected(self) -> None:
         """A protected payment alone still demands the forecast (§5.1)."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 state_pension={"protected_payment": "12.50"},
             ),
@@ -1173,7 +1475,7 @@ class TestValidationMessages:
     def test_protected_payment_beyond_the_forecast_is_rejected(self) -> None:
         """The record's cross-field rule surfaces on the section (§5.1)."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 state_pension={
                     "forecast_weekly_amount": "200.00",
@@ -1191,7 +1493,7 @@ class TestValidationMessages:
     def test_bad_state_pension_numbers_are_field_addressed(self) -> None:
         """Unparsable state pension numbers land on their fields."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 state_pension={
                     "forecast_weekly_amount": "two hundred",
@@ -1209,7 +1511,7 @@ class TestValidationMessages:
     def test_non_finite_factors_are_rejected(self, factor: str) -> None:
         """NaN and Infinity factors are form errors, never domain values."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -1231,7 +1533,7 @@ class TestValidationMessages:
     def test_zero_age_factor_table_surfaces_the_core_message(self) -> None:
         """Factor-table validation (positive ages) surfaces on the field."""
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 db_pensions=(
                     {
@@ -1254,7 +1556,7 @@ class TestValidationMessages:
     def test_negative_lsa_surfaces_the_person_level_message(self) -> None:
         """Person-level validation lands as a section-level error."""
         result = parse_facts_form(
-            FactsFormData(person=person_values(lsa_used="-1")),
+            form_data(person=person_values(lsa_used="-1")),
             recorded_on=RECORDED,
             today=TODAY,
         )
@@ -1267,7 +1569,7 @@ class TestValidationMessages:
         """A section-level error formats without a field label."""
         form = build_facts_form_view_model()
         result = parse_facts_form(
-            FactsFormData(person=person_values(lsa_used="-1")),
+            form_data(person=person_values(lsa_used="-1")),
             recorded_on=RECORDED,
             today=TODAY,
         )
@@ -1278,7 +1580,7 @@ class TestValidationMessages:
         """Formatted errors carry the section title, index, and field label."""
         form = build_facts_form_view_model()
         result = parse_facts_form(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},
@@ -1293,6 +1595,17 @@ class TestValidationMessages:
         assert "Balance" in text
         assert "amount of money" in text
 
+    def test_format_form_errors_uses_the_partner_titles(self) -> None:
+        """Partner-section errors format under the partner copy (9.31)."""
+        form = build_facts_form_view_model()
+        result = parse_facts_form(
+            couple_form_data(partner=partner_values(date_of_birth="bad")),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        text = format_form_errors(form, result.errors)
+        assert text.startswith("About your partner — Date of birth: ")
+
 
 class TestEntityIdReuse:
     """Entity ids ride their form rows, so scenario overrides survive (§4.3)."""
@@ -1300,7 +1613,7 @@ class TestEntityIdReuse:
     @staticmethod
     def submission() -> FactsFormData:
         """One valid submission with a person and two wrappers."""
-        return FactsFormData(
+        return form_data(
             person=person_values(),
             wrappers=(
                 {"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},
@@ -1341,7 +1654,7 @@ class TestEntityIdReuse:
         stripping whitespace would change identity and orphan them.
         """
         household = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=(
                     {
@@ -1376,7 +1689,7 @@ class TestEntityIdReuse:
         first = parse(self.submission())
         rendered = facts_form_data_from_household(first)
         result = parse_facts_form(
-            FactsFormData(person=rendered.person, wrappers=rendered.wrappers[1:]),
+            FactsFormData(persons=rendered.persons, wrappers=rendered.wrappers[1:]),
             recorded_on=RECORDED,
             today=TODAY,
             previous=first,
@@ -1389,7 +1702,7 @@ class TestEntityIdReuse:
     def test_deleting_a_row_orphans_only_its_override(self) -> None:
         """Scenario targeting: the survivor's override stays addressable."""
         first = parse(
-            FactsFormData(
+            form_data(
                 person=person_values(),
                 wrappers=({"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},),
                 annuity_purchases=(
@@ -1416,7 +1729,7 @@ class TestEntityIdReuse:
         rendered = facts_form_data_from_household(first)
         result = parse_facts_form(
             FactsFormData(
-                person=rendered.person,
+                persons=rendered.persons,
                 wrappers=rendered.wrappers,
                 annuity_purchases=rendered.annuity_purchases[1:],
             ),
@@ -1430,6 +1743,42 @@ class TestEntityIdReuse:
         assert [override.target for override in orphans] == [
             DecisionTarget(entity_id=deleted.id, field_path="at_age")
         ]
+
+    def test_partner_reuses_the_prior_plans_id_by_position(self) -> None:
+        """Person i keeps previous.persons[i].id — the partner pairs too."""
+        first = parse(couple_form_data())
+        result = parse_facts_form(
+            couple_form_data(), recorded_on=RECORDED, today=TODAY, previous=first
+        )
+        second = result.household
+        assert second is not None
+        assert [person.id for person in second.persons] == [
+            person.id for person in first.persons
+        ]
+
+    def test_partner_rows_keep_their_ids_verbatim(self) -> None:
+        """A partner-owned row's carried id is preserved untouched."""
+        household = parse(
+            couple_form_data(
+                wrappers=(
+                    {
+                        ENTITY_ID_KEY: "main-wrapper",
+                        "kind": str(ISA_KIND),
+                        "balance": "1000",
+                    },
+                    {
+                        ENTITY_ID_KEY: " partner-wrapper ",
+                        OWNER_KEY: "1",
+                        "kind": str(ISA_KIND),
+                        "balance": "2000",
+                    },
+                ),
+            )
+        )
+        [main] = household.persons[0].wrappers
+        [partner] = household.persons[1].wrappers
+        assert main.id == EntityId("main-wrapper")
+        assert partner.id == EntityId(" partner-wrapper ")
 
     def test_rows_without_ids_mint_fresh_ids(self) -> None:
         """A hand-typed row is a new entity even when a prior plan exists."""
@@ -1452,7 +1801,7 @@ class TestEntityIdReuse:
 
 def _maximal_submission() -> FactsFormData:
     """A submission exercising every optional field the form offers."""
-    return FactsFormData(
+    return form_data(
         person=person_values(
             sex_for_longevity="male",
             employment_income="52000",
@@ -1506,6 +1855,63 @@ def _maximal_submission() -> FactsFormData:
     )
 
 
+def _maximal_couple_submission() -> FactsFormData:
+    """The maximal submission with a fully loaded partner added (9.31)."""
+    base = _maximal_submission()
+    partner_wrappers = (
+        {
+            OWNER_KEY: "1",
+            "label": "Nest egg",
+            "kind": str(ISA_KIND),
+            "balance": "9000",
+            "balances_as_of": "2026-06-30",
+        },
+        {
+            OWNER_KEY: "1",
+            "kind": str(WORKPLACE_DC_KIND),
+            "balance": "30000",
+            "employee_contribution": "2400",
+            "relief_mechanic": "net_pay",
+        },
+    )
+    partner_db_pensions = (
+        {
+            OWNER_KEY: "1",
+            "accrued_annual_pension": "4200",
+            "statement_date": "2026-04-01",
+            "normal_pension_age": "67",
+            "revaluation_reference": "none",
+        },
+    )
+    partner_annuity_purchases = (
+        {
+            OWNER_KEY: "1",
+            "at_age": "70",
+            "fraction_of_pot": "0.25",
+            "annuity_type": "inflation_linked",
+        },
+    )
+    return FactsFormData(
+        persons=(
+            *base.persons,
+            PersonFormData(
+                person=partner_values(
+                    sex_for_longevity="female",
+                    employment_income="31000",
+                ),
+                state_pension={
+                    "forecast_weekly_amount": "180.10",
+                    "forecast_as_of": "2026-04-06",
+                },
+            ),
+        ),
+        spending=base.spending,
+        wrappers=(*base.wrappers, *partner_wrappers),
+        db_pensions=(*base.db_pensions, *partner_db_pensions),
+        annuity_purchases=(*base.annuity_purchases, *partner_annuity_purchases),
+    )
+
+
 def _altered[T](entity: T, **changes: object) -> T:
     """A copy of a frozen dataclass with ``changes`` applied.
 
@@ -1542,8 +1948,8 @@ class TestFormCannotRepresent:
         """Everything the form itself produced is representable."""
         assert form_cannot_represent(base) is None
 
-    def test_second_person_is_flagged(self, base: Household) -> None:
-        """The v1 form edits exactly one person."""
+    def test_second_person_is_representable(self, base: Household) -> None:
+        """A two-person household now fits the form (roadmap 9.31)."""
         person = base.persons[0]
         second = _altered(
             person,
@@ -1554,7 +1960,52 @@ class TestFormCannotRepresent:
             state_pension=None,
         )
         household = _altered(base, persons=(person, second))
-        assert form_cannot_represent(household) == "more than one person"
+        assert form_cannot_represent(household) is None
+
+    def test_partner_glide_path_is_flagged(self, base: Household) -> None:
+        """A partner's unrepresentable detail still refuses the edit."""
+        person = base.persons[0]
+        glide = GlidePathConfig(
+            points=(
+                GlidePathPoint(
+                    years_to_retirement=0,
+                    allocation=AssetAllocation(
+                        equity=Decimal("0.4"), bonds=Decimal("0.6")
+                    ),
+                ),
+            )
+        )
+        second = _altered(
+            person,
+            id=EntityId("forms-second-person"),
+            wrappers=(),
+            db_pensions=(),
+            annuity_purchases=(),
+            state_pension=None,
+            glide_path=glide,
+        )
+        household = _altered(base, persons=(person, second))
+        assert form_cannot_represent(household) == "a personal glide path"
+
+    def test_partner_joint_life_annuity_is_flagged(self, base: Household) -> None:
+        """A partner's joint-life purchase refuses the edit too (9.34)."""
+        person = base.persons[0]
+        [purchase] = person.annuity_purchases
+        joint = _altered(
+            purchase,
+            id=EntityId("forms-partner-joint"),
+            basis=AnnuityBasis.JOINT,
+        )
+        second = _altered(
+            person,
+            id=EntityId("forms-second-person"),
+            wrappers=(),
+            db_pensions=(),
+            annuity_purchases=(joint,),
+            state_pension=None,
+        )
+        household = _altered(base, persons=(person, second))
+        assert form_cannot_represent(household) == "a joint-life annuity purchase"
 
     def test_planned_outflows_are_flagged(self, base: Household) -> None:
         """Planned outflows have no form section yet."""
@@ -1783,6 +2234,57 @@ class TestFormDataFromHousehold:
         assert result.errors == ()
         assert result.household == household
 
+    def test_round_trips_a_maximal_two_person_household(self) -> None:
+        """Render → reparse preserves both persons exactly (9.31).
+
+        The issue's acceptance criterion: a two-person household's
+        render → reparse cycle reproduces the household field for
+        field, entity ids included, for BOTH persons.
+        """
+        household = parse(_maximal_couple_submission())
+        rendered = facts_form_data_from_household(household)
+        assert [row[OWNER_KEY] for row in rendered.wrappers] == ["0", "0", "1", "1"]
+        assert [row[OWNER_KEY] for row in rendered.db_pensions] == ["0", "1"]
+        assert [row[OWNER_KEY] for row in rendered.annuity_purchases] == ["0", "1"]
+        result = parse_facts_form(
+            rendered, recorded_on=RECORDED, today=TODAY, previous=household
+        )
+        assert result.errors == ()
+        reparsed = result.household
+        assert reparsed is not None
+        assert reparsed == household
+        assert [person.id for person in reparsed.persons] == [
+            person.id for person in household.persons
+        ]
+        partner, prior_partner = reparsed.persons[1], household.persons[1]
+        assert [w.id for w in partner.wrappers] == [
+            w.id for w in prior_partner.wrappers
+        ]
+        assert [p.id for p in partner.db_pensions] == [
+            p.id for p in prior_partner.db_pensions
+        ]
+        assert [a.id for a in partner.annuity_purchases] == [
+            a.id for a in prior_partner.annuity_purchases
+        ]
+
+    def test_plan_entity_ids_concatenates_both_persons_rows(self) -> None:
+        """Write-back ids come first person's rows first, then the partner's."""
+        household = parse(_maximal_couple_submission())
+        ids = plan_entity_ids(household)
+        first, second = household.persons
+        assert ids.wrappers == (
+            *(str(entry.id) for entry in first.wrappers),
+            *(str(entry.id) for entry in second.wrappers),
+        )
+        assert ids.db_pensions == (
+            *(str(entry.id) for entry in first.db_pensions),
+            *(str(entry.id) for entry in second.db_pensions),
+        )
+        assert ids.annuity_purchases == (
+            *(str(entry.id) for entry in first.annuity_purchases),
+            *(str(entry.id) for entry in second.annuity_purchases),
+        )
+
     def test_round_trips_the_launch_example(self) -> None:
         """The launch example survives the same render → reparse cycle."""
         first = parse_facts_form(
@@ -1816,10 +2318,18 @@ class TestFormDataFromHousehold:
         """A changed fact is a fresh statement; the rest keep their dates."""
         stored = _plan_with_historical_dates()
         rendered = facts_form_data_from_household(stored)
+        [rendered_person] = rendered.persons
         edited = FactsFormData(
-            person={**rendered.person, "employment_income": "60000"},
+            persons=(
+                PersonFormData(
+                    person={
+                        **rendered_person.person,
+                        "employment_income": "60000",
+                    },
+                    state_pension=rendered_person.state_pension,
+                ),
+            ),
             spending=rendered.spending,
-            state_pension=rendered.state_pension,
             wrappers=rendered.wrappers,
             db_pensions=rendered.db_pensions,
         )
@@ -1836,12 +2346,13 @@ class TestFormDataFromHousehold:
 
     def test_blank_optionals_render_blank(self) -> None:
         """A minimal household renders empty strings, not literal Nones."""
-        household = parse(FactsFormData(person=person_values()))
+        household = parse(form_data(person=person_values()))
         rendered = facts_form_data_from_household(household)
-        assert rendered.person["employment_income"] == ""
-        assert rendered.person["sex_for_longevity"] == ""
+        [rendered_person] = rendered.persons
+        assert rendered_person.person["employment_income"] == ""
+        assert rendered_person.person["sex_for_longevity"] == ""
         assert rendered.spending == {}
-        assert rendered.state_pension == {}
+        assert rendered_person.state_pension == {}
         assert rendered.wrappers == ()
         assert rendered.db_pensions == ()
         assert rendered.annuity_purchases == ()

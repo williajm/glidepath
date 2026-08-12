@@ -19,6 +19,7 @@ from glidepath.app import (
     DISCLAIMER_BODY,
     MONTE_CARLO_CHART_TITLE,
     NOTHING_TO_EXPORT_MESSAGE,
+    PersonFormData,
     PlanState,
     ReportRequest,
     RetirementAnswer,
@@ -164,6 +165,30 @@ class TestCashFlowCsv:
             assert cells[1] == row.period.end.isoformat()
             assert cells[2] == "You"
             assert cells[age_index] == str(row.age_at_period_start)
+
+    def test_person_column_names_both_persons_of_a_couple(self) -> None:
+        """A two-person plan's rows read "You" / "Your partner" (9.31)."""
+        data = example_facts_form_data()
+        partner = PersonFormData(
+            person={
+                "date_of_birth": "1993-02-11",
+                "tax_residency": "uk.ruk",
+                "target_retirement_age": "63",
+            }
+        )
+        result = parse_facts_form(
+            replace(data, persons=(*data.persons, partner)),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is not None
+        state = state_with_household(
+            initial_plan_state(), result.household, today=TODAY
+        )
+        text = cash_flow_csv(state, basis=ReportBasis.REAL, plan_name="Example")
+        assert text is not None
+        _columns, rows = _parsed(text)
+        assert {cells[2] for cells in rows} == {"You", "Your partner"}
 
     def test_wrapper_columns_round_trip_the_per_wrapper_balances(self) -> None:
         """One closing-balance column per wrapper, in first-seen order."""

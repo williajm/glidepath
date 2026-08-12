@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QStyle,
@@ -26,9 +27,11 @@ from PySide6.QtWidgets import (
 from glidepath.app import (
     DATE_PICKER_TOOLTIP,
     ENTITY_ID_KEY,
+    OWNER_KEY,
     FactsFormData,
     FactsFormViewModel,
     FieldKind,
+    PersonFormData,
     PlanEntityIds,
     SectionSpec,
 )
@@ -227,12 +230,18 @@ class RepeatableSection(QWidget):
         )
 
     def set_values_list(self, values_list: Sequence[Mapping[str, str]]) -> None:
-        """Replace every instance with one per entry of ``values_list``."""
+        """Replace every instance with one per entry of ``values_list``.
+
+        The reserved entity-id and owner keys never render as fields —
+        the id travels with the row and the owner is the pane's
+        section placement (roadmap 9.31).
+        """
+        reserved = (ENTITY_ID_KEY, OWNER_KEY)
         self.clear()
         for values in values_list:
             form = self.add_entry(entity_id=values.get(ENTITY_ID_KEY, ""))
             form.set_values(
-                {key: value for key, value in values.items() if key != ENTITY_ID_KEY}
+                {key: value for key, value in values.items() if key not in reserved}
             )
 
     def set_entity_ids(self, entity_ids: Sequence[str]) -> None:
@@ -248,8 +257,29 @@ class RepeatableSection(QWidget):
             self._remove_entry(container)
 
 
+def _owned_rows(section: RepeatableSection, owner: int) -> tuple[dict[str, str], ...]:
+    """The section's rows stamped with their owning person (§4.11)."""
+    return tuple({**row, OWNER_KEY: str(owner)} for row in section.values_list())
+
+
+def _partner_rows(
+    rows: Sequence[Mapping[str, str]],
+) -> tuple[tuple[Mapping[str, str], ...], tuple[Mapping[str, str], ...]]:
+    """One section's combined rows split (first person's, partner's)."""
+    mine = tuple(row for row in rows if row.get(OWNER_KEY, "") != "1")
+    theirs = tuple(row for row in rows if row.get(OWNER_KEY, "") == "1")
+    return mine, theirs
+
+
 class FactsEntryPane(QWidget):
-    """The facts tab: sections, submit and clear buttons, a status line."""
+    """The facts tab: sections, submit and clear buttons, a status line.
+
+    The partner is strictly optional (roadmap 9.31): their sections sit
+    hidden behind one explicit "Add a partner" action, and removing the
+    partner confirms first — it deletes their person details and every
+    row under them. With no partner the pane renders and submits
+    exactly as the single-person form always has.
+    """
 
     def __init__(
         self,
@@ -262,6 +292,9 @@ class FactsEntryPane(QWidget):
         super().__init__(parent)
         self._on_submit = on_submit
         self._on_clear = on_clear
+        self._remove_partner_title = view_model.remove_partner_label
+        self._remove_partner_confirm = view_model.remove_partner_confirm
+        self._partner_active = False
 
         intro = QLabel(view_model.intro, self)
         intro.setWordWrap(True)
@@ -271,6 +304,7 @@ class FactsEntryPane(QWidget):
         self.wrappers = RepeatableSection(view_model.wrapper)
         self.db_pensions = RepeatableSection(view_model.db_pension)
         self.annuity_purchases = RepeatableSection(view_model.annuity_purchase)
+        self._build_partner_sections(view_model)
         self.submit_button = QPushButton(view_model.submit_label, self)
         self.submit_button.setObjectName("primaryButton")
         self.submit_button.clicked.connect(self.submit)
@@ -288,6 +322,8 @@ class FactsEntryPane(QWidget):
         content_layout.addWidget(self.wrappers)
         content_layout.addWidget(self.db_pensions)
         content_layout.addWidget(self.annuity_purchases)
+        content_layout.addWidget(self.add_partner_button)
+        content_layout.addWidget(self._partner_group)
         content_layout.addStretch()
 
         scroll = QScrollArea(self)
@@ -306,39 +342,144 @@ class FactsEntryPane(QWidget):
         layout.addWidget(self.status_label)
         layout.addWidget(buttons)
 
+    def _build_partner_sections(self, view_model: FactsFormViewModel) -> None:
+        """Create the add-partner action and the hidden partner group."""
+        self.add_partner_button = QPushButton(view_model.add_partner_label, self)
+        self.add_partner_button.clicked.connect(self.add_partner)
+        self.partner_form = SectionForm(view_model.partner)
+        self.partner_state_pension_form = SectionForm(view_model.partner_state_pension)
+        self.partner_wrappers = RepeatableSection(view_model.partner_wrapper)
+        self.partner_db_pensions = RepeatableSection(view_model.partner_db_pension)
+        self.partner_annuity_purchases = RepeatableSection(
+            view_model.partner_annuity_purchase
+        )
+        self.remove_partner_button = QPushButton(view_model.remove_partner_label)
+        self.remove_partner_button.clicked.connect(self._confirm_remove_partner)
+        self._partner_group = QWidget(self)
+        partner_layout = QVBoxLayout(self._partner_group)
+        partner_layout.setContentsMargins(0, 0, 0, 0)
+        partner_layout.addWidget(self.partner_form)
+        partner_layout.addWidget(self.partner_state_pension_form)
+        partner_layout.addWidget(self.partner_wrappers)
+        partner_layout.addWidget(self.partner_db_pensions)
+        partner_layout.addWidget(self.partner_annuity_purchases)
+        partner_layout.addWidget(self.remove_partner_button)
+        self._partner_group.setVisible(False)
+
+    @property
+    def has_partner(self) -> bool:
+        """Whether the partner sections are on the form."""
+        return self._partner_active
+
+    def add_partner(self) -> None:
+        """Put the (blank) partner sections on the form (§4.11)."""
+        self._set_partner_active(active=True)
+
+    def remove_partner(self) -> None:
+        """Take the partner off the form, deleting all their rows."""
+        self.partner_form.clear()
+        self.partner_state_pension_form.clear()
+        self.partner_wrappers.clear()
+        self.partner_db_pensions.clear()
+        self.partner_annuity_purchases.clear()
+        self._set_partner_active(active=False)
+
+    def _confirm_remove_partner(self) -> None:
+        """Confirm before the removal deletes the partner's rows (§4.11)."""
+        answer = QMessageBox.question(
+            self,
+            self._remove_partner_title,
+            self._remove_partner_confirm,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.remove_partner()
+
+    def _set_partner_active(self, *, active: bool) -> None:
+        """Swap between the add-partner action and the partner sections."""
+        self._partner_active = active
+        self._partner_group.setVisible(active)
+        self.add_partner_button.setVisible(not active)
+
     def form_data(self) -> FactsFormData:
-        """The whole form's raw text as one submission."""
+        """The whole form's raw text as one submission.
+
+        Rows carry their owning person (:data:`~glidepath.app.OWNER_KEY`)
+        from the section they sit in, first person's rows first — the
+        order :func:`~glidepath.app.plan_entity_ids` seeds back.
+        """
+        persons = [
+            PersonFormData(
+                person=self.person_form.values(),
+                state_pension=self.state_pension_form.values(),
+            )
+        ]
+        wrappers = _owned_rows(self.wrappers, 0)
+        db_pensions = _owned_rows(self.db_pensions, 0)
+        annuity_purchases = _owned_rows(self.annuity_purchases, 0)
+        if self._partner_active:
+            persons.append(
+                PersonFormData(
+                    person=self.partner_form.values(),
+                    state_pension=self.partner_state_pension_form.values(),
+                )
+            )
+            wrappers += _owned_rows(self.partner_wrappers, 1)
+            db_pensions += _owned_rows(self.partner_db_pensions, 1)
+            annuity_purchases += _owned_rows(self.partner_annuity_purchases, 1)
         return FactsFormData(
-            person=self.person_form.values(),
+            persons=tuple(persons),
             spending=self.spending_form.values(),
-            state_pension=self.state_pension_form.values(),
-            wrappers=self.wrappers.values_list(),
-            db_pensions=self.db_pensions.values_list(),
-            annuity_purchases=self.annuity_purchases.values_list(),
+            wrappers=wrappers,
+            db_pensions=db_pensions,
+            annuity_purchases=annuity_purchases,
         )
 
     def set_form_data(self, data: FactsFormData) -> None:
         """Replace the whole form's raw text (e.g. the launch example)."""
+        first = data.persons[0] if data.persons else PersonFormData()
         self.person_form.clear()
-        self.person_form.set_values(data.person)
+        self.person_form.set_values(first.person)
         self.spending_form.clear()
         self.spending_form.set_values(data.spending)
         self.state_pension_form.clear()
-        self.state_pension_form.set_values(data.state_pension)
-        self.wrappers.set_values_list(data.wrappers)
-        self.db_pensions.set_values_list(data.db_pensions)
-        self.annuity_purchases.set_values_list(data.annuity_purchases)
+        self.state_pension_form.set_values(first.state_pension)
+        self._set_partner_active(active=len(data.persons) > 1)
+        self.partner_form.clear()
+        self.partner_state_pension_form.clear()
+        if self._partner_active:
+            second = data.persons[1]
+            self.partner_form.set_values(second.person)
+            self.partner_state_pension_form.set_values(second.state_pension)
+        wrappers, partner_wrappers = _partner_rows(data.wrappers)
+        db_pensions, partner_db_pensions = _partner_rows(data.db_pensions)
+        annuities, partner_annuities = _partner_rows(data.annuity_purchases)
+        self.wrappers.set_values_list(wrappers)
+        self.db_pensions.set_values_list(db_pensions)
+        self.annuity_purchases.set_values_list(annuities)
+        self.partner_wrappers.set_values_list(partner_wrappers)
+        self.partner_db_pensions.set_values_list(partner_db_pensions)
+        self.partner_annuity_purchases.set_values_list(partner_annuities)
 
     def set_entity_ids(self, ids: PlanEntityIds) -> None:
         """Seed every repeatable row's entity id from the saved plan.
 
         Called after a successful save so rows the user typed fresh
         adopt their minted ids — the next resubmission then edits the
-        same entities instead of minting again (§4.3).
+        same entities instead of minting again (§4.3). The ids arrive
+        first person's rows first, the order :func:`form_data` submits,
+        so they split between the sections by row count.
         """
-        self.wrappers.set_entity_ids(ids.wrappers)
-        self.db_pensions.set_entity_ids(ids.db_pensions)
-        self.annuity_purchases.set_entity_ids(ids.annuity_purchases)
+        mine = len(self.wrappers.forms)
+        self.wrappers.set_entity_ids(ids.wrappers[:mine])
+        self.partner_wrappers.set_entity_ids(ids.wrappers[mine:])
+        mine = len(self.db_pensions.forms)
+        self.db_pensions.set_entity_ids(ids.db_pensions[:mine])
+        self.partner_db_pensions.set_entity_ids(ids.db_pensions[mine:])
+        mine = len(self.annuity_purchases.forms)
+        self.annuity_purchases.set_entity_ids(ids.annuity_purchases[:mine])
+        self.partner_annuity_purchases.set_entity_ids(ids.annuity_purchases[mine:])
 
     def submit(self) -> None:
         """Forward the submission and show the returned status text."""

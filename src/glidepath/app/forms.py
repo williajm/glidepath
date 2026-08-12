@@ -10,6 +10,12 @@ shell binds
 :class:`FactsFormData`; parsing back into `Fact`/`Decision`-wrapped
 domain objects happens here, so validation and messages stay
 UI-agnostic.
+
+The household is one or two persons (roadmap 9.31; planning §4.11):
+the partner is strictly optional, entered through the partner section
+specs, and every repeatable row names its owning person under
+:data:`OWNER_KEY`. With no partner the form renders and parses exactly
+as a single-person form always has.
 """
 
 from dataclasses import dataclass, field, fields, is_dataclass, replace
@@ -47,7 +53,6 @@ from glidepath.core import (
     Wrapper,
     WrapperKindId,
     new_entity_id,
-    validate_household_v1,
 )
 from glidepath.regions.uk import (
     CASH_KIND,
@@ -61,7 +66,7 @@ from glidepath.regions.uk import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 
 class FieldKind(Enum):
@@ -113,7 +118,13 @@ class SectionSpec:
 
 @dataclass(frozen=True)
 class FactsFormViewModel:
-    """The whole facts entry screen (roadmap 8.2)."""
+    """The whole facts entry screen (roadmap 8.2, 9.31).
+
+    The partner sections mirror the person/state-pension/repeatable
+    sections under their own keys and copy ("About you" / "About your
+    partner"); a shell shows them only while a partner is on the form
+    (planning §4.11 — the partner is strictly optional).
+    """
 
     title: str
     intro: str
@@ -123,6 +134,11 @@ class FactsFormViewModel:
     wrapper: SectionSpec
     db_pension: SectionSpec
     annuity_purchase: SectionSpec
+    partner: SectionSpec
+    partner_state_pension: SectionSpec
+    partner_wrapper: SectionSpec
+    partner_db_pension: SectionSpec
+    partner_annuity_purchase: SectionSpec
     submit_label: str
     clear_label: str
     """The button that empties the whole form (planning §4.9)."""
@@ -130,6 +146,13 @@ class FactsFormViewModel:
     """Status shown while the launch example is on screen (§4.9)."""
     cleared_note: str
     """Status shown after the form is cleared (§4.9)."""
+    add_partner_label: str
+    """The one explicit action that puts a partner on the form (§4.11)."""
+    remove_partner_label: str
+    """The action that takes the partner off the form again (§4.11)."""
+    remove_partner_confirm: str
+    """The confirmation a shell must show before removing the partner —
+    removal deletes every partner row (§4.11)."""
 
     @property
     def sections(self) -> tuple[SectionSpec, ...]:
@@ -141,20 +164,35 @@ class FactsFormViewModel:
             self.wrapper,
             self.db_pension,
             self.annuity_purchase,
+            self.partner,
+            self.partner_state_pension,
+            self.partner_wrapper,
+            self.partner_db_pension,
+            self.partner_annuity_purchase,
         )
+
+
+@dataclass(frozen=True)
+class PersonFormData:
+    """One person's raw section text: their facts and state pension."""
+
+    person: Mapping[str, str] = field(default_factory=dict)
+    state_pension: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class FactsFormData:
     """Raw text captured by a shell, keyed exactly like the specs.
 
-    Each repeatable-section row may additionally carry its entity id
-    under :data:`ENTITY_ID_KEY`, opaque to the rendered fields.
+    ``persons`` holds one entry per person on the form (1..2, roadmap
+    9.31), first entry first person. Each repeatable-section row may
+    additionally carry its entity id under :data:`ENTITY_ID_KEY` and
+    its owning person under :data:`OWNER_KEY`, both opaque to the
+    rendered fields.
     """
 
-    person: Mapping[str, str] = field(default_factory=dict)
+    persons: tuple[PersonFormData, ...] = (PersonFormData(),)
     spending: Mapping[str, str] = field(default_factory=dict)
-    state_pension: Mapping[str, str] = field(default_factory=dict)
     wrappers: tuple[Mapping[str, str], ...] = ()
     db_pensions: tuple[Mapping[str, str], ...] = ()
     annuity_purchases: tuple[Mapping[str, str], ...] = ()
@@ -169,6 +207,14 @@ so wrappers, DB pensions, and annuity purchases keep their stable ids
 edits, reordering, and row deletion alike. Empty or absent means a
 new entity; any other value is the id, verbatim — ids only ever
 originate from a parsed household."""
+
+OWNER_KEY: Final = "owner"
+"""Reserved key of a repeatable-section row's owning person (§4.11).
+
+Never a rendered field: the position ("0" or "1") of the owning person
+in :attr:`FactsFormData.persons`. Empty or absent means the first
+person, so a single-person submission needs no owner keys and parses
+exactly as before the partner existed (roadmap 9.31)."""
 
 
 @dataclass(frozen=True)
@@ -212,8 +258,19 @@ _MULTIPLIERS_NEED_SPENDING = (
     "enter the annual spending need for the stage multipliers to scale"
 )
 _DUPLICATE_LABEL_MESSAGE = "another wrapper already carries this name"
+_PERSON_COUNT_MESSAGE = "the form carries one or two persons"
+_OWNER_MESSAGE = "this row's owner is not a person on the form"
 
 _AS_OF_HINT = "YYYY-MM-DD; blank means today"
+
+_PERSON_SECTIONS: Final = (
+    ("person", "state_pension"),
+    ("partner", "partner_state_pension"),
+)
+"""Per-person (person, state-pension) section keys, by form position."""
+_WRAPPER_SECTIONS: Final = ("wrapper", "partner_wrapper")
+_DB_PENSION_SECTIONS: Final = ("db_pension", "partner_db_pension")
+_ANNUITY_PURCHASE_SECTIONS: Final = ("annuity_purchase", "partner_annuity_purchase")
 
 _STAGE_MULTIPLIER_FIELDS: Final[tuple[tuple[str, LifeStage], ...]] = (
     ("go_go_multiplier", LifeStage.GO_GO),
@@ -703,9 +760,9 @@ def _annuity_purchase_from(
 
     The record is wholly a decision (planning §5.1): the age, pot
     fraction, and product type are all choices, priced from the
-    annuity-rate assumptions at run time. The v1 form is single-person
-    (§4.4), so every purchase it writes is single-life — joint-life
-    annuities wait for the couples spike (roadmap 9.4).
+    annuity-rate assumptions at run time. The form offers no basis
+    choice yet, so every purchase it writes is single-life —
+    joint-life annuities land with roadmap 9.34.
     """
     at_age = reader.int_value("at_age", required=True)
     fraction = reader.decimal_value("fraction_of_pot", required=True)
@@ -741,7 +798,7 @@ class _PersonParts:
 def _person_from(
     reader: _SectionReader, parts: _PersonParts, entity_id: EntityId
 ) -> Person | None:
-    """The (v1 single) person from the person section plus sub-entities."""
+    """One person from their person section plus their sub-entities."""
     dob = reader.fact_of(reader.date_value("date_of_birth", required=True))
     sex_value = reader.choice("sex_for_longevity", _SEXES)
     residency = reader.choice("tax_residency", _RESIDENCIES)
@@ -775,25 +832,103 @@ def _person_from(
         return None
 
 
+@dataclass(frozen=True)
+class _OwnedRow:
+    """One repeatable row bound to its owner-scoped error address."""
+
+    values: Mapping[str, str]
+    section: str
+    index: int
+
+
+def _row_owner(
+    context: _FormContext, values: Mapping[str, str], person_count: int, section: str
+) -> int | None:
+    """The row's owning-person position, or ``None`` (with an error).
+
+    Blank or absent means the first person (:data:`OWNER_KEY`), so
+    single-person data needs no owner keys; a row owned by nobody on
+    the form is refused rather than silently reassigned.
+    """
+    text = values.get(OWNER_KEY, "").strip()
+    if not text:
+        return 0
+    if text.isdigit() and int(text, 10) < person_count:
+        return int(text, 10)
+    context.errors.append(FormError(section, None, OWNER_KEY, _OWNER_MESSAGE))
+    return None
+
+
+def _owned_rows(
+    context: _FormContext,
+    rows: Sequence[Mapping[str, str]],
+    person_count: int,
+    sections: tuple[str, str],
+) -> tuple[tuple[_OwnedRow, ...], ...]:
+    """The section's rows grouped per owning person, in row order.
+
+    Each row keeps its owner's section key and its position within
+    that owner's rows, so errors land on the section instance a shell
+    actually shows (the partner's rows render under the partner
+    sections, roadmap 9.31).
+    """
+    grouped: tuple[list[_OwnedRow], ...] = tuple([] for _ in range(person_count))
+    for values in rows:
+        owner = _row_owner(context, values, person_count, sections[0])
+        if owner is None:
+            continue
+        bucket = grouped[owner]
+        bucket.append(_OwnedRow(values, sections[owner], len(bucket)))
+    return tuple(tuple(bucket) for bucket in grouped)
+
+
+def _entities_from[T](
+    context: _FormContext,
+    grouped: tuple[tuple[_OwnedRow, ...], ...],
+    parse: Callable[[_SectionReader, EntityId], T | None],
+) -> tuple[tuple[T, ...], ...]:
+    """Each owner's rows parsed through ``parse``, dropping failures.
+
+    A failed row has already recorded its errors through the reader;
+    the submission as a whole fails, so the dropped entity never
+    reaches a household.
+    """
+    return tuple(
+        tuple(
+            entity
+            for row in bucket
+            if (
+                entity := parse(
+                    _SectionReader(context, row.section, row.values, index=row.index),
+                    _row_entity_id(row.values),
+                )
+            )
+            is not None
+        )
+        for bucket in grouped
+    )
+
+
 def _reject_duplicate_wrapper_labels(
-    context: _FormContext, rows: Sequence[Mapping[str, str]]
+    context: _FormContext, rows: Sequence[_OwnedRow]
 ) -> None:
     """Refuse two wrappers sharing one name (roadmap 9.28).
 
     A name exists to tell wrappers apart, so a repeat would defeat it —
     and the display layers would have to number the copies right back.
-    Checked on the raw rows so the error lands even when another field
-    on the row failed to parse; each repeated row errors, first seen
-    keeps the name.
+    Household-wide across both persons' rows, because names label the
+    household's legends and exports (§4.11). Checked on the raw rows so
+    the error lands even when another field on the row failed to
+    parse; each repeated row errors, first seen keeps the name.
     """
     seen: set[str] = set()
-    for index, values in enumerate(rows):
-        label = values.get("label", "").strip()
+    for row in rows:
+        label = row.values.get("label", "").strip()
         if not label:
             continue
         if label in seen:
             context.errors.append(
-                FormError("wrapper", index, "label", _DUPLICATE_LABEL_MESSAGE)
+                FormError(row.section, row.index, "label", _DUPLICATE_LABEL_MESSAGE)
             )
         seen.add(label)
 
@@ -817,7 +952,7 @@ def parse_facts_form(
     today: date,
     previous: Household | None = None,
 ) -> FactsFormResult:
-    """Parse a submission into a v1 household, or the errors preventing one.
+    """Parse a submission into a household, or the errors preventing one.
 
     Every fact is stamped with the submission's ``recorded_on`` and an
     ``as_of`` date — the one the user entered for statement-dated
@@ -833,69 +968,60 @@ def parse_facts_form(
     entity id under :data:`ENTITY_ID_KEY` (empty means a new entity),
     so scenario overrides targeting them by stable id (§4.3) survive a
     facts edit — row deletion and reordering included — instead of
-    orphaning or silently retargeting. ``previous`` is the household a
-    re-submission replaces: the (single) person reuses its id, and
-    unchanged undated facts keep their stored ``as_of`` dates.
+    orphaning or silently retargeting; each row's owning person is
+    named under :data:`OWNER_KEY` (roadmap 9.31). ``previous`` is the
+    household a re-submission replaces: persons reuse its ids by form
+    position, and unchanged undated facts keep their stored ``as_of``
+    dates.
     """
     context = _FormContext(
         recorded_on=recorded_on,
         default_as_of=today,
         errors=[],
     )
-    prior = previous.persons[0] if previous is not None and previous.persons else None
+    person_count = len(data.persons)
+    if not 1 <= person_count <= len(_PERSON_SECTIONS):
+        return FactsFormResult(
+            household=None,
+            errors=(FormError("person", None, "", _PERSON_COUNT_MESSAGE),),
+        )
     spending = _spending_from(_SectionReader(context, "spending", data.spending))
-    state_pension = _state_pension_from(
-        _SectionReader(context, "state_pension", data.state_pension)
+    wrapper_rows = _owned_rows(context, data.wrappers, person_count, _WRAPPER_SECTIONS)
+    db_pension_rows = _owned_rows(
+        context, data.db_pensions, person_count, _DB_PENSION_SECTIONS
     )
-    _reject_duplicate_wrapper_labels(context, data.wrappers)
-    wrappers = tuple(
-        wrapper
-        for index, values in enumerate(data.wrappers)
-        if (
-            wrapper := _wrapper_from(
-                _SectionReader(context, "wrapper", values, index=index),
-                _row_entity_id(values),
-            )
+    annuity_rows = _owned_rows(
+        context, data.annuity_purchases, person_count, _ANNUITY_PURCHASE_SECTIONS
+    )
+    _reject_duplicate_wrapper_labels(
+        context, [row for bucket in wrapper_rows for row in bucket]
+    )
+    wrappers = _entities_from(context, wrapper_rows, _wrapper_from)
+    db_pensions = _entities_from(context, db_pension_rows, _db_pension_from)
+    annuity_purchases = _entities_from(context, annuity_rows, _annuity_purchase_from)
+    priors = previous.persons if previous is not None else ()
+    persons: list[Person] = []
+    for position, person_data in enumerate(data.persons):
+        person_section, pension_section = _PERSON_SECTIONS[position]
+        state_pension = _state_pension_from(
+            _SectionReader(context, pension_section, person_data.state_pension)
         )
-        is not None
-    )
-    db_pensions = tuple(
-        pension
-        for index, values in enumerate(data.db_pensions)
-        if (
-            pension := _db_pension_from(
-                _SectionReader(context, "db_pension", values, index=index),
-                _row_entity_id(values),
-            )
+        person = _person_from(
+            _SectionReader(context, person_section, person_data.person),
+            _PersonParts(
+                wrappers=wrappers[position],
+                db_pensions=db_pensions[position],
+                annuity_purchases=annuity_purchases[position],
+                state_pension=state_pension,
+            ),
+            priors[position].id if position < len(priors) else new_entity_id(),
         )
-        is not None
-    )
-    annuity_purchases = tuple(
-        purchase
-        for index, values in enumerate(data.annuity_purchases)
-        if (
-            purchase := _annuity_purchase_from(
-                _SectionReader(context, "annuity_purchase", values, index=index),
-                _row_entity_id(values),
-            )
-        )
-        is not None
-    )
-    person = _person_from(
-        _SectionReader(context, "person", data.person),
-        _PersonParts(
-            wrappers=wrappers,
-            db_pensions=db_pensions,
-            annuity_purchases=annuity_purchases,
-            state_pension=state_pension,
-        ),
-        prior.id if prior is not None else new_entity_id(),
-    )
-    if context.errors or person is None:
+        if person is not None:
+            persons.append(person)
+    if context.errors or len(persons) != person_count:
         return FactsFormResult(household=None, errors=tuple(context.errors))
     try:
-        household = Household(persons=(person,), spending=spending)
-        validate_household_v1(household)
+        household = Household(persons=tuple(persons), spending=spending)
     except ValueError as exc:
         return FactsFormResult(
             household=None, errors=(FormError("person", None, "", str(exc)),)
@@ -950,6 +1076,22 @@ def _wrapper_with_carried_dates(wrapper: Wrapper, prior: Wrapper | None) -> Wrap
     return replace(wrapper, **changes) if changes else wrapper
 
 
+def _carried_person(
+    person: Person,
+    prior: Person | None,
+    prior_wrappers: Mapping[EntityId, Wrapper],
+) -> Person:
+    """One person with unchanged undated facts re-dated from the prior plan."""
+    carried = person if prior is None else _person_with_carried_dates(person, prior)
+    wrappers = tuple(
+        _wrapper_with_carried_dates(wrapper, prior_wrappers.get(wrapper.id))
+        for wrapper in carried.wrappers
+    )
+    if wrappers != carried.wrappers:
+        carried = replace(carried, wrappers=wrappers)
+    return carried
+
+
 def _with_carried_dates(household: Household, previous: Household | None) -> Household:
     """Unchanged undated facts keep the replaced plan's ``as_of`` (§4.5).
 
@@ -958,23 +1100,24 @@ def _with_carried_dates(household: Household, previous: Household | None) -> Hou
     When the submission replaces a loaded plan (``previous``) and the
     value is unchanged, that would silently rewrite persisted
     provenance — the prior date carries forward instead. An edited
-    value is a fresh statement and keeps the submission day. Wrappers
-    pair up by form position, exactly like the §4.3 id reuse.
+    value is a fresh statement and keeps the submission day. Persons
+    and wrappers pair up by entity id, exactly like the §4.3 id reuse.
     """
     if previous is None or not previous.persons or not household.persons:
         return household
-    prior = previous.persons[0]
-    prior_by_id = {wrapper.id: wrapper for wrapper in prior.wrappers}
-    person = _person_with_carried_dates(household.persons[0], prior)
-    wrappers = tuple(
-        _wrapper_with_carried_dates(wrapper, prior_by_id.get(wrapper.id))
+    prior_persons = {person.id: person for person in previous.persons}
+    prior_wrappers = {
+        wrapper.id: wrapper
+        for person in previous.persons
         for wrapper in person.wrappers
+    }
+    persons = tuple(
+        _carried_person(person, prior_persons.get(person.id), prior_wrappers)
+        for person in household.persons
     )
-    if wrappers != person.wrappers:
-        person = replace(person, wrappers=wrappers)
     changes: dict[str, Any] = {}
-    if person is not household.persons[0]:
-        changes["persons"] = (person,)
+    if persons != household.persons:
+        changes["persons"] = persons
     spending = household.spending
     if spending is not None and previous.spending is not None:
         carried = _fact_dated_from(
@@ -1038,11 +1181,12 @@ def _state_pension_values(record: StatePensionRecord | None) -> dict[str, str]:
     }
 
 
-def _wrapper_values(wrapper: Wrapper) -> dict[str, str]:
+def _wrapper_values(wrapper: Wrapper, owner: int) -> dict[str, str]:
     """One wrapper section instance's raw text."""
     crystallised = wrapper.crystallised_balance
     values = {
         ENTITY_ID_KEY: str(wrapper.id),
+        OWNER_KEY: str(owner),
         "label": wrapper.label or "",
         "kind": str(wrapper.kind),
         "balance": str(wrapper.balance.value.amount),
@@ -1079,13 +1223,14 @@ def _factor_table_text(table: FactorTable) -> str:
     return ", ".join(f"{age}:{factor}" for age, factor in sorted(table.factors.items()))
 
 
-def _db_pension_values(pension: DBPension) -> dict[str, str]:
+def _db_pension_values(pension: DBPension, owner: int) -> dict[str, str]:
     """One DB pension section instance's raw text."""
     basis = pension.revaluation_basis
     commutation = pension.commutation_factor
     taken = pension.taken_at_age
     values = {
         ENTITY_ID_KEY: str(pension.id),
+        OWNER_KEY: str(owner),
         "accrued_annual_pension": str(pension.accrued_annual_pension.value.amount),
         "statement_date": pension.statement_date.isoformat(),
         "normal_pension_age": str(pension.normal_pension_age.value),
@@ -1111,10 +1256,11 @@ def _db_pension_values(pension: DBPension) -> dict[str, str]:
     return values
 
 
-def _annuity_purchase_values(purchase: AnnuityPurchase) -> dict[str, str]:
+def _annuity_purchase_values(purchase: AnnuityPurchase, owner: int) -> dict[str, str]:
     """One annuity purchase section instance's raw text."""
     return {
         ENTITY_ID_KEY: str(purchase.id),
+        OWNER_KEY: str(owner),
         "at_age": str(purchase.at_age.value),
         "fraction_of_pot": str(purchase.fraction_of_pot.value),
         "annuity_type": _ANNUITY_TYPE_KEYS[purchase.annuity_type],
@@ -1208,7 +1354,7 @@ def _db_pension_cannot_represent(pension: DBPension) -> str | None:
 def _annuity_purchase_cannot_represent(purchase: AnnuityPurchase) -> str | None:
     """Why the form cannot faithfully edit ``purchase``; ``None`` if it can.
 
-    The v1 form is single-person, so it offers no basis choice: a
+    The form offers no basis choice until roadmap 9.34, so a
     joint-life purchase would silently become single-life on resave.
     """
     if purchase.basis is not AnnuityBasis.SINGLE:
@@ -1251,20 +1397,17 @@ def _person_cannot_represent(person: Person) -> str | None:
 
 
 def form_cannot_represent(household: Household) -> str | None:
-    """Why the v1 facts form cannot faithfully edit ``household``.
+    """Why the facts form cannot faithfully edit ``household``.
 
     ``None`` when every stored detail lands in a form field. The domain
-    model legitimately holds more than the form yet offers (extra
-    persons, planned outflows, joint-life annuity purchases, personal
-    glide paths, whole-retirement spending multipliers, wrapper
-    allocations and fees, independently dated fact pairs, fact and
-    decision notes) —
+    model legitimately holds more than the form yet offers (planned
+    outflows, joint-life annuity purchases, personal glide paths,
+    whole-retirement spending multipliers, wrapper allocations and
+    fees, independently dated fact pairs, fact and decision notes) —
     resubmitting the populated form would silently rebuild a reduced
     household, so a shell must refuse to open such a plan rather than
     lose the data (§4.5).
     """
-    if len(household.persons) != 1:
-        return "more than one person"
     if household.planned_outflows:
         return "planned outflows"
     spending = household.spending
@@ -1274,7 +1417,8 @@ def form_cannot_represent(household: Household) -> str | None:
             return "spending stage multipliers beyond the go-go/slow-go/no-go fields"
     if _carries_note(household):
         return "notes on facts or decisions"
-    return _person_cannot_represent(household.persons[0])
+    reasons = (_person_cannot_represent(person) for person in household.persons)
+    return next((reason for reason in reasons if reason is not None), None)
 
 
 def facts_form_data_from_household(household: Household) -> FactsFormData:
@@ -1289,18 +1433,37 @@ def facts_form_data_from_household(household: Household) -> FactsFormData:
     unchanged — so a plan-load round trip re-dates nothing silently
     either way. Provenance timestamps are not carried — a resubmission
     re-records its facts at submission time, exactly like any edit.
-    Every repeatable row carries its entity id (:data:`ENTITY_ID_KEY`),
-    so identity survives edits, reordering, and row deletion (§4.3).
+    Every repeatable row carries its entity id (:data:`ENTITY_ID_KEY`)
+    and its owning person (:data:`OWNER_KEY`), so identity survives
+    edits, reordering, and row deletion (§4.3), and each row lands
+    under its owner's sections (roadmap 9.31). Rows are emitted first
+    person's first, matching :func:`plan_entity_ids` order.
     """
-    person = household.persons[0]
+    persons = tuple(
+        PersonFormData(
+            person=_person_values(person),
+            state_pension=_state_pension_values(person.state_pension),
+        )
+        for person in household.persons
+    )
+    owned = tuple(enumerate(household.persons))
     return FactsFormData(
-        person=_person_values(person),
+        persons=persons,
         spending=_spending_values(household.spending),
-        state_pension=_state_pension_values(person.state_pension),
-        wrappers=tuple(_wrapper_values(entry) for entry in person.wrappers),
-        db_pensions=tuple(_db_pension_values(entry) for entry in person.db_pensions),
+        wrappers=tuple(
+            _wrapper_values(entry, owner)
+            for owner, person in owned
+            for entry in person.wrappers
+        ),
+        db_pensions=tuple(
+            _db_pension_values(entry, owner)
+            for owner, person in owned
+            for entry in person.db_pensions
+        ),
         annuity_purchases=tuple(
-            _annuity_purchase_values(entry) for entry in person.annuity_purchases
+            _annuity_purchase_values(entry, owner)
+            for owner, person in owned
+            for entry in person.annuity_purchases
         ),
     )
 
@@ -1321,13 +1484,21 @@ def plan_entity_ids(household: Household) -> PlanEntityIds:
     parse time; without this write-back the *next* submission would
     mint again, orphaning any scenario override created in between.
     On success the parsed household holds exactly one entity per form
-    row, in row order, so the ids line up positionally.
+    row, first person's rows first (the order
+    :func:`facts_form_data_from_household` emits and a shell submits),
+    so the ids line up positionally.
     """
-    person = household.persons[0]
+    persons = household.persons
     return PlanEntityIds(
-        wrappers=tuple(str(entry.id) for entry in person.wrappers),
-        db_pensions=tuple(str(entry.id) for entry in person.db_pensions),
-        annuity_purchases=tuple(str(entry.id) for entry in person.annuity_purchases),
+        wrappers=tuple(
+            str(entry.id) for person in persons for entry in person.wrappers
+        ),
+        db_pensions=tuple(
+            str(entry.id) for person in persons for entry in person.db_pensions
+        ),
+        annuity_purchases=tuple(
+            str(entry.id) for person in persons for entry in person.annuity_purchases
+        ),
     )
 
 
@@ -1697,7 +1868,7 @@ def _annuity_purchase_section() -> SectionSpec:
 
     Every field is a choice (planning §5.1): the record is wholly a
     decision, priced at run time from the annuity-rate assumptions in
-    the inspector. Single-life only until couples activate (9.4).
+    the inspector. Single-life only until roadmap 9.34.
     """
     return SectionSpec(
         key="annuity_purchase",
@@ -1749,12 +1920,76 @@ def _annuity_purchase_section() -> SectionSpec:
     )
 
 
+def _partner_section() -> SectionSpec:
+    """The partner's person section: same fields, partner copy (§4.11)."""
+    return replace(
+        _person_section(),
+        key="partner",
+        title="About your partner",
+        description=(
+            "Facts about your partner, plus their target retirement age. "
+            "Where a tax rule requires marriage or civil partnership, the "
+            "plan assumes you qualify."
+        ),
+    )
+
+
+def _partner_state_pension_section() -> SectionSpec:
+    """The partner's state pension section."""
+    base = _state_pension_section()
+    return replace(
+        base,
+        key="partner_state_pension",
+        title="Partner's state pension",
+        description=base.description.replace(
+            "Your official", "Your partner's official"
+        ),
+    )
+
+
+def _partner_wrapper_section() -> SectionSpec:
+    """The partner's repeatable savings-wrapper section."""
+    return replace(
+        _wrapper_section(),
+        key="partner_wrapper",
+        title="Partner's savings wrapper",
+    )
+
+
+def _partner_db_pension_section() -> SectionSpec:
+    """The partner's repeatable DB-pension section."""
+    base = _db_pension_section()
+    return replace(
+        base,
+        key="partner_db_pension",
+        title="Partner's defined benefit pension",
+        description=base.description.replace(
+            "your benefit statement", "your partner's benefit statement"
+        ),
+    )
+
+
+def _partner_annuity_purchase_section() -> SectionSpec:
+    """The partner's repeatable annuity-purchase section."""
+    base = _annuity_purchase_section()
+    return replace(
+        base,
+        key="partner_annuity_purchase",
+        title="Partner's annuity purchase",
+        description=base.description.replace(
+            "your pension pot", "your partner's pension pot"
+        ),
+    )
+
+
 def build_facts_form_view_model() -> FactsFormViewModel:
-    """Assemble the facts entry screen (roadmap 8.2).
+    """Assemble the facts entry screen (roadmap 8.2, 9.31).
 
     The acceptance criterion is that every §5.1 fact is enterable with
     its ``as_of`` date; the guard is ``tests/test_app_forms.py``'s
-    coverage sweep over the §5.1 fact list.
+    coverage sweep over the §5.1 fact list. The partner sections carry
+    the same fields under partner keys and copy, shown only while a
+    partner is on the form (planning §4.11).
     """
     return FactsFormViewModel(
         title="Your plan's facts",
@@ -1771,6 +2006,11 @@ def build_facts_form_view_model() -> FactsFormViewModel:
         wrapper=_wrapper_section(),
         db_pension=_db_pension_section(),
         annuity_purchase=_annuity_purchase_section(),
+        partner=_partner_section(),
+        partner_state_pension=_partner_state_pension_section(),
+        partner_wrapper=_partner_wrapper_section(),
+        partner_db_pension=_partner_db_pension_section(),
+        partner_annuity_purchase=_partner_annuity_purchase_section(),
         submit_label="Save facts and project",
         clear_label="Clear the form",
         example_note=(
@@ -1780,4 +2020,11 @@ def build_facts_form_view_model() -> FactsFormViewModel:
             "start blank."
         ),
         cleared_note="Form cleared — enter your facts and save to project.",
+        add_partner_label="Add a partner",
+        remove_partner_label="Remove partner",
+        remove_partner_confirm=(
+            "Remove your partner from the plan? Their details and every "
+            "entry under them — wrappers, DB pensions, and annuity "
+            "purchases — will be deleted from the form."
+        ),
     )

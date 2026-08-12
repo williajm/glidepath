@@ -66,6 +66,7 @@ from glidepath.app import (
     chart_table,
     fill_tooltip,
 )
+from glidepath.gui.forms import ScrollSafeComboBox
 from glidepath.gui.style import (
     CHART_AXIS_LINE,
     CHART_BAND_INKS,
@@ -116,9 +117,10 @@ class ChartsPaneCallbacks:
     """The shell handlers a :class:`ChartsPane` forwards actions to.
 
     ``run_retirement`` receives the raw replacement-rate and
-    success-target text plus the Monte Carlo panel's raw seed and
-    path-count text (its basis under that run mode) — the shell
-    parses, the pane only captures (planning §4.7); ``run_drawdown``
+    success-target text, the Monte Carlo panel's raw seed and
+    path-count text (its basis under that run mode), and the raw
+    whose-age selection (roadmap 9.31) — the shell parses, the pane
+    only captures (planning §4.7); ``run_drawdown``
     is its dual (9.25), forwarding the raw retirement-age text
     instead of the rate. ``run_backtest``
     carries nothing — the run itself has no inputs (9.18) — and
@@ -129,8 +131,8 @@ class ChartsPaneCallbacks:
     select_basis: Callable[[str], None]
     select_mode: Callable[[str], None]
     run_monte_carlo: Callable[[str, str], None]
-    run_retirement: Callable[[str, str, str, str], None]
-    run_drawdown: Callable[[str, str, str, str], None]
+    run_retirement: Callable[[str, str, str, str, str], None]
+    run_drawdown: Callable[[str, str, str, str, str], None]
     run_backtest: Callable[[], None]
     select_backtest_year: Callable[[str], None]
 
@@ -550,12 +552,16 @@ class ChartsPane(QWidget):
         self.rate_edit = QLineEdit(self._retirement_box)
         self.success_label = QLabel("", self._retirement_box)
         self.success_edit = QLineEdit(self._retirement_box)
+        self.retirement_person_label = QLabel("", self._retirement_box)
+        self.retirement_person_combo = ScrollSafeComboBox(self._retirement_box)
         self.retirement_button = QPushButton("", self._retirement_box)
         self.retirement_button.clicked.connect(self._retirement_clicked)
         retirement_controls.addWidget(self.rate_label)
         retirement_controls.addWidget(self.rate_edit)
         retirement_controls.addWidget(self.success_label)
         retirement_controls.addWidget(self.success_edit)
+        retirement_controls.addWidget(self.retirement_person_label)
+        retirement_controls.addWidget(self.retirement_person_combo)
         retirement_controls.addWidget(self.retirement_button)
         retirement_controls.addStretch(1)
         retirement_layout.addLayout(retirement_controls)
@@ -579,12 +585,16 @@ class ChartsPane(QWidget):
         self.drawdown_age_edit = QLineEdit(self._drawdown_box)
         self.drawdown_success_label = QLabel("", self._drawdown_box)
         self.drawdown_success_edit = QLineEdit(self._drawdown_box)
+        self.drawdown_person_label = QLabel("", self._drawdown_box)
+        self.drawdown_person_combo = ScrollSafeComboBox(self._drawdown_box)
         self.drawdown_button = QPushButton("", self._drawdown_box)
         self.drawdown_button.clicked.connect(self._drawdown_clicked)
         drawdown_controls.addWidget(self.drawdown_age_label)
         drawdown_controls.addWidget(self.drawdown_age_edit)
         drawdown_controls.addWidget(self.drawdown_success_label)
         drawdown_controls.addWidget(self.drawdown_success_edit)
+        drawdown_controls.addWidget(self.drawdown_person_label)
+        drawdown_controls.addWidget(self.drawdown_person_combo)
         drawdown_controls.addWidget(self.drawdown_button)
         drawdown_controls.addStretch(1)
         drawdown_layout.addLayout(drawdown_controls)
@@ -648,6 +658,7 @@ class ChartsPane(QWidget):
             self.success_edit.text(),
             self.seed_edit.text(),
             self.paths_edit.text(),
+            str(max(self.retirement_person_combo.currentIndex(), 0)),
         )
 
     def _drawdown_clicked(self) -> None:
@@ -661,6 +672,7 @@ class ChartsPane(QWidget):
             self.drawdown_success_edit.text(),
             self.seed_edit.text(),
             self.paths_edit.text(),
+            str(max(self.drawdown_person_combo.currentIndex(), 0)),
         )
 
     def set_monte_carlo_busy(self, *, busy: bool) -> None:
@@ -796,6 +808,23 @@ class ChartsPane(QWidget):
         self.outlook_message_label.setText(panel.message)
         self.outlook_message_label.setVisible(bool(panel.message))
 
+    def _sync_person_combo(
+        self,
+        label: QLabel,
+        combo: ScrollSafeComboBox,
+        panel: RetirementPanelViewModel | DrawdownPanelViewModel,
+    ) -> None:
+        """Re-render one card's whose-age selector (roadmap 9.31)."""
+        label.setText(panel.person_label)
+        options = panel.person_options
+        if tuple(combo.itemText(i) for i in range(combo.count())) != options:
+            combo.clear()
+            combo.addItems(list(options))
+        value = panel.person_value
+        combo.setCurrentIndex(int(value) if value.isdigit() else 0)
+        label.setVisible(panel.person_visible)
+        combo.setVisible(panel.person_visible)
+
     def _sync_retirement(self, panel: RetirementPanelViewModel) -> None:
         """Re-render the "When can I retire?" card (roadmap 9.14)."""
         self._retirement_box.setTitle(panel.heading)
@@ -806,6 +835,9 @@ class ChartsPane(QWidget):
         self.retirement_button.setText(panel.run_label)
         self.success_label.setVisible(panel.success_visible)
         self.success_edit.setVisible(panel.success_visible)
+        self._sync_person_combo(
+            self.retirement_person_label, self.retirement_person_combo, panel
+        )
         self.retirement_answer_label.setText(panel.answer)
         self.retirement_answer_label.setVisible(bool(panel.answer))
         self.retirement_detail_label.setText(panel.detail)
@@ -823,6 +855,9 @@ class ChartsPane(QWidget):
         self.drawdown_button.setText(panel.run_label)
         self.drawdown_success_label.setVisible(panel.success_visible)
         self.drawdown_success_edit.setVisible(panel.success_visible)
+        self._sync_person_combo(
+            self.drawdown_person_label, self.drawdown_person_combo, panel
+        )
         self.drawdown_answer_label.setText(panel.answer)
         self.drawdown_answer_label.setVisible(bool(panel.answer))
         self.drawdown_detail_label.setText(panel.detail)

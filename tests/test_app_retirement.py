@@ -44,6 +44,10 @@ from glidepath.app.retirement import (
     RETIREMENT_FAILED_PREFIX,
     RETIREMENT_HEADING,
     RETIREMENT_HORIZON_MESSAGE,
+    RETIREMENT_PERSON_LABEL,
+    RETIREMENT_PERSON_MESSAGE,
+    household_employment_income,
+    parsed_person_position,
 )
 from glidepath.core import (
     Decision,
@@ -100,6 +104,21 @@ def household(
     )
 
 
+def couple(partner_employment: str | None = "30000") -> Household:
+    """The saver joined by a 58-year-old partner (planning §4.11)."""
+    base = household()
+    partner = Person(
+        id=EntityId("retire-partner"),
+        date_of_birth=Fact(value=date(1968, 2, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=63, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+        employment_income=(
+            None if partner_employment is None else money_fact(partner_employment)
+        ),
+    )
+    return Household(persons=(*base.persons, partner), spending=base.spending)
+
+
 def short_horizon_state() -> PlanState:
     """A fresh session with the planning age overridden down to 65."""
     outcome = state_with_override(
@@ -117,6 +136,12 @@ def short_horizon_state() -> PlanState:
 def projected_fixture() -> PlanState:
     """One projected short-horizon session."""
     return state_with_household(short_horizon_state(), household(), today=TODAY)
+
+
+@pytest.fixture(scope="module", name="couple_projected")
+def couple_projected_fixture() -> PlanState:
+    """One projected short-horizon session over the couple."""
+    return state_with_household(short_horizon_state(), couple(), today=TODAY)
 
 
 @pytest.fixture(scope="module", name="solved")
@@ -377,6 +402,102 @@ class TestStateWithRetirement:
         assert state.result == re_anchored.result
         assert state.result != projected.result
         assert state.monte_carlo is None
+
+
+class TestCoupleSelection:
+    """Whose age the search varies, and the household target (§4.11)."""
+
+    def test_the_target_sums_the_household_incomes(
+        self, couple_projected: PlanState
+    ) -> None:
+        """66% of the £80,000 both earners state, not of one salary."""
+        state = state_with_retirement(
+            couple_projected, DETERMINISTIC_REQUEST, today=TODAY
+        )
+        answer = state.retirement
+        assert answer is not None
+        assert answer.employment_income == Money(Decimal(80000))
+        assert answer.target_income == Money(Decimal(52800))
+        assert answer.person_position == 0
+
+    def test_person_text_selects_the_partner(self, couple_projected: PlanState) -> None:
+        """Selecting "1" searches the partner's ages from their current age."""
+        request = replace(DETERMINISTIC_REQUEST, person_text="1")
+        state = state_with_retirement(couple_projected, request, today=TODAY)
+        answer = state.retirement
+        assert answer is not None
+        assert answer.person_position == 1
+        assert answer.minimum_age == 58
+        assert answer.maximum_age == 64
+        panel = build_retirement_panel(state, RunMode.DETERMINISTIC)
+        assert "searched your partner's ages 58 to 64" in panel.detail
+        assert panel.person_value == "1"
+
+    def test_an_off_household_person_selection_is_rejected(
+        self, couple_projected: PlanState
+    ) -> None:
+        """A selection naming nobody on the plan folds into the error."""
+        request = replace(DETERMINISTIC_REQUEST, person_text="2")
+        state = state_with_retirement(couple_projected, request, today=TODAY)
+        assert state.retirement is None
+        assert state.retirement_error == RETIREMENT_PERSON_MESSAGE
+
+    def test_a_single_person_plan_rejects_a_partner_selection(
+        self, projected: PlanState
+    ) -> None:
+        """Selecting "1" names nobody when the plan holds one person."""
+        request = replace(DETERMINISTIC_REQUEST, person_text="1")
+        state = state_with_retirement(projected, request, today=TODAY)
+        assert state.retirement is None
+        assert state.retirement_error == RETIREMENT_PERSON_MESSAGE
+
+    def test_the_person_selector_shows_only_for_a_couple(
+        self, projected: PlanState, couple_projected: PlanState
+    ) -> None:
+        """One person hides the selector; a couple names them both."""
+        single = build_retirement_panel(projected, RunMode.DETERMINISTIC)
+        pair = build_retirement_panel(couple_projected, RunMode.DETERMINISTIC)
+        assert single.person_visible is False
+        assert single.person_options == ("You",)
+        assert pair.person_visible is True
+        assert pair.person_options == ("You", "Your partner")
+        assert pair.person_label == RETIREMENT_PERSON_LABEL
+        assert pair.person_value == "0"
+
+
+class TestPersonHelpers:
+    """The shared person-selection and household-income helpers (§4.11)."""
+
+    def test_a_blank_selection_means_the_first_person(self) -> None:
+        """Blank is the single-person default."""
+        position = parsed_person_position("", 1, RETIREMENT_PERSON_MESSAGE)
+        assert position == 0
+
+    def test_a_digit_inside_the_household_parses(self) -> None:
+        """Whitespace-padded positions parse to the named person."""
+        position = parsed_person_position(" 1 ", 2, RETIREMENT_PERSON_MESSAGE)
+        assert position == 1
+
+    @pytest.mark.parametrize("text", ["1", "2", "-1", "x"])
+    def test_a_selection_off_the_household_is_rejected(self, text: str) -> None:
+        """Anything not naming a person raises the given message."""
+        with pytest.raises(ValueError, match=RETIREMENT_PERSON_MESSAGE):
+            parsed_person_position(text, 1, RETIREMENT_PERSON_MESSAGE)
+
+    def test_household_income_sums_both_earners(self) -> None:
+        """£50,000 and £30,000 target as one £80,000 household income."""
+        income = household_employment_income(couple())
+        assert income == Money(Decimal(80000))
+
+    def test_a_non_earning_partner_adds_nothing(self) -> None:
+        """A partner without stated income leaves the saver's alone."""
+        income = household_employment_income(couple(partner_employment=None))
+        assert income == Money(Decimal(50000))
+
+    def test_no_stated_income_anywhere_is_none(self) -> None:
+        """Nobody stating an income leaves nothing to target."""
+        income = household_employment_income(household(employment=None))
+        assert income is None
 
 
 class TestRetirementPanel:

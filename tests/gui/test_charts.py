@@ -106,8 +106,8 @@ def callbacks(
     select_basis: Callable[[str], None] | None = None,
     select_mode: Callable[[str], None] | None = None,
     run_monte_carlo: Callable[[str, str], None] | None = None,
-    run_retirement: Callable[[str, str, str, str], None] | None = None,
-    run_drawdown: Callable[[str, str, str, str], None] | None = None,
+    run_retirement: Callable[[str, str, str, str, str], None] | None = None,
+    run_drawdown: Callable[[str, str, str, str, str], None] | None = None,
     run_backtest: Callable[[], None] | None = None,
     select_backtest_year: Callable[[str], None] | None = None,
 ) -> ChartsPaneCallbacks:
@@ -116,8 +116,10 @@ def callbacks(
         select_basis=select_basis or (lambda _key: None),
         select_mode=select_mode or (lambda _key: None),
         run_monte_carlo=run_monte_carlo or (lambda _seed, _paths: None),
-        run_retirement=run_retirement or (lambda _rate, _success, _seed, _paths: None),
-        run_drawdown=run_drawdown or (lambda _age, _success, _seed, _paths: None),
+        run_retirement=run_retirement
+        or (lambda _rate, _success, _seed, _paths, _person: None),
+        run_drawdown=run_drawdown
+        or (lambda _age, _success, _seed, _paths, _person: None),
         run_backtest=run_backtest or (lambda: None),
         select_backtest_year=select_backtest_year or (lambda _year: None),
     )
@@ -253,6 +255,37 @@ def drawdown_state() -> PlanState:
     state = state_with_household(outcome.state, plan, today=TODAY)
     request = DrawdownRequest(mode=RunMode.DETERMINISTIC, age_text="63")
     return state_with_drawdown(state, request, today=TODAY)
+
+
+def couple_state() -> PlanState:
+    """One projected session over a two-person household (9.31)."""
+    isa = Wrapper(
+        id=EntityId("charts-gui-couple-isa"),
+        kind=ISA_KIND,
+        balance=Fact(value=Money(Decimal(25000)), as_of=AS_OF, recorded_on=RECORDED),
+    )
+    first = Person(
+        id=EntityId("charts-gui-couple-p0"),
+        date_of_birth=Fact(value=date(1991, 2, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=60, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+        wrappers=(isa,),
+    )
+    second = Person(
+        id=EntityId("charts-gui-couple-p1"),
+        date_of_birth=Fact(value=date(1993, 6, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=58, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+    )
+    plan = Household(
+        persons=(first, second),
+        spending=SpendingPlan(
+            annual_spending_real=Fact(
+                value=Money(Decimal(18000)), as_of=AS_OF, recorded_on=RECORDED
+            )
+        ),
+    )
+    return state_with_household(initial_plan_state(), plan, today=TODAY)
 
 
 class TestChartsPane:
@@ -561,11 +594,11 @@ class TestRetirementCard:
 
     def test_find_button_forwards_the_raw_text(self) -> None:
         """The shell parses; the card only captures and forwards."""
-        searches: list[tuple[str, str, str, str]] = []
+        searches: list[tuple[str, str, str, str, str]] = []
         pane = ChartsPane(
             callbacks(
-                run_retirement=lambda rate, success, seed, paths: searches.append(
-                    (rate, success, seed, paths)
+                run_retirement=lambda rate, success, seed, paths, person: (
+                    searches.append((rate, success, seed, paths, person))
                 )
             )
         )
@@ -578,7 +611,7 @@ class TestRetirementCard:
         pane.seed_edit.setText("42")
         pane.paths_edit.setText("5")
         pane.retirement_button.click()
-        assert searches == [("70", "85", "42", "5")]
+        assert searches == [("70", "85", "42", "5", "0")]
 
     def test_an_answer_renders_on_the_card(self) -> None:
         """The answer and its detail show; the no-run message hides."""
@@ -622,11 +655,11 @@ class TestDrawdownCard:
 
     def test_find_button_forwards_the_raw_text(self) -> None:
         """The shell parses; the card only captures and forwards."""
-        searches: list[tuple[str, str, str, str]] = []
+        searches: list[tuple[str, str, str, str, str]] = []
         pane = ChartsPane(
             callbacks(
-                run_drawdown=lambda age, success, seed, paths: searches.append(
-                    (age, success, seed, paths)
+                run_drawdown=lambda age, success, seed, paths, person: searches.append(
+                    (age, success, seed, paths, person)
                 )
             )
         )
@@ -639,7 +672,7 @@ class TestDrawdownCard:
         pane.seed_edit.setText("42")
         pane.paths_edit.setText("5")
         pane.drawdown_button.click()
-        assert searches == [("62", "85", "42", "5")]
+        assert searches == [("62", "85", "42", "5", "0")]
 
     def test_an_answer_renders_on_the_card(self) -> None:
         """The answer and its detail show; the no-run message hides."""
@@ -651,6 +684,61 @@ class TestDrawdownCard:
         assert not pane.drawdown_detail_label.isHidden()
         assert "age 63" in pane.drawdown_detail_label.text()
         assert pane.drawdown_message_label.isHidden()
+
+
+class TestWhoseAgeSelectors:
+    """The whose-age combos on the search cards (roadmap 9.31)."""
+
+    def test_a_single_person_plan_hides_the_selectors(self) -> None:
+        """One person: nothing to choose, so no combo renders."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(projected_view_model())
+        assert pane.retirement_person_combo.isHidden()
+        assert pane.retirement_person_label.isHidden()
+        assert pane.drawdown_person_combo.isHidden()
+        assert pane.drawdown_person_label.isHidden()
+
+    def test_a_couple_sees_both_persons_listed(self) -> None:
+        """Two persons: both cards offer You and Your partner."""
+        pane = ChartsPane(callbacks())
+        pane.refresh(build_charts_view_model(couple_state()))
+        retirement_combo = pane.retirement_person_combo
+        assert not retirement_combo.isHidden()
+        assert not pane.retirement_person_label.isHidden()
+        retirement_items = [
+            retirement_combo.itemText(index)
+            for index in range(retirement_combo.count())
+        ]
+        assert retirement_items == ["You", "Your partner"]
+        drawdown_combo = pane.drawdown_person_combo
+        assert not drawdown_combo.isHidden()
+        assert not pane.drawdown_person_label.isHidden()
+        drawdown_items = [
+            drawdown_combo.itemText(index) for index in range(drawdown_combo.count())
+        ]
+        assert drawdown_items == ["You", "Your partner"]
+
+    def test_run_forwards_the_selected_person(self) -> None:
+        """Each card's run click carries the combo's index as text."""
+        retirement_persons: list[str] = []
+        drawdown_persons: list[str] = []
+        pane = ChartsPane(
+            callbacks(
+                run_retirement=lambda _rate, _success, _seed, _paths, person: (
+                    retirement_persons.append(person)
+                ),
+                run_drawdown=lambda _age, _success, _seed, _paths, person: (
+                    drawdown_persons.append(person)
+                ),
+            )
+        )
+        pane.refresh(build_charts_view_model(couple_state()))
+        pane.retirement_person_combo.setCurrentIndex(1)
+        pane.retirement_button.click()
+        assert retirement_persons == ["1"]
+        pane.drawdown_person_combo.setCurrentIndex(1)
+        pane.drawdown_button.click()
+        assert drawdown_persons == ["1"]
 
 
 class TestChartTheme:
