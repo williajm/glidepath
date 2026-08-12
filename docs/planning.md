@@ -939,7 +939,15 @@ carries, a labelled v1 limitation of the §7 table (real quotes price
 the 50/66/100% options differently). On the buyer's death a
 joint-life stream continues to the surviving partner at the purchased
 fraction, escalating as before (§4.11, roadmap 9.34); a single-life
-stream dies with the buyer. Income is wholly taxable, starts at the exact purchase date
+stream dies with the buyer. A joint-life purchase executed with no
+living modelled partner — none in the plan, or the partner already
+dead at the purchase date — still prices at the joint factor and buys
+a survivor income the model can never pay: a recorded convention (the
+purchase is the user's stated decision, and the engine executes it as
+priced). The facts form refuses entering a joint-life purchase with
+no partner on the form, so the convention is reachable only through a
+death predating the purchase or a plan built outside the form.
+Income is wholly taxable, starts at the exact purchase date
 (pro-rated in its first period, §4.1), and escalates per product:
 level holds nominal; escalating compounds the table's fixed rate;
 inflation-linked tracks the run's CPI path exactly — annuity
@@ -2502,12 +2510,16 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   pricing factor (0.92) applies whatever the fraction — a labelled v1
   limitation of the §7 age-adjustment table; the facts form's
   survivor-income choice implies the basis, so
-  `form_cannot_represent` drops its last couples refusal; the
-  survivor fraction joins the scenario whitelist (synthesized over a
-  single-life base like `death_age`; a basis flip to single entails
-  dropping it); schema v8 adds `survivor_fraction` to every annuity
-  purchase — `null` for single-life, the 50% the joint factor was
-  always quoting for a v7 joint-life purchase.*
+  `form_cannot_represent` drops its last couples refusal — while a
+  joint-life purchase with no partner is refused on entry and on
+  open (the §5 convention records that the engine still prices the
+  joint factor with no one to pay); the survivor fraction joins the
+  scenario whitelist (synthesized over a single-life base like
+  `death_age`; a basis flip to single entails dropping it), and the
+  scenario editor pairs the two overrides so the joint-life what-if
+  is reachable one edit at a time; schema v8 adds `survivor_fraction`
+  to every annuity purchase — `null` for single-life, the 50% the
+  joint factor was always quoting for a v7 joint-life purchase.*
 
 ## 9. Open questions
 

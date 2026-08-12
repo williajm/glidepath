@@ -20,9 +20,13 @@ in the release PR and becomes the GitHub Release notes verbatim.
   partner at the purchased fraction, escalating as before;
   single-life purchases are unchanged. Pricing keeps the single
   joint-life factor (0.92) whatever the fraction — a labelled v1
-  limitation of the annuity age-adjustment table. The facts form
-  thereby represents every couples plan feature; plan documents step
-  to schema v8 (older files load as before).
+  limitation of the annuity age-adjustment table. A joint-life
+  purchase needs a partner in the plan (the form refuses one
+  otherwise), and the scenario editor pairs the basis and
+  survivor-income overrides so "what if joint-life" works one edit
+  at a time. The facts form thereby represents every couples plan
+  feature; plan documents step to schema v8 (older files load as
+  before).
 
 - Couples get deterministic survivor modelling (roadmap 9.33, planning
   §4.11): each person can state an optional "model death at age" —

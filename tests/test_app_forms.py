@@ -1039,8 +1039,7 @@ class TestAnnuityPurchaseParsing:
     ) -> None:
         """A §6 survivor option implies the joint basis (roadmap 9.34)."""
         household = parse(
-            form_data(
-                person=person_values(),
+            couple_form_data(
                 annuity_purchases=(
                     {
                         "at_age": "68",
@@ -1061,8 +1060,7 @@ class TestAnnuityPurchaseParsing:
     def test_an_unknown_survivor_income_is_rejected(self) -> None:
         """A fraction outside the §6 options is rejected on its field."""
         result = parse_facts_form(
-            form_data(
-                person=person_values(),
+            couple_form_data(
                 annuity_purchases=(
                     {
                         "at_age": "68",
@@ -1079,6 +1077,29 @@ class TestAnnuityPurchaseParsing:
         [error] = result.errors
         assert error.section == "annuity_purchase"
         assert error.field_key == "survivor_fraction"
+
+    def test_a_survivor_income_with_no_partner_is_rejected(self) -> None:
+        """A single-person plan cannot buy joint-life (9.34, §5)."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                annuity_purchases=(
+                    {
+                        "at_age": "68",
+                        "fraction_of_pot": "0.5",
+                        "annuity_type": "level",
+                        "survivor_fraction": "66",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "annuity_purchase"
+        assert error.field_key == "survivor_fraction"
+        assert "partner" in error.message
 
 
 class TestStatePensionParsing:
@@ -2130,6 +2151,14 @@ class TestFormCannotRepresent:
         )
         household = _altered(base, persons=(person, second))
         assert form_cannot_represent(household) is None
+        rendered = facts_form_data_from_household(household)
+        assert rendered.annuity_purchases[1]["survivor_fraction"] == "66"
+        result = parse_facts_form(rendered, recorded_on=RECORDED, today=TODAY)
+        assert result.household is not None
+        [reparsed] = result.household.persons[1].annuity_purchases
+        assert reparsed.basis is AnnuityBasis.JOINT
+        assert reparsed.survivor_fraction is not None
+        assert reparsed.survivor_fraction.value == Decimal("0.66")
 
     def test_planned_outflows_are_flagged(self, base: Household) -> None:
         """Planned outflows have no form section yet."""
@@ -2142,10 +2171,13 @@ class TestFormCannotRepresent:
         household = _altered(base, planned_outflows=(outflow,))
         assert form_cannot_represent(household) == "planned outflows"
 
-    def test_joint_life_annuity_purchase_is_representable(
-        self, base: Household
-    ) -> None:
-        """A joint-life purchase renders and re-parses faithfully (9.34)."""
+    def test_a_partnerless_joint_purchase_is_flagged(self, base: Household) -> None:
+        """A joint-life purchase with no partner refuses the edit (9.34).
+
+        The form refuses entering one — the §5 convention records that
+        the engine still prices the joint factor with no one to pay —
+        so a resubmission could never faithfully rebuild it.
+        """
         [purchase] = base.persons[0].annuity_purchases
         joint = _altered(
             purchase,
@@ -2153,15 +2185,9 @@ class TestFormCannotRepresent:
             survivor_fraction=Decision(value=Decimal("0.5"), recorded_on=RECORDED),
         )
         household = _with_person(base, annuity_purchases=(joint,))
-        assert form_cannot_represent(household) is None
-        rendered = facts_form_data_from_household(household)
-        assert rendered.annuity_purchases[0]["survivor_fraction"] == "50"
-        result = parse_facts_form(rendered, recorded_on=RECORDED, today=TODAY)
-        assert result.household is not None
-        [reparsed] = result.household.persons[0].annuity_purchases
-        assert reparsed.basis is AnnuityBasis.JOINT
-        assert reparsed.survivor_fraction is not None
-        assert reparsed.survivor_fraction.value == Decimal("0.5")
+        assert form_cannot_represent(household) == (
+            "a joint-life annuity purchase with no partner"
+        )
 
     def test_personal_glide_path_is_flagged(self, base: Household) -> None:
         """A per-person glide path has no form field yet."""

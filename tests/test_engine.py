@@ -4477,6 +4477,47 @@ class TestSurvivorModelling:
         assert survivor_by_year[1] == ZERO
         assert survivor_by_year[2] == Money(Decimal("1620.00"))
 
+    def test_a_joint_purchase_after_the_partners_death_still_prices_joint(
+        self,
+    ) -> None:
+        """The recorded §5 convention: joint pricing, no one left to pay.
+
+        The partner dies at the 2026 gate; the buyer's joint-life
+        purchase still fires in 2027 at the joint factor — 40,000 x
+        0.08 x 1.25 x 0.9 = 3,600 — and at the buyer's own 2028 death
+        the stream stops, with no survivor to receive the fraction.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "0", crystallised="40000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                annuity_purchases=(
+                    annuity_purchase_of(
+                        at_age=67,
+                        fraction="1",
+                        basis=AnnuityBasis.JOINT,
+                        survivor_fraction="0.5",
+                    ),
+                ),
+                death_at=68,
+            ),
+            partner_of((), death_at=64),
+        )
+        result = run(
+            plan,
+            annuity_assumptions({"spending.survivor_multiplier": Decimal(1)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 12, 31)),
+        )
+        buyer_by_year = [
+            snapshot.persons[0].annuity_income for snapshot in result.snapshots
+        ]
+        assert buyer_by_year == [ZERO, Money(Decimal("3600.00")), ZERO]
+        assert all(
+            snapshot.persons[1].annuity_income == ZERO for snapshot in result.snapshots
+        )
+
     def test_a_full_survivor_fraction_passes_the_income_whole(self) -> None:
         """A 100% joint-life purchase continues undiminished (§6)."""
         plan = couple_of(

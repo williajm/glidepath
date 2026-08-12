@@ -245,6 +245,9 @@ _FACTORS_MESSAGE = "enter age:factor pairs separated by commas, e.g. 60:0.75, 65
 _CONTRIBUTIONS_NEED_EMPLOYEE = (
     "enter the employee contribution (0 is fine) to record contributions"
 )
+_JOINT_NEEDS_PARTNER_MESSAGE = (
+    "a joint-life purchase needs a partner in the plan to receive the income"
+)
 _MEMBERSHIP_NEEDS_RATE = (
     "enter the accrual rate to record active membership; blank means deferred"
 )
@@ -775,7 +778,7 @@ def _db_pension_from(reader: _SectionReader, entity_id: EntityId) -> DBPension |
 
 
 def _annuity_purchase_from(
-    reader: _SectionReader, entity_id: EntityId
+    reader: _SectionReader, entity_id: EntityId, *, joint_life_offered: bool
 ) -> AnnuityPurchase | None:
     """One planned annuity purchase from its section values.
 
@@ -783,7 +786,9 @@ def _annuity_purchase_from(
     fraction, product type, and survivor income are all choices,
     priced from the annuity-rate assumptions at run time. The basis
     is implied by the survivor-income choice (roadmap 9.34): blank is
-    a single-life purchase; a §6 fraction makes it joint-life.
+    a single-life purchase; a §6 fraction makes it joint-life — and
+    needs a partner in the plan to receive the income, else the joint
+    factor would price a benefit the model can never pay (§5).
     """
     at_age = reader.int_value("at_age", required=True)
     fraction = reader.decimal_value("fraction_of_pot", required=True)
@@ -791,6 +796,8 @@ def _annuity_purchase_from(
     if annuity_type is None and not reader.raw("annuity_type"):
         reader.error("annuity_type", _REQUIRED_MESSAGE)
     survivor = reader.choice("survivor_fraction", _SURVIVOR_FRACTIONS)
+    if survivor is not None and not joint_life_offered:
+        reader.error("survivor_fraction", _JOINT_NEEDS_PARTNER_MESSAGE)
     if at_age is None or fraction is None or annuity_type is None or not reader.ok:
         return None
     recorded = reader.recorded_on
@@ -1027,7 +1034,15 @@ def parse_facts_form(
     )
     wrappers = _entities_from(context, wrapper_rows, _wrapper_from)
     db_pensions = _entities_from(context, db_pension_rows, _db_pension_from)
-    annuity_purchases = _entities_from(context, annuity_rows, _annuity_purchase_from)
+    annuity_purchases = _entities_from(
+        context,
+        annuity_rows,
+        lambda reader, entity_id: _annuity_purchase_from(
+            reader,
+            entity_id,
+            joint_life_offered=person_count == len(_PERSON_SECTIONS),
+        ),
+    )
     priors = previous.persons if previous is not None else ()
     persons: list[Person] = []
     for position, person_data in enumerate(data.persons):
@@ -1461,6 +1476,13 @@ def form_cannot_represent(household: Household) -> str | None:
         # The claim field renders in the partner section, so with no
         # partner a resubmission would silently drop the decision.
         return "a marriage allowance claim with no partner"
+    if len(household.persons) == 1 and any(
+        purchase.basis is not AnnuityBasis.SINGLE
+        for purchase in household.persons[0].annuity_purchases
+    ):
+        # The form refuses a partnerless joint-life purchase on entry
+        # (9.34), so a resubmission could never faithfully rebuild one.
+        return "a joint-life annuity purchase with no partner"
     spending = household.spending
     if spending is not None and spending.stage_multipliers is not None:
         offered = {stage for _, stage in _STAGE_MULTIPLIER_FIELDS}
