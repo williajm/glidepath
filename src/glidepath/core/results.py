@@ -377,6 +377,7 @@ def _note_db_pension_facts(
     note(f"{prefix}.accrued_annual_pension", pension.accrued_annual_pension)
     note(f"{prefix}.normal_pension_age", pension.normal_pension_age)
     note(f"{prefix}.commutation_factor", pension.commutation_factor)
+    note(f"{prefix}.survivor_fraction", pension.survivor_fraction)
     membership = pension.active_membership
     if membership is not None:
         note(f"{prefix}.active_membership.accrual_rate", membership.accrual_rate)
@@ -462,6 +463,13 @@ def collect_plan_decisions(household: Household) -> tuple[LabelledDecision, ...]
                 decision=person.target_retirement_age,
             )
         )
+        if person.death_age is not None:
+            decisions.append(
+                LabelledDecision(
+                    label=f"person[{person.id}].death_age",
+                    decision=person.death_age,
+                )
+            )
         for pension in person.db_pensions:
             pension_prefix = f"db_pension[{pension.id}]"
             if pension.taken_at_age is not None:

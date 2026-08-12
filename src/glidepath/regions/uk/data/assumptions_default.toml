@@ -4,10 +4,10 @@
 # user-overridable in the app; §6 announced-policy items are facts, these
 # are estimates.
 
-schema_version = 3
+schema_version = 4
 
 [meta]
-verified_on = 2026-08-04
+verified_on = 2026-08-12
 sources = [
   "https://obr.uk/efo/economic-and-fiscal-outlook-march-2026/",
   "https://www.gov.scot/publications/scottish-budget-2026-2027/pages/4/",
@@ -15,6 +15,8 @@ sources = [
   "https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07",
   "https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm",
   "https://www.hl.co.uk/retirement/annuities/best-buy-rates",
+  "https://www.ppf.co.uk/blog-posts/defined-benefit-pension-beliefs",
+  "https://www.retirementlivingstandards.org.uk/",
 ]
 
 [[assumption]]
@@ -168,3 +170,13 @@ joint_factor = "0.92"
 "65" = "1.0"
 "70" = "1.144"
 "75" = "1.380"
+
+[[assumption]]
+key = "db.survivor_fraction"
+value = "0.50"
+basis = "No statutory fraction for private DB schemes - scheme rules govern (PPF); the major public-service legacy schemes (Civil Service Classic, NHS 1995, Teachers' NPA60, Police 1987, Firefighters 1992, AFPS 1975) all pay 50% (planning §6); overridable per scheme via the DB pension's survivor_fraction fact"
+
+[[assumption]]
+key = "spending.survivor_multiplier"
+value = "0.70"
+basis = "PLSA/Pensions UK Retirement Living Standards single-vs-couple budget ratios: 13,900/22,500 = 0.62 minimum, 32,700/45,400 = 0.72 moderate, 45,400/62,700 = 0.72 comfortable (retrieved 2026-08-12); 0.70 sits just under the moderate/comfortable ratio"

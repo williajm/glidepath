@@ -210,6 +210,7 @@ def _person(person: Person) -> dict[str, object]:
         "employment_income": _optional_fact(person.employment_income, _money_value),
         "mpaa_triggered_on": _optional_fact(person.mpaa_triggered_on, _date_value),
         "lsa_used": _optional_fact(person.lsa_used, _money_value),
+        "death_age": _optional_decision(person.death_age, _int_value),
         "wrappers": [_wrapper(wrapper) for wrapper in person.wrappers],
         "db_pensions": [_db_pension(pension) for pension in person.db_pensions],
         "annuity_purchases": [
@@ -278,6 +279,7 @@ def _db_pension(pension: DBPension) -> dict[str, object]:
             pension.commutation_factor, _decimal_value
         ),
         "taken_at_age": _optional_decision(pension.taken_at_age, _int_value),
+        "survivor_fraction": _optional_fact(pension.survivor_fraction, _decimal_value),
         "active_membership": _optional(pension.active_membership, _active_membership),
     }
 

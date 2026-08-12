@@ -27,6 +27,7 @@ from glidepath.regions.uk.schema import (
     AssumptionDefault,
     AssumptionsFile,
     DataFileError,
+    DeathBenefitAges,
     DividendRate,
     DividendRules,
     FileMeta,
@@ -493,6 +494,20 @@ def _parse_lisa(raw: object, context: str) -> LisaAges:
     return ages
 
 
+def _parse_death_benefits(raw: object, context: str) -> DeathBenefitAges:
+    """Parse the ``[death_benefits]`` table."""
+    table = _Table(raw, context)
+    ages = DeathBenefitAges(
+        income_tax_free_before_age=_integer(
+            table.take("income_tax_free_before_age"),
+            f"{context}.income_tax_free_before_age",
+            minimum=1,
+        )
+    )
+    table.finish()
+    return ages
+
+
 def _parse_deferral(raw: object, context: str) -> StatePensionDeferral:
     """Parse the ``[state_pension_deferral]`` table."""
     table = _Table(raw, context)
@@ -529,6 +544,9 @@ def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRules
     deferral = _parse_deferral(
         root.take("state_pension_deferral"), f"{context}.state_pension_deferral"
     )
+    death_benefits = _parse_death_benefits(
+        root.take("death_benefits"), f"{context}.death_benefits"
+    )
     root.finish()
     return AgeRulesFile(
         schema_version=schema_version,
@@ -537,6 +555,7 @@ def parse_age_rules(text: str, *, context: str = "<age-rules data>") -> AgeRules
         spa_bands=spa_bands,
         lisa=lisa,
         deferral=deferral,
+        death_benefits=death_benefits,
     )
 
 

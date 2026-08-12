@@ -120,6 +120,29 @@ def _upgrade_v5_to_v6(raw: RawDocument) -> RawDocument:
     return raw
 
 
+def _upgrade_v6_to_v7(raw: RawDocument) -> RawDocument:
+    """v7 adds the survivor-modelling keys (roadmap 9.33).
+
+    A v6 file predates survivor modelling, so every person it holds is
+    alive to the horizon (``death_age`` decodes as ``null``) and every
+    DB pension keeps the assumption default for its survivor pension
+    (``survivor_fraction`` decodes as ``null`` — the
+    ``db.survivor_fraction`` assumption applies, planning §4.11).
+    """
+    household = raw.get("household")
+    persons = household.get("persons") if isinstance(household, dict) else []
+    for person in persons if isinstance(persons, list) else []:
+        if not isinstance(person, dict):
+            continue
+        person["death_age"] = None
+        pensions = person.get("db_pensions")
+        for pension in pensions if isinstance(pensions, list) else []:
+            if isinstance(pension, dict):
+                pension["survivor_fraction"] = None
+    raw[_VERSION_KEY] = 7
+    return raw
+
+
 UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
     {
         1: _upgrade_v1_to_v2,
@@ -127,6 +150,7 @@ UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
         3: _upgrade_v3_to_v4,
         4: _upgrade_v4_to_v5,
         5: _upgrade_v5_to_v6,
+        6: _upgrade_v6_to_v7,
     }
 )
 """The registered upgraders, keyed by the version each reads."""

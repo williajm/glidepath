@@ -70,6 +70,8 @@ ASSUMPTION_NAMES: Final[Mapping[str, str]] = {
         "Annuity rate (inflation-linked, single life, age 65)"
     ),
     "annuity.age_adjustment": "Annuity rate age adjustment",
+    "db.survivor_fraction": "DB survivor pension fraction",
+    "spending.survivor_multiplier": "Survivor spending multiplier",
 }
 """Human display names for the shipped assumption keys (roadmap 8.3).
 

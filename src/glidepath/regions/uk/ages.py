@@ -147,6 +147,21 @@ class UkAgeRules:
             date_of_birth, self.rules.lisa.access_age, period
         )
 
+    def death_benefits_income_tax_free(
+        self, date_of_birth: date, death_date: date
+    ) -> bool:
+        """Whether this death passes DC pensions as tax-free drawdown.
+
+        Death strictly before the boundary birthday (75, planning §6
+        "Couples") passes beneficiary drawdown income-tax-free; death
+        on or after it is taxed at the beneficiary's marginal rate
+        (roadmap 9.33).
+        """
+        boundary = date_age_attained(
+            date_of_birth, self.rules.death_benefits.income_tax_free_before_age
+        )
+        return death_date < boundary
+
 
 def _age_window(date_of_birth: date, opens_at: int, closes_at: int) -> Period:
     """The inclusive span from one birthday to the eve of a later one."""

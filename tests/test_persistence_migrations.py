@@ -95,8 +95,8 @@ class TestV1ToV2:
         assert migrated["schema_version"] == SCHEMA_VERSION
         pensions = migrated["household"]["persons"][0]["db_pensions"]
         assert pensions == [
-            {"id": "a", "active_membership": None},
-            {"id": "b", "active_membership": None},
+            {"id": "a", "active_membership": None, "survivor_fraction": None},
+            {"id": "b", "active_membership": None, "survivor_fraction": None},
         ]
 
     def test_a_document_without_pensions_just_bumps_the_version(self) -> None:
@@ -243,6 +243,55 @@ class TestV3ToV4:
             {
                 "schema_version": 3,
                 "household": {"spending": {"stage_multipliers": "not-a-dict"}},
+            },
+        ],
+    )
+    def test_malformed_shapes_pass_through_for_the_strict_decoder(
+        self, raw: RawDocument
+    ) -> None:
+        """The upgrader never crashes on shapes the decoder will reject."""
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+
+
+class TestV6ToV7:
+    """The 9.33 migration: the survivor-modelling keys arrive (§4.5)."""
+
+    def test_persons_and_db_pensions_gain_the_null_survivor_keys(self) -> None:
+        """Every person decodes alive; every DB pension keeps the default."""
+        raw: RawDocument = {
+            "schema_version": 6,
+            "household": {
+                "persons": [
+                    {"db_pensions": [{"id": "a"}]},
+                    {"db_pensions": []},
+                ]
+            },
+        }
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        persons = migrated["household"]["persons"]
+        assert persons[0] == {
+            "death_age": None,
+            "db_pensions": [{"id": "a", "survivor_fraction": None}],
+        }
+        assert persons[1] == {"death_age": None, "db_pensions": []}
+
+    def test_a_document_without_persons_just_bumps_the_version(self) -> None:
+        """Nothing to upgrade still steps the version."""
+        raw: RawDocument = {"schema_version": 6, "marker": "untouched"}
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        assert migrated["marker"] == "untouched"
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            {"schema_version": 6, "household": "not-an-object"},
+            {"schema_version": 6, "household": {"persons": "not-a-list"}},
+            {
+                "schema_version": 6,
+                "household": {"persons": [{"db_pensions": "not-a-list"}, "not-a-dict"]},
             },
         ],
     )

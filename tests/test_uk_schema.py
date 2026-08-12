@@ -13,6 +13,7 @@ from glidepath.regions.uk import (
     AssumptionDefault,
     AssumptionsFile,
     DataFileError,
+    DeathBenefitAges,
     DividendRate,
     DividendRules,
     FileMeta,
@@ -95,6 +96,7 @@ LISA_AGES = LisaAges(
 DEFERRAL = StatePensionDeferral(increment_rate=Rate(Decimal("0.01")), per_weeks=9)
 BASELINE_NMPA = (NmpaStep(age=55, effective_from=None),)
 OPEN_SPA_BAND = SpaAgeBand(dob_from=None, dob_to=None, years=66, months=0)
+DEATH_BENEFITS = DeathBenefitAges(income_tax_free_before_age=75)
 
 
 def make_age_rules(
@@ -109,6 +111,7 @@ def make_age_rules(
         spa_bands=spa_bands,
         lisa=LISA_AGES,
         deferral=DEFERRAL,
+        death_benefits=DEATH_BENEFITS,
     )
 
 

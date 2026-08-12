@@ -21,13 +21,18 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from decimal import Decimal
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 """The data-file schema version this code understands.
 
 v2 (#97): tax-year files lose the ``[state_pension]`` table and
 ``age_rules.toml`` the ``[new_state_pension]`` table — the state
 pension amount is the user's stated DWP forecast, never a shipped
 rate.
+
+v4 (roadmap 9.33): ``age_rules.toml`` gains the ``[death_benefits]``
+table — the age boundary below which a deceased member's pension
+passes as income-tax-free beneficiary drawdown (planning §6
+"Couples").
 
 v3 (#173): tax-year files gain the ``[marriage_allowance]`` table —
 the s55B transferable amount and the per-schedule recipient band
@@ -433,6 +438,23 @@ class LisaAges:
 
 
 @dataclass(frozen=True, slots=True)
+class DeathBenefitAges:
+    """Pension death-benefit tax boundary (planning §6 "Couples", 9.33).
+
+    A member's death before attaining this age passes their DC pension
+    as income-tax-free beneficiary drawdown; death at or after it is
+    taxed at the beneficiary's marginal rate.
+    """
+
+    income_tax_free_before_age: int
+
+    def __post_init__(self) -> None:
+        """Require a positive age boundary."""
+        if self.income_tax_free_before_age <= 0:
+            _fail("DeathBenefitAges", "income_tax_free_before_age must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class StatePensionDeferral:
     """State pension deferral increment (post-2016 rules)."""
 
@@ -499,6 +521,7 @@ class AgeRulesFile:
     spa_bands: tuple[SpaBand, ...]
     lisa: LisaAges
     deferral: StatePensionDeferral
+    death_benefits: DeathBenefitAges
 
     def __post_init__(self) -> None:
         """Validate the version, the NMPA schedule, and SPA band tiling."""

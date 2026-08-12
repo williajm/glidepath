@@ -184,6 +184,13 @@ class DBPension:
     """Pounds of lump sum per pound of annual pension given up."""
     taken_at_age: Decision[int] | None = None
     """The age benefits start; ``None`` means the normal pension age."""
+    survivor_fraction: Fact[Decimal] | None = None
+    """Fraction of the pension a surviving partner receives (§4.11).
+
+    A scheme fact — scheme rules, not statute, set it (planning §6).
+    ``None`` means the ``db.survivor_fraction`` assumption (50%)
+    applies when the member's death is modelled (roadmap 9.33).
+    """
     active_membership: DBActiveMembership | None = None
     """Active CARE-style accrual; ``None`` means deferred (roadmap 9.6)."""
 
@@ -200,17 +207,7 @@ class DBPension:
         if self.normal_pension_age.value <= 0:
             msg = "DBPension.normal_pension_age must be positive"
             raise ValueError(msg)
-        fraction = self.commuted_fraction.value
-        if not _ZERO <= fraction <= _ONE:
-            msg = "DBPension.commuted_fraction must lie between 0 and 1"
-            raise ValueError(msg)
-        if fraction > _ZERO:
-            if self.commutation_factor is None:
-                msg = "DBPension.commutation_factor is required to commute pension"
-                raise ValueError(msg)
-            if self.commutation_factor.value <= _ZERO:
-                msg = "DBPension.commutation_factor must be positive"
-                raise ValueError(msg)
+        _validate_db_fractions(self)
         taken = db_taken_age(self)
         if taken <= 0:
             msg = "DBPension.taken_at_age must be positive"
@@ -234,6 +231,26 @@ class DBPension:
                 " exceed the age benefits are taken (planning §5.1)"
             )
             raise ValueError(msg)
+
+
+def _validate_db_fractions(pension: DBPension) -> None:
+    """Reject impossible commutation and survivor fractions (§5.1, §4.11)."""
+    fraction = pension.commuted_fraction.value
+    if not _ZERO <= fraction <= _ONE:
+        msg = "DBPension.commuted_fraction must lie between 0 and 1"
+        raise ValueError(msg)
+    if fraction > _ZERO:
+        if pension.commutation_factor is None:
+            msg = "DBPension.commutation_factor is required to commute pension"
+            raise ValueError(msg)
+        if pension.commutation_factor.value <= _ZERO:
+            msg = "DBPension.commutation_factor must be positive"
+            raise ValueError(msg)
+    if pension.survivor_fraction is not None and not (
+        _ZERO <= pension.survivor_fraction.value <= _ONE
+    ):
+        msg = "DBPension.survivor_fraction must lie between 0 and 1"
+        raise ValueError(msg)
 
 
 def db_taken_age(pension: DBPension) -> int:

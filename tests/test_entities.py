@@ -100,6 +100,25 @@ def test_person_defaults_to_the_default_glide_path() -> None:
     assert make_person().glide_path is None
 
 
+def test_person_defaults_to_alive_to_the_horizon() -> None:
+    """No stated death age means no survivor modelling (planning §4.11)."""
+    assert make_person().death_age is None
+
+
+def test_person_rejects_a_non_positive_death_age() -> None:
+    """A death age of zero is a data error, never a modelling input."""
+    person = make_person()
+    death_age = Decision(value=0, recorded_on=RECORDED)
+    with pytest.raises(ValueError, match="death_age must be positive"):
+        Person(
+            id=person.id,
+            date_of_birth=person.date_of_birth,
+            target_retirement_age=person.target_retirement_age,
+            tax_residency=person.tax_residency,
+            death_age=death_age,
+        )
+
+
 def test_person_carries_a_glide_path_override() -> None:
     """A per-person glide path overrides the default shape (roadmap 3.5)."""
     config = GlidePathConfig(

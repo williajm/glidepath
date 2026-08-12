@@ -511,9 +511,14 @@ otherwise (below). Chart categories label both ages (`2032 · 60/58`).
 **Survivor modelling — deterministic and optional.** Each person gains
 `death_age: Decision[int] | None`, default `None` (alive to horizon).
 It is a Decision, so it is scenario-overridable: "what if I die at 75"
-becomes an ordinary scenario diff. Death lands at the period the age
-is attained (§4.1 gate convention). From that period, verified rules
-(§6 "Couples"):
+becomes an ordinary scenario diff — the one decision addressable even
+when the base plan leaves it unset (a `None` base synthesizes the
+resolved decision, borrowing `target_retirement_age`'s timestamp so
+resolution stays clock-free). Death takes effect at the first period
+whose start the death age has been attained by — the §4.1 access-gate
+convention, so the period containing the death date still models the
+person alive and the survivor rules run from the next period boundary.
+From that period, verified rules (§6 "Couples"):
 
 - **DC pensions** pass to the survivor as beneficiary drawdown: the
   pot merges into a survivor-held crystallised sub-balance flagged
@@ -539,9 +544,27 @@ is attained (§4.1 gate convention). From that period, verified rules
   continue at the purchase's survivor fraction (9.34).
 - **Marriage allowance** lapses from the tax year after death.
 - **Spending**: the household spending plan scales by a
-  `spending.survivor_multiplier` assumption (default 0.70; basis to
-  be pinned against the PLSA single-vs-couple budget ratio at
-  implementation — §9 open question 9).
+  `spending.survivor_multiplier` assumption (default 0.70; pinned
+  2026-08-12 against the PLSA single-vs-couple budget ratios —
+  0.62/0.72/0.72 across the three living standards, §7 — resolving
+  §9 open question 9).
+
+Shipped conventions (9.33): inherited holdings stay reported under
+their original wrapper ids but join the *survivor's* ledgers, results,
+and tax picture — every draw prices through the survivor's own
+assessment, inherited pension pots are fully crystallised on transfer
+(no new tax-free cash) with their beneficiary-drawdown taxation read
+from the region's data-driven age-75 boundary, and no inherited source
+is ever gated or triggers the survivor's MPAA. Death ends the
+deceased's employment income, contributions (an inherited wrapper's
+schedule dies with them), DB accrual, and pending annuity purchases;
+the DB commutation lump sum dies too (a survivor pension pays income
+only). Planned outflows are household decisions and keep funding
+whoever's age dates them. With no survivor — a one-person death, or
+both gates fired — nothing further is spent, drawn, or taxed: the
+estate stays invested to the horizon, out of scope. The 9.32 marriage
+allowance lapses from the death-effect period, which is exactly the
+tax year after the one containing the death date.
 
 **Rejected:** stochastic mortality in Monte Carlo (death ages are
 deterministic across paths, exactly as CPI is — §5.2; longevity *risk*
@@ -691,6 +714,7 @@ class Person:
     target_retirement_age: Decision[int]
     mpaa_triggered_on: Fact[date] | None  # flexibly accessed before this plan
     lsa_used: Fact[Money] | None  # lump sum allowance already used
+    death_age: Decision[int] | None  # None: alive to horizon (4.11, 9.33)
     wrappers: tuple[Wrapper, ...]
     db_pensions: tuple[DBPension, ...]
     annuity_purchases: tuple[AnnuityPurchase, ...]  # decision records (5.5)
@@ -747,6 +771,7 @@ class DBPension:
     commutation_factor: Fact[Decimal] | None  # £ lump sum per £1 pension
     taken_at_age: Decision[int] | None
     commuted_fraction: Decision[Decimal]
+    survivor_fraction: Fact[Decimal] | None  # None = db.survivor_fraction (4.11)
     active_membership: DBActiveMembership | None  # None = deferred (9.6)
 
 
@@ -1543,7 +1568,7 @@ recipient band gates never move. **Recurring task** after each Budget: copy prev
 year's file, re-verify every figure, update `verified_on`/`sources`,
 update §6.
 
-### 5.4 Plan document format (`.glidepath.json` schema v6)
+### 5.4 Plan document format (`.glidepath.json` schema v7)
 
 Implements the §4.5 decision (`glidepath/persistence/`, roadmap 6.2/6.4;
 region-agnostic like the core — the region's shipped defaults and data
@@ -1551,7 +1576,7 @@ version are function inputs, never imports). Top level:
 
 ```json
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "region": "uk",
   "assumptions_resolved_against": "<region data_version at last save>",
   "household": { "persons": [...], "spending": ..., "planned_outflows": [...],
@@ -1606,7 +1631,11 @@ v1-era files unloadable until this step); v4→v5 (roadmap 9.28) adds
 `"label": null` to every wrapper — a v4 file's wrappers all load
 unnamed; v5→v6 (roadmap 9.32) adds
 `"claim_marriage_allowance": null` to the household — a v5 file keeps
-the default claim-when-eligible (§4.11).
+the default claim-when-eligible (§4.11); v6→v7 (roadmap 9.33) adds
+`"death_age": null` to every person and `"survivor_fraction": null` to
+every DB pension — a v6 file's persons all load alive to the horizon
+and its schemes keep the `db.survivor_fraction` assumption default
+(§4.11).
 
 ## 6. Verified UK policy figures (2026/27)
 
@@ -1738,7 +1767,8 @@ these figures back the §4.11 decision record and become data keys as the
 
 Every row is a shipped default the user can override; each carries its
 basis. Recorded 2026-08-01 (the `yield.*` rows and the annuity
-age-adjustment table 2026-08-03). This table is the human-readable
+age-adjustment table 2026-08-03; the couples survivor rows
+2026-08-12). This table is the human-readable
 mirror of `regions/uk/data/assumptions_default.toml` (doc-sync test in
 Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 
@@ -1780,6 +1810,13 @@ Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 (roadmap 5.3) and the portfolio income of taxable-growth wrappers
 (roadmap 9.2); they are read — and recorded in provenance — only when
 that strategy runs or the plan holds a GIA/cash wrapper.*
+
+### Couples
+
+| Key | Default | Basis |
+| --- | --- | --- |
+| `db.survivor_fraction` | 50% | No statutory fraction for private DB schemes — scheme rules govern (§6, PPF); the major public-service legacy schemes all pay 50%. Overridable per scheme via the DB pension's `survivor_fraction` fact ([PPF on DB beliefs](https://www.ppf.co.uk/blog-posts/defined-benefit-pension-beliefs)) |
+| `spending.survivor_multiplier` | 0.70 × household spending | PLSA/Pensions UK Retirement Living Standards single-vs-couple budget ratios — £13,900/£22,500 = 0.62 (Minimum), £32,700/£45,400 = 0.72 (Moderate), £45,400/£62,700 = 0.72 (Comfortable), retrieved 2026-08-12 ([retirementlivingstandards.org.uk](https://www.retirementlivingstandards.org.uk/)); 0.70 sits just under the Moderate/Comfortable ratio (§9 open question 9, resolved) |
 
 ## 8. Phased roadmap — issue basis
 
@@ -2419,19 +2456,33 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   sits inside the transferable band). The claim enters via the
   partner form section and is not scenario-addressable (the household
   has no EntityId) — both recorded limitations.*
-- [ ] 9.33 Couples: survivor modelling — *optional per-person
-  `death_age: Decision[int]` per §4.11 (scenario-overridable; death at
-  the §4.1 period gate): DC pots merge to the survivor as beneficiary
-  drawdown (income-tax-free below age-75 deaths, marginal rate at/after
-  75; no NMPA gate, no new tax-free cash, no LSA consumption, no death
-  lump sums); ISA/LISA merge via APS; GIA/cash merge; DB continues at
-  the new per-scheme `survivor_fraction` fact defaulting to the
-  `db.survivor_fraction` assumption (50%); the deceased's state
-  pension stops (nothing inherited — §6); marriage allowance lapses
-  the following tax year; spending scales by
-  `spending.survivor_multiplier` (default 0.70, basis pinned per §9
-  open question 9). Both new assumption keys land in §7 + the
-  defaults file with this issue (doc-sync).*
+- [x] 9.33 Couples: survivor modelling (#174) — *optional per-person
+  `death_age: Decision[int]` per §4.11 (scenario-overridable even over
+  an unset base — the "what if I die at 75" headline; death takes
+  effect at the first period whose start attains the age, the §4.1
+  gate convention; plan document schema v7): a household death step
+  runs before each period's steps and moves the deceased's holdings
+  onto the survivor's ledgers — DC pots as fully-crystallised
+  beneficiary drawdown (income-tax-free below age-75 deaths, survivor
+  marginal rate at/after; no NMPA gate, no new tax-free cash, no LSA
+  consumption, no MPAA trigger; the boundary ships in
+  `age_rules.toml` `[death_benefits]`, data schema v4, behind a new
+  `WrapperRuleset.death_benefits_income_tax_free`), ISA/LISA as
+  ungated ISA money (APS), GIA/cash as they stand; DB streams
+  continue at the new per-scheme `survivor_fraction` fact defaulting
+  to the `db.survivor_fraction` assumption (50%), accrual and
+  commutation lump sum ended; the deceased's state pension and
+  annuity streams stop (nothing inherited — §6; joint-life
+  continuation is 9.34); marriage allowance lapses from the
+  death-effect period (the tax year after death); spending scales by
+  `spending.survivor_multiplier` (0.70, pinned against the PLSA
+  single-vs-couple ratios 0.62/0.72/0.72 — §9 open question 9
+  resolved). Both assumption keys land in §7 + the defaults file
+  (doc-sync); the facts form enters the death age and per-scheme
+  survivor fraction. No-death plans are bit-identical (goldens
+  unchanged); death is deterministic across Monte Carlo paths; with
+  no survivor the estate stays invested with no further modelled
+  flows (§4.11 shipped conventions).*
 - [ ] 9.34 Couples: joint-life annuities end-to-end — *the purchase
   gains a survivor-fraction decision (50/66/100%, §6); the facts form
   enters joint-life purchases (`form_cannot_represent` drops its last
@@ -2486,8 +2537,12 @@ Carried from the 2026-08-01 research pass:
    [HS345 (2026)](https://www.gov.uk/government/publications/pensions-tax-charges-on-any-excess-over-the-lifetime-allowance-annual-allowance-special-annual-allowance-and-on-unauthorised-payments-hs345-self/hs345-pension-savings-tax-charges-2026)
    (§6).
 9. **Survivor spending multiplier basis** (from the 2026-08-11 couples
-   spike) — the §4.11 default of 0.70 is a placeholder ratio; pin it
-   against the PLSA Retirement Living Standards single-vs-couple
-   budgets (fetch the current-year figures) when 9.33 ships the
-   `spending.survivor_multiplier` key — natural companion to the PLSA
-   benchmarks work in #165.
+   spike) — *resolved 2026-08-12* (9.33): the current PLSA/Pensions UK
+   Retirement Living Standards budgets give single-vs-couple ratios of
+   £13,900/£22,500 = 0.62 (Minimum), £32,700/£45,400 = 0.72
+   (Moderate) and £45,400/£62,700 = 0.72 (Comfortable)
+   ([retirementlivingstandards.org.uk](https://www.retirementlivingstandards.org.uk/)),
+   so the 0.70 default stands, sitting just under the
+   Moderate/Comfortable ratio; shipped as the
+   `spending.survivor_multiplier` key (§7 "Couples"). The per-standard
+   ratios remain relevant to the PLSA benchmarks suggestion in #165.

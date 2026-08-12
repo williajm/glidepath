@@ -101,6 +101,16 @@ class Person:
     seeded with it, reducing the headroom under the region's lifetime
     cap (roadmap 5.2). ``None`` means none used.
     """
+    death_age: Decision[int] | None = None
+    """Model this person's death at this age (planning §4.11).
+
+    ``None`` — the default — means alive to the horizon. A decision,
+    so scenario-overridable: "what if I die at 75" is an ordinary
+    scenario diff. Death lands at the period the age is attained
+    (§4.1 gate convention); from that period the survivor rules run
+    (roadmap 9.33). Deterministic in every run mode — never a
+    stochastic mortality draw (§4.11).
+    """
     wrappers: tuple[Wrapper, ...] = ()
     db_pensions: tuple[DBPension, ...] = ()
     """DB entitlements — deferred or actively accruing (roadmap 4.2, 9.6)."""
@@ -131,6 +141,9 @@ class Person:
             raise ValueError(msg)
         if self.lsa_used is not None and self.lsa_used.value < _ZERO:
             msg = "Person.lsa_used must be non-negative"
+            raise ValueError(msg)
+        if self.death_age is not None and self.death_age.value <= 0:
+            msg = "Person.death_age must be positive"
             raise ValueError(msg)
 
 
