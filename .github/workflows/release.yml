@@ -109,17 +109,28 @@ jobs:
   # The GitHub Release is created only after PyPI publication succeeds,
   # so a failed upload never leaves a public release advertising a
   # package that is not there. The sdist/wheel are attached so the
-  # release carries the exact published artifacts.
+  # release carries the exact published artifacts, and signed build
+  # provenance is attested for them first — the GitHub-side mirror of
+  # the PEP 740 attestations PyPI holds, so a download from the release
+  # page verifies with `gh attestation verify <file> -R <repo>`. Like
+  # publish-pypi, this job checks out nothing and runs no project code.
   github-release:
     needs: publish-pypi
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Download release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-assets
+
+      - name: Attest build provenance for the release artifacts
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/*
 
       - name: Create GitHub Release
         env:

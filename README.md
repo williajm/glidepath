@@ -173,8 +173,11 @@ Releases are `vX.Y.Z` tags on `main`. Each one is published to
 trusted publishing with PEP 740 attestations, and as a GitHub Release
 carrying its notes from
 [`CHANGELOG.md`](https://github.com/williajm/glidepath/blob/main/CHANGELOG.md)
-with the same artifacts attached. There are no packaged binary builds
-(installer/exe) yet — install from PyPI as above.
+with the same artifacts attached, each carrying signed build
+provenance — verify a downloaded file with
+`gh attestation verify <file> -R williajm/glidepath`. There are no
+packaged binary builds (installer/exe) yet — install from PyPI as
+above.
 
 ## Data licences
 

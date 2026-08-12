@@ -9,6 +9,14 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Added
+
+- Release artifacts attached to a GitHub Release now carry signed
+  build provenance (`actions/attest-build-provenance`) — the
+  GitHub-side mirror of the PEP 740 attestations PyPI already holds —
+  so a file downloaded from the release page verifies with
+  `gh attestation verify <file> -R williajm/glidepath`.
+
 ## [0.4.0] - 2026-08-12
 
 Couples release: a plan gains an optional partner, modelled end to

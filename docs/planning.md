@@ -420,7 +420,17 @@ manual approval and only `v*` tags may deploy to it (defence in depth
 behind the trusted-publishing contract). The GitHub Release is
 created last, only after PyPI publication succeeds, with the
 published sdist/wheel attached — a failed upload never leaves a
-public release advertising a package that is not on PyPI.
+public release advertising a package that is not on PyPI. Before
+attaching them, the release job (which likewise checks out nothing
+and runs no project code) attests signed build provenance for the
+artifacts via `actions/attest-build-provenance` — the GitHub-side
+mirror of the PEP 740 attestations, so a file downloaded from the
+release page verifies with
+`gh attestation verify <file> -R williajm/glidepath` instead of
+trusting the download channel. No checksum files are published:
+digests without provenance add nothing an attacker who could swap
+the artifact could not also swap, and SHA-256 digests already ship
+in PyPI's own file metadata.
 **Runtime pin.** `uv tool install glidepath` resolves dependencies
 fresh — `uv.lock` and the `exclude-newer` cooldown do not apply to
 end users — so the runtime dependency is pinned exactly
