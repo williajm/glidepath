@@ -73,6 +73,7 @@ OUTFLOW_ID = EntityId("scen-outflow")
 OUTFLOW_2_ID = EntityId("scen-outflow-2")
 
 RETIREMENT_KEY = f"{PERSON_ID}:target_retirement_age"
+DEATH_AGE_KEY = f"{PERSON_ID}:death_age"
 OUTFLOW_KEY = f"{OUTFLOW_ID}:amount_real"
 OUTFLOW_2_KEY = f"{OUTFLOW_2_ID}:amount_real"
 CPI_KEY = AssumptionKey.INFLATION_CPI.value
@@ -250,6 +251,23 @@ class TestScenarioOverrides:
         assert outcome.error is None
         override = outcome.state.scenarios[0].overrides[0]
         assert override.value == 58
+        assert outcome.state.scenario_runs is not None
+
+    def test_death_age_override_works_over_an_unset_base(
+        self, with_scenario: PlanState
+    ) -> None:
+        """The "what if I die at 75" case needs no base death age (9.33).
+
+        The base plan leaves ``death_age`` unset, so the target's
+        current value is ``None`` — the override must still parse and
+        resolve through the editor.
+        """
+        outcome = state_with_scenario_override(
+            with_scenario, SCENARIO, DEATH_AGE_KEY, "75", today=TODAY
+        )
+        assert outcome.error is None
+        override = outcome.state.scenarios[0].overrides[0]
+        assert override.value == 75
         assert outcome.state.scenario_runs is not None
 
     def test_money_decision_override_parses(self, with_scenario: PlanState) -> None:
@@ -641,6 +659,19 @@ class TestValueParsingHelpers:
         assert _edit_text(60) == "60"
         assert _edit_text(AnnuityType.LEVEL) == "Level"
         assert _edit_text({"equity_start": Decimal("0.8")}) == "equity_start = 0.8"
+
+    def test_an_unset_optional_decision_prefills_empty(self) -> None:
+        """An unset death age never prefills a literal "None" (9.33)."""
+        assert _edit_text(None) == ""
+
+    def test_a_none_base_parses_as_a_whole_number(self) -> None:
+        """The unset-death-age template is an int (planning §4.11)."""
+        assert _parsed_decision_value(None, "75") == 75
+
+    def test_a_none_base_rejects_non_integers(self) -> None:
+        """Bad text over an unset base gets the whole-number message."""
+        with pytest.raises(ValueError, match="whole number"):
+            _parsed_decision_value(None, "soon")
 
 
 class TestCellFormatting:

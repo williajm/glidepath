@@ -1029,9 +1029,18 @@ class _Projection:
         if decumulating and self.plan.spending is not None:
             need = _spending_need(self.plan.spending, first.stage, inflation) * fraction
             if len(living) < len(entries):
-                need = need * decimal_assumption_value(
+                multiplier = decimal_assumption_value(
                     self.tracked.get(AssumptionKey.SPENDING_SURVIVOR_MULTIPLIER)
                 )
+                if multiplier < Decimal(0):
+                    # A negative need would flow back out as banked
+                    # surplus — money from nowhere. Fail loudly (§4.6).
+                    msg = (
+                        "spending.survivor_multiplier must be"
+                        f" non-negative, got {multiplier}"
+                    )
+                    raise EngineError(msg)
+                need = need * multiplier
         first.need = need
         income_net = _ZERO
         for _, context in entries:
@@ -1653,6 +1662,13 @@ class _PersonProjection:
                 fraction = decimal_assumption_value(
                     self.tracked.get(AssumptionKey.DB_SURVIVOR_FRACTION)
                 )
+                if not Decimal(0) <= fraction <= _ONE:
+                    # The stated fact enforces this at construction;
+                    # the assumption route must match (§4.6 fail-loud).
+                    msg = (
+                        f"db.survivor_fraction must lie between 0 and 1, got {fraction}"
+                    )
+                    raise EngineError(msg)
             stream.accrued_annual = stream.accrued_annual * fraction
             stream.lump_sum_factor = Decimal(0)
             stream.accrual = None

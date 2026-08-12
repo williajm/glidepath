@@ -1382,6 +1382,8 @@ def _db_pension_cannot_represent(pension: DBPension) -> str | None:
     dated = [pension.accrued_annual_pension.as_of, pension.normal_pension_age.as_of]
     if pension.commutation_factor is not None:
         dated.append(pension.commutation_factor.as_of)
+    if pension.survivor_fraction is not None:
+        dated.append(pension.survivor_fraction.as_of)
     membership = pension.active_membership
     if membership is not None:
         dated.append(membership.accrual_rate.as_of)

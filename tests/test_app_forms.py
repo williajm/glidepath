@@ -2213,6 +2213,21 @@ class TestFormCannotRepresent:
             == "DB scheme facts dated off the statement date"
         )
 
+    def test_off_statement_survivor_fraction_is_flagged(self, base: Household) -> None:
+        """A resave would silently redate the survivor fraction (9.33)."""
+        person = base.persons[0]
+        pension = person.db_pensions[0]
+        assert pension.survivor_fraction is not None
+        moved = _altered(pension.survivor_fraction, as_of=date(2026, 6, 1))
+        household = _with_person(
+            base,
+            db_pensions=(_altered(pension, survivor_fraction=moved),),
+        )
+        assert (
+            form_cannot_represent(household)
+            == "DB scheme facts dated off the statement date"
+        )
+
     def test_noted_fact_is_flagged(self, base: Household) -> None:
         """A note on a fact has no form field, so a resave would drop it."""
         person = base.persons[0]

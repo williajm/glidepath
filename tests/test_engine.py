@@ -4569,6 +4569,48 @@ class TestSurvivorModelling:
             assert incomes[0] > ZERO
             assert all(income == ZERO for income in incomes[1:])
 
+    def test_a_negative_survivor_multiplier_is_rejected(self) -> None:
+        """A negative multiplier would mint banked surplus; fail loudly.
+
+        The need it produced would flow back out of the household as
+        surplus swept into a taxable wrapper — money from nowhere.
+        """
+        plan = couple_of(
+            person_of((), date_of_birth=date(1960, 1, 1), retire_at=60, death_at=67),
+            partner_of((wrapper_of(FREE, "50000"),)),
+            spending="10000",
+        )
+        assumptions = survivor_assumptions(
+            {"spending.survivor_multiplier": Decimal("-0.7")}
+        )
+        region = stub_region()
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        with pytest.raises(EngineError, match="must be non-negative"):
+            run(plan, assumptions, region, config)
+
+    def test_an_out_of_range_survivor_fraction_assumption_is_rejected(self) -> None:
+        """The assumption route enforces the same 0..1 bound as the fact.
+
+        A stated per-scheme fraction is bounded at construction; an
+        assumption override must not bypass the invariant and inflate
+        survivor income past the member's own.
+        """
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1955, 1, 1),
+                retire_at=60,
+                db_pensions=(db_pension_of(),),
+                death_at=72,
+            ),
+            partner_of(()),
+        )
+        assumptions = survivor_assumptions({"db.survivor_fraction": Decimal("1.5")})
+        region = stub_region()
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        with pytest.raises(EngineError, match="between 0 and 1"):
+            run(plan, assumptions, region, config)
+
     def test_death_age_scenarios_diff_cleanly_against_the_base(self) -> None:
         """A death-age override over an alive-to-horizon base just works.
 
