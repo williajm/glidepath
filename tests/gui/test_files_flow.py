@@ -226,8 +226,9 @@ class TestOpenFlow:
         window.open_plan_dialog()
         assert str(plan) in window.statusBar().currentMessage()
         assert window.charts_pane.chart_tabs.count() == 3
-        example_dob = example_facts_form_data().person["date_of_birth"]
-        assert window.facts_pane.form_data().person["date_of_birth"] == example_dob
+        example_dob = example_facts_form_data().persons[0].person["date_of_birth"]
+        reloaded = window.facts_pane.form_data()
+        assert reloaded.persons[0].person["date_of_birth"] == example_dob
         assert load_state(settings).last_plan_path == plan
 
     def test_failed_open_keeps_the_session(self, tmp_path: Path) -> None:

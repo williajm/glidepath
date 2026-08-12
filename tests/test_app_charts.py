@@ -6,6 +6,7 @@ wrapper balances, income composition, tax — aggregate the core
 report to household level, one category per projected period.
 """
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -188,13 +189,21 @@ class TestProjectedCharts:
         nominal = build_charts_view_model(projected, basis=ReportBasis.NOMINAL)
         assert nominal.categories == view_model.categories
 
-    def test_a_two_person_period_labels_with_the_year_alone(
-        self, projected: PlanState
-    ) -> None:
-        """No single age exists to show until couples activate (9.4)."""
+    def test_a_two_person_period_labels_both_ages(self, projected: PlanState) -> None:
+        """A couple's label joins both ages in household order (9.31)."""
         assert projected.result is not None
         row = build_report(projected.result).rows[0]
-        label = _category_label(row.period, [row, row])
+        partner_row = replace(row, age_at_period_start=row.age_at_period_start - 2)
+        label = _category_label(row.period, [row, partner_row])
+        assert label == f"{row.period.start.year} · 35/33"
+
+    def test_a_period_without_rows_labels_with_the_year_alone(
+        self, projected: PlanState
+    ) -> None:
+        """No rows leave no ages to show — the year stands alone."""
+        assert projected.result is not None
+        row = build_report(projected.result).rows[0]
+        label = _category_label(row.period, [])
         assert label == str(row.period.start.year)
 
     def test_every_series_spans_every_category(

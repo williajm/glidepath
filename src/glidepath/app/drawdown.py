@@ -22,6 +22,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from glidepath.app.display import format_money, format_percent
+from glidepath.app.labels import PERSON_NAMES
 from glidepath.app.montecarlo import (
     MAX_PATHS,
     MONTE_CARLO_PATHS_MESSAGE,
@@ -29,7 +30,7 @@ from glidepath.app.montecarlo import (
     path_pool,
 )
 from glidepath.app.plan import PlanState, region_for, replanned_state
-from glidepath.app.retirement import parsed_percent
+from glidepath.app.retirement import parsed_percent, parsed_person_position
 from glidepath.core import (
     AssumptionKey,
     Money,
@@ -44,7 +45,7 @@ from glidepath.core import (
 if TYPE_CHECKING:
     from datetime import date
 
-    from glidepath.core import AssumptionSet, Household
+    from glidepath.core import AssumptionSet, EntityId, Household
 
 _ONE = Decimal(1)
 _TWO = Decimal(2)
@@ -52,6 +53,10 @@ _TWO = Decimal(2)
 DRAWDOWN_HEADING: Final = "How much can I draw down?"
 
 DRAWDOWN_AGE_LABEL: Final = "Retirement age"
+
+DRAWDOWN_PERSON_LABEL: Final = "Whose retirement age"
+
+DRAWDOWN_PERSON_MESSAGE: Final = "Pick whose retirement age to test."
 
 DRAWDOWN_SUCCESS_LABEL: Final = "Success target (%)"
 
@@ -144,7 +149,10 @@ class DrawdownRequest:
     basis. ``seed_text``, ``paths_text``, and ``success_text`` are read
     only under the Monte Carlo mode: the seed and path count come from
     the Monte Carlo panel's own controls, so the bands and the answer
-    always describe the same runs.
+    always describe the same runs. ``person_text`` is the whose-age
+    selection ("0" or "1"; blank means the first person) — a couple's
+    probe moves one person's retirement age with the partner's held
+    fixed (planning §4.11).
     """
 
     mode: RunMode
@@ -152,6 +160,7 @@ class DrawdownRequest:
     seed_text: str = ""
     paths_text: str = ""
     success_text: str = ""
+    person_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -161,9 +170,10 @@ class DrawdownAnswer:
     ``income`` is the highest sustainable net annual income in today's
     money, or ``None`` when not even zero spending survives the plan's
     outflows. The rest is the manifest side: the retirement age the
-    answer assumed, the searched bracket's upper bound, and the basis
-    — ``seed``, ``paths``, and ``target_success_rate`` are carried
-    only for a Monte Carlo basis.
+    answer assumed and whose it was (``person_position``, the
+    household position), the searched bracket's upper bound, and the
+    basis — ``seed``, ``paths``, and ``target_success_rate`` are
+    carried only for a Monte Carlo basis.
     """
 
     income: Money | None
@@ -173,6 +183,7 @@ class DrawdownAnswer:
     seed: int | None = None
     paths: int | None = None
     target_success_rate: Decimal | None = None
+    person_position: int = 0
 
 
 @dataclass(frozen=True)
@@ -183,10 +194,18 @@ class DrawdownPanelViewModel:
     stated retirement-age decision before any run — blank without a
     plan. ``success_value`` echoes likewise or the default.
     ``success_visible`` shows the success-target control only under
-    the Monte Carlo mode. ``answer`` is the headline; ``detail`` names
-    the age, the searched bracket, and the basis; ``message`` carries
-    the no-run or failure copy — blank whenever ``answer`` is
-    populated, and vice versa.
+    the Monte Carlo mode. ``person_options`` name the persons a probe
+    can move (household order); ``person_visible`` shows that selector
+    only for a couple, and ``person_value`` echoes the held answer's
+    selection as its option position. ``person_age_defaults`` carry
+    each person's stated retirement-age decision (household order): a
+    shell writes the newly selected person's default into the age
+    field when the selector changes, so switching to the partner
+    tests *their* stated age rather than the first person's (§4.11).
+    ``answer`` is the headline; ``detail`` names the age, the
+    searched bracket, and the basis; ``message`` carries the no-run
+    or failure copy — blank whenever ``answer`` is populated, and
+    vice versa.
     """
 
     heading: str
@@ -195,6 +214,11 @@ class DrawdownPanelViewModel:
     success_label: str
     success_value: str
     success_visible: bool
+    person_label: str
+    person_options: tuple[str, ...]
+    person_value: str
+    person_visible: bool
+    person_age_defaults: tuple[str, ...]
     run_label: str
     answer: str
     detail: str
@@ -209,6 +233,8 @@ class _SolverInputs:
     seed: int | None
     paths: int | None
     target_success_rate: Decimal | None
+    person_id: EntityId
+    person_position: int
 
 
 def state_with_drawdown(
@@ -252,6 +278,7 @@ def state_with_drawdown(
                 config,
                 age=inputs.age,
                 search=search,
+                person_id=inputs.person_id,
                 parallelism=parallelism,
             )
     except Exception as exc:  # noqa: BLE001
@@ -268,6 +295,7 @@ def state_with_drawdown(
         seed=inputs.seed,
         paths=inputs.paths,
         target_success_rate=inputs.target_success_rate,
+        person_position=inputs.person_position,
     )
     changes: dict[str, Any] = {"drawdown": answer, "drawdown_error": None}
     return replace(base, **changes) if changes else base
@@ -291,6 +319,15 @@ def build_drawdown_panel(state: PlanState, mode: RunMode) -> DrawdownPanelViewMo
     else:
         headline = _headline(answer)
         detail = _detail(answer)
+    person_count = 1 if state.household is None else len(state.household.persons)
+    age_defaults = (
+        ()
+        if state.household is None
+        else tuple(
+            str(person.target_retirement_age.value)
+            for person in state.household.persons
+        )
+    )
     return DrawdownPanelViewModel(
         heading=DRAWDOWN_HEADING,
         age_label=DRAWDOWN_AGE_LABEL,
@@ -298,6 +335,11 @@ def build_drawdown_panel(state: PlanState, mode: RunMode) -> DrawdownPanelViewMo
         success_label=DRAWDOWN_SUCCESS_LABEL,
         success_value=_success_echo(answer),
         success_visible=mode is RunMode.MONTE_CARLO,
+        person_label=DRAWDOWN_PERSON_LABEL,
+        person_options=PERSON_NAMES[:person_count],
+        person_value=_person_echo(answer),
+        person_visible=person_count > 1,
+        person_age_defaults=age_defaults,
         run_label=FIND_DRAWDOWN_LABEL,
         answer=headline,
         detail=detail,
@@ -317,8 +359,13 @@ def _headline(answer: DrawdownAnswer) -> str:
 
 def _detail(answer: DrawdownAnswer) -> str:
     """The assumed age, searched bracket, and basis under the headline."""
+    retiring = (
+        f"Retiring at age {answer.age}"
+        if answer.person_position == 0
+        else f"Your partner retiring at age {answer.age}"
+    )
     target = (
-        f"Retiring at age {answer.age} — the highest net annual income"
+        f"{retiring} — the highest net annual income"
         " the plan sustains, in today's money, searched up to"
         f" {format_money(answer.maximum)}."
     )
@@ -348,6 +395,13 @@ def _success_echo(answer: DrawdownAnswer | None) -> str:
     return str(int(answer.target_success_rate * Decimal(100)))
 
 
+def _person_echo(answer: DrawdownAnswer | None) -> str:
+    """The held answer's tested person, or the first person."""
+    if answer is None:
+        return "0"
+    return str(answer.person_position)
+
+
 def _solver_inputs(
     household: Household,
     assumptions: AssumptionSet,
@@ -359,12 +413,15 @@ def _solver_inputs(
     Raises:
         ValueError: With the user-facing message, on anything unusable
             — a planning horizon the person has already reached, an
-            unparseable or out-of-bracket age, an unusable Monte Carlo
-            seed, path count, or success target, or a Monte Carlo
-            search whose probe bound times paths would exceed the
-            search budget.
+            unparseable or out-of-bracket age or person selection, an
+            unusable Monte Carlo seed, path count, or success target,
+            or a Monte Carlo search whose probe bound times paths
+            would exceed the search budget.
     """
-    person = household.persons[0]
+    position = parsed_person_position(
+        request.person_text, len(household.persons), DRAWDOWN_PERSON_MESSAGE
+    )
+    person = household.persons[position]
     minimum_age = age_on(person.date_of_birth.value, today)
     planning_age = int_assumption_value(
         assumptions.get(AssumptionKey.HORIZON_PLANNING_AGE)
@@ -403,6 +460,8 @@ def _solver_inputs(
         seed=seed,
         paths=paths,
         target_success_rate=success,
+        person_id=person.id,
+        person_position=position,
     )
 
 

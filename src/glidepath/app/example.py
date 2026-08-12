@@ -20,7 +20,7 @@ surface is a demonstration, and a first impression of a plan already
 in ruin reads as a broken app rather than an honest warning.
 """
 
-from glidepath.app.forms import FactsFormData
+from glidepath.app.forms import FactsFormData, PersonFormData
 
 _PERSON = {
     "date_of_birth": "1991-06-15",
@@ -58,9 +58,13 @@ def example_facts_form_data() -> FactsFormData:
     opens with can never show an error.
     """
     return FactsFormData(
-        person=dict(_PERSON),
+        persons=(
+            PersonFormData(
+                person=dict(_PERSON),
+                state_pension=dict(_STATE_PENSION),
+            ),
+        ),
         spending=dict(_SPENDING),
-        state_pension=dict(_STATE_PENSION),
         wrappers=(dict(_WORKPLACE_DC), dict(_ISA)),
         db_pensions=(),
     )

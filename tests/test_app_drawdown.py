@@ -40,6 +40,8 @@ from glidepath.app.drawdown import (
     DRAWDOWN_FAILED_PREFIX,
     DRAWDOWN_HEADING,
     DRAWDOWN_HORIZON_MESSAGE,
+    DRAWDOWN_PERSON_LABEL,
+    DRAWDOWN_PERSON_MESSAGE,
     DRAWDOWN_SEARCH_MAXIMUM,
 )
 from glidepath.app.plan import region_for, replanned_state
@@ -93,6 +95,18 @@ def household(date_of_birth: date = date(1966, 2, 1)) -> Household:
     )
 
 
+def couple() -> Household:
+    """The saver joined by a 58-year-old partner (planning §4.11)."""
+    base = household()
+    partner = Person(
+        id=EntityId("drawdown-partner"),
+        date_of_birth=Fact(value=date(1968, 2, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=63, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+    )
+    return Household(persons=(*base.persons, partner), spending=base.spending)
+
+
 def short_horizon_state() -> PlanState:
     """A fresh session with the planning age overridden down to 65."""
     outcome = state_with_override(
@@ -110,6 +124,12 @@ def short_horizon_state() -> PlanState:
 def projected_fixture() -> PlanState:
     """One projected short-horizon session."""
     return state_with_household(short_horizon_state(), household(), today=TODAY)
+
+
+@pytest.fixture(scope="module", name="couple_projected")
+def couple_projected_fixture() -> PlanState:
+    """One projected short-horizon session over the couple."""
+    return state_with_household(short_horizon_state(), couple(), today=TODAY)
 
 
 @pytest.fixture(scope="module", name="solved")
@@ -333,6 +353,81 @@ class TestStateWithDrawdown:
         assert state.result == re_anchored.result
         assert state.result != projected.result
         assert state.monte_carlo is None
+
+
+class TestCoupleSelection:
+    """Whose retirement age a probe moves (planning §4.11)."""
+
+    def test_person_text_selects_the_partner(self, couple_projected: PlanState) -> None:
+        """Selecting "1" tests the partner's age; the saver's holds fixed."""
+        request = replace(DETERMINISTIC_REQUEST, person_text="1")
+        state = state_with_drawdown(couple_projected, request, today=TODAY)
+        answer = state.drawdown
+        assert answer is not None
+        assert answer.person_position == 1
+        assert answer.age == 63
+        panel = build_drawdown_panel(state, RunMode.DETERMINISTIC)
+        assert "Your partner retiring at age 63" in panel.detail
+        assert panel.person_value == "1"
+
+    def test_an_off_household_person_selection_is_rejected(
+        self, couple_projected: PlanState
+    ) -> None:
+        """A selection naming nobody on the plan folds into the error."""
+        request = replace(DETERMINISTIC_REQUEST, person_text="2")
+        state = state_with_drawdown(couple_projected, request, today=TODAY)
+        assert state.drawdown is None
+        assert state.drawdown_error == DRAWDOWN_PERSON_MESSAGE
+
+    def test_a_single_person_plan_rejects_a_partner_selection(
+        self, projected: PlanState
+    ) -> None:
+        """Selecting "1" names nobody when the plan holds one person."""
+        request = replace(DETERMINISTIC_REQUEST, person_text="1")
+        state = state_with_drawdown(projected, request, today=TODAY)
+        assert state.drawdown is None
+        assert state.drawdown_error == DRAWDOWN_PERSON_MESSAGE
+
+    def test_the_age_bracket_anchors_on_the_selected_person(
+        self, couple_projected: PlanState
+    ) -> None:
+        """Age 58 is below the saver's bracket but inside the partner's."""
+        for_saver = replace(DETERMINISTIC_REQUEST, age_text="58")
+        for_partner = replace(DETERMINISTIC_REQUEST, age_text="58", person_text="1")
+        saver_state = state_with_drawdown(couple_projected, for_saver, today=TODAY)
+        partner_state = state_with_drawdown(couple_projected, for_partner, today=TODAY)
+        assert saver_state.drawdown is None
+        assert saver_state.drawdown_error == DRAWDOWN_AGE_MESSAGE
+        assert partner_state.drawdown is not None
+        assert partner_state.drawdown.person_position == 1
+
+    def test_the_person_selector_shows_only_for_a_couple(
+        self, projected: PlanState, couple_projected: PlanState
+    ) -> None:
+        """One person hides the selector; a couple names them both."""
+        single = build_drawdown_panel(projected, RunMode.DETERMINISTIC)
+        pair = build_drawdown_panel(couple_projected, RunMode.DETERMINISTIC)
+        assert single.person_visible is False
+        assert single.person_options == ("You",)
+        assert pair.person_visible is True
+        assert pair.person_options == ("You", "Your partner")
+        assert pair.person_label == DRAWDOWN_PERSON_LABEL
+        assert pair.person_value == "0"
+
+    def test_the_panel_carries_each_persons_stated_age(
+        self, projected: PlanState, couple_projected: PlanState
+    ) -> None:
+        """A shell re-seeds the age field from these on person change.
+
+        Without them, picking "Your partner" and pressing run would
+        test the partner at the first person's stated age (§4.11).
+        """
+        single = build_drawdown_panel(projected, RunMode.DETERMINISTIC)
+        pair = build_drawdown_panel(couple_projected, RunMode.DETERMINISTIC)
+        empty = build_drawdown_panel(initial_plan_state(), RunMode.DETERMINISTIC)
+        assert single.person_age_defaults == ("63",)
+        assert pair.person_age_defaults == ("63", "63")
+        assert empty.person_age_defaults == ()
 
 
 class TestDrawdownPanel:

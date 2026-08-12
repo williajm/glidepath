@@ -54,7 +54,6 @@ from glidepath.core.entities import (
     SpendingPlan,
     TaxResidencyId,
     new_entity_id,
-    validate_household_v1,
 )
 from glidepath.core.glide import (
     GlidePathConfig,
@@ -384,7 +383,6 @@ __all__ = [
     "sustainable_income",
     "sustainable_income_at_age",
     "tax_aware_order",
-    "validate_household_v1",
     "whole_months_between",
     "years_to_target_retirement",
 ]

@@ -732,7 +732,12 @@ class MainWindow(QMainWindow):
         self._refresh_result_panes()
 
     def _handle_retirement_run(
-        self, rate_text: str, success_text: str, seed_text: str, paths_text: str
+        self,
+        rate_text: str,
+        success_text: str,
+        seed_text: str,
+        paths_text: str,
+        person_text: str,
     ) -> None:
         """Start a retirement-age search off the GUI thread (9.14).
 
@@ -753,6 +758,7 @@ class MainWindow(QMainWindow):
             seed_text=seed_text,
             paths_text=paths_text,
             success_text=success_text,
+            person_text=person_text,
         )
         worker = _TransitionWorker(
             lambda: state_with_retirement(state, request, today=today)
@@ -785,7 +791,12 @@ class MainWindow(QMainWindow):
         self._refresh_result_panes()
 
     def _handle_drawdown_run(
-        self, age_text: str, success_text: str, seed_text: str, paths_text: str
+        self,
+        age_text: str,
+        success_text: str,
+        seed_text: str,
+        paths_text: str,
+        person_text: str,
     ) -> None:
         """Start a sustainable-income search off the GUI thread (9.25).
 
@@ -806,6 +817,7 @@ class MainWindow(QMainWindow):
             seed_text=seed_text,
             paths_text=paths_text,
             success_text=success_text,
+            person_text=person_text,
         )
         worker = _TransitionWorker(
             lambda: state_with_drawdown(state, request, today=today)

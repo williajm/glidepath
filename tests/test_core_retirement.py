@@ -142,6 +142,28 @@ def household_of(
     return Household(persons=(person,), spending=plan)
 
 
+def couple_of(
+    stated_retirement_age: int = 56, partner_retirement_age: int = 58
+) -> Household:
+    """The saver joined by a partner born 1972-01-01 (planning §4.11).
+
+    The pot stays the saver's single 100,000 wrapper; household
+    spending starts only once BOTH persons are retired (the pooled
+    decumulation of 9.30), so the binding constraint on any target is
+    whichever person retires later.
+    """
+    saver = household_of(stated_retirement_age=stated_retirement_age).persons[0]
+    partner = Person(
+        id=EntityId("person-2"),
+        date_of_birth=Fact(value=date(1972, 1, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(
+            value=partner_retirement_age, recorded_on=RECORDED
+        ),
+        tax_residency=RESIDENCY,
+    )
+    return Household(persons=(saver, partner))
+
+
 def deterministic_config() -> RunConfig:
     """Whole calendar-year periods 2026 through 2033."""
     return RunConfig(today=date(2026, 1, 1), horizon_end=date(2033, 12, 31))
@@ -163,6 +185,8 @@ def search_of(
     maximum_age: int = 63,
     paths: int = 1,
     target_success_rate: Decimal = Decimal(1),
+    *,
+    person_id: EntityId | None = None,
 ) -> RetirementAgeSearch:
     """A search over the ages the 2026-2033 horizon can express."""
     return RetirementAgeSearch(
@@ -171,6 +195,7 @@ def search_of(
         maximum_age=maximum_age,
         paths=paths,
         target_success_rate=target_success_rate,
+        person_id=person_id,
     )
 
 
@@ -389,6 +414,177 @@ class TestRetirementExposure:
             search_of(target=affordable, minimum_age=56, maximum_age=56),
         )
         assert age == 56
+
+    def test_the_default_horizon_spans_the_latest_planning_age(self) -> None:
+        """A younger partner's planning-age date extends the horizon.
+
+        Without an explicit horizon the run ends at the LATEST of the
+        persons' planning-age dates (planning §4.11): born 1972, the
+        partner turns 95 in 2067, so the saver's age-96 candidate
+        (retired from 2066) still has a retired period to test —
+        under the saver's own 2065 planning-age end it would have
+        none and fail as unexposed.
+        """
+        config = RunConfig(today=date(2026, 1, 1))
+        affordable = Money(Decimal(2000))
+        age = earliest_retirement_age(
+            couple_of(),
+            flat_assumptions(),
+            stub_region(),
+            config,
+            search_of(target=affordable, minimum_age=96, maximum_age=96),
+        )
+        assert age == 96
+
+
+class TestCoupleSelection:
+    """Whose retirement-age decision a search varies (planning §4.11)."""
+
+    def test_an_unknown_person_id_is_rejected(self) -> None:
+        """A search selecting nobody on the plan is an error."""
+        plan = couple_of()
+        assumptions = flat_assumptions()
+        region = stub_region()
+        config = deterministic_config()
+        search = search_of(person_id=EntityId("nobody"))
+        with pytest.raises(ValueError, match="is not in the household"):
+            earliest_retirement_age(plan, assumptions, region, config, search)
+
+    def test_the_income_search_rejects_an_unknown_person_id(self) -> None:
+        """The drawdown dual applies the same selection rule."""
+        plan = couple_of()
+        assumptions = flat_assumptions()
+        region = stub_region()
+        config = deterministic_config()
+        search = income_search_of()
+        nobody = EntityId("nobody")
+        with pytest.raises(ValueError, match="is not in the household"):
+            sustainable_income_at_age(
+                plan,
+                assumptions,
+                region,
+                config,
+                age=60,
+                search=search,
+                person_id=nobody,
+            )
+
+    def test_a_partner_past_the_horizon_leaves_no_exposure(self) -> None:
+        """No period opens the household fully retired, so no answer.
+
+        The partner's fixed decision (age 62, attained 2034-01-01)
+        falls past the 2026-2033 horizon: household spending never
+        starts, so every candidate would succeed vacuously — the
+        search answers ``None`` instead of the bracket's minimum.
+        """
+        age = earliest_retirement_age(
+            couple_of(partner_retirement_age=62),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            search_of(),
+        )
+        assert age is None
+
+    def test_the_income_search_needs_household_exposure(self) -> None:
+        """The drawdown dual answers ``None`` past the partner's date.
+
+        With the partner retiring beyond the horizon there is no
+        retired period to test any income in — without the household
+        gate the search would report its £50,000 ceiling.
+        """
+        income = sustainable_income_at_age(
+            couple_of(partner_retirement_age=62),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            age=56,
+            search=income_search_of(),
+        )
+        assert income is None
+
+    def test_none_selects_the_first_person(self) -> None:
+        """An explicit first-person id changes nothing.
+
+        With the partner's stated age 58 held fixed (retired from
+        2030), a 50,000 target needs household spending to start no
+        earlier than 2032, so the saver's earliest age is 62 — from
+        the default selection and the explicit id alike.
+        """
+        target = Money(Decimal(50000))
+        by_default = earliest_retirement_age(
+            couple_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            search_of(target=target, minimum_age=56, maximum_age=63),
+        )
+        by_id = earliest_retirement_age(
+            couple_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            search_of(
+                target=target,
+                minimum_age=56,
+                maximum_age=63,
+                person_id=EntityId("person-1"),
+            ),
+        )
+        assert by_default == by_id
+        assert by_default == 62
+
+    def test_selecting_the_partner_varies_only_their_age(self) -> None:
+        """The saver's stated decision holds fixed through the probes.
+
+        The saver retires at the stated 56 (2026), so household
+        spending starts when the partner's candidate age is attained;
+        a 50,000 target needs that no earlier than 2032 — partner age
+        60. Were the search varying the saver instead, no age below
+        62 could succeed (the sibling test above).
+        """
+        target = Money(Decimal(50000))
+        age = earliest_retirement_age(
+            couple_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            search_of(
+                target=target,
+                minimum_age=54,
+                maximum_age=63,
+                person_id=EntityId("person-2"),
+            ),
+        )
+        assert age == 60
+
+    def test_the_income_search_selects_by_person_id(self) -> None:
+        """The drawdown dual mirrors the selection (9.25).
+
+        Retiring the saver at 60 leaves the four years 2030-2033 once
+        the partner's stated 58 (2030) has passed — 25,000 of the
+        100,000 pot; retiring the partner at 60 (2032) alongside the
+        long-retired saver leaves two years — 50,000.
+        """
+        saver_income = sustainable_income_at_age(
+            couple_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            age=60,
+            search=income_search_of(),
+        )
+        partner_income = sustainable_income_at_age(
+            couple_of(),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            age=60,
+            search=income_search_of(),
+            person_id=EntityId("person-2"),
+        )
+        assert saver_income == Money(Decimal(25000))
+        assert partner_income == Money(Decimal(50000))
 
 
 class TestMonteCarloSolver:

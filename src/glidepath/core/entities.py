@@ -4,8 +4,8 @@ The schema models ``Household{persons: 1..2}`` — UK tax is individual,
 so computation is per-person anyway, and placing shared economics at
 household level avoided a schema + engine migration when couples
 activated (roadmap 9.4). The engine projects one or two persons
-(roadmap 9.30); :func:`validate_household_v1` remains the facts form's
-single-person gate until the form gains a partner (roadmap 9.31).
+(roadmap 9.30) and the facts form enters the optional partner
+(roadmap 9.31), so the 1..2 bound below is the only person-count rule.
 
 Wrappers attach to :class:`Person` as of roadmap 3.1, the glide-path
 config as of 3.5, household spending as of 4.1, DB pensions and state
@@ -203,9 +203,7 @@ class PlannedOutflow:
 class Household:
     """One or two persons plus shared economics (planning §4.4, §5.1).
 
-    The 1..2 bound is the schema-level invariant (planning §4.4); the
-    stricter single-person rule of the facts form (until roadmap 9.31)
-    is :func:`validate_household_v1`.
+    The 1..2 bound is the schema-level invariant (planning §4.4).
     ``spending`` is the household-level retirement spending need;
     ``None`` means decumulation spending withdrawals are not modelled.
     ``planned_outflows`` are household-level dated one-offs (roadmap
@@ -253,19 +251,3 @@ class Household:
                     f" {outflow.at_age_of[0]}, who is not in this household"
                 )
                 raise ValueError(msg)
-
-
-def validate_household_v1(household: Household) -> None:
-    """Enforce the facts form's single-person restriction (planning §4.4).
-
-    The engine projects one or two persons (roadmap 9.30); this gate
-    remains on the form pipeline until it can represent a partner
-    (roadmap 9.31), so a two-person plan file is refused rather than
-    mis-edited.
-
-    Raises:
-        ValueError: If the household does not hold exactly one person.
-    """
-    if len(household.persons) != _MIN_PERSONS:
-        msg = "v1 supports exactly one person per household (planning §4.4)"
-        raise ValueError(msg)

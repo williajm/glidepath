@@ -94,6 +94,41 @@ def household(
     )
 
 
+def partner(
+    *, state_pension: StatePensionRecord | None = None, kind: WrapperKindId = SIPP_KIND
+) -> Person:
+    """A partner born 1969-02-01 retiring at 60 with £50,000 in ``kind``."""
+    sipp = Wrapper(
+        id=EntityId("outlook-partner-0"),
+        kind=kind,
+        balance=money_fact("50000", as_of=AS_OF),
+    )
+    return Person(
+        id=EntityId("outlook-partner"),
+        date_of_birth=Fact(value=date(1969, 2, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=60, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+        wrappers=(sipp,),
+        state_pension=state_pension,
+    )
+
+
+def couple(
+    *, with_forecasts: bool = False, partner_kind: WrapperKindId = SIPP_KIND
+) -> Household:
+    """The saver joined by the partner — both retire on 2029-02-01.
+
+    The saver attains their target 63 and the partner their target 60
+    on the same date, so the reading names ages 63 and 60.
+    """
+    record = state_pension_record() if with_forecasts else None
+    base = household(state_pension=record)
+    return Household(
+        persons=(*base.persons, partner(state_pension=record, kind=partner_kind)),
+        spending=base.spending,
+    )
+
+
 def short_horizon_state(planning_age: str = "65") -> PlanState:
     """A fresh session with the planning age overridden down."""
     outcome = state_with_override(
@@ -199,6 +234,46 @@ class TestHeldRun:
         }
         assert by_kind[SIPP_KIND] is True
         assert by_kind[ISA_KIND] is False
+
+
+class TestCoupleCopy:
+    """A two-person household speaks at household level (9.31)."""
+
+    def test_the_headline_names_both_ages(self) -> None:
+        """The anchor carries each person's age at the reading date."""
+        panel = build_outlook_panel(outlook_state(couple()))
+        assert panel.answer.startswith(
+            "At ages 63 and 60, your pots could be worth around £"
+        )
+        assert panel.message == ""
+
+    def test_the_annuity_buys_each_slice_at_its_own_age(self) -> None:
+        """Both pension slices purchase at their owners' ages."""
+        panel = build_outlook_panel(outlook_state(couple()))
+        assert "As level single-life annuities bought at ages 63 and 60," in (
+            panel.detail
+        )
+        assert "a year before tax" in panel.detail
+
+    def test_each_forecast_stacks_with_one_all_told(self) -> None:
+        """One sentence per forecast; the combined figure lands last.
+
+        Both forecasts quote £230.25 a week (£11,973 a year) from this
+        cohort's state pension age of 67; only the partner's closing
+        sentence combines the annuity income with both forecasts.
+        """
+        panel = build_outlook_panel(outlook_state(couple(with_forecasts=True)))
+        lines = panel.detail.split("\n")
+        forecasts = [line for line in lines if "State Pension forecast adds" in line]
+        assert len(forecasts) == 2
+        assert forecasts[0].startswith(
+            "Your State Pension forecast adds £11,973 a year from age 67"
+        )
+        assert forecasts[1].startswith(
+            "Your partner's State Pension forecast adds £11,973 a year from age 67"
+        )
+        assert "all told" not in forecasts[0]
+        assert "all told" in forecasts[1]
 
 
 class TestSentenceGating:

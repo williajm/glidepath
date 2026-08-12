@@ -7,13 +7,14 @@ into a status message instead of an exception at the shell.
 """
 
 import json
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 
 from glidepath.app import (
     NOTHING_TO_SAVE_MESSAGE,
+    PersonFormData,
     PlanState,
     document_from_state,
     example_facts_form_data,
@@ -58,6 +59,25 @@ def projected_state() -> PlanState:
     """A projected session over the launch example's household."""
     result = parse_facts_form(
         example_facts_form_data(), recorded_on=RECORDED, today=TODAY
+    )
+    assert result.household is not None
+    return state_with_household(initial_plan_state(), result.household, today=TODAY)
+
+
+def couple_state() -> PlanState:
+    """A projected session over a two-person household (roadmap 9.31)."""
+    data = example_facts_form_data()
+    partner = PersonFormData(
+        person={
+            "date_of_birth": "1993-02-11",
+            "tax_residency": "uk.ruk",
+            "target_retirement_age": "63",
+        }
+    )
+    result = parse_facts_form(
+        replace(data, persons=(*data.persons, partner)),
+        recorded_on=RECORDED,
+        today=TODAY,
     )
     assert result.household is not None
     return state_with_household(initial_plan_state(), result.household, today=TODAY)
@@ -195,6 +215,16 @@ class TestLoadPlanState:
         assert target.field_path == "target_retirement_age"
         assert override.value == 58
         assert loaded.scenario_runs is not None
+
+    def test_a_clean_two_person_plan_loads(self, tmp_path: Path) -> None:
+        """A couple plan opens — the person-count refusal is gone (9.31)."""
+        path = tmp_path / "plan.glidepath.json"
+        assert save_plan_state(couple_state(), path).saved
+        outcome = load_plan_state(path, today=TODAY)
+        loaded = outcome.state
+        assert loaded is not None
+        assert loaded.household is not None
+        assert len(loaded.household.persons) == 2
 
     def test_missing_file_reports_rather_than_raises(self, tmp_path: Path) -> None:
         """A vanished file comes back as a status message."""

@@ -52,23 +52,45 @@ def numbered_unique[K](bases: Mapping[K, str]) -> dict[K, str]:
     return names
 
 
+PERSON_NAMES = ("You", "Your partner")
+"""Person display names by household position (roadmap 9.31).
+
+Shared by every surface that offers a person choice (the retirement
+and drawdown cards' whose-age selectors) so the wording never drifts
+from the names the inspector and exports show.
+"""
+_OWNER_PREFIXES = ("Your", "Partner's")
+"""Owner prefixes distinguishing the two persons' entities (§4.11)."""
+
+
 def entity_names(household: Household | None) -> dict[str, str]:
-    """Friendly names for the entity ids provenance labels address."""
+    """Friendly names for the entity ids provenance labels address.
+
+    A single-person household reads exactly as it always has: the
+    person is "You" and entities carry their own labels. With a
+    partner on the plan (roadmap 9.31) the persons read "You" / "Your
+    partner" and every owned entity is prefixed with its owner
+    ("Your …" / "Partner's …"), so the two persons' same-numbered
+    entities never share a display name — surfaces resolving a pick
+    by label rely on uniqueness.
+    """
     if household is None:
         return {}
+    couple = len(household.persons) > 1
     wrapper_bases: dict[str, str] = {}
     names: dict[str, str] = {}
-    for person in household.persons:
-        names[str(person.id)] = "You"
+    for position, person in enumerate(household.persons):
+        names[str(person.id)] = PERSON_NAMES[position] if couple else "You"
+        prefix = f"{_OWNER_PREFIXES[position]} " if couple else ""
         for number, wrapper in enumerate(person.wrappers, start=1):
             kind = format_wrapper_kind(wrapper.kind)
-            wrapper_bases[str(wrapper.id)] = (
+            wrapper_bases[str(wrapper.id)] = prefix + (
                 wrapper.label or f"Wrapper {number} ({kind})"
             )
         for number, pension in enumerate(person.db_pensions, start=1):
-            names[str(pension.id)] = f"DB pension {number}"
+            names[str(pension.id)] = f"{prefix}DB pension {number}"
         for number, purchase in enumerate(person.annuity_purchases, start=1):
-            names[str(purchase.id)] = f"Annuity purchase {number}"
+            names[str(purchase.id)] = f"{prefix}Annuity purchase {number}"
     names.update(numbered_unique(wrapper_bases))
     for outflow in household.planned_outflows:
         names[str(outflow.id)] = outflow.label
@@ -85,6 +107,7 @@ def display_label(label: str, names: Mapping[str, str]) -> str:
 
 
 __all__ = [
+    "PERSON_NAMES",
     "capitalised",
     "display_label",
     "entity_names",

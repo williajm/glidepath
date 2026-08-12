@@ -213,9 +213,9 @@ class ChartsViewModel:
     """The projection charts screen (roadmap 8.4).
 
     ``categories`` labels the shared x axis — one label per projected
-    period: the period-start year with the person's age at period
-    start alongside (roadmap 9.11; year alone until couples activate,
-    9.4 — a two-person period has no single age to show). ``message``
+    period: the period-start year with each person's age at period
+    start alongside (roadmap 9.11; both ages in household order for a
+    couple, e.g. ``2032 · 60/58`` — roadmap 9.31). ``message``
     carries the empty-state copy when there is nothing to chart; it
     is blank whenever ``charts`` is populated. ``allocation_note``
     states the asset allocation each wrapper actually ran — stated
@@ -522,17 +522,15 @@ def _allocation_note(
 
 
 def _category_label(period: Period, rows: list[PeriodReportRow]) -> str:
-    """One period's x-axis label: its start year, with the person's age.
+    """One period's x-axis label: its start year, with the persons' ages.
 
     ``2032 · 60`` reads the horizon in ages as well as calendar years
-    (roadmap 9.11). Only a single-person period carries an age — a
-    two-person household has no one age to label with (revisit with
-    couples activation, 9.4).
+    (roadmap 9.11); a two-person period labels both ages in household
+    order — ``2032 · 60/58`` (roadmap 9.31).
     """
     year = str(period.start.year)
-    if len(rows) == 1:
-        return f"{year} · {rows[0].age_at_period_start}"
-    return year
+    ages = "/".join(str(row.age_at_period_start) for row in rows)
+    return f"{year} · {ages}" if ages else year
 
 
 def _rows_by_period(

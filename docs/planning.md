@@ -158,7 +158,10 @@ plan, one-off outflows, success metrics) hang off the `Household`. v1
 validates `len(persons) == 1`. No couples UI, transfers, or
 survivor/death modelling until a later couples spike adds its own decision
 record. *The spike has since run — §4.11 records the activation
-decisions (roadmap 9.29–9.34).*
+decisions (roadmap 9.29–9.34). The single-person gate is retired: the
+engine runs two persons as of 9.30 and the facts form enters the
+optional partner as of 9.31, so the schema's 1..2 bound is the only
+person-count rule left.*
 
 **Why.** UK tax is individual, so computation is per-person anyway; the
 expensive-to-retrofit fork is where spending and goals live, and placing
@@ -460,9 +463,9 @@ comparison and exports **already two-person generic**; the work
 concentrates in the engine's per-person run state, the facts form, and
 the decisions recorded here. Couples ship in increments (roadmap
 9.29–9.34), each independently mergeable behind the existing gates:
-the engine accepts two persons as of 9.30, while `parse_facts_form`
-keeps validating one person until 9.31 activates the partner entry, so
-a partially activated build refuses a two-person plan rather than
+the engine accepted two persons as of 9.30, while `parse_facts_form`
+kept validating one person until 9.31 activated the partner entry, so
+a partially activated build refused a two-person plan rather than
 mis-modelling it.
 
 **Scope.** A household is one or two adults planning together; the
@@ -2362,17 +2365,24 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   contribution machinery runs per person unchanged. Monte Carlo,
   reporting, comparison and exports flow through (already
   household-generic).*
-- [ ] 9.31 Couples: partner in the facts form — *optional second person
-  per §4.11: form data `persons: tuple` (1–2), owner key on every
-  repeatable row, "About you"/"About your partner" copy, explicit
-  add/remove-partner actions (removal confirms and deletes the
-  partner's rows); `parse_facts_form` and `form_cannot_represent`
-  drop their extra-person refusals; `entity_names` distinguishes the
-  two persons (no more double "You"); the `persons[0]` narrative
-  sites (outlook, retirement, drawdown cards) take household framing
-  and the solver varies one selected person's age against household
-  employment income; chart categories label both ages
-  (`2032 · 60/58`).*
+- [x] 9.31 Couples: partner in the facts form — *optional second person
+  per §4.11: form data `persons: tuple` (1–2) of per-person section
+  values, owner key on every repeatable row, "About you"/"About your
+  partner" copy, explicit add/remove-partner actions (removal
+  confirms and deletes the partner's rows); `parse_facts_form` and
+  `form_cannot_represent` dropped their extra-person refusals
+  (`validate_household_v1` retired — the schema's 1..2 bound is the
+  only person-count rule) and two-person plan files open instead of
+  being refused, entity ids preserved per person; `entity_names`
+  distinguishes the persons ("You"/"Your partner", owned entities
+  "Your …"/"Partner's …"); the outlook card reads the household's
+  pots at the later retirement date with per-person annuity slices
+  and State Pensions, the retirement/drawdown cards gained a
+  whose-age selector — the solvers vary one selected person's age
+  with the partner's decision held fixed, the replacement-rate target
+  measured against household employment income — and chart categories
+  label both ages (`2032 · 60/58`). A partnerless form renders and
+  parses exactly as before.*
 - [ ] 9.32 Couples: marriage allowance — *the §4.11 household-level
   claim Decision (default claimed-when-eligible): per-tax-year
   eligibility check (transferor below PA; recipient ≤ basic rate rUK /
