@@ -1034,29 +1034,19 @@ class _Projection:
         """Deliver the plan's net target, grossing up source by source.
 
         A one-person household walks the plan's order exactly as it
-        always has: each source drawn until the target is met to
-        within ledger tolerance or the listed sources are exhausted.
-        With two persons the order is consumed in maximal runs of one
-        §5.2 treatment group (planning §4.11): tax-free groups draw in
-        the listed order, while a tax-bearing group spanning both
-        persons drains greedily by marginal cost
-        (:meth:`_greedy_segment_draw`). The unmet remainder is the
-        caller's shortfall. Returns the net delivered per person.
+        always has (:meth:`_single_person_net_plan`): each source drawn
+        until the target is met to within ledger tolerance or the
+        listed sources are exhausted. With two persons the order is
+        consumed in maximal runs of one §5.2 treatment group (planning
+        §4.11): tax-free groups draw in the listed order, while a
+        tax-bearing group spanning both persons drains greedily by
+        marginal cost (:meth:`_greedy_segment_draw`). The unmet
+        remainder is the caller's shortfall. Returns the net delivered
+        per person.
         """
-        delivered = {person.person.id: _ZERO for person in self._persons}
         if len(self._persons) == 1:
-            person = self._persons[0]
-            total = _ZERO
-            for source_id in plan.order:
-                remaining = plan.target - total
-                if remaining <= _NET_TOLERANCE:
-                    break
-                source = _plan_source(sources, source_id)
-                if source.available <= _ZERO:
-                    continue
-                total = total + person.draw_from(source, period, remaining)
-            delivered[person.person.id] = total
-            return delivered
+            return self._single_person_net_plan(sources, period, plan)
+        delivered = {person.person.id: _ZERO for person in self._persons}
         total = _ZERO
         for segment in _plan_segments(sources, plan.order):
             remaining = plan.target - total
@@ -1075,6 +1065,29 @@ class _Projection:
                 delivered[person_id] = delivered[person_id] + net
                 total = total + net
         return delivered
+
+    def _single_person_net_plan(
+        self,
+        sources: dict[WithdrawalSourceId, _WithdrawalSource],
+        period: Period,
+        plan: NetWithdrawalPlan,
+    ) -> dict[EntityId, Money]:
+        """Walk the plan's order for a one-person household.
+
+        Each source is drawn until the target is met to within ledger
+        tolerance or the listed sources are exhausted.
+        """
+        person = self._persons[0]
+        total = _ZERO
+        for source_id in plan.order:
+            remaining = plan.target - total
+            if remaining <= _NET_TOLERANCE:
+                break
+            source = _plan_source(sources, source_id)
+            if source.available <= _ZERO:
+                continue
+            total = total + person.draw_from(source, period, remaining)
+        return {person.person.id: total}
 
     def _ordered_segment_draw(
         self,
