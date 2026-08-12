@@ -9,6 +9,13 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-12
+
+Couples release: a plan gains an optional partner, modelled end to
+end — a pooled two-person household with per-person tax, the marriage
+allowance, deterministic survivor modelling, and joint-life annuities
+— plus wrapper naming and a retirement outlook card.
+
 ### Added
 
 - Couples get joint-life annuities end-to-end (roadmap 9.34, planning
@@ -118,6 +125,7 @@ in the release PR and becomes the GitHub Release notes verbatim.
   own conventions, and the State Pension forecast stacked on top with
   the combined total, from its month-precise start age at the run's
   rolled-forward rate.
+
 - Monte Carlo path outcomes now retain a pension-only closing-balance
   series alongside the household one (`pension_balance_percentiles`),
   and each wrapper period result carries the region's pension marker.
