@@ -3653,6 +3653,56 @@ class TestTwoPersonHousehold:
         assert first.shortfall == ZERO
         assert second.shortfall == ZERO
 
+    def test_pooled_phased_draw_never_overdraws_the_residue(self) -> None:
+        """A pooled lump-sum-as-needed draw consumes its residue once.
+
+        Both persons hold uncrystallised pensions under a 250
+        lump-sum allowance: each free-bearing tranche pays 250
+        tax-free and designates 750 to drawdown. The 4,500 taxable
+        remainder must drain the first person's 750 residue exactly
+        once and then crystallise fresh funds — the §4.11 cursor once
+        measured residue draws on the uncrystallised balance, saw no
+        consumption, and re-offered the same tranche, pushing the
+        crystallised sub-balance negative.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "100000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+            ),
+            partner_of((wrapper_of(PENSION, "100001"),)),
+            spending="5000",
+        )
+        result = run(
+            plan,
+            assumptions_with({"returns.equity.real": Decimal(0)}),
+            stub_region(lsa_cap=Money(Decimal(250))),
+            RunConfig(
+                today=date(2026, 1, 1),
+                horizon_end=date(2026, 12, 31),
+                tax_free_cash=TaxFreeCashStrategy.LUMP_SUM_AS_NEEDED,
+            ),
+        )
+        first, second = result.snapshots[0].persons
+        [first_pension] = first.wrappers
+        assert first_pension.withdrawal_tax_free == Money(Decimal("250.00"))
+        assert Money(Decimal("5999.98")) <= first_pension.withdrawal_taxable
+        assert first_pension.withdrawal_taxable <= Money(Decimal("6000.00"))
+        assert first_pension.closing_crystallised == ZERO
+        assert Money(Decimal("93750.00")) <= first_pension.closing_uncrystallised
+        assert first_pension.closing_uncrystallised <= Money(Decimal("93750.02"))
+        [second_pension] = second.wrappers
+        assert second_pension.withdrawal_tax_free == Money(Decimal("250.00"))
+        assert second_pension.withdrawal_taxable == ZERO
+        assert second_pension.closing_crystallised == Money(Decimal("750.00"))
+        assert second_pension.closing_uncrystallised == Money(Decimal("99001.00"))
+        delivered = first.net_withdrawn + second.net_withdrawn
+        assert Money(Decimal("4999.99")) <= delivered
+        assert delivered <= Money(Decimal("5000.01"))
+        assert first.shortfall == ZERO
+        assert second.shortfall == ZERO
+
     def test_tax_free_cash_headroom_is_reported_per_person(self) -> None:
         """The LSA is an individual cap: one headroom entry per person.
 

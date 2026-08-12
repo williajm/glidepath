@@ -383,6 +383,19 @@ class _WithdrawalSource:
             return self.ledger.crystallised
         return self.ledger.uncrystallised
 
+    def tranche_balance(self, tranche: _DrawTranche) -> Money:
+        """The wrapper balance ``tranche`` draws down.
+
+        A lump-sum-as-needed residue tranche debits the wrapper's
+        crystallised balance even though it belongs to the
+        uncrystallised source, so tranche consumption must be measured
+        on the side ``from_crystallised`` names — :attr:`available`
+        would not move for such a draw (§4.11 cursor bookkeeping).
+        """
+        if tranche.from_crystallised:
+            return self.ledger.crystallised
+        return self.ledger.uncrystallised
+
 
 @dataclass(frozen=True, slots=True)
 class _DrawTranche:
@@ -1157,11 +1170,11 @@ class _Projection:
                 break
             best = min(bids, key=lambda bid: (bid.price, bid.order))
             source = best.cursor.source
-            before = source.available
+            before = source.tranche_balance(best.tranche)
             net = best.cursor.owner.draw_tranche(
                 source, period, best.tranche, remaining
             )
-            best.cursor.record(before - source.available)
+            best.cursor.record(before - source.tranche_balance(best.tranche))
             person_id = best.cursor.owner.person.id
             delivered[person_id] = delivered[person_id] + net
             remaining = remaining - net
