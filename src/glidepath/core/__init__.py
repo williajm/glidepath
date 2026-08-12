@@ -182,7 +182,13 @@ from glidepath.core.state_pension import (
     UpratingRule,
     deferral_months,
 )
-from glidepath.core.tax import TaxInput, TaxLine, TaxResult, TaxSystem
+from glidepath.core.tax import (
+    HouseholdAssessment,
+    TaxInput,
+    TaxLine,
+    TaxResult,
+    TaxSystem,
+)
 from glidepath.core.withdrawals import (
     FixedPercentWithdrawalStrategy,
     FixedRealWithdrawalStrategy,
@@ -265,6 +271,7 @@ __all__ = [
     "HistoricalWindowModel",
     "HistoricalYear",
     "Household",
+    "HouseholdAssessment",
     "LabelledDecision",
     "LabelledFact",
     "LifeStage",

@@ -127,6 +127,13 @@ def format_recorded(moment: datetime) -> str:
     return moment.date().isoformat()
 
 
+def _format_temporal(value: date) -> str:
+    """A datetime (a recorded-on moment, and a date subclass) or a date."""
+    if isinstance(value, datetime):
+        return format_recorded(value)
+    return format_date(value)
+
+
 def format_value(value: object) -> str:
     """Any fact, decision, or assumption value as display text.
 
@@ -134,12 +141,12 @@ def format_value(value: object) -> str:
     numbers, enum choices, policy strings, and structured tables
     (rendered as compact ``key=value`` pairs, truncated when long).
     """
+    if isinstance(value, bool):  # before any numeric type: bool is an int
+        return "Yes" if value else "No"
     if isinstance(value, Money):
         return format_money(value)
-    if isinstance(value, datetime):  # before date: datetime is a date subclass
-        return format_recorded(value)
     if isinstance(value, date):
-        return format_date(value)
+        return _format_temporal(value)
     if isinstance(value, Enum):
         generic = str(value.name).replace("_", " ").capitalize()
         return _ENUM_LABELS.get(value, generic)

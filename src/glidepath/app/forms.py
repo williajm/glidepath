@@ -289,6 +289,12 @@ _SELECT_OPTION = ChoiceOption(value="", label="Select…")
 be picked, never pre-selected (planning §1 — facts are stated, not
 guessed)."""
 
+CLAIM_MARRIAGE_ALLOWANCE_KEY: Final = "claim_marriage_allowance"
+"""The partner-section field carrying the household claim decision (9.32)."""
+
+_CLAIM_OPTIONS: Final[Mapping[str, bool]] = {"yes": True, "no": False}
+"""Domain values of the marriage-allowance claim choice; blank = default."""
+
 _SEXES: Mapping[str, Sex] = {"female": Sex.FEMALE, "male": Sex.MALE}
 _RESIDENCIES: Mapping[str, TaxResidencyId] = {
     str(RUK_RESIDENCY): RUK_RESIDENCY,
@@ -1018,10 +1024,22 @@ def parse_facts_form(
         )
         if person is not None:
             persons.append(person)
+    claim: Decision[bool] | None = None
+    if person_count == len(_PERSON_SECTIONS):
+        # The claim choice lives in the partner section (roadmap 9.32):
+        # a household-level decision that only exists with a partner.
+        partner_reader = _SectionReader(context, "partner", data.persons[1].person)
+        claim = partner_reader.decision_of(
+            partner_reader.choice(CLAIM_MARRIAGE_ALLOWANCE_KEY, _CLAIM_OPTIONS)
+        )
     if context.errors or len(persons) != person_count:
         return FactsFormResult(household=None, errors=tuple(context.errors))
     try:
-        household = Household(persons=tuple(persons), spending=spending)
+        household = Household(
+            persons=tuple(persons),
+            spending=spending,
+            claim_marriage_allowance=claim,
+        )
     except ValueError as exc:
         return FactsFormResult(
             household=None, errors=(FormError("person", None, "", str(exc)),)
@@ -1145,6 +1163,13 @@ def _person_values(person: Person) -> dict[str, str]:
         "mpaa_triggered_on": "" if mpaa is None else mpaa.value.isoformat(),
         "lsa_used": "" if lsa is None else str(lsa.value.amount),
     }
+
+
+def _claim_marriage_allowance_values(claim: Decision[bool] | None) -> dict[str, str]:
+    """The partner section's raw text for the household claim decision."""
+    if claim is None:
+        return {CLAIM_MARRIAGE_ALLOWANCE_KEY: ""}
+    return {CLAIM_MARRIAGE_ALLOWANCE_KEY: "yes" if claim.value else "no"}
 
 
 def _spending_values(spending: SpendingPlan | None) -> dict[str, str]:
@@ -1410,6 +1435,10 @@ def form_cannot_represent(household: Household) -> str | None:
     """
     if household.planned_outflows:
         return "planned outflows"
+    if len(household.persons) == 1 and household.claim_marriage_allowance is not None:
+        # The claim field renders in the partner section, so with no
+        # partner a resubmission would silently drop the decision.
+        return "a marriage allowance claim with no partner"
     spending = household.spending
     if spending is not None and spending.stage_multipliers is not None:
         offered = {stage for _, stage in _STAGE_MULTIPLIER_FIELDS}
@@ -1441,10 +1470,15 @@ def facts_form_data_from_household(household: Household) -> FactsFormData:
     """
     persons = tuple(
         PersonFormData(
-            person=_person_values(person),
+            person=(
+                _person_values(person)
+                if position == 0
+                else _person_values(person)
+                | _claim_marriage_allowance_values(household.claim_marriage_allowance)
+            ),
             state_pension=_state_pension_values(person.state_pension),
         )
-        for person in household.persons
+        for position, person in enumerate(household.persons)
     )
     owned = tuple(enumerate(household.persons))
     return FactsFormData(
@@ -1921,7 +1955,13 @@ def _annuity_purchase_section() -> SectionSpec:
 
 
 def _partner_section() -> SectionSpec:
-    """The partner's person section: same fields, partner copy (§4.11)."""
+    """The partner's person section: same fields, partner copy (§4.11).
+
+    It also carries the household's marriage-allowance claim decision
+    (roadmap 9.32) — a choice that only exists with a partner on the
+    form, so it lives with the partner's fields and leaves the
+    single-person form untouched.
+    """
     base = _person_section()
     changes: dict[str, Any] = {
         "key": "partner",
@@ -1930,6 +1970,24 @@ def _partner_section() -> SectionSpec:
             "Facts about your partner, plus their target retirement age. "
             "Where a tax rule requires marriage or civil partnership, the "
             "plan assumes you qualify."
+        ),
+        "fields": (
+            *base.fields,
+            FieldSpec(
+                key=CLAIM_MARRIAGE_ALLOWANCE_KEY,
+                label="Claim marriage allowance when eligible (your choice)",
+                kind=FieldKind.CHOICE,
+                hint=(
+                    "Checked each tax year: whoever's income sits inside "
+                    "their personal allowance transfers it to the other, "
+                    "reducing the household's tax."
+                ),
+                choices=(
+                    ChoiceOption(value="", label="Yes — claim when eligible (default)"),
+                    ChoiceOption(value="yes", label="Yes — claim when eligible"),
+                    ChoiceOption(value="no", label="No — never claim"),
+                ),
+            ),
         ),
     }
     return replace(base, **changes) if changes else base

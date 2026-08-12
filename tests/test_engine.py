@@ -130,7 +130,7 @@ money_fact = partial(factories.money_fact, as_of=AS_OF)
 
 
 @dataclass(frozen=True)
-class FlatTaxSystem:
+class FlatTaxSystem(factories.NoHouseholdAdjustment):
     """Flat 25% on every pound of income, floored to the penny.
 
     Savings and dividend income join the same flat band (roadmap 9.2),
@@ -175,7 +175,7 @@ UPPER_RATE = Decimal("0.40")
 
 
 @dataclass(frozen=True)
-class TieredTaxSystem:
+class TieredTaxSystem(factories.NoHouseholdAdjustment):
     """20% to 10,000 of stacked income, 40% above (roadmap 9.2 tests).
 
     Savings and dividends stack on top of non-savings income, so a
@@ -220,7 +220,7 @@ ALLOWANCE = Money(Decimal(1000))
 
 
 @dataclass(frozen=True)
-class AllowanceTaxSystem:
+class AllowanceTaxSystem(factories.NoHouseholdAdjustment):
     """Flat 25% above a 1,000 allowance on the stacked income.
 
     A modest taxable account's portfolio income can sit wholly
@@ -266,7 +266,7 @@ OTHER_RESIDENCY = TaxResidencyId("test.other")
 
 
 @dataclass(frozen=True)
-class ResidencyTaxSystem:
+class ResidencyTaxSystem(factories.NoHouseholdAdjustment):
     """Flat 25% for the main residency, nothing for the other.
 
     Pins the §4.11 mixed-residency contract: each person's assessment

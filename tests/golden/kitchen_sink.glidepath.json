@@ -60,6 +60,11 @@
   ],
   "assumptions_resolved_against": "test-region data v1",
   "household": {
+    "claim_marriage_allowance": {
+      "note": "we cohabit",
+      "recorded_on": "2026-08-01T12:00:00+00:00",
+      "value": false
+    },
     "persons": [
       {
         "annuity_purchases": [
@@ -535,5 +540,5 @@
       "overrides": []
     }
   ],
-  "schema_version": 5
+  "schema_version": 6
 }

@@ -66,7 +66,14 @@ class TaxInput:
 
 @dataclass(frozen=True, slots=True)
 class TaxLine:
-    """Tax charged within one region-defined band of an assessment."""
+    """Tax charged within one region-defined band of an assessment.
+
+    ``tax`` may be negative on a statutory tax-reducer line — a relief
+    a region's household adjustment step deducts from the liability
+    after the band ladder (planning §4.11), e.g. the UK marriage
+    allowance. ``taxed`` (the income the line covers) is always
+    non-negative; a reducer line covers no income.
+    """
 
     band: str
     rate: Rate
@@ -74,12 +81,15 @@ class TaxLine:
     tax: Money
 
     def __post_init__(self) -> None:
-        """Reject unnamed bands and negative amounts."""
+        """Reject unnamed bands, negative taxed income, and hidden credits."""
         if not self.band:
             msg = "TaxLine.band must not be empty"
             raise ValueError(msg)
-        if self.taxed < _ZERO or self.tax < _ZERO:
-            msg = "TaxLine amounts must be non-negative"
+        if self.taxed < _ZERO:
+            msg = "TaxLine.taxed must be non-negative"
+            raise ValueError(msg)
+        if self.tax < _ZERO and self.taxed != _ZERO:
+            msg = "TaxLine.tax may be negative only on a no-income reducer line"
             raise ValueError(msg)
 
 
@@ -98,14 +108,35 @@ class TaxResult:
     lines: tuple[TaxLine, ...]
 
     def __post_init__(self) -> None:
-        """Require non-negative amounts and a consistent breakdown."""
+        """Require non-negative amounts and a consistent breakdown.
+
+        ``tax_due`` must be non-negative even though a reducer line's
+        ``tax`` is negative: reducers are capped at the liability,
+        never refundable (planning §4.11).
+        """
         if self.taxable_income < _ZERO or self.tax_free_allowance < _ZERO:
             msg = "TaxResult amounts must be non-negative"
+            raise ValueError(msg)
+        if self.tax_due < _ZERO:
+            msg = "TaxResult.tax_due must be non-negative"
             raise ValueError(msg)
         total = sum((line.tax for line in self.lines), start=_ZERO)
         if self.tax_due != total:
             msg = "TaxResult.tax_due must equal the sum of its lines"
             raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class HouseholdAssessment:
+    """One person's completed period assessment, paired with its input.
+
+    The household adjustment step (planning §4.11) needs both sides:
+    the input carries the income picture joint eligibility rules test,
+    the result carries the liability a reducer is capped at.
+    """
+
+    tax_input: TaxInput
+    result: TaxResult
 
 
 class TaxSystem(Protocol):
@@ -118,6 +149,25 @@ class TaxSystem(Protocol):
 
     def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:
         """Assess ``tax_input`` for ``period`` under this region's rules."""
+        ...
+
+    def adjust_household(
+        self, period: Period, assessments: tuple[HouseholdAssessment, ...]
+    ) -> tuple[TaxResult, ...]:
+        """Adjust a household's completed assessments jointly (§4.11).
+
+        The one deliberate crack in the person-isolated tax contract:
+        after every person's strictly per-person :meth:`assess`, the
+        region may apply reliefs that only exist between partners —
+        the UK marriage allowance — by returning replacement results
+        in the same order, typically with a reducer line appended.
+        The engine calls this only when the household holds two
+        persons and has not declined joint claims; a region with no
+        such relief returns the results unchanged. Adjustments must
+        not reshape the assessed income (``taxable_income`` and
+        ``tax_free_allowance`` stay as assessed) — the step reduces
+        liability, it never re-assesses.
+        """
         ...
 
     def annual_allowance_charge(

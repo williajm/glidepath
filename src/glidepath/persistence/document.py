@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from glidepath.core import AssumptionKey, Household, Scenario
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 """The schema version this build reads and writes (planning §4.5).
 
 v2 (roadmap 9.6): every DB pension carries an ``active_membership``
@@ -35,6 +35,10 @@ they never bound (#114 retired the tokens without a migration).
 
 v5 (roadmap 9.28): every wrapper carries a ``label`` key — the user's
 own name for the account, ``null`` for an unnamed one.
+
+v6 (roadmap 9.32): the household carries a ``claim_marriage_allowance``
+key — the §4.11 claim decision, ``null`` for the default
+(claim whenever eligible).
 """
 
 

@@ -310,6 +310,7 @@ def kitchen_sink_household(
         ),
         spending=spending,
         planned_outflows=(outflow,),
+        claim_marriage_allowance=decision(value=False, note="we cohabit"),
     )
 
 
@@ -720,6 +721,14 @@ class TestRoundTrip:
         wrappers = loaded.household.persons[0].wrappers
         assert wrappers
         assert all(wrapper.label is None for wrapper in wrappers)
+
+    def test_v5_file_loads_with_the_default_marriage_allowance_claim(self) -> None:
+        """The 9.32 migration adds the household claim key on load."""
+        payload = payload_of(kitchen_sink_document())
+        del payload["household"]["claim_marriage_allowance"]
+        payload["schema_version"] = 5
+        loaded = loads_plan(json.dumps(payload))
+        assert loaded.household.claim_marriage_allowance is None
 
     @given(
         balance=st.decimals(

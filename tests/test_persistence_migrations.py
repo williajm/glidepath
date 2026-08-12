@@ -222,11 +222,18 @@ class TestV3ToV4:
         assert stored == multipliers
 
     def test_a_document_without_spending_just_bumps_the_version(self) -> None:
-        """Nothing to upgrade still steps the version."""
+        """Nothing to upgrade still steps the version.
+
+        The later v5→v6 step of the full chain adds the household's
+        marriage-allowance claim key (roadmap 9.32).
+        """
         raw: RawDocument = {"schema_version": 3, "household": {"spending": None}}
         migrated = apply_migrations(raw)
         assert migrated["schema_version"] == SCHEMA_VERSION
-        assert migrated["household"] == {"spending": None}
+        assert migrated["household"] == {
+            "spending": None,
+            "claim_marriage_allowance": None,
+        }
 
     @pytest.mark.parametrize(
         "raw",

@@ -234,6 +234,7 @@ def test_frozen_mode_carries_every_figure_forward(base: TaxYearFile) -> None:
     assert extended.income_tax_scotland == base.income_tax_scotland
     assert extended.pension == base.pension
     assert extended.isa == base.isa
+    assert extended.marriage_allowance == base.marriage_allowance
 
 
 def test_default_policy_is_frozen_through_2030_31(
@@ -314,6 +315,10 @@ def test_first_indexed_year_figures(
     assert savings.psa_higher == Money(Decimal(510))
     assert savings.psa_additional == Money(Decimal(0))  # zero indexes to zero
     assert extended.dividend.allowance == Money(Decimal(510))
+    # Derived, not indexed (PAYE100060): 10% of the synthesized PA of
+    # 12,821 is 1,282.10, rounded up to the nearest £10.
+    marriage = extended.marriage_allowance
+    assert marriage.transferable_amount == Money(Decimal(1290))
 
 
 def test_rates_never_extrapolate(
@@ -336,6 +341,13 @@ def test_rates_never_extrapolate(
     assert extended.isa.lisa_bonus_rate == base.isa.lisa_bonus_rate
     assert extended.isa.lisa_withdrawal_charge == base.isa.lisa_withdrawal_charge
     assert extended.dividend.rates == base.dividend.rates
+    marriage = extended.marriage_allowance
+    base_marriage = base.marriage_allowance
+    assert marriage.recipient_top_band_ruk == base_marriage.recipient_top_band_ruk
+    assert (
+        marriage.recipient_top_band_scotland
+        == base_marriage.recipient_top_band_scotland
+    )
 
 
 def test_indexation_compounds_once_from_the_base_year(
@@ -344,6 +356,8 @@ def test_indexation_compounds_once_from_the_base_year(
     """2035/36 gets five steps in one go: 12,570 x 1.02^5 = 13,878.30."""
     extended = extend_tax_year(base, 2035, policy=default_policy, cpi=CPI)
     assert extended.income_tax_ruk.personal_allowance == Money(Decimal(13878))
+    # 10% of 13,878 is 1,387.80: up to the nearest £10 (PAYE100060).
+    assert extended.marriage_allowance.transferable_amount == Money(Decimal(1390))
 
 
 def test_synthesis_is_memoized(
@@ -425,7 +439,10 @@ def test_scottish_extension_needs_the_higher_band_anchor(
             TaxBand(name="top", rate=Rate(Decimal("0.48")), upper=None),
         ),
     )
-    lopsided = replace(base, income_tax_scotland=schedule)
+    # The reduced ladder has no intermediate band either, so the
+    # marriage-allowance recipient gate must move to one that exists.
+    gates = replace(base.marriage_allowance, recipient_top_band_scotland="basic")
+    lopsided = replace(base, income_tax_scotland=schedule, marriage_allowance=gates)
     with pytest.raises(DataFileError, match="no band named 'higher'"):
         extend_tax_year(lopsided, 2031, policy=default_policy, cpi=CPI)
 

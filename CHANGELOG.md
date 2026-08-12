@@ -11,6 +11,22 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Couples get the marriage allowance (roadmap 9.32, planning §4.11):
+  each tax year the engine checks eligibility — one partner's income
+  inside their personal allowance, the other liable at no more than
+  the basic rate (rUK) or intermediate rate (Scotland) — picks the
+  direction automatically, and reduces the recipient's assessed tax
+  by the ITA 2007 s55B reducer (20% of the £1,260 transferable
+  amount, up to £252 a year, capped at their liability). The claim
+  is a household decision entered in the partner form section,
+  defaulting to "claim when eligible"; the figures ship in the
+  tax-year data files, and synthesized future years re-derive the
+  transferable amount from that year's personal allowance (10%,
+  rounded up to the nearest £10 per HMRC PAYE100060). Plan documents step to schema v6 (older
+  files migrate on load); the reduction shows in the reported tax
+  breakdown as its own "marriage allowance" line and does not alter
+  withdrawal sizing — a recorded simplification.
+
 - The facts form gains an optional partner (roadmap 9.31, planning
   §4.11): one explicit "Add a partner" action reveals an "About your
   partner" section plus the partner's own state pension, wrappers, DB

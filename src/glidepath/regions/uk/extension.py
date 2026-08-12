@@ -41,7 +41,7 @@ not depend on intermediate synthesized years.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_HALF_EVEN, ROUND_UP, Decimal
 from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, NoReturn
@@ -52,6 +52,7 @@ from glidepath.regions.uk.schema import (
     DividendRules,
     IncomeTaxSchedule,
     IsaRules,
+    MarriageAllowanceRules,
     PensionRules,
     SavingsRules,
     TaxBand,
@@ -70,6 +71,9 @@ if TYPE_CHECKING:
 _CONTEXT = "policy.tax.future_years"
 _SCOTLAND_CONTEXT = f"{_CONTEXT}.scotland"
 _POUND = Decimal(1)
+_TEN_POUNDS = Decimal(10)
+_MA_PA_FRACTION = Decimal("0.1")
+"""ITA 2007 ss 55A-55B: the transferable amount is 10% of the PA."""
 
 HIGHER_BAND_NAME = "higher"
 """The Scottish higher-rate band: anchor of the upper-threshold group.
@@ -381,6 +385,27 @@ def _indexed_dividend(dividend: DividendRules, factor: Decimal) -> DividendRules
     )
 
 
+def _derived_marriage_allowance(
+    rules: MarriageAllowanceRules, personal_allowance: Money
+) -> MarriageAllowanceRules:
+    """Re-derive the transferable amount from the synthesized PA.
+
+    The statutory rule is derivation, not indexation: the transferable
+    amount is 10% of the personal allowance, rounded up to the nearest
+    £10 when not already a multiple (HMRC PAYE100060 — the 2018/19 PA
+    of £11,850 gave £1,190). A synthesized year therefore computes it
+    from its own reserved PA rather than scaling the base figure,
+    which would drift off the £10 grid. The band gates never move.
+    """
+    tenth = personal_allowance.amount * _MA_PA_FRACTION
+    steps_of_ten = (tenth / _TEN_POUNDS).quantize(_POUND, rounding=ROUND_UP)
+    return MarriageAllowanceRules(
+        transferable_amount=Money(steps_of_ten * _TEN_POUNDS),
+        recipient_top_band_ruk=rules.recipient_top_band_ruk,
+        recipient_top_band_scotland=rules.recipient_top_band_scotland,
+    )
+
+
 @lru_cache(maxsize=256)
 def extend_tax_year(
     base: TaxYearFile,
@@ -439,6 +464,7 @@ def extend_tax_year(
             isa=base.isa,
             savings=base.savings,
             dividend=base.dividend,
+            marriage_allowance=base.marriage_allowance,
         )
     factor = cpi.growth_factor**steps
     lower_steps = _indexation_steps(
@@ -461,14 +487,15 @@ def extend_tax_year(
             upper_factor=cpi.growth_factor**upper_steps,
         )
     )
+    ruk = (
+        base.income_tax_ruk
+        if steps == 0
+        else _indexed_schedule(base.income_tax_ruk, factor)
+    )
     return TaxYearFile(
         schema_version=base.schema_version,
         meta=meta,
-        income_tax_ruk=(
-            base.income_tax_ruk
-            if steps == 0
-            else _indexed_schedule(base.income_tax_ruk, factor)
-        ),
+        income_tax_ruk=ruk,
         income_tax_scotland=scotland,
         pension=base.pension if steps == 0 else _indexed_pension(base.pension, factor),
         isa=base.isa if steps == 0 else _indexed_isa(base.isa, factor),
@@ -477,5 +504,12 @@ def extend_tax_year(
         ),
         dividend=(
             base.dividend if steps == 0 else _indexed_dividend(base.dividend, factor)
+        ),
+        marriage_allowance=(
+            base.marriage_allowance
+            if steps == 0
+            else _derived_marriage_allowance(
+                base.marriage_allowance, ruk.personal_allowance
+            )
         ),
     )

@@ -214,6 +214,17 @@ class Household:
     persons: tuple[Person, ...]
     spending: SpendingPlan | None = None
     planned_outflows: tuple[PlannedOutflow, ...] = ()
+    claim_marriage_allowance: Decision[bool] | None = None
+    """Claim the region's partner tax transfer when eligible (§4.11).
+
+    A household-level decision: ``None`` means the default — claim
+    whenever a tax year's eligibility check passes; an explicit
+    ``False`` declines. Meaningless (and ignored) for a one-person
+    household. UK-named after the only such relief modelled (the
+    marriage allowance), matching :attr:`Person.lsa_used` precedent —
+    the engine never interprets it beyond gating the region's
+    household adjustment step.
+    """
 
     def __post_init__(self) -> None:
         """Enforce the 1..2 bound, distinct entity ids, and outflow targets.
