@@ -31,7 +31,7 @@ nothing is transmitted.
 
 *(All screenshots show example data, not anyone's real finances.)*
 
-What it models today (single person, UK):
+What it models today (UK, single or couple):
 
 - **Wrappers** — workplace DC, SIPP, S&S ISA, LISA, GIA and cash, with
   UK contribution relief mechanics and dividend/savings taxation.
@@ -41,6 +41,14 @@ What it models today (single person, UK):
   including deferral.
 - **Tax** — rUK and Scottish income tax from verified 2026/27 data
   files; pension allowances (AA/taper/MPAA, lump-sum allowance).
+- **Couples** — an optional partner, modelled end to end: one pooled
+  household decumulation drawing tax-efficiently across both partners'
+  wrappers with each person taxed individually (mixed rUK/Scottish
+  residency included), the marriage allowance claimed when eligible,
+  optional survivor modelling ("model death at age" — pensions pass as
+  beneficiary drawdown, ISAs via the additional permitted
+  subscription, DB schemes at their survivor fraction), and joint-life
+  annuities paying a 50/66/100% survivor income.
 - **Projection** — deterministic or Monte Carlo runs from the app:
   success rate, probability of ruin, ending-pot percentiles, and a
   probability fan chart on its own tab, reproducible from a seed. With
