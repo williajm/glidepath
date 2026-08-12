@@ -374,7 +374,7 @@ def _annuity_quote(context: _CardContext, pot: Money) -> _AnnuityQuote | None:
         _pension_closing_balance(_snapshot_person(context, person.id))
         for person in context.persons
     )
-    total = sum((balance for balance in balances), _ZERO_MONEY)
+    total = sum(balances, _ZERO_MONEY)
     if total > _ZERO_MONEY:
         slices = tuple(
             Money(pot.amount * balance.amount / total.amount) for balance in balances

@@ -1922,64 +1922,66 @@ def _annuity_purchase_section() -> SectionSpec:
 
 def _partner_section() -> SectionSpec:
     """The partner's person section: same fields, partner copy (§4.11)."""
-    return replace(
-        _person_section(),
-        key="partner",
-        title="About your partner",
-        description=(
+    base = _person_section()
+    changes: dict[str, Any] = {
+        "key": "partner",
+        "title": "About your partner",
+        "description": (
             "Facts about your partner, plus their target retirement age. "
             "Where a tax rule requires marriage or civil partnership, the "
             "plan assumes you qualify."
         ),
-    )
+    }
+    return replace(base, **changes) if changes else base
 
 
 def _partner_state_pension_section() -> SectionSpec:
     """The partner's state pension section."""
     base = _state_pension_section()
-    return replace(
-        base,
-        key="partner_state_pension",
-        title="Partner's state pension",
-        description=base.description.replace(
+    changes: dict[str, Any] = {
+        "key": "partner_state_pension",
+        "title": "Partner's state pension",
+        "description": base.description.replace(
             "Your official", "Your partner's official"
         ),
-    )
+    }
+    return replace(base, **changes) if changes else base
 
 
 def _partner_wrapper_section() -> SectionSpec:
     """The partner's repeatable savings-wrapper section."""
-    return replace(
-        _wrapper_section(),
-        key="partner_wrapper",
-        title="Partner's savings wrapper",
-    )
+    base = _wrapper_section()
+    changes: dict[str, Any] = {
+        "key": "partner_wrapper",
+        "title": "Partner's savings wrapper",
+    }
+    return replace(base, **changes) if changes else base
 
 
 def _partner_db_pension_section() -> SectionSpec:
     """The partner's repeatable DB-pension section."""
     base = _db_pension_section()
-    return replace(
-        base,
-        key="partner_db_pension",
-        title="Partner's defined benefit pension",
-        description=base.description.replace(
+    changes: dict[str, Any] = {
+        "key": "partner_db_pension",
+        "title": "Partner's defined benefit pension",
+        "description": base.description.replace(
             "your benefit statement", "your partner's benefit statement"
         ),
-    )
+    }
+    return replace(base, **changes) if changes else base
 
 
 def _partner_annuity_purchase_section() -> SectionSpec:
     """The partner's repeatable annuity-purchase section."""
     base = _annuity_purchase_section()
-    return replace(
-        base,
-        key="partner_annuity_purchase",
-        title="Partner's annuity purchase",
-        description=base.description.replace(
+    changes: dict[str, Any] = {
+        "key": "partner_annuity_purchase",
+        "title": "Partner's annuity purchase",
+        "description": base.description.replace(
             "your pension pot", "your partner's pension pot"
         ),
-    )
+    }
+    return replace(base, **changes) if changes else base
 
 
 def build_facts_form_view_model() -> FactsFormViewModel:
