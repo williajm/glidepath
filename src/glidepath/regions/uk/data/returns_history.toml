@@ -14,7 +14,7 @@
 # Cite Jordà, Schularick & Taylor (2017) and, for the return series,
 # Jordà, Knoll, Kuvshinov, Schularick & Taylor (2019).
 
-schema_version = 3
+schema_version = 4
 
 [meta]
 verified_on = 2026-08-05

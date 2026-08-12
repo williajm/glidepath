@@ -285,3 +285,17 @@ class WrapperRuleset(Protocol):
         concern (§5.2).
         """
         ...
+
+    def death_benefits_income_tax_free(
+        self, date_of_birth: date, death_date: date
+    ) -> bool:
+        """Whether this death passes pension kinds as tax-free drawdown.
+
+        The survivor-modelling rule for a deceased member's
+        partially-tax-free (pension) wrappers (planning §4.11, roadmap
+        9.33): ``True`` means the survivor's inherited beneficiary
+        drawdown pays income-tax-free; ``False`` means draws are taxed
+        at the survivor's marginal rate. The boundary (the UK's age 75)
+        is the region's call, from its data files.
+        """
+        ...

@@ -11,6 +11,29 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Couples get deterministic survivor modelling (roadmap 9.33, planning
+  §4.11): each person can state an optional "model death at age" —
+  a choice, so "what if I die at 75" also works as an ordinary
+  scenario override, even when the base plan sets no death age. From
+  the death gate (the §4.1 period convention) the survivor inherits
+  the household: pension pots merge as beneficiary drawdown —
+  income-tax-free when death precedes 75, taxed at the survivor's
+  marginal rate from 75, never gated, never consuming the survivor's
+  lump sum allowance or triggering their MPAA (the age boundary ships
+  in the UK data files) — ISAs and LISAs pass as the survivor's own
+  ISA money (the additional permitted subscription), GIA/cash pass at
+  the spouse exemption, and DB pensions continue at each scheme's
+  survivor fraction (a new per-scheme fact in the DB form section,
+  defaulting to the new `db.survivor_fraction` assumption of 50%).
+  The deceased's state pension and single-life annuity income stop,
+  the marriage allowance lapses from the tax year after death, and
+  household spending scales by the new `spending.survivor_multiplier`
+  assumption (0.70, pinned against the current PLSA single-vs-couple
+  retirement budgets). Plan documents step to schema v7 and UK data
+  files to schema v4 (older files migrate/load as before); plans with
+  no death age are unchanged to the byte, and death ages are
+  deterministic across Monte Carlo paths.
+
 - Couples get the marriage allowance (roadmap 9.32, planning §4.11):
   each tax year the engine checks eligibility — one partner's income
   inside their personal allowance, the other liable at no more than

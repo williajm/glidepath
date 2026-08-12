@@ -157,6 +157,7 @@ class TestFormSpec:
             "target_retirement_age",
             "mpaa_triggered_on",
             "lsa_used",
+            "death_age",
         }
 
     def test_wrapper_section_covers_balances_and_contributions(self) -> None:
@@ -189,6 +190,7 @@ class TestFormSpec:
             "commutation_factor",
             "taken_at_age",
             "commuted_fraction",
+            "survivor_fraction",
             "accrual_rate",
             "pensionable_salary",
             "active_until_age",
@@ -356,6 +358,31 @@ class TestPersonParsing:
             form_data(person=person_values(tax_residency=str(SCOTLAND_RESIDENCY)))
         )
         assert household.persons[0].tax_residency == SCOTLAND_RESIDENCY
+
+    def test_death_age_parses_as_an_optional_decision(self) -> None:
+        """A stated death age is a choice recorded at submission (9.33)."""
+        household = parse(form_data(person=person_values(death_age="82")))
+        [person] = household.persons
+        assert person.death_age is not None
+        assert person.death_age.value == 82
+        assert person.death_age.recorded_on == RECORDED
+
+    def test_blank_death_age_means_alive_to_the_horizon(self) -> None:
+        """The default models no death (planning §4.11)."""
+        household = parse(form_data(person=person_values()))
+        assert household.persons[0].death_age is None
+
+    def test_non_positive_death_age_is_rejected(self) -> None:
+        """The entity's own bound surfaces as a section-level error."""
+        result = parse_facts_form(
+            form_data(person=person_values(death_age="0")),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "person"
+        assert "death_age" in error.message
 
 
 class TestWrapperParsing:
@@ -657,6 +684,7 @@ class TestDBPensionParsing:
                         "commutation_factor": "12",
                         "taken_at_age": "60",
                         "commuted_fraction": "0.25",
+                        "survivor_fraction": "0.6667",
                     },
                 ),
             )
@@ -682,6 +710,32 @@ class TestDBPensionParsing:
         assert pension.taken_at_age is not None
         assert pension.taken_at_age.value == 60
         assert pension.commuted_fraction.value == Decimal("0.25")
+        assert pension.survivor_fraction is not None
+        assert pension.survivor_fraction.value == Decimal("0.6667")
+        assert pension.survivor_fraction.as_of == statement
+
+    def test_survivor_fraction_beyond_one_is_rejected(self) -> None:
+        """The core bound surfaces as a section-level error."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                db_pensions=(
+                    {
+                        "accrued_annual_pension": "8500",
+                        "statement_date": "2025-11-30",
+                        "normal_pension_age": "65",
+                        "revaluation_reference": "none",
+                        "survivor_fraction": "1.5",
+                    },
+                ),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "db_pension"
+        assert "survivor_fraction" in error.message
 
     def test_fixed_basis_without_rate_is_rejected(self) -> None:
         """The core cross-field rule surfaces as a section-level error."""
@@ -1816,6 +1870,7 @@ def _maximal_submission() -> FactsFormData:
             employment_income="52000",
             mpaa_triggered_on="2024-01-15",
             lsa_used="1250.50",
+            death_age="82",
         ),
         spending={
             "annual_spending_real": "28000",
@@ -1853,6 +1908,7 @@ def _maximal_submission() -> FactsFormData:
                 "commutation_factor": "12",
                 "taken_at_age": "60",
                 "commuted_fraction": "0.25",
+                "survivor_fraction": "0.5",
                 "accrual_rate": "0.0166667",
                 "pensionable_salary": "48000",
                 "active_until_age": "58",
@@ -1907,6 +1963,7 @@ def _maximal_couple_submission() -> FactsFormData:
                 person=partner_values(
                     sex_for_longevity="female",
                     employment_income="31000",
+                    death_age="90",
                 ),
                 state_pension={
                     "forecast_weekly_amount": "180.10",
@@ -2150,6 +2207,21 @@ class TestFormCannotRepresent:
         household = _with_person(
             base,
             db_pensions=(_altered(pension, accrued_annual_pension=moved),),
+        )
+        assert (
+            form_cannot_represent(household)
+            == "DB scheme facts dated off the statement date"
+        )
+
+    def test_off_statement_survivor_fraction_is_flagged(self, base: Household) -> None:
+        """A resave would silently redate the survivor fraction (9.33)."""
+        person = base.persons[0]
+        pension = person.db_pensions[0]
+        assert pension.survivor_fraction is not None
+        moved = _altered(pension.survivor_fraction, as_of=date(2026, 6, 1))
+        household = _with_person(
+            base,
+            db_pensions=(_altered(pension, survivor_fraction=moved),),
         )
         assert (
             form_cannot_represent(household)

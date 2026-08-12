@@ -162,6 +162,7 @@ def db_pensions() -> tuple[DBPension, ...]:
         commuted_fraction=decision(Decimal("0.25")),
         commutation_factor=fact(Decimal(12)),
         taken_at_age=decision(62, note="what if I go early"),
+        survivor_fraction=fact(Decimal("0.6667")),
         active_membership=DBActiveMembership(
             accrual_rate=fact(Decimal("0.0166667")),
             pensionable_salary=money_fact("42000"),
@@ -259,6 +260,7 @@ def full_person(
         employment_income=money_fact("52000"),
         mpaa_triggered_on=fact(date(2024, 1, 15)),
         lsa_used=money_fact("10000"),
+        death_age=decision(88, note="modelling an earlier death"),
         wrappers=(full_wrapper(balance=balance, fee=fee), bare_wrapper),
         db_pensions=db_pensions(),
         annuity_purchases=annuity_purchases(),

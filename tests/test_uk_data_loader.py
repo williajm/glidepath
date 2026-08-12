@@ -28,7 +28,7 @@ from glidepath.regions.uk import (
     tax_year_filename,
 )
 
-TAX_HEADER = "schema_version = 3\n"
+TAX_HEADER = "schema_version = 4\n"
 TAX_META = """
 [meta]
 tax_year = "2026/27"
@@ -122,7 +122,7 @@ VALID_TAX_YEAR = (
 )
 
 VALID_AGE_RULES = """
-schema_version = 3
+schema_version = 4
 
 [meta]
 verified_on = 2026-08-02
@@ -152,9 +152,12 @@ access_age = 60
 [state_pension_deferral]
 increment_rate = "0.01"
 per_weeks = 9
+
+[death_benefits]
+income_tax_free_before_age = 75
 """
 
-ASSUMPTIONS_HEADER = """schema_version = 3
+ASSUMPTIONS_HEADER = """schema_version = 4
 
 [meta]
 verified_on = 2026-08-01
@@ -216,21 +219,21 @@ def test_invalid_toml_is_a_load_error() -> None:
 
 def test_missing_schema_version_is_an_error() -> None:
     """schema_version is mandatory."""
-    broken = _mutated(VALID_TAX_YEAR, "schema_version = 3\n", "")
+    broken = _mutated(VALID_TAX_YEAR, "schema_version = 4\n", "")
     with pytest.raises(DataFileError, match="missing required key 'schema_version'"):
         parse_tax_year(broken)
 
 
 def test_unsupported_schema_version_is_an_error() -> None:
-    """Version 4 files must not load into version 3 code."""
-    broken = _mutated(VALID_TAX_YEAR, "schema_version = 3", "schema_version = 4")
-    with pytest.raises(DataFileError, match="schema_version 4 is not supported"):
+    """Version 5 files must not load into version 4 code."""
+    broken = _mutated(VALID_TAX_YEAR, "schema_version = 4", "schema_version = 5")
+    with pytest.raises(DataFileError, match="schema_version 5 is not supported"):
         parse_tax_year(broken)
 
 
 def test_string_schema_version_is_an_error() -> None:
     """schema_version must be an integer."""
-    broken = _mutated(VALID_TAX_YEAR, "schema_version = 3", 'schema_version = "3"')
+    broken = _mutated(VALID_TAX_YEAR, "schema_version = 4", 'schema_version = "4"')
     with pytest.raises(DataFileError, match="expected an integer"):
         parse_tax_year(broken)
 
@@ -252,7 +255,7 @@ def test_missing_meta_key_is_an_error() -> None:
 def test_unknown_top_level_key_is_an_error() -> None:
     """Unknown keys anywhere are load errors."""
     broken = _mutated(
-        VALID_TAX_YEAR, "schema_version = 3\n", "schema_version = 3\nmystery = 1\n"
+        VALID_TAX_YEAR, "schema_version = 4\n", "schema_version = 4\nmystery = 1\n"
     )
     with pytest.raises(DataFileError, match="unknown keys: mystery"):
         parse_tax_year(broken)
@@ -436,6 +439,7 @@ def test_valid_age_rules_parse() -> None:
     assert date_band.reaches_on == date(2044, 5, 6)
     assert rules.lisa.access_age == 60
     assert rules.deferral.per_weeks == 9
+    assert rules.death_benefits.income_tax_free_before_age == 75
 
 
 def test_spa_band_with_age_and_date_is_an_error() -> None:
@@ -532,6 +536,28 @@ def test_lisa_age_order_is_enforced_at_load() -> None:
 def test_deferral_zero_weeks_is_an_error() -> None:
     """The deferral increment interval must be positive."""
     broken = _mutated(VALID_AGE_RULES, "per_weeks = 9", "per_weeks = 0")
+    with pytest.raises(DataFileError, match="at least 1"):
+        parse_age_rules(broken)
+
+
+def test_death_benefits_table_is_required() -> None:
+    """The 9.33 death-benefit boundary is a policy figure, never defaulted."""
+    broken = _mutated(
+        VALID_AGE_RULES,
+        "\n[death_benefits]\nincome_tax_free_before_age = 75\n",
+        "\n",
+    )
+    with pytest.raises(DataFileError, match="missing required key 'death_benefits'"):
+        parse_age_rules(broken)
+
+
+def test_death_benefit_boundary_must_be_positive() -> None:
+    """A zero boundary age is a data error."""
+    broken = _mutated(
+        VALID_AGE_RULES,
+        "income_tax_free_before_age = 75",
+        "income_tax_free_before_age = 0",
+    )
     with pytest.raises(DataFileError, match="at least 1"):
         parse_age_rules(broken)
 
@@ -695,7 +721,7 @@ def test_available_tax_years_matches_shipped_files(
 # --- returns_history.toml (issue 9.18) ---------------------------------------
 
 VALID_RETURNS_HISTORY = """
-schema_version = 3
+schema_version = 4
 
 [meta]
 verified_on = 2026-08-05

@@ -719,6 +719,7 @@ def _db_pension_from(reader: _SectionReader, entity_id: EntityId) -> DBPension |
     commutation = reader.decimal_value("commutation_factor")
     taken_at = reader.int_value("taken_at_age")
     fraction = reader.decimal_value("commuted_fraction")
+    survivor = reader.decimal_value("survivor_fraction")
     membership = _active_membership_from(reader, statement)
     if reference is None:
         reader.error("revaluation_reference", _REQUIRED_MESSAGE)
@@ -752,6 +753,11 @@ def _db_pension_from(reader: _SectionReader, entity_id: EntityId) -> DBPension |
                 else Fact(value=commutation, as_of=statement, recorded_on=recorded)
             ),
             taken_at_age=reader.decision_of(taken_at),
+            survivor_fraction=(
+                None
+                if survivor is None
+                else Fact(value=survivor, as_of=statement, recorded_on=recorded)
+            ),
             active_membership=membership,
         )
     except ValueError as exc:
@@ -814,6 +820,7 @@ def _person_from(
     employment = reader.fact_of(reader.money("employment_income"))
     mpaa = reader.fact_of(reader.date_value("mpaa_triggered_on"))
     lsa = reader.fact_of(reader.money("lsa_used"))
+    death = reader.int_value("death_age")
     if dob is None or target is None or residency is None or not reader.ok:
         return None
     try:
@@ -828,6 +835,7 @@ def _person_from(
             employment_income=employment,
             mpaa_triggered_on=mpaa,
             lsa_used=lsa,
+            death_age=reader.decision_of(death),
             wrappers=parts.wrappers,
             db_pensions=parts.db_pensions,
             annuity_purchases=parts.annuity_purchases,
@@ -1152,6 +1160,7 @@ def _person_values(person: Person) -> dict[str, str]:
     employment = person.employment_income
     mpaa = person.mpaa_triggered_on
     lsa = person.lsa_used
+    death = person.death_age
     return {
         "date_of_birth": person.date_of_birth.value.isoformat(),
         "sex_for_longevity": "" if sex is None else _SEX_KEYS[sex.value],
@@ -1162,6 +1171,7 @@ def _person_values(person: Person) -> dict[str, str]:
         "target_retirement_age": str(person.target_retirement_age.value),
         "mpaa_triggered_on": "" if mpaa is None else mpaa.value.isoformat(),
         "lsa_used": "" if lsa is None else str(lsa.value.amount),
+        "death_age": "" if death is None else str(death.value),
     }
 
 
@@ -1268,6 +1278,11 @@ def _db_pension_values(pension: DBPension, owner: int) -> dict[str, str]:
         "commutation_factor": "" if commutation is None else str(commutation.value),
         "taken_at_age": "" if taken is None else str(taken.value),
         "commuted_fraction": str(pension.commuted_fraction.value),
+        "survivor_fraction": (
+            ""
+            if pension.survivor_fraction is None
+            else str(pension.survivor_fraction.value)
+        ),
         "accrual_rate": "",
         "pensionable_salary": "",
         "active_until_age": "",
@@ -1367,6 +1382,8 @@ def _db_pension_cannot_represent(pension: DBPension) -> str | None:
     dated = [pension.accrued_annual_pension.as_of, pension.normal_pension_age.as_of]
     if pension.commutation_factor is not None:
         dated.append(pension.commutation_factor.as_of)
+    if pension.survivor_fraction is not None:
+        dated.append(pension.survivor_fraction.as_of)
     membership = pension.active_membership
     if membership is not None:
         dated.append(membership.accrual_rate.as_of)
@@ -1628,6 +1645,11 @@ def _person_section() -> SectionSpec:
                 label="Lump sum allowance already used",
                 hint="blank if none",
             ),
+            FieldSpec(
+                key="death_age",
+                label="Model death at age (optional, your choice)",
+                hint="blank means alive to the horizon; e.g. 82",
+            ),
         ),
     )
 
@@ -1877,6 +1899,11 @@ def _db_pension_section() -> SectionSpec:
                 key="commuted_fraction",
                 label="Fraction commuted to lump sum (your choice)",
                 hint="0 to 1, e.g. 0.25; blank means none",
+            ),
+            FieldSpec(
+                key="survivor_fraction",
+                label="Survivor pension fraction (scheme fact)",
+                hint="0 to 1, e.g. 0.5; blank means the shipped 50% assumption",
             ),
             FieldSpec(
                 key="accrual_rate",

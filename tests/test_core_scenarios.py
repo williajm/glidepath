@@ -7,6 +7,7 @@ outflow — so every field path in the decision whitelist is exercised,
 along with orphan detection and the type-enforced facts boundary.
 """
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import MappingProxyType
@@ -313,6 +314,60 @@ class TestOrphans:
             resolve_scenario(household, assumptions, scenario)
 
 
+class TestDeathAgeOverride:
+    """§4.11's headline what-if works over an alive-to-horizon base."""
+
+    def test_an_unset_death_age_synthesizes_a_fresh_decision(self) -> None:
+        """The "what if I die at 75" case needs no base death age (9.33).
+
+        The synthesized decision borrows ``target_retirement_age``'s
+        timestamp — resolution reads no clock (§4.6) — and carries the
+        override's note.
+        """
+        override = decision_override(PERSON_ID, "death_age", 75, note="what if")
+        scenario = Scenario(name="die at 75", overrides=(override,))
+        resolution = resolve_scenario(base_household(), base_assumptions(), scenario)
+        [person] = resolution.household.persons
+        assert person.death_age is not None
+        assert person.death_age.value == 75
+        assert person.death_age.note == "what if"
+        assert person.death_age.recorded_on == person.target_retirement_age.recorded_on
+        [applied] = resolution.applied
+        assert applied.label == f"person[{PERSON_ID}].death_age"
+
+    def test_a_stated_death_age_is_replaced_in_place(self) -> None:
+        """A base plan already modelling a death takes the new age."""
+        base = base_household()
+        [person] = base.persons
+        stated_decision = decision(80)
+        household = replace(base, persons=(replace(person, death_age=stated_decision),))
+        override = decision_override(PERSON_ID, "death_age", 75)
+        scenario = Scenario(name="earlier", overrides=(override,))
+        resolution = resolve_scenario(household, base_assumptions(), scenario)
+        [resolved] = resolution.household.persons
+        assert resolved.death_age is not None
+        assert resolved.death_age.value == 75
+        assert resolved.death_age.recorded_on == stated_decision.recorded_on
+
+    def test_the_value_is_type_checked_against_the_int_template(self) -> None:
+        """A mistyped value fails loudly even with no base decision."""
+        override = decision_override(PERSON_ID, "death_age", "seventy-five")
+        scenario = Scenario(name="mistyped", overrides=(override,))
+        household = base_household()
+        assumptions = base_assumptions()
+        with pytest.raises(ScenarioError, match="must hold a int"):
+            resolve_scenario(household, assumptions, scenario)
+
+    def test_the_catalogue_lists_death_age_with_no_current_value(self) -> None:
+        """The unset target still appears, valued ``None`` (alive)."""
+        catalogue = decision_target_catalogue(base_household())
+        values = {
+            (info.target.entity_id, info.target.field_path): info.value
+            for info in catalogue
+        }
+        assert values[(PERSON_ID, "death_age")] is None
+
+
 class TestResolution:
     """base ⊕ overrides with SCENARIO_OVERRIDE provenance (§4.3)."""
 
@@ -610,6 +665,7 @@ class TestDecisionTargetCatalogue:
         assert keyed == {
             (OUTFLOW_ID, "amount_real"),
             (PERSON_ID, "target_retirement_age"),
+            (PERSON_ID, "death_age"),
             (PERSON_ID, "state_pension.deferral_years"),
             (WRAPPER_ID, "contributions.employee_amount"),
             (DB_ID, "taken_at_age"),
@@ -621,7 +677,7 @@ class TestDecisionTargetCatalogue:
             (ANNUITY_ID, "annuity_type"),
             (ANNUITY_ID, "basis"),
         }
-        assert len(catalogue) == 12
+        assert len(catalogue) == 13
 
     def test_values_are_bare_with_decisions_unwrapped(self) -> None:
         """Each entry carries the current bare value an override replaces."""

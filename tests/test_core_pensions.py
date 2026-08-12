@@ -60,6 +60,7 @@ def pension_of(
     commutation_factor: str | None = None,
     taken_at: int | None = None,
     membership: DBActiveMembership | None = None,
+    survivor_fraction: str | None = None,
 ) -> DBPension:
     """A DB pension built from compact test parameters."""
     return DBPension(
@@ -78,6 +79,9 @@ def pension_of(
         taken_at_age=None
         if taken_at is None
         else Decision(value=taken_at, recorded_on=RECORDED),
+        survivor_fraction=None
+        if survivor_fraction is None
+        else Fact(value=Decimal(survivor_fraction), as_of=AS_OF, recorded_on=RECORDED),
         active_membership=membership,
     )
 
@@ -195,6 +199,22 @@ class TestDBPensionValidation:
         """The normal pension age carries an implicit factor of 1."""
         pension = pension_of(taken_at=65)
         assert db_early_late_factor(pension) == Decimal(1)
+
+    def test_survivor_fraction_beyond_one_is_rejected(self) -> None:
+        """A survivor pension cannot exceed the member's own (§4.11)."""
+        with pytest.raises(ValueError, match="survivor_fraction"):
+            pension_of(survivor_fraction="1.5")
+
+    def test_negative_survivor_fraction_is_rejected(self) -> None:
+        """A negative survivor fraction is a data error."""
+        with pytest.raises(ValueError, match="survivor_fraction"):
+            pension_of(survivor_fraction="-0.1")
+
+    def test_whole_range_survivor_fractions_are_accepted(self) -> None:
+        """Nothing-to-survivor and whole-pension schemes both exist."""
+        assert pension_of(survivor_fraction="0").survivor_fraction is not None
+        assert pension_of(survivor_fraction="1").survivor_fraction is not None
+        assert pension_of().survivor_fraction is None
 
 
 class TestDBHelpers:

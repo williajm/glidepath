@@ -175,6 +175,12 @@
               "reference": "cpi"
             },
             "statement_date": "2026-01-01",
+            "survivor_fraction": {
+              "as_of": "2026-08-01",
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "0.6667"
+            },
             "taken_at_age": {
               "note": "what if I go early",
               "recorded_on": "2026-08-01T12:00:00+00:00",
@@ -209,6 +215,7 @@
               "reference": "fixed"
             },
             "statement_date": "2020-04-06",
+            "survivor_fraction": null,
             "taken_at_age": null
           },
           {
@@ -239,9 +246,15 @@
               "reference": "none"
             },
             "statement_date": "2015-01-01",
+            "survivor_fraction": null,
             "taken_at_age": null
           }
         ],
+        "death_age": {
+          "note": "modelling an earlier death",
+          "recorded_on": "2026-08-01T12:00:00+00:00",
+          "value": 88
+        },
         "employment_income": {
           "as_of": "2026-08-01",
           "note": null,
@@ -380,6 +393,7 @@
           "value": "1972-03-15"
         },
         "db_pensions": [],
+        "death_age": null,
         "employment_income": null,
         "glide_path": null,
         "id": "person-2",
@@ -540,5 +554,5 @@
       "overrides": []
     }
   ],
-  "schema_version": 6
+  "schema_version": 7
 }

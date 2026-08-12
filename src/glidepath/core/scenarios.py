@@ -64,7 +64,7 @@ class DecisionTarget:
     that entity. The addressable paths are exactly the decision
     whitelist:
 
-    - person: ``target_retirement_age``,
+    - person: ``target_retirement_age``, ``death_age``,
       ``state_pension.deferral_years``
     - wrapper: ``contributions.employee_amount``
     - DB pension: ``taken_at_age``, ``commuted_fraction``,
@@ -79,7 +79,10 @@ class DecisionTarget:
     household's ``claim_marriage_allowance`` decision (planning §4.11)
     is not addressable: the household carries no ``EntityId``, and a
     what-if over a bounded relief reads directly off the base run —
-    a recorded 9.32 limitation.
+    a recorded 9.32 limitation. ``death_age`` alone is addressable
+    even when the base plan leaves it unset — "what if I die at 75"
+    must work over an alive-to-horizon base (§4.11), so a ``None``
+    base synthesizes a fresh decision at resolution.
     """
 
     entity_id: EntityId
@@ -329,6 +332,7 @@ def _person_decision_target_labels(person: Person) -> dict[tuple[EntityId, str],
     labels[(person.id, "target_retirement_age")] = (
         f"person[{person.id}].target_retirement_age"
     )
+    labels[(person.id, "death_age")] = f"person[{person.id}].death_age"
     if person.state_pension is not None:
         labels[(person.id, "state_pension.deferral_years")] = (
             f"person[{person.id}].state_pension.deferral_years"
@@ -478,6 +482,9 @@ def _apply_to_person(
             override,
             f"person[{person.id}].target_retirement_age",
         )
+    override = picks.get((person.id, "death_age"))
+    if override is not None:
+        changes["death_age"] = _resolved_death_age(person, override)
     if person.state_pension is not None:
         override = picks.get((person.id, "state_pension.deferral_years"))
         if override is not None:
@@ -501,6 +508,28 @@ def _apply_to_person(
     if purchases != person.annuity_purchases:
         changes["annuity_purchases"] = purchases
     return replace(person, **changes) if changes else person
+
+
+def _resolved_death_age(person: Person, override: Override) -> Decision[Any]:
+    """The death-age decision the override resolves to (§4.11).
+
+    ``death_age`` is addressable even when the base plan leaves it
+    unset — "what if I die at 75" must work over an alive-to-horizon
+    base — so a ``None`` base synthesizes a fresh decision. Resolution
+    reads no clock (§4.6): the synthesized decision borrows
+    ``target_retirement_age.recorded_on``, the person's ever-present
+    decision timestamp, which also supplies the ``int`` template the
+    value's type is checked against.
+    """
+    label = f"person[{person.id}].death_age"
+    if person.death_age is not None:
+        return _resolved_decision(person.death_age, override, label)
+    _check_value_type(person.target_retirement_age.value, override.value, label)
+    return Decision(
+        value=override.value,
+        recorded_on=person.target_retirement_age.recorded_on,
+        note=override.note,
+    )
 
 
 def _apply_to_wrapper(

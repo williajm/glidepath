@@ -1,11 +1,12 @@
 # UK age rules: durable, effective-dated policy parameters that are not
 # re-set each tax year (docs/planning.md §5.3, §6). The SPA timetable was
-# re-verified against the live gov.uk timetable page on 2026-08-02.
+# re-verified against the live gov.uk timetable page on 2026-08-02; the
+# death-benefit age boundary against the live gov.uk page on 2026-08-12.
 
-schema_version = 3
+schema_version = 4
 
 [meta]
-verified_on = 2026-08-02
+verified_on = 2026-08-12
 sources = [
   "https://www.gov.uk/government/publications/state-pension-age-timetable/state-pension-age-timetable",
   "https://www.gov.uk/government/publications/increasing-normal-minimum-pension-age",
@@ -13,6 +14,7 @@ sources = [
   "https://www.gov.uk/lifetime-isa/who-can-open-a-lifetime-isa",
   "https://www.gov.uk/lifetime-isa/withdrawing-money-from-your-lifetime-isa",
   "https://www.gov.uk/deferring-state-pension/if-you-reach-state-pension-age-on-or-after-6-april-2016",
+  "https://www.gov.uk/tax-on-pension-death-benefits",
 ]
 
 # Normal minimum pension age: 55 today, 57 from 6 April 2028. Protected
@@ -67,6 +69,13 @@ open_age_min = 18
 open_age_max = 39
 contribute_until_age = 50
 access_age = 60
+
+# Pension death benefits (§6 "Couples", roadmap 9.33): a member's death
+# before this age passes their DC pension as income-tax-free beneficiary
+# drawdown (funds first designated post-April 2015); death at or after
+# it is taxed at the beneficiary's marginal rate.
+[death_benefits]
+income_tax_free_before_age = 75
 
 # Post-2016 deferral: the weekly rate increases by 1% per 9 weeks
 # deferred, accruing at increment_rate/per_weeks for each whole week

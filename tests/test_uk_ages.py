@@ -210,6 +210,19 @@ def test_lisa_access_gate(rules: UkAgeRules) -> None:
     assert rules.is_lisa_access_open(date(1968, 4, 7), tax_year(2029))
 
 
+def test_death_benefits_boundary_is_the_75th_birthday(rules: UkAgeRules) -> None:
+    """Death strictly before 75 passes drawdown tax-free (§6, 9.33).
+
+    Death on the boundary birthday itself is already "at 75", so it is
+    taxed at the beneficiary's marginal rate.
+    """
+    dob = date(1960, 6, 15)
+    boundary = date(2035, 6, 15)
+    assert rules.death_benefits_income_tax_free(dob, date(2035, 6, 14))
+    assert not rules.death_benefits_income_tax_free(dob, boundary)
+    assert not rules.death_benefits_income_tax_free(dob, date(2040, 1, 1))
+
+
 def test_spa_feeds_prorata_income_convention(rules: UkAgeRules) -> None:
     """An SPA falling mid-period pro-rates by whole months (§4.1).
 

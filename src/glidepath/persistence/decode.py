@@ -395,6 +395,12 @@ def _person(raw: object, path: str) -> Person:
     income = _optional_fact(reader, "employment_income", parse_money)
     mpaa = _optional_fact(reader, "mpaa_triggered_on", parse_date)
     lsa_used = _optional_fact(reader, "lsa_used", parse_money)
+    death_raw = reader.take("death_age")
+    death_age = (
+        None
+        if death_raw is None
+        else _decision(death_raw, reader.at("death_age"), parse_int)
+    )
     wrappers = _sequence(reader.take("wrappers"), reader.at("wrappers"), _wrapper)
     pensions = _sequence(
         reader.take("db_pensions"), reader.at("db_pensions"), _db_pension
@@ -421,6 +427,7 @@ def _person(raw: object, path: str) -> Person:
             employment_income=income,
             mpaa_triggered_on=mpaa,
             lsa_used=lsa_used,
+            death_age=death_age,
             wrappers=wrappers,
             db_pensions=pensions,
             annuity_purchases=purchases,
@@ -560,6 +567,12 @@ def _db_pension(raw: object, path: str) -> DBPension:
         if taken_raw is None
         else _decision(taken_raw, reader.at("taken_at_age"), parse_int)
     )
+    survivor_raw = reader.take("survivor_fraction")
+    survivor = (
+        None
+        if survivor_raw is None
+        else _fact(survivor_raw, reader.at("survivor_fraction"), parse_decimal)
+    )
     membership = _optional(
         reader.take("active_membership"),
         reader.at("active_membership"),
@@ -577,6 +590,7 @@ def _db_pension(raw: object, path: str) -> DBPension:
             commuted_fraction=commuted,
             commutation_factor=commutation,
             taken_at_age=taken,
+            survivor_fraction=survivor,
             active_membership=membership,
         ),
         path,

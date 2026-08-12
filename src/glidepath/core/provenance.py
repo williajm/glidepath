@@ -107,6 +107,8 @@ class AssumptionKey(StrEnum):
     ANNUITY_ESCALATING3_SINGLE_65 = "annuity.escalating3.single.65"
     ANNUITY_INFLATION_LINKED_SINGLE_65 = "annuity.inflation_linked.single.65"
     ANNUITY_AGE_ADJUSTMENT = "annuity.age_adjustment"
+    DB_SURVIVOR_FRACTION = "db.survivor_fraction"
+    SPENDING_SURVIVOR_MULTIPLIER = "spending.survivor_multiplier"
 
 
 @dataclass(frozen=True, slots=True)

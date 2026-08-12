@@ -213,7 +213,7 @@ def test_lisa_ages_and_deferral() -> None:
 def test_default_assumptions_cover_every_key() -> None:
     """The defaults file defines every AssumptionKey exactly once."""
     file = load_default_assumptions()
-    assert file.meta.verified_on == date(2026, 8, 4)
+    assert file.meta.verified_on == date(2026, 8, 12)
     assert {entry.key for entry in file.defaults} == set(AssumptionKey)
 
 

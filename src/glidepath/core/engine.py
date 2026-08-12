@@ -895,8 +895,10 @@ class _Projection:
         Steps 1-3 run per person, the spending/withdrawal step runs
         once for the whole household, and steps 5-8 close each person
         out — the one-withdrawal-step-per-period decision of planning
-        §4.11.
+        §4.11. The death gate fires first, so a death period opens
+        with the survivor transfers already applied.
         """
+        self._death_step(period)
         entries = [
             (person, person.begin_period(period, factors, fraction))
             for person in self._persons
@@ -917,6 +919,34 @@ class _Projection:
             year_fraction=fraction,
         )
 
+    def _death_step(self, period: Period) -> None:
+        """The §4.11 death gate, before the period's steps run.
+
+        A person dies for modelling purposes at the first period whose
+        start their stated death age has been attained by — the §4.1
+        access-gate convention, so the period containing the death
+        date itself still models the person alive (their income and
+        spending share run through it) and the survivor rules take
+        over at the next period boundary. Death dates derive from
+        stated facts and decisions only, so they are identical across
+        Monte Carlo paths (§4.11). When both persons' gates fire in
+        one period, the first person's estate passes to the second,
+        who then dies holding it — deterministic in person order.
+        """
+        for person in self._persons:
+            death_date = person.death_date
+            if person.dead or death_date is None or death_date > period.start:
+                continue
+            survivor = next(
+                (
+                    other
+                    for other in self._persons
+                    if other is not person and not other.dead
+                ),
+                None,
+            )
+            person.die(period, death_date, survivor)
+
     def _household_tax_step(
         self, period: Period, persons: tuple[PersonPeriodResult, ...]
     ) -> tuple[PersonPeriodResult, ...]:
@@ -934,7 +964,14 @@ class _Projection:
         reduction never feeds back into the period's cash flows).
         """
         claim = self.plan.claim_marriage_allowance
-        if len(persons) != _COUPLE or (claim is not None and not claim.value):
+        if (
+            len(persons) != _COUPLE
+            or any(person.dead for person in self._persons)
+            or (claim is not None and not claim.value)
+        ):
+            # The §4.11 lapse: the claim ends from the death-effect
+            # period — the tax year after the one containing the death
+            # date, exactly "the tax year after death".
             return persons
         assessments = tuple(
             person.household_assessment(result.tax)
@@ -964,24 +1001,46 @@ class _Projection:
         decumulation the configured strategy runs every period,
         whatever the need — a gross-defined strategy's draw follows
         the pot, not the need. The stage multiplier on the spending
-        need follows the first person's life stage — one household
-        need, one stage (planning §4.11 household framing).
+        need follows the first *living* person's life stage — one
+        household need, one stage (planning §4.11 household framing) —
+        and once a death gate has fired the need also scales by the
+        ``spending.survivor_multiplier`` assumption (§4.11). Planned
+        outflows are household decisions and keep funding whoever's
+        age dates them, dead or alive. With every person dead nothing
+        further is spent, funded, or banked — balances stay invested,
+        un-drawn (§4.11 recorded convention).
 
         The income offset, wrapper need, delivery, and surplus are
         household totals; each figure lands on a defined owner (see
         :class:`_PersonPeriodContext`) so the persons' results sum to
         the household truth.
         """
+        living = [(person, context) for person, context in entries if not person.dead]
+        if not living:
+            return
         outflows_by_person = self.outflows_due(period, inflation)
         outflows = _ZERO
         for person, context in entries:
             context.outflows = outflows_by_person.get(person.person.id, _ZERO)
             outflows = outflows + context.outflows
-        decumulating = all(context.retired for _, context in entries)
-        first = entries[0][1]
+        decumulating = all(context.retired for _, context in living)
+        first = living[0][1]
         need = _ZERO
         if decumulating and self.plan.spending is not None:
             need = _spending_need(self.plan.spending, first.stage, inflation) * fraction
+            if len(living) < len(entries):
+                multiplier = decimal_assumption_value(
+                    self.tracked.get(AssumptionKey.SPENDING_SURVIVOR_MULTIPLIER)
+                )
+                if multiplier < Decimal(0):
+                    # A negative need would flow back out as banked
+                    # surplus — money from nowhere. Fail loudly (§4.6).
+                    msg = (
+                        "spending.survivor_multiplier must be"
+                        f" non-negative, got {multiplier}"
+                    )
+                    raise EngineError(msg)
+                need = need * multiplier
         first.need = need
         income_net = _ZERO
         for _, context in entries:
@@ -993,7 +1052,7 @@ class _Projection:
         }
         if decumulating:
             delivered_by, spend_target = self._withdrawal_step(
-                entries,
+                living,
                 period,
                 wrapper_need,
                 fraction,
@@ -1001,11 +1060,11 @@ class _Projection:
             )
         elif wrapper_need > _ZERO:
             delivered_by, spend_target = self._withdrawal_step(
-                entries, period, wrapper_need, fraction, _OUTFLOW_FUNDING
+                living, period, wrapper_need, fraction, _OUTFLOW_FUNDING
             )
         delivered = _ZERO
         for person, context in entries:
-            context.delivered = delivered_by[person.person.id]
+            context.delivered = delivered_by.get(person.person.id, _ZERO)
             delivered = delivered + context.delivered
         first.household_shortfall = max(wrapper_need - delivered, _ZERO)
         # Income and gross draws beyond the need bank into the
@@ -1017,7 +1076,7 @@ class _Projection:
         surplus = max(income_net - need - outflows, _ZERO) + max(
             delivered - spend_target, _ZERO
         )
-        self._bank_surplus(entries, surplus)
+        self._bank_surplus(living, surplus)
 
     def _withdrawal_step(
         self,
@@ -1503,6 +1562,14 @@ class _PersonProjection:
     _lsa_used: Money = _ZERO
     _mpaa_triggered_on: date | None = None
     _roll_forwards: list[BalanceRollForward] = field(default_factory=list)
+    _wrappers: list[Wrapper] = field(default_factory=list)
+    _death_date: date | None = None
+    _dead: bool = False
+    _inherited: dict[str, bool | None] = field(default_factory=dict)
+    """Inherited wrapper ids (§4.11): the value flags a pension pot's
+    beneficiary-drawdown taxation — ``True`` income-tax-free, ``False``
+    the survivor's marginal rate — and is ``None`` for a non-pension
+    wrapper, whose own treatment continues unchanged."""
 
     @property
     def region(self) -> Region:
@@ -1535,7 +1602,121 @@ class _PersonProjection:
             self._lsa_used = self.person.lsa_used.value
         if self.person.mpaa_triggered_on is not None:
             self._mpaa_triggered_on = self.person.mpaa_triggered_on.value
+        if self.person.death_age is not None:
+            self._death_date = date_age_attained(
+                self.person.date_of_birth.value, self.person.death_age.value
+            )
+        self._wrappers = list(self.person.wrappers)
         self._balances = self._opening_balances()
+
+    @property
+    def dead(self) -> bool:
+        """Whether this person's death gate has fired (§4.11)."""
+        return self._dead
+
+    @property
+    def death_date(self) -> date | None:
+        """The exact date the stated death age is attained, if any."""
+        return self._death_date
+
+    def die(
+        self,
+        period: Period,
+        death_date: date,
+        survivor: _PersonProjection | None,
+    ) -> None:
+        """Apply this person's death at the period open (§4.11, 9.33).
+
+        Income streams stop: the state pension dies with the person
+        (nothing is inherited, planning §6), and annuity streams end —
+        every purchasable stream is single-life until roadmap 9.34
+        continues joint-life ones. DB streams pass to the survivor at
+        each scheme's survivor fraction — the stated per-scheme fact,
+        else the ``db.survivor_fraction`` assumption — with accrual and
+        the commutation lump sum ended (death ends service; a survivor
+        pension pays income only, a recorded simplification). Wrapper
+        balances merge to the survivor: pension pots become
+        fully-crystallised beneficiary drawdown (no NMPA gate, no new
+        tax-free cash, no LSA use, no MPAA trigger; income-tax-free
+        exactly when the region's death-benefit rule says so), ISA
+        money passes via the additional permitted subscription, and
+        GIA/cash pass at the spouse exemption — the latter two keeping
+        their own treatments. With no survivor the streams still stop;
+        the wrappers stay where they are, invested but with no further
+        flows modelled (§4.11 recorded convention).
+        """
+        self._dead = True
+        self._sp_stream = None
+        self._annuity_streams.clear()
+        streams = self._db_streams
+        self._db_streams = []
+        if survivor is None:
+            return
+        tax_free = self.region.wrappers.death_benefits_income_tax_free(
+            self.person.date_of_birth.value, death_date
+        )
+        for pension, stream in zip(self.person.db_pensions, streams, strict=True):
+            if pension.survivor_fraction is not None:
+                fraction = pension.survivor_fraction.value
+            else:
+                fraction = decimal_assumption_value(
+                    self.tracked.get(AssumptionKey.DB_SURVIVOR_FRACTION)
+                )
+                if not Decimal(0) <= fraction <= _ONE:
+                    # The stated fact enforces this at construction;
+                    # the assumption route must match (§4.6 fail-loud).
+                    msg = (
+                        f"db.survivor_fraction must lie between 0 and 1, got {fraction}"
+                    )
+                    raise EngineError(msg)
+            stream.accrued_annual = stream.accrued_annual * fraction
+            stream.lump_sum_factor = Decimal(0)
+            stream.accrual = None
+            survivor.inherit_db_stream(stream)
+        for wrapper in self._wrappers:
+            uncrystallised, crystallised = self._balances.pop(wrapper.id)
+            treatment = self.region.wrappers.tax_treatment(wrapper.kind, period)
+            pension_pot = (
+                treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+            )
+            survivor.inherit_wrapper(
+                wrapper,
+                uncrystallised=_ZERO if pension_pot else uncrystallised,
+                crystallised=(
+                    uncrystallised + crystallised if pension_pot else crystallised
+                ),
+                pension_tax_free=tax_free if pension_pot else None,
+            )
+        self._wrappers = []
+
+    def inherit_db_stream(self, stream: _DbStream) -> None:
+        """Receive a deceased partner's DB stream, already rescaled (§4.11).
+
+        The stream joins this person's own: its income is taxed as
+        theirs and uprates with their ``advance_streams``.
+        """
+        self._db_streams.append(stream)
+
+    def inherit_wrapper(
+        self,
+        wrapper: Wrapper,
+        *,
+        uncrystallised: Money,
+        crystallised: Money,
+        pension_tax_free: bool | None,
+    ) -> None:
+        """Receive one of a deceased partner's wrappers (§4.11).
+
+        The wrapper joins this person's ledger from the next
+        ``begin_period``: its draws price against this person's tax
+        picture and its access gates never close (beneficiary drawdown
+        has no NMPA gate; APS ISA money no LISA gate).
+        ``pension_tax_free`` is ``None`` for a non-pension wrapper and
+        the beneficiary-drawdown taxation flag for a pension pot.
+        """
+        self._wrappers.append(wrapper)
+        self._balances[wrapper.id] = (uncrystallised, crystallised)
+        self._inherited[wrapper.id] = pension_tax_free
 
     def advance_streams(self, cpi: Decimal, fraction: Decimal) -> None:
         """Compound one completed period's growth into each stream (§5.2)."""
@@ -1918,8 +2099,7 @@ class _PersonProjection:
         stage = glide.stage_at(ytr)
         retired = ytr <= 0
         ledgers = [
-            self._open_ledger(wrapper, period, glide, ytr)
-            for wrapper in person.wrappers
+            self._open_ledger(wrapper, period, glide, ytr) for wrapper in self._wrappers
         ]
         # Step 2 — income. Active DB accrual credits at the period open,
         # gated by retirement like employment income (planning §5.1).
@@ -1929,7 +2109,7 @@ class _PersonProjection:
         if not retired:
             self._accrue_db_step(period, factors)
         employment = _ZERO
-        if not retired and person.employment_income is not None:
+        if not retired and not self._dead and person.employment_income is not None:
             employment = (
                 person.employment_income.value
                 * factors.factor(AssumptionKey.EARNINGS_GROWTH_REAL)
@@ -1937,7 +2117,9 @@ class _PersonProjection:
             )
         db_income, db_lump_sum = self._db_amounts(period)
         db_lump_sum_excess = self._consume_lump_sum_headroom(db_lump_sum, period)
-        annuity_lump_sum = self._annuity_purchase_step(ledgers, period)
+        annuity_lump_sum = (
+            _ZERO if self._dead else self._annuity_purchase_step(ledgers, period)
+        )
         annuity_income = self._annuity_amount(period)
         state_pension = self._state_pension_amount(period)
         self._accrue_portfolio_income(ledgers, fraction)
@@ -1947,7 +2129,7 @@ class _PersonProjection:
         )
         self._relief_at_source = _ZERO
         self._net_pay_deductions = _ZERO
-        if not retired:
+        if not retired and not self._dead:
             self._contribution_step(ledgers, period, employment, factors, fraction)
         # The annual-allowance measurement takes the trigger standing
         # when the contributions were made: a trigger a step-4 draw
@@ -1956,7 +2138,7 @@ class _PersonProjection:
         self._mpaa_at_contributions = self._mpaa_triggered_on
         pension_lump_sum = _ZERO
         up_front = self.config.tax_free_cash is TaxFreeCashStrategy.UP_FRONT_LUMP_SUM
-        if retired and up_front:
+        if retired and up_front and not self._dead:
             pension_lump_sum = self._up_front_lump_sums(ledgers, period)
         income = _PeriodIncome(
             employment=employment,
@@ -2151,7 +2333,10 @@ class _PersonProjection:
                 ledger.treatment.withdrawals
                 is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
             )
-            if not partial:
+            if not partial or ledger.wrapper.id in self._inherited:
+                # Inherited beneficiary drawdown stays in drawdown: a
+                # purchased annuity's income is wholly taxable, which
+                # would mis-tax a tax-free inherited pot (§4.11).
                 continue
             annuitised, tax_free = self._annuitise_wrapper(purchase, ledger, period)
             capital = capital + annuitised
@@ -2301,7 +2486,9 @@ class _PersonProjection:
         relieved_so_far = _ZERO
         for ledger in ledgers:
             schedule = ledger.wrapper.contributions
-            if schedule is None:
+            if schedule is None or ledger.wrapper.id in self._inherited:
+                # An inherited wrapper's schedule was the deceased's
+                # intent and dies with them (§4.11).
                 continue
             self._require_permitted_mechanic(ledger.wrapper, schedule)
             terms = self.region.wrappers.contribution_terms(
@@ -2453,44 +2640,67 @@ class _PersonProjection:
         treatment says nothing about accessibility — the uncrystallised
         pot answers to the region's access gate (§4.1); crystallised
         funds are always drawable (already accessed, never re-gated —
-        planning §5.1).
+        planning §5.1). Inherited holdings (§4.11) are never gated at
+        all — beneficiary drawdown has no NMPA gate and APS ISA money
+        no LISA gate — and an inherited pension pot draws as
+        beneficiary drawdown: no fresh tax-free cash, no lump-sum
+        allowance use, no MPAA trigger, wholly income-tax-free or
+        wholly taxable per the region's death-benefit rule.
         """
         sources: dict[WithdrawalSourceId, _WithdrawalSource] = {}
         for ledger in ledgers:
-            treatment = ledger.treatment
-            pension = treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
-            if treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE:
-                free_fraction = _ONE
-                crystallised_fraction = _ONE
-            else:
-                free_fraction = Decimal(0)
-                crystallised_fraction = Decimal(0)
-                if pension and treatment.tax_free_fraction is not None:
-                    free_fraction = treatment.tax_free_fraction.value
-            entries = (
-                _WithdrawalSource(
-                    owner=self,
-                    ledger=ledger,
-                    crystallised=False,
-                    tax_free_fraction=free_fraction,
-                    access_open=self.region.wrappers.is_access_open(
-                        ledger.wrapper.kind,
-                        self.person.date_of_birth.value,
-                        period,
-                    ),
-                    pension=pension,
-                ),
-                _WithdrawalSource(
-                    owner=self,
-                    ledger=ledger,
-                    crystallised=True,
-                    tax_free_fraction=crystallised_fraction,
-                    pension=pension,
-                ),
-            )
-            for source in entries:
+            for source in self._ledger_sources(ledger, period):
                 sources[source.source_id] = source
         return sources
+
+    def _ledger_sources(
+        self, ledger: _WrapperLedger, period: Period
+    ) -> tuple[_WithdrawalSource, _WithdrawalSource]:
+        """One ledger's uncrystallised and crystallised sources (§5.2).
+
+        The tax-free fractions and gate come from the wrapper's own
+        treatment, then the inherited overrides of the class docstring
+        apply on top (§4.11).
+        """
+        treatment = ledger.treatment
+        pension = treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+        if treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE:
+            free_fraction = _ONE
+            crystallised_fraction = _ONE
+        else:
+            free_fraction = Decimal(0)
+            crystallised_fraction = Decimal(0)
+            if pension and treatment.tax_free_fraction is not None:
+                free_fraction = treatment.tax_free_fraction.value
+        access_open = self.region.wrappers.is_access_open(
+            ledger.wrapper.kind,
+            self.person.date_of_birth.value,
+            period,
+        )
+        if ledger.wrapper.id in self._inherited:
+            access_open = True
+            beneficiary_tax_free = self._inherited[ledger.wrapper.id]
+            if beneficiary_tax_free is not None:
+                pension = False
+                free_fraction = _ONE if beneficiary_tax_free else Decimal(0)
+                crystallised_fraction = free_fraction
+        return (
+            _WithdrawalSource(
+                owner=self,
+                ledger=ledger,
+                crystallised=False,
+                tax_free_fraction=free_fraction,
+                access_open=access_open,
+                pension=pension,
+            ),
+            _WithdrawalSource(
+                owner=self,
+                ledger=ledger,
+                crystallised=True,
+                tax_free_fraction=crystallised_fraction,
+                pension=pension,
+            ),
+        )
 
     def draw_from(
         self, source: _WithdrawalSource, period: Period, need: Money
@@ -2880,6 +3090,11 @@ class _PersonProjection:
         """
         self._savings_income = _ZERO
         self._dividend_income = _ZERO
+        if self._dead:
+            # A dead person with no survivor keeps their wrappers, but
+            # there is no taxpayer: the estate's income is out of scope
+            # (§4.11 recorded convention).
+            return
         for ledger in ledgers:
             if ledger.treatment.growth is not GrowthTaxTreatment.TAXABLE:
                 continue

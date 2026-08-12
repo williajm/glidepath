@@ -283,7 +283,14 @@ def _target_key(target: OverrideTarget) -> str:
 
 
 def _edit_text(value: object) -> str:
-    """A value as prompt-prefill text that parses back to its own shape."""
+    """A value as prompt-prefill text that parses back to its own shape.
+
+    An unset optional decision (a ``None`` death age, §4.11) prefills
+    empty — the blank that also means "remove the override", never a
+    literal ``"None"`` the parser would reject.
+    """
+    if value is None:
+        return ""
     if isinstance(value, Money):
         return str(value.quantized().amount)
     if isinstance(value, Enum):
@@ -548,11 +555,20 @@ def _parsed_decision_value(base_value: object, raw: str) -> object:
     """The typed value ``raw`` denotes for a decision target's shape.
 
     The §4.3 whitelist holds ``Money``, ``int``, ``Decimal``, and enum
-    decisions only, so those are the shapes parsed here.
+    decisions only, so those are the shapes parsed here. A ``None``
+    base is the whitelist's one optional-base decision — an unset
+    ``death_age`` (§4.11), whose "what if I die at 75" must work over
+    an alive-to-horizon base — and parses as the same whole-number
+    template core resolution checks against.
 
     Raises:
         ValueError: If ``raw`` does not parse as the base value's shape.
     """
+    if base_value is None:
+        try:
+            return int(raw, 10)
+        except ValueError:
+            raise ValueError(_INT_VALUE_MESSAGE) from None
     if isinstance(base_value, Money):
         return Money(_parsed_decimal(raw))
     if isinstance(base_value, Enum):

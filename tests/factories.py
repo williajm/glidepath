@@ -158,6 +158,12 @@ class FreeWrapperRules:
         del kind, date_of_birth, period
         return True
 
+    def death_benefits_income_tax_free(
+        self, date_of_birth: date, death_date: date
+    ) -> bool:
+        """Tax-free below a fixed boundary of 75, the UK shape (§4.11)."""
+        return death_date < date_age_attained(date_of_birth, 75)
+
 
 @dataclass(frozen=True)
 class PassThroughContributions:

@@ -271,6 +271,18 @@ class UkWrapperRuleset:
             return True
         _unknown_kind(kind)
 
+    def death_benefits_income_tax_free(
+        self, date_of_birth: date, death_date: date
+    ) -> bool:
+        """Whether this death passes pension kinds as tax-free drawdown.
+
+        Death before the member's 75th birthday (the shipped
+        ``death_benefits`` age boundary, planning §6 "Couples") passes
+        beneficiary drawdown income-tax-free; at or after it, draws are
+        taxed at the beneficiary's marginal rate (roadmap 9.33).
+        """
+        return self.ages.death_benefits_income_tax_free(date_of_birth, death_date)
+
     def _series(self) -> TaxYearSeries:
         """The shared year-resolution series over this ruleset's files."""
         return TaxYearSeries(tax_years=self.tax_years, future_years=self.future_years)

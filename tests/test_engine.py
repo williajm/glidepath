@@ -8,7 +8,7 @@ operation order of planning §5.2 is pinned by exact values, not
 approximations.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from decimal import ROUND_DOWN, Decimal
@@ -37,6 +37,7 @@ from glidepath.core import (
     DBActiveMembership,
     DBPension,
     Decision,
+    DecisionTarget,
     EngineError,
     EntityId,
     Fact,
@@ -49,15 +50,18 @@ from glidepath.core import (
     GrowthTaxTreatment,
     GuardrailsWithdrawalStrategy,
     Household,
+    HouseholdAssessment,
     LifeStage,
     MemberContributionOutcome,
     MemberContributionRequest,
     Money,
     NaturalYieldWithdrawalStrategy,
     NetWithdrawalPlan,
+    Override,
     Period,
     PeriodReturns,
     Person,
+    PersonPeriodResult,
     PlannedOutflow,
     Provenance,
     Rate,
@@ -69,6 +73,7 @@ from glidepath.core import (
     RevaluationReference,
     RunConfig,
     RunMode,
+    Scenario,
     SchemeInput,
     SchemePayment,
     SpendingPlan,
@@ -86,10 +91,12 @@ from glidepath.core import (
     WithdrawalTaxTreatment,
     Wrapper,
     WrapperKindId,
+    WrapperPeriodResult,
     WrapperTaxTreatment,
     add_months,
     date_age_attained,
     is_age_attained_by_period_start,
+    resolve_scenario,
     run,
 )
 
@@ -368,6 +375,7 @@ class StubWrapperRules:
     free_window: Period | None = None
     sub_kind_cap: Money | None = None
     fee_free_kinds: frozenset[WrapperKindId] = frozenset()
+    death_tax_free_before_age: int = 75
 
     def tax_treatment(self, kind: WrapperKindId, period: Period) -> WrapperTaxTreatment:
         """The pension pays out 25% tax-free; the free kind wholly so."""
@@ -448,6 +456,13 @@ class StubWrapperRules:
                 date_of_birth, self.free_access_age, period
             )
         return True
+
+    def death_benefits_income_tax_free(
+        self, date_of_birth: date, death_date: date
+    ) -> bool:
+        """Tax-free below the configured boundary age, the UK shape."""
+        boundary = date_age_attained(date_of_birth, self.death_tax_free_before_age)
+        return death_date < boundary
 
 
 @dataclass
@@ -665,6 +680,7 @@ def person_of(
     state_pension: StatePensionRecord | None = None,
     lsa_used: str | None = None,
     mpaa_triggered_on: date | None = None,
+    death_at: int | None = None,
 ) -> Person:
     """A single test person."""
     return Person(
@@ -677,6 +693,9 @@ def person_of(
         if mpaa_triggered_on is None
         else Fact(value=mpaa_triggered_on, as_of=AS_OF, recorded_on=RECORDED),
         lsa_used=None if lsa_used is None else money_fact(lsa_used),
+        death_age=None
+        if death_at is None
+        else Decision(value=death_at, recorded_on=RECORDED),
         wrappers=wrappers,
         db_pensions=db_pensions,
         annuity_purchases=annuity_purchases,
@@ -695,6 +714,7 @@ def db_pension_of(
     commutation_factor: str | None = None,
     taken_at: int | None = None,
     membership: DBActiveMembership | None = None,
+    survivor_fraction: str | None = None,
 ) -> DBPension:
     """A DB pension; the default basis never revalues, deferred by default."""
     return DBPension(
@@ -712,6 +732,9 @@ def db_pension_of(
         taken_at_age=None
         if taken_at is None
         else Decision(value=taken_at, recorded_on=RECORDED),
+        survivor_fraction=None
+        if survivor_fraction is None
+        else Fact(value=Decimal(survivor_fraction), as_of=AS_OF, recorded_on=RECORDED),
         active_membership=membership,
     )
 
@@ -764,6 +787,7 @@ def partner_of(
     employment: str | None = None,
     lsa_used: str | None = None,
     residency: TaxResidencyId = RESIDENCY,
+    death_at: int | None = None,
 ) -> Person:
     """A second person (``person-2``) for two-person households (§4.11)."""
     return Person(
@@ -773,6 +797,9 @@ def partner_of(
         tax_residency=residency,
         employment_income=None if employment is None else money_fact(employment),
         lsa_used=None if lsa_used is None else money_fact(lsa_used),
+        death_age=None
+        if death_at is None
+        else Decision(value=death_at, recorded_on=RECORDED),
         wrappers=wrappers,
     )
 
@@ -3939,6 +3966,699 @@ class TestTwoPersonHousehold:
         )
         assert len(result.snapshots) == 5
         assert all(len(snapshot.persons) == 2 for snapshot in result.snapshots)
+
+
+TEN_K = Money(Decimal(10000))
+JOINT_RELIEF = Money(Decimal(100))
+
+
+@dataclass(frozen=True)
+class JointReliefTaxSystem(FlatTaxSystem):
+    """Flat tax plus a fixed household relief on the second person.
+
+    Stands in for a marriage-allowance-shaped adjustment (9.32): while
+    the engine offers both assessments to the region, the second
+    person's tax drops by a flat 100 — so its disappearance pins the
+    §4.11 lapse at the death gate.
+    """
+
+    def adjust_household(
+        self, period: Period, assessments: tuple[HouseholdAssessment, ...]
+    ) -> tuple[TaxResult, ...]:
+        """Knock the fixed relief off the second person's liability.
+
+        The relief lands as a negative no-income line, the 9.32 reducer
+        shape, keeping the result's lines-sum invariant intact.
+        """
+        del period
+        first, second = assessments
+        relief = min(JOINT_RELIEF, second.result.tax_due)
+        if relief <= ZERO:
+            return (first.result, second.result)
+        line = TaxLine(
+            band="joint relief", rate=Rate(Decimal(0)), taxed=ZERO, tax=-relief
+        )
+        relieved = replace(
+            second.result,
+            tax_due=second.result.tax_due - relief,
+            lines=(*second.result.lines, line),
+        )
+        return (first.result, relieved)
+
+
+def survivor_assumptions(overrides: dict[str, object] | None = None) -> AssumptionSet:
+    """The stub baseline with zero returns and a unit survivor multiplier."""
+    values: dict[str, object] = {
+        "returns.equity.real": Decimal(0),
+        "spending.survivor_multiplier": Decimal(1),
+    }
+    values.update(overrides or {})
+    return assumptions_with(values)
+
+
+class TestSurvivorModelling:
+    """The 9.33 activation: deterministic survivor rules (planning §4.11)."""
+
+    def test_death_lands_at_the_period_the_age_is_attained_by_its_start(self) -> None:
+        """The §4.1 gate: a mid-period death age holds through that period.
+
+        Born mid-June, dying at 67: age 67 is attained mid-2027, so
+        2027 still models the person alive (their state pension pays
+        the full period) and the survivor rules take over in 2028 —
+        the first period whose start the death age is attained by.
+        """
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 6, 15),
+                retire_at=60,
+                state_pension=sp_record(),
+                death_at=67,
+            ),
+            partner_of(()),
+        )
+        result = run(
+            plan,
+            survivor_assumptions({"policy.state_pension.uprating": TRIPLE_LOCK}),
+            stub_region(state_pension=StubStatePension(annual=TEN_K, start_age=65)),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 12, 31)),
+        )
+        by_year = [snapshot.persons[0] for snapshot in result.snapshots]
+        assert by_year[0].state_pension_income > ZERO
+        assert by_year[1].state_pension_income > ZERO
+        assert by_year[2].state_pension_income == ZERO
+
+    def test_state_pension_dies_with_the_person(self) -> None:
+        """Nothing of the deceased's state pension reaches the survivor."""
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(),
+                death_at=67,
+            ),
+            partner_of(()),
+        )
+        result = run(
+            plan,
+            survivor_assumptions({"policy.state_pension.uprating": TRIPLE_LOCK}),
+            stub_region(state_pension=StubStatePension(annual=TEN_K, start_age=65)),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first_2026, second_2026 = result.snapshots[0].persons
+        assert first_2026.state_pension_income == Money(Decimal("10000.00"))
+        assert second_2026.state_pension_income == ZERO
+        first_2027, second_2027 = result.snapshots[1].persons
+        assert first_2027.state_pension_income == ZERO
+        assert second_2027.state_pension_income == ZERO
+
+    def test_db_continues_to_the_survivor_at_the_stated_fraction(self) -> None:
+        """An in-payment DB stream passes at the scheme's survivor fact.
+
+        The fact wins over the assumption, whose key is then never
+        read — so it stays out of the run's provenance.
+        """
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1955, 1, 1),
+                retire_at=60,
+                db_pensions=(db_pension_of(survivor_fraction="0.6"),),
+                death_at=72,
+            ),
+            partner_of(()),
+        )
+        result = run(
+            plan,
+            survivor_assumptions(),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first_2026, second_2026 = result.snapshots[0].persons
+        assert first_2026.db_income == Money(Decimal("8000.00"))
+        assert second_2026.db_income == ZERO
+        first_2027, second_2027 = result.snapshots[1].persons
+        assert first_2027.db_income == ZERO
+        assert second_2027.db_income == Money(Decimal("4800.00"))
+        keys_read = {entry.key for entry in result.provenance.assumptions}
+        assert AssumptionKey.DB_SURVIVOR_FRACTION not in keys_read
+
+    def test_db_survivor_fraction_defaults_to_the_assumption(self) -> None:
+        """A scheme with no stated fraction falls back to the shipped 50%."""
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1955, 1, 1),
+                retire_at=60,
+                db_pensions=(db_pension_of(),),
+                death_at=72,
+            ),
+            partner_of(()),
+        )
+        result = run(
+            plan,
+            survivor_assumptions({"db.survivor_fraction": Decimal("0.5")}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        _, second_2027 = result.snapshots[1].persons
+        assert second_2027.db_income == Money(Decimal("4000.00"))
+        keys_read = {entry.key for entry in result.provenance.assumptions}
+        assert AssumptionKey.DB_SURVIVOR_FRACTION in keys_read
+
+    def test_the_commutation_lump_sum_dies_with_the_member(self) -> None:
+        """A deferred scheme's lump sum never pays out to the survivor.
+
+        Death at 67 precedes the age-68 benefits start: the survivor
+        pension pays income at the fraction from 2028, but the
+        commuted lump sum — the member's own entitlement — is gone.
+        """
+        pension = db_pension_of(
+            npa=68,
+            commuted="0.25",
+            commutation_factor="12",
+            survivor_fraction="0.5",
+        )
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                db_pensions=(pension,),
+                death_at=67,
+            ),
+            partner_of(()),
+        )
+        result = run(
+            plan,
+            survivor_assumptions(),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 12, 31)),
+        )
+        first_2028, second_2028 = result.snapshots[2].persons
+        assert second_2028.db_income == Money(Decimal("3000.00"))
+        assert second_2028.db_lump_sum == ZERO
+        assert first_2028.db_income == ZERO
+        assert first_2028.db_lump_sum == ZERO
+
+    def test_dc_pot_merges_as_tax_free_beneficiary_drawdown(self) -> None:
+        """Death before the boundary: inherited draws pay no income tax.
+
+        2026's need drains the survivor's own tax-free account; 2027's
+        comes wholly from the inherited drawdown pot — tax-free, with
+        no lump-sum-allowance use and no MPAA trigger on the survivor.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "0", crystallised="50000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                death_at=67,
+            ),
+            partner_of((wrapper_of(FREE, "8000"),)),
+            spending="8000",
+        )
+        result = run(
+            plan,
+            survivor_assumptions(),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first_2027, second_2027 = result.snapshots[1].persons
+        assert first_2027.wrappers == ()
+        inherited = _wrapper_result(second_2027, "wrapper-test.pension-0-50000")
+        assert inherited.withdrawal_tax_free == Money(Decimal("8000.00"))
+        assert inherited.withdrawal_taxable == ZERO
+        assert second_2027.tax.tax_due == ZERO
+        assert second_2027.net_withdrawn == Money(Decimal("8000.00"))
+        assert second_2027.lsa_used == ZERO
+        assert second_2027.mpaa_triggered_on is None
+
+    def test_dc_pot_merges_taxable_from_the_boundary(self) -> None:
+        """Death at/after the boundary: draws bear the survivor's rate.
+
+        The uncrystallised pot crystallises whole on transfer — no new
+        tax-free cash — and 2027's draws gross up against the
+        survivor's flat 25%, still with no MPAA trigger (beneficiary
+        drawdown is not the survivor's own flexible access).
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "50000"),),
+                date_of_birth=date(1950, 1, 1),
+                retire_at=60,
+                death_at=77,
+            ),
+            partner_of((wrapper_of(FREE, "8000"),)),
+            spending="8000",
+        )
+        result = run(
+            plan,
+            survivor_assumptions(),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first_2027, second_2027 = result.snapshots[1].persons
+        assert first_2027.wrappers == ()
+        inherited = _wrapper_result(second_2027, "wrapper-test.pension-50000-None")
+        assert inherited.closing_uncrystallised == ZERO
+        assert Money(Decimal("10666.60")) <= inherited.withdrawal_taxable
+        assert inherited.withdrawal_taxable <= Money(Decimal("10666.70"))
+        assert inherited.withdrawal_tax_free == ZERO
+        assert Money(Decimal("2666.60")) <= second_2027.tax.tax_due
+        assert second_2027.tax.tax_due <= Money(Decimal("2666.70"))
+        assert Money(Decimal("7999.99")) <= second_2027.net_withdrawn
+        assert second_2027.net_withdrawn <= Money(Decimal("8000.01"))
+        assert second_2027.lsa_used == ZERO
+        assert second_2027.mpaa_triggered_on is None
+
+    def test_an_inherited_gated_account_opens_to_the_survivor(self) -> None:
+        """Inherited tax-free savings shed their age gate (the APS shape).
+
+        The free kind gates at 70: the deceased (71) could draw, the
+        survivor (65) cannot draw their own — but the inherited
+        account funds 2027's need regardless, additional-permitted-
+        subscription style.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(FREE, "50000"),),
+                date_of_birth=date(1955, 1, 1),
+                retire_at=60,
+                death_at=72,
+            ),
+            partner_of(()),
+            spending="5000",
+        )
+        result = run(
+            plan,
+            survivor_assumptions(),
+            stub_region(free_access_age=70),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first_2027, second_2027 = result.snapshots[1].persons
+        inherited = _wrapper_result(second_2027, "wrapper-test.free-50000-None")
+        assert inherited.withdrawal_tax_free == Money(Decimal("5000.00"))
+        assert second_2027.net_withdrawn == Money(Decimal("5000.00"))
+        assert second_2027.spending_need == Money(Decimal("5000.00"))
+        assert first_2027.shortfall == ZERO
+        assert second_2027.shortfall == ZERO
+
+    def test_survivor_multiplier_scales_the_household_need(self) -> None:
+        """From the death period the need scales by the §4.11 multiplier.
+
+        10,000 becomes 7,000 at the shipped-shaped 0.70, and the need
+        lands on the first *living* person — the survivor.
+        """
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                death_at=67,
+            ),
+            partner_of((wrapper_of(FREE, "50000"),)),
+            spending="10000",
+        )
+        result = run(
+            plan,
+            survivor_assumptions({"spending.survivor_multiplier": Decimal("0.7")}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first_2026, second_2026 = result.snapshots[0].persons
+        assert first_2026.spending_need == Money(Decimal("10000.00"))
+        assert second_2026.spending_need == ZERO
+        first_2027, second_2027 = result.snapshots[1].persons
+        assert first_2027.spending_need == ZERO
+        assert second_2027.spending_need == Money(Decimal("7000.00"))
+        keys_read = {entry.key for entry in result.provenance.assumptions}
+        assert AssumptionKey.SPENDING_SURVIVOR_MULTIPLIER in keys_read
+
+    def test_household_tax_relief_lapses_from_the_death_period(self) -> None:
+        """The region's joint adjustment stops once a death gate fires.
+
+        The stand-in relief knocks 100 off the surviving earner's flat
+        tax while both are modelled alive (2026) and vanishes from the
+        death-effect period (2027) — the §4.11 marriage-allowance
+        lapse, one tax year after the death date.
+        """
+        plan = couple_of(
+            person_of((), date_of_birth=date(1960, 1, 1), retire_at=99, death_at=67),
+            partner_of((), employment="40000", retire_at=99),
+        )
+        result = run(
+            plan,
+            survivor_assumptions(),
+            stub_region(tax_system=JointReliefTaxSystem()),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        _, second_2026 = result.snapshots[0].persons
+        assert second_2026.tax.tax_due == Money(Decimal("9900.00"))
+        _, second_2027 = result.snapshots[1].persons
+        assert second_2027.tax.tax_due == Money(Decimal("10000.00"))
+
+    def test_a_single_person_death_stops_the_modelling_of_flows(self) -> None:
+        """With no survivor nothing further is spent, drawn, or taxed.
+
+        The estate stays invested — zero returns keep the balance
+        static — but spending, withdrawals, and the taxable account's
+        portfolio income all stop at the death gate.
+        """
+        plan = household_of(
+            person_of(
+                (wrapper_of(TAXABLE, "50000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                death_at=67,
+            ),
+            spending="6000",
+        )
+        result = run(
+            plan,
+            survivor_assumptions(
+                {
+                    "yield.equity": Decimal("0.02"),
+                    "yield.bonds": Decimal("0.025"),
+                    "yield.cash": Decimal("0.015"),
+                }
+            ),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        [person_2026] = result.snapshots[0].persons
+        assert person_2026.spending_need == Money(Decimal("6000.00"))
+        [account_2026] = person_2026.wrappers
+        assert account_2026.taxable_dividends > ZERO
+        [person_2027] = result.snapshots[1].persons
+        assert person_2027.spending_need == ZERO
+        assert person_2027.net_withdrawn == ZERO
+        assert person_2027.tax.tax_due == ZERO
+        [account_2027] = person_2027.wrappers
+        assert account_2027.taxable_dividends == ZERO
+        assert (
+            account_2027.closing_uncrystallised == account_2027.opening_uncrystallised
+        )
+
+    def test_employment_and_contributions_stop_at_the_death_gate(self) -> None:
+        """A working person's death ends their pay and their schedules.
+
+        While they live the household is still accumulating (no
+        spending draws); from the death period the survivor's
+        retirement carries the decumulation gate alone, and the
+        inherited account's contribution schedule never runs again.
+        """
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(2000)), recorded_on=RECORDED)
+        )
+        plan = couple_of(
+            person_of(
+                (wrapper_of(FREE, "1000", schedule=schedule),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=70,
+                employment="30000",
+                death_at=67,
+            ),
+            partner_of((wrapper_of(FREE, "50000"),)),
+            spending="3000",
+        )
+        result = run(
+            plan,
+            survivor_assumptions(),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first_2026, second_2026 = result.snapshots[0].persons
+        assert first_2026.employment_income == Money(Decimal("30000.00"))
+        assert second_2026.spending_need == ZERO
+        own_2026 = _wrapper_result(first_2026, "wrapper-test.free-1000-None")
+        assert own_2026.employee_contribution == Money(Decimal("2000.00"))
+        first_2027, second_2027 = result.snapshots[1].persons
+        assert first_2027.employment_income == ZERO
+        assert second_2027.spending_need == Money(Decimal("3000.00"))
+        inherited_2027 = _wrapper_result(second_2027, "wrapper-test.free-1000-None")
+        assert inherited_2027.employee_contribution == ZERO
+
+    def test_a_single_life_annuity_stream_stops_at_death(self) -> None:
+        """Bought income ends with the buyer; nothing passes over.
+
+        The age-66 purchase pays through 2026 and 2027; from the 2028
+        death gate the stream is gone (joint-life continuation is
+        roadmap 9.34).
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "0", crystallised="40000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                annuity_purchases=(annuity_purchase_of(at_age=66, fraction="1"),),
+                death_at=68,
+            ),
+            partner_of(()),
+        )
+        result = run(
+            plan,
+            annuity_assumptions({"spending.survivor_multiplier": Decimal(1)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 12, 31)),
+        )
+        annuity_by_year = [
+            snapshot.persons[0].annuity_income for snapshot in result.snapshots
+        ]
+        assert annuity_by_year[0] > ZERO
+        assert annuity_by_year[1] > ZERO
+        assert annuity_by_year[2] == ZERO
+        assert all(
+            snapshot.persons[1].annuity_income == ZERO for snapshot in result.snapshots
+        )
+
+    def test_a_dead_persons_pending_purchase_never_executes(self) -> None:
+        """A purchase due in the death-effect period is not made.
+
+        The age-67 purchase and the death gate land on the same 2027
+        period open; the death step runs first, so the pot passes to
+        the survivor whole and no annuity income ever arises.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "0", crystallised="40000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                annuity_purchases=(annuity_purchase_of(at_age=67, fraction="1"),),
+                death_at=67,
+            ),
+            partner_of(()),
+        )
+        result = run(
+            plan,
+            annuity_assumptions({"spending.survivor_multiplier": Decimal(1)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        assert all(
+            person.annuity_income == ZERO
+            for snapshot in result.snapshots
+            for person in snapshot.persons
+        )
+        _, second_2027 = result.snapshots[1].persons
+        inherited = _wrapper_result(second_2027, "wrapper-test.pension-0-40000")
+        assert inherited.closing_crystallised == Money(Decimal("40000.00"))
+
+    def test_a_survivors_purchase_skips_inherited_drawdown(self) -> None:
+        """The survivor's own annuity purchase leaves inherited pots alone.
+
+        Beneficiary drawdown stays in drawdown: annuitising it would
+        re-tax a tax-free pot as wholly taxable annuity income. The
+        purchase converts only the survivor's own pension.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "0", crystallised="40000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                annuity_purchases=(annuity_purchase_of(at_age=67, fraction="0.5"),),
+            ),
+            partner_of(
+                (wrapper_of(PENSION, "0", crystallised="60000"),),
+                death_at=65,
+            ),
+        )
+        result = run(
+            plan,
+            annuity_assumptions({"spending.survivor_multiplier": Decimal(1)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first_2027, _ = result.snapshots[1].persons
+        own = _wrapper_result(first_2027, "wrapper-test.pension-0-40000")
+        assert own.annuity_purchase == Money(Decimal("20000.00"))
+        inherited = _wrapper_result(first_2027, "wrapper-test.pension-0-60000")
+        assert inherited.annuity_purchase == ZERO
+        assert first_2027.annuity_income > ZERO
+
+    def test_simultaneous_deaths_settle_deterministically(self) -> None:
+        """Both gates firing in one period end the household's flows.
+
+        The first person's estate passes to the second, who then dies
+        holding it — person order, deterministic — and from that
+        period nothing is spent or drawn.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(FREE, "30000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                death_at=67,
+            ),
+            partner_of((wrapper_of(FREE, "20000"),), death_at=65),
+            spending="5000",
+        )
+        result = run(
+            plan,
+            survivor_assumptions(),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31)),
+        )
+        first_2026, _ = result.snapshots[0].persons
+        assert first_2026.spending_need == Money(Decimal("5000.00"))
+        for person in result.snapshots[1].persons:
+            assert person.spending_need == ZERO
+            assert person.net_withdrawn == ZERO
+            assert person.shortfall == ZERO
+
+    def test_death_is_deterministic_across_monte_carlo_paths(self) -> None:
+        """Every stochastic path kills the stream at the same period (§4.11)."""
+        plan = couple_of(
+            person_of(
+                (wrapper_of(FREE, "50000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(),
+                death_at=67,
+            ),
+            partner_of(()),
+        )
+        for path in (0, 1):
+            result = run(
+                plan,
+                survivor_assumptions(
+                    {
+                        "policy.state_pension.uprating": TRIPLE_LOCK,
+                        "volatility.equity": Decimal("0.15"),
+                        "volatility.bonds": Decimal(0),
+                        "volatility.cash": Decimal(0),
+                        "correlation.equity_bonds": Decimal(0),
+                        "correlation.equity_cash": Decimal(0),
+                        "correlation.bonds_cash": Decimal(0),
+                    }
+                ),
+                stub_region(state_pension=StubStatePension(annual=TEN_K, start_age=65)),
+                RunConfig(
+                    today=date(2026, 1, 1),
+                    horizon_end=date(2029, 12, 31),
+                    mode=RunMode.MONTE_CARLO,
+                    seed=7,
+                    path=path,
+                ),
+            )
+            incomes = [
+                snapshot.persons[0].state_pension_income
+                for snapshot in result.snapshots
+            ]
+            assert incomes[0] > ZERO
+            assert all(income == ZERO for income in incomes[1:])
+
+    def test_a_negative_survivor_multiplier_is_rejected(self) -> None:
+        """A negative multiplier would mint banked surplus; fail loudly.
+
+        The need it produced would flow back out of the household as
+        surplus swept into a taxable wrapper — money from nowhere.
+        """
+        plan = couple_of(
+            person_of((), date_of_birth=date(1960, 1, 1), retire_at=60, death_at=67),
+            partner_of((wrapper_of(FREE, "50000"),)),
+            spending="10000",
+        )
+        assumptions = survivor_assumptions(
+            {"spending.survivor_multiplier": Decimal("-0.7")}
+        )
+        region = stub_region()
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        with pytest.raises(EngineError, match="must be non-negative"):
+            run(plan, assumptions, region, config)
+
+    def test_an_out_of_range_survivor_fraction_assumption_is_rejected(self) -> None:
+        """The assumption route enforces the same 0..1 bound as the fact.
+
+        A stated per-scheme fraction is bounded at construction; an
+        assumption override must not bypass the invariant and inflate
+        survivor income past the member's own.
+        """
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1955, 1, 1),
+                retire_at=60,
+                db_pensions=(db_pension_of(),),
+                death_at=72,
+            ),
+            partner_of(()),
+        )
+        assumptions = survivor_assumptions({"db.survivor_fraction": Decimal("1.5")})
+        region = stub_region()
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        with pytest.raises(EngineError, match="between 0 and 1"):
+            run(plan, assumptions, region, config)
+
+    def test_death_age_scenarios_diff_cleanly_against_the_base(self) -> None:
+        """A death-age override over an alive-to-horizon base just works.
+
+        The base plan sets no death age; the scenario addresses
+        ``person-1.death_age`` anyway (§4.11's headline what-if). The
+        pre-death period is identical to the base run; the post-death
+        periods diverge exactly at the gate.
+        """
+        plan = couple_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(),
+            ),
+            partner_of(()),
+        )
+        assumptions = survivor_assumptions(
+            {"policy.state_pension.uprating": TRIPLE_LOCK}
+        )
+        scenario = Scenario(
+            name="what if I die at 67",
+            overrides=(
+                Override(
+                    target=DecisionTarget(
+                        entity_id=EntityId("person-1"), field_path="death_age"
+                    ),
+                    value=67,
+                ),
+            ),
+        )
+        resolution = resolve_scenario(plan, assumptions, scenario)
+        region = stub_region(state_pension=StubStatePension(annual=TEN_K, start_age=65))
+        config = RunConfig(today=date(2026, 1, 1), horizon_end=date(2027, 12, 31))
+        base = run(plan, assumptions, region, config)
+        what_if = run(resolution.household, resolution.assumptions, region, config)
+        assert what_if.snapshots[0] == base.snapshots[0]
+        assert base.snapshots[1].persons[0].state_pension_income > ZERO
+        assert what_if.snapshots[1].persons[0].state_pension_income == ZERO
+
+
+def _wrapper_result(person: PersonPeriodResult, wrapper_id: str) -> WrapperPeriodResult:
+    """The person's period result for one wrapper, by its id."""
+    matches = [
+        wrapper for wrapper in person.wrappers if wrapper.wrapper_id == wrapper_id
+    ]
+    assert len(matches) == 1, f"expected exactly one result for {wrapper_id}"
+    return matches[0]
 
 
 class TestEngineErrors:
