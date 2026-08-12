@@ -1,10 +1,11 @@
 """Household and person entities (planning §4.4, §5.1 skeleton).
 
-The schema models ``Household{persons: 1..2}`` now — UK tax is individual,
+The schema models ``Household{persons: 1..2}`` — UK tax is individual,
 so computation is per-person anyway, and placing shared economics at
-household level avoids a schema + engine migration when couples activate
-(roadmap 9.4). v1 validates exactly one person via
-:func:`validate_household_v1`.
+household level avoided a schema + engine migration when couples
+activated (roadmap 9.4). The engine projects one or two persons
+(roadmap 9.30); :func:`validate_household_v1` remains the facts form's
+single-person gate until the form gains a partner (roadmap 9.31).
 
 Wrappers attach to :class:`Person` as of roadmap 3.1, the glide-path
 config as of 3.5, household spending as of 4.1, DB pensions and state
@@ -203,7 +204,8 @@ class Household:
     """One or two persons plus shared economics (planning §4.4, §5.1).
 
     The 1..2 bound is the schema-level invariant (planning §4.4); the
-    stricter v1 single-person rule is :func:`validate_household_v1`.
+    stricter single-person rule of the facts form (until roadmap 9.31)
+    is :func:`validate_household_v1`.
     ``spending`` is the household-level retirement spending need;
     ``None`` means decumulation spending withdrawals are not modelled.
     ``planned_outflows`` are household-level dated one-offs (roadmap
@@ -254,7 +256,12 @@ class Household:
 
 
 def validate_household_v1(household: Household) -> None:
-    """Enforce the v1 single-person restriction (planning §4.4).
+    """Enforce the facts form's single-person restriction (planning §4.4).
+
+    The engine projects one or two persons (roadmap 9.30); this gate
+    remains on the form pipeline until it can represent a partner
+    (roadmap 9.31), so a two-person plan file is refused rather than
+    mis-edited.
 
     Raises:
         ValueError: If the household does not hold exactly one person.

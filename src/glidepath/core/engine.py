@@ -25,9 +25,17 @@ tested):
 3. **Contributions** — employee + employer per schedule, escalation,
    per-kind caps, then the region's relief mechanics.
 4. **Withdrawals** — in decumulation, the household's net (after-tax)
-   spending need is met from wrappers; net-defined draws gross up
-   against the region tax system by fixed-point iteration (capped,
-   residual settled at ledger precision).
+   spending need is met from wrappers in one pooled step per period
+   (planning §4.11): every person's drawable sources enter one
+   withdrawal state, and net-defined draws gross up against the
+   owner's own tax position by fixed-point iteration (capped,
+   residual settled at ledger precision). Within a tax-bearing
+   treatment group the pooled step drains the need greedily by
+   marginal cost — the next slice is priced from each person's
+   frontier source through the incremental-tax machinery and drawn
+   from whichever person's slice is cheaper, so both personal
+   allowances and both basic bands fill naturally; tax-free groups
+   keep the plan's listed (person, then wrapper) order.
 5. **Tax** — one final assessment per person over the period's full
    categorised income; the gross-up called the same function, so the
    final assessment is consistent by construction.
@@ -40,8 +48,11 @@ v1 engine conventions, superseded as later phases land:
 
 - Accumulation and decumulation switch together at the target
   retirement age (§4.1 convention): employment income and
-  contributions run while years-to-retirement is positive; spending
-  withdrawals start once it is not.
+  contributions run while a person's years-to-retirement is positive.
+  Household spending withdrawals start once every person has retired
+  (planning §4.11): while anyone still works, net pay funds
+  working-life spending outside the model, and a retired partner's
+  income meanwhile banks like any pre-decumulation income.
 - Withdrawals follow the configured strategy (roadmap 5.1): the
   strategy plans net-defined or gross-defined draws over the drawable
   sub-balances and the engine executes the plan, enforcing the
@@ -53,9 +64,9 @@ v1 engine conventions, superseded as later phases land:
   subject to the region's access gate. In decumulation the net-of-tax
   DB/state-pension income (and any commutation lump sum) received in
   the period offsets the net spending need before wrappers are drawn;
-  income and gross draws beyond the need bank into the person's first
-  uncapped taxable wrapper (GIA/cash, roadmap 9.2) and are spent only
-  when they hold none.
+  income and gross draws beyond the need bank into the household's
+  first uncapped taxable wrapper (GIA/cash, roadmap 9.2) and are
+  spent only when it holds none.
 - Planned outflows (roadmap 5.4) land whole in the period containing
   the date their person attains the stated age — inside the run
   window only — inflated from today's money by the period-start
@@ -171,7 +182,6 @@ from glidepath.core.contributions import (
     MemberContributionRequest,
     SchemeInput,
 )
-from glidepath.core.entities import validate_household_v1
 from glidepath.core.glide import (
     LifeStage,
     glide_path_from_shape,
@@ -244,7 +254,7 @@ if TYPE_CHECKING:
         AnnualAllowanceOutcome,
         ContributionSchedule,
     )
-    from glidepath.core.entities import Household, Person, SpendingPlan
+    from glidepath.core.entities import EntityId, Household, Person, SpendingPlan
     from glidepath.core.glide import GlidePathConfig
     from glidepath.core.investments import AssetAllocation
     from glidepath.core.pensions import DBPension, RevaluationBasis
@@ -264,6 +274,16 @@ _GROSS_UP_ITERATION_CAP = 48
 """Fixed-point iteration cap for the net-need gross-up (§5.2 step 4)."""
 _NET_TOLERANCE = Money(Decimal("0.005"))
 """Half a penny: residuals below ledger precision are settled, not chased."""
+_GREEDY_QUANTUM = Money(Decimal(1))
+"""Bisection floor for the §4.11 marginal-cost slice discovery: one pound."""
+_LINEARITY_TOLERANCE = Money(Decimal("0.03"))
+"""Slack for the constant-marginal-cost test (§4.11 pooled draws).
+
+A region's assessment may round each band line to the penny (the UK
+rounds down), so a draw's tax cost drifts from exact linearity by a few
+pennies even at one marginal rate; a genuine rate change moves the
+midpoint test by the rate step times the distance past the boundary,
+so a tolerance of a few pennies locates band edges within pounds."""
 _NO_FEES = FeeSchedule(platform=Rate(Decimal(0)), fund=Rate(Decimal(0)))
 """The schedule of a kind the region exempts from the default fees."""
 _OUTFLOW_FUNDING = FixedRealWithdrawalStrategy()
@@ -319,9 +339,13 @@ class _WithdrawalSource:
     planning §5.1). ``pension`` marks a sub-balance of a
     partially-tax-free (pension) wrapper kind: its tax-free cash
     consumes the region's lump-sum allowance and its taxable draws
-    mark flexible access (roadmap 5.2).
+    mark flexible access (roadmap 5.2). ``owner`` is the person whose
+    wrapper holds the sub-balance (planning §4.11): the pooled
+    household step prices and applies every draw through the owner's
+    own tax picture and allowances.
     """
 
+    owner: _PersonProjection
     ledger: _WrapperLedger
     crystallised: bool
     tax_free_fraction: Decimal
@@ -347,6 +371,7 @@ class _WithdrawalSource:
             available=self.available,
             tax_free_fraction=self.tax_free_fraction,
             access_open=self.access_open,
+            person_id=self.owner.person.id,
             natural_yield=natural_yield,
             growth_taxable=(self.ledger.treatment.growth is GrowthTaxTreatment.TAXABLE),
         )
@@ -355,6 +380,19 @@ class _WithdrawalSource:
     def available(self) -> Money:
         """What the sub-balance currently holds."""
         if self.crystallised:
+            return self.ledger.crystallised
+        return self.ledger.uncrystallised
+
+    def tranche_balance(self, tranche: _DrawTranche) -> Money:
+        """The wrapper balance ``tranche`` draws down.
+
+        A lump-sum-as-needed residue tranche debits the wrapper's
+        crystallised balance even though it belongs to the
+        uncrystallised source, so tranche consumption must be measured
+        on the side ``from_crystallised`` names — :attr:`available`
+        would not move for such a draw (§4.11 cursor bookkeeping).
+        """
+        if tranche.from_crystallised:
             return self.ledger.crystallised
         return self.ledger.uncrystallised
 
@@ -398,6 +436,112 @@ class _PeriodIncome:
     annuity_income: Money
     annuity_lump_sum: Money
     state_pension: Money
+
+
+@dataclass(slots=True)
+class _PersonPeriodContext:
+    """One person's steps 1-3 state awaiting the pooled step (§4.11).
+
+    ``income_net`` is the person's net income offset toward the
+    household need. The household step fills the attribution fields:
+    the spending need and any unmet household need land on the first
+    person, planned outflows on the person whose age dates them, and
+    delivered net cash and banked surplus on the owners of the
+    sources and wrapper involved — so summing the persons' period
+    results always reproduces the household totals.
+    """
+
+    age: int
+    years_to_retirement: int
+    stage: LifeStage
+    retired: bool
+    ledgers: list[_WrapperLedger]
+    income: _PeriodIncome
+    employment: Money
+    pension_lump_sum: Money
+    income_net: Money
+    need: Money = _ZERO
+    outflows: Money = _ZERO
+    delivered: Money = _ZERO
+    banked: Money = _ZERO
+    household_shortfall: Money = _ZERO
+
+
+@dataclass(slots=True)
+class _SegmentCursor:
+    """One person's live draw position within a pooled segment (§4.11).
+
+    The person's segment sources are consumed in the plan's listed
+    order through the owner's usual lazy tranche resolution, held live
+    so a lump-sum-as-needed designation stays drawable by its later
+    tranches exactly as in a single-person draw. ``drawn`` tracks the
+    gross taken from the current tranche; its remaining cap is
+    ``max_gross - drawn``, exact because every cap the tranche
+    machinery computes shrinks one-for-one with this cursor's own
+    draws (no other cursor touches the owner's balances or headroom
+    mid-segment).
+    """
+
+    owner: _PersonProjection
+    sources: list[_WithdrawalSource]
+    mode: TaxFreeCashStrategy
+    period: Period
+    index: int = 0
+    tranches: Iterator[_DrawTranche] | None = None
+    current: _DrawTranche | None = None
+    drawn: Money = _ZERO
+
+    @property
+    def source(self) -> _WithdrawalSource:
+        """The source the frontier tranche draws on."""
+        return self.sources[self.index]
+
+    def frontier(self) -> _DrawTranche | None:
+        """The next drawable slice with its remaining cap, or ``None``."""
+        while self.index < len(self.sources):
+            if self.tranches is None:
+                self.tranches = self.owner.draw_tranches(
+                    self.sources[self.index], self.period, self.mode
+                )
+                self.current = None
+            if self.current is None:
+                self.current = next(self.tranches, None)
+                self.drawn = _ZERO
+                if self.current is None:
+                    self.tranches = None
+                    self.index += 1
+                    continue
+            remaining = self.current.max_gross - self.drawn
+            if remaining <= _ZERO:
+                self.current = None
+                continue
+            return _DrawTranche(
+                free_share=self.current.free_share,
+                taxable_share=self.current.taxable_share,
+                max_gross=remaining,
+                from_crystallised=self.current.from_crystallised,
+            )
+        return None
+
+    def record(self, gross: Money) -> None:
+        """Advance past ``gross`` drawn from the current tranche."""
+        self.drawn = self.drawn + gross
+
+
+@dataclass(frozen=True, slots=True)
+class _GreedyBid:
+    """One person's priced frontier slice in a pooled segment (§4.11).
+
+    ``price`` is the marginal tax per net pound of the slice —
+    constant across it by construction
+    (:meth:`_PersonProjection.linear_gross_cap`) — and ``order`` the
+    person's position in the household, the deterministic tie-break.
+    """
+
+    price: Decimal
+    order: int
+    cursor: _SegmentCursor
+    tranche: _DrawTranche
 
 
 class _NominalFactors:
@@ -610,14 +754,9 @@ def run(
     assumption view (a scripted sequence fixture, roadmap 7.4).
 
     Raises:
-        EngineError: If the horizon is empty, the plan is not
-            projectable (v1: exactly one person), or a ``MONTE_CARLO``
+        EngineError: If the horizon is empty or a ``MONTE_CARLO``
             config carries no seed.
     """
-    try:
-        validate_household_v1(plan)
-    except ValueError as exc:
-        raise EngineError(str(exc)) from exc
     recorder = AssumptionReadRecorder()
     tracked = TrackedAssumptions(assumptions=assumptions, recorder=recorder)
     projection = _Projection(
@@ -671,13 +810,14 @@ def _return_model(
 class _Projection:
     """One run's shared state: the household loop of planning §5.2.
 
-    The engine's per-person split (planning §4.11, roadmap 9.29):
+    The engine's per-person split (planning §4.11, roadmap 9.29/9.30):
     everything person-independent — the plan, region, config, return
-    model, the period loop with its shared CPI/nominal factors, and
-    the run-level assumption caches — lives here, while each person's
-    mutable run state lives in a :class:`_PersonProjection`. ``run()``
-    still validates a one-person household, so the person list holds
-    exactly one entry until the 9.30 activation.
+    model, the period loop with its shared CPI/nominal factors, the
+    pooled household withdrawal step, and the run-level assumption
+    caches — lives here, while each person's mutable run state lives
+    in a :class:`_PersonProjection`. The person list holds one or two
+    entries (the §4.4 schema bound); a one-person household runs
+    exactly as it always has.
     """
 
     plan: Household
@@ -748,10 +888,21 @@ class _Projection:
         factors: _NominalFactors,
         fraction: Decimal,
     ) -> PeriodSnapshot:
-        """Assemble one period's snapshot from each person's eight steps."""
-        persons = tuple(
-            person.project_period(period, returns, inflation, factors, fraction)
+        """Assemble one period's snapshot (§5.2 steps, §4.11 pooling).
+
+        Steps 1-3 run per person, the spending/withdrawal step runs
+        once for the whole household, and steps 5-8 close each person
+        out — the one-withdrawal-step-per-period decision of planning
+        §4.11.
+        """
+        entries = [
+            (person, person.begin_period(period, factors, fraction))
             for person in self._persons
+        ]
+        self._household_spending_step(entries, period, inflation, fraction)
+        persons = tuple(
+            person.finish_period(context, period, returns, fraction)
+            for person, context in entries
         )
         return PeriodSnapshot(
             period=period,
@@ -760,6 +911,366 @@ class _Projection:
             persons=persons,
             year_fraction=fraction,
         )
+
+    def _household_spending_step(
+        self,
+        entries: list[tuple[_PersonProjection, _PersonPeriodContext]],
+        period: Period,
+        inflation: Decimal,
+        fraction: Decimal,
+    ) -> None:
+        """Steps 3½-4 at household level (planning §4.11, §5.2 step 4).
+
+        Household spending begins once every person is retired: while
+        anyone still works, net pay funds working-life spending
+        outside the model (§5.2), only planned outflows are funded
+        from wrappers (net-defined, default tax-aware order — the
+        configured strategy is a decumulation decision), and income
+        already in payment banks like any pre-decumulation income. In
+        decumulation the configured strategy runs every period,
+        whatever the need — a gross-defined strategy's draw follows
+        the pot, not the need. The stage multiplier on the spending
+        need follows the first person's life stage — one household
+        need, one stage (planning §4.11 household framing).
+
+        The income offset, wrapper need, delivery, and surplus are
+        household totals; each figure lands on a defined owner (see
+        :class:`_PersonPeriodContext`) so the persons' results sum to
+        the household truth.
+        """
+        outflows_by_person = self.outflows_due(period, inflation)
+        outflows = _ZERO
+        for person, context in entries:
+            context.outflows = outflows_by_person.get(person.person.id, _ZERO)
+            outflows = outflows + context.outflows
+        decumulating = all(context.retired for _, context in entries)
+        first = entries[0][1]
+        need = _ZERO
+        if decumulating and self.plan.spending is not None:
+            need = _spending_need(self.plan.spending, first.stage, inflation) * fraction
+        first.need = need
+        income_net = _ZERO
+        for _, context in entries:
+            income_net = income_net + context.income_net
+        wrapper_need = max(need + outflows - income_net, _ZERO)
+        spend_target = wrapper_need
+        delivered_by: dict[EntityId, Money] = {
+            person.person.id: _ZERO for person, _ in entries
+        }
+        if decumulating:
+            delivered_by, spend_target = self._withdrawal_step(
+                entries,
+                period,
+                wrapper_need,
+                fraction,
+                self.config.withdrawal_strategy,
+            )
+        elif wrapper_need > _ZERO:
+            delivered_by, spend_target = self._withdrawal_step(
+                entries, period, wrapper_need, fraction, _OUTFLOW_FUNDING
+            )
+        delivered = _ZERO
+        for person, context in entries:
+            context.delivered = delivered_by[person.person.id]
+            delivered = delivered + context.delivered
+        first.household_shortfall = max(wrapper_need - delivered, _ZERO)
+        # Income and gross draws beyond the need bank into the
+        # household's first uncapped taxable wrapper when one exists
+        # (roadmap 9.2); with none they are spent. A net-defined
+        # strategy's adjusted target (a guardrails prosperity rise) is
+        # spending, never swept back: only delivery beyond that target
+        # is surplus.
+        surplus = max(income_net - need - outflows, _ZERO) + max(
+            delivered - spend_target, _ZERO
+        )
+        self._bank_surplus(entries, surplus)
+
+    def _withdrawal_step(
+        self,
+        entries: list[tuple[_PersonProjection, _PersonPeriodContext]],
+        period: Period,
+        need: Money,
+        fraction: Decimal,
+        strategy: WithdrawalStrategy,
+    ) -> tuple[dict[EntityId, Money], Money]:
+        """Step 4: run the strategy over the household's drawable sources.
+
+        The strategy sees every person's sub-balance — gate-closed
+        ones flagged, each tagged with its owner (planning §4.11) —
+        and returns a net-defined or gross-defined plan; execution
+        enforces the access gates, so a plan drawing on a closed
+        source is an error, never a silent draw. For a strategy
+        declaring ``uses_natural_yield`` (roadmap 5.3), each source
+        also carries the income its balance throws off — the wrapper
+        allocation's weighted ``yield.*`` assumptions, scaled by the
+        period's active fraction; the yield keys are read only then,
+        so other runs' provenance never lists them. Returns the net
+        cash delivered per person and the plan's net spending target —
+        the strategy-adjusted need for a net-defined plan (a
+        guardrails rise or cut), the caller's need for a gross-defined
+        one, which sets no net target. Delivery toward the target is
+        spending; only delivery beyond it is surplus for the caller to
+        bank (roadmap 9.2).
+        """
+        sources: dict[WithdrawalSourceId, _WithdrawalSource] = {}
+        for person, context in entries:
+            sources.update(person.withdrawal_sources(context.ledgers, period))
+        # Opt-in marker, deliberately not a protocol member: a strategy
+        # that never declares it simply gets no yield pricing (§5.2).
+        price_yield = getattr(strategy, "uses_natural_yield", False)
+        views: list[WithdrawalSource] = []
+        for source in sources.values():
+            natural_yield = _ZERO
+            if price_yield and source.available > _ZERO:
+                natural_yield = source.available * (
+                    self.portfolio_yield(source.ledger.allocation) * fraction
+                )
+            views.append(source.view(natural_yield=natural_yield))
+        state = WithdrawalState(
+            sources=tuple(views),
+            year_fraction=fraction,
+            tax_free_cash_headroom={
+                person.person.id: person.lsa_headroom(period) for person, _ in entries
+            },
+        )
+        plan = strategy.withdraw(state, need)
+        if isinstance(plan, NetWithdrawalPlan):
+            return self._execute_net_plan(sources, period, plan), plan.target
+        return self._execute_gross_plan(sources, period, plan), need
+
+    def _execute_net_plan(
+        self,
+        sources: dict[WithdrawalSourceId, _WithdrawalSource],
+        period: Period,
+        plan: NetWithdrawalPlan,
+    ) -> dict[EntityId, Money]:
+        """Deliver the plan's net target, grossing up source by source.
+
+        A one-person household walks the plan's order exactly as it
+        always has (:meth:`_single_person_net_plan`): each source drawn
+        until the target is met to within ledger tolerance or the
+        listed sources are exhausted. With two persons the order is
+        consumed in maximal runs of one §5.2 treatment group (planning
+        §4.11): tax-free groups draw in the listed order, while a
+        tax-bearing group spanning both persons drains greedily by
+        marginal cost (:meth:`_greedy_segment_draw`). The unmet
+        remainder is the caller's shortfall. Returns the net delivered
+        per person.
+        """
+        if len(self._persons) == 1:
+            return self._single_person_net_plan(sources, period, plan)
+        delivered = {person.person.id: _ZERO for person in self._persons}
+        total = _ZERO
+        for segment in _plan_segments(sources, plan.order):
+            remaining = plan.target - total
+            if remaining <= _NET_TOLERANCE:
+                break
+            owners = {source.owner.person.id for source in segment}
+            pooled = (
+                len(owners) > 1 and _source_bucket(segment[0]) >= _FIRST_TAXED_BUCKET
+            )
+            draws = (
+                self._greedy_segment_draw(segment, period, remaining)
+                if pooled
+                else self._ordered_segment_draw(segment, period, remaining)
+            )
+            for person_id, net in draws.items():
+                delivered[person_id] = delivered[person_id] + net
+                total = total + net
+        return delivered
+
+    def _single_person_net_plan(
+        self,
+        sources: dict[WithdrawalSourceId, _WithdrawalSource],
+        period: Period,
+        plan: NetWithdrawalPlan,
+    ) -> dict[EntityId, Money]:
+        """Walk the plan's order for a one-person household.
+
+        Each source is drawn until the target is met to within ledger
+        tolerance or the listed sources are exhausted.
+        """
+        person = self._persons[0]
+        total = _ZERO
+        for source_id in plan.order:
+            remaining = plan.target - total
+            if remaining <= _NET_TOLERANCE:
+                break
+            source = _plan_source(sources, source_id)
+            if source.available <= _ZERO:
+                continue
+            total = total + person.draw_from(source, period, remaining)
+        return {person.person.id: total}
+
+    def _ordered_segment_draw(
+        self,
+        segment: list[_WithdrawalSource],
+        period: Period,
+        need: Money,
+    ) -> dict[EntityId, Money]:
+        """Draw one segment in its listed order toward ``need`` net.
+
+        The single-owner and tax-free cases of the §4.11 pooled
+        execution: each source drawn through its owner until the need
+        is met to within ledger tolerance or the segment is exhausted.
+        Returns the net delivered per person.
+        """
+        delivered: dict[EntityId, Money] = {}
+        total = _ZERO
+        for source in segment:
+            remaining = need - total
+            if remaining <= _NET_TOLERANCE:
+                break
+            if source.available <= _ZERO:
+                continue
+            net = source.owner.draw_from(source, period, remaining)
+            person_id = source.owner.person.id
+            delivered[person_id] = delivered.get(person_id, _ZERO) + net
+            total = total + net
+        return delivered
+
+    def _greedy_segment_draw(
+        self,
+        segment: list[_WithdrawalSource],
+        period: Period,
+        need: Money,
+    ) -> dict[EntityId, Money]:
+        """Drain ``need`` from one tax-bearing segment by marginal cost.
+
+        The §4.11 pooled draw: each person's frontier slice — the next
+        constant-marginal-cost stretch of their next tranche
+        (:meth:`_PersonProjection.linear_gross_cap`) — is priced
+        through the existing incremental-tax machinery, and the
+        cheaper person's slice is drawn through the usual fixed-point
+        gross-up; re-pricing after every slice fills both personal
+        allowances and both basic bands naturally, with no optimizer
+        and no new tax model. Ties go to the first-listed person.
+        Returns the net delivered per person.
+        """
+        mode = self.config.tax_free_cash
+        if mode is TaxFreeCashStrategy.UP_FRONT_LUMP_SUM:
+            # The up-front mode is a decumulation crystallisation
+            # event; any other draw it leaves to make is a split
+            # payment (§5.2).
+            mode = TaxFreeCashStrategy.SPLIT_EACH_PAYMENT
+        cursors = [
+            _SegmentCursor(owner=person, sources=owned, mode=mode, period=period)
+            for person in self._persons
+            if (owned := [source for source in segment if source.owner is person])
+        ]
+        delivered = {cursor.owner.person.id: _ZERO for cursor in cursors}
+        remaining = need
+        while remaining > _NET_TOLERANCE:
+            bids = [
+                bid
+                for order, cursor in enumerate(cursors)
+                if (bid := self._frontier_bid(cursor, order, period)) is not None
+            ]
+            if not bids:
+                break
+            best = min(bids, key=lambda bid: (bid.price, bid.order))
+            source = best.cursor.source
+            before = source.tranche_balance(best.tranche)
+            net = best.cursor.owner.draw_tranche(
+                source, period, best.tranche, remaining
+            )
+            best.cursor.record(before - source.tranche_balance(best.tranche))
+            person_id = best.cursor.owner.person.id
+            delivered[person_id] = delivered[person_id] + net
+            remaining = remaining - net
+        return delivered
+
+    def _frontier_bid(
+        self, cursor: _SegmentCursor, order: int, period: Period
+    ) -> _GreedyBid | None:
+        """Price one person's frontier slice, or ``None`` when drained.
+
+        The price is the marginal tax per net pound over the slice —
+        zero for a wholly tax-free tranche, infinite when the slice
+        delivers no net cash at all (tax at or above 100%), so such a
+        source is drawn only when nothing cheaper remains.
+        """
+        tranche = cursor.frontier()
+        if tranche is None:
+            return None
+        if tranche.taxable_share <= Decimal(0):
+            return _GreedyBid(
+                price=Decimal(0), order=order, cursor=cursor, tranche=tranche
+            )
+        run = cursor.owner.linear_gross_cap(period, tranche)
+        tax = cursor.owner.incremental_tax(period, run * tranche.taxable_share)
+        net = run * (tranche.free_share + tranche.taxable_share) - tax
+        price = Decimal("Infinity") if net <= _ZERO else tax.amount / net.amount
+        sliced = _DrawTranche(
+            free_share=tranche.free_share,
+            taxable_share=tranche.taxable_share,
+            max_gross=run,
+            from_crystallised=tranche.from_crystallised,
+        )
+        return _GreedyBid(price=price, order=order, cursor=cursor, tranche=sliced)
+
+    def _execute_gross_plan(
+        self,
+        sources: dict[WithdrawalSourceId, _WithdrawalSource],
+        period: Period,
+        plan: GrossWithdrawalPlan,
+    ) -> dict[EntityId, Money]:
+        """Take the plan's exact gross draws; net is what survives tax.
+
+        No fixed-point iteration (planning §5.2): a gross-defined
+        strategy declares itself gross. Each draw is capped at what
+        its source holds and resolved as a split payment against its
+        owner's tax picture, whatever the run's tax-free cash mode —
+        an exact gross amount is a payment instruction, not a
+        designation (planning §5.2). The marginal tax on the taxable
+        share is priced through the same regional assessment the final
+        step-5 pass uses, so the two cannot disagree. Returns the net
+        delivered per person.
+        """
+        delivered = {person.person.id: _ZERO for person in self._persons}
+        for draw in plan.draws:
+            source = _plan_source(sources, draw.source)
+            owner = source.owner
+            remaining = min(draw.amount, source.available)
+            for tranche in owner.draw_tranches(
+                source, period, TaxFreeCashStrategy.SPLIT_EACH_PAYMENT
+            ):
+                if remaining <= _ZERO:
+                    break
+                gross = min(remaining, tranche.max_gross)
+                if gross <= _ZERO:
+                    continue
+                net = owner.apply_tranche(source, period, tranche, gross)
+                delivered[owner.person.id] = delivered[owner.person.id] + net
+                remaining = remaining - gross
+        return delivered
+
+    def _bank_surplus(
+        self,
+        entries: list[tuple[_PersonProjection, _PersonPeriodContext]],
+        surplus: Money,
+    ) -> None:
+        """Sweep household surplus into the first taxable wrapper.
+
+        Income and gross draws beyond the period's need land in the
+        household's first wrapper (person order, then plan order)
+        whose treatment marks it a bare taxable account — paid from
+        taxed income, growth taxable, withdrawals tax-free (a GIA or
+        cash account) — rather than being spent (roadmap 9.2).
+        Banking is not a contribution: no cap, relief, or bonus
+        machinery applies. With no such wrapper the surplus is spent,
+        the pre-9.2 behaviour (planning §5.2). The sweep is recorded
+        on the receiving wrapper's owner.
+        """
+        if surplus <= _ZERO:
+            return
+        for _, context in entries:
+            for ledger in context.ledgers:
+                if _is_bare_taxable(ledger.treatment):
+                    ledger.uncrystallised = ledger.uncrystallised + surplus
+                    ledger.banked_in = ledger.banked_in + surplus
+                    context.banked = surplus
+                    return
 
     def horizon_end(self) -> date:
         """The configured horizon end, or the planning-age default (§5.2).
@@ -785,8 +1296,8 @@ class _Projection:
             raise EngineError(msg)
         return horizon_end
 
-    def outflows_due(self, period: Period, inflation: Decimal) -> Money:
-        """The planned outflows landing in ``period``, in nominal money.
+    def outflows_due(self, period: Period, inflation: Decimal) -> dict[EntityId, Money]:
+        """The planned outflows landing in ``period``, by dating person.
 
         A planned outflow is a dated one-off (roadmap 5.4): it hits the
         period containing the date its person attains the stated age —
@@ -794,19 +1305,25 @@ class _Projection:
         when that date lies inside the run window; an outflow already
         past lives in the stated balances, not the model. The real
         amount is inflated by the period-start price level, the same
-        single inflation truth the spending need uses (§5.2).
+        single inflation truth the spending need uses (§5.2). Outflows
+        are household needs funded from the pooled step (planning
+        §4.11); the per-person keying attributes each to the person
+        whose age dates it for the period results.
         """
-        total = _ZERO
+        due_by_person: dict[EntityId, Money] = {}
         if not self.plan.planned_outflows:
-            return total
+            return due_by_person
         horizon_end = self.horizon_end()
         births = {person.id: person.date_of_birth.value for person in self.plan.persons}
         for outflow in self.plan.planned_outflows:
             person_id, age = outflow.at_age_of
             due = date_age_attained(births[person_id], age)
             if period.contains(due) and self.config.today <= due <= horizon_end:
-                total = total + outflow.amount_real.value * inflation
-        return total
+                due_by_person[person_id] = (
+                    due_by_person.get(person_id, _ZERO)
+                    + outflow.amount_real.value * inflation
+                )
+        return due_by_person
 
     def fees_for(self, wrapper: Wrapper) -> FeeSchedule:
         """The wrapper's fee schedule, or the shipped fee assumptions.
@@ -1339,23 +1856,23 @@ class _PersonProjection:
         )
         return glide_path_from_shape(shape)
 
-    def project_period(
-        self,
-        period: Period,
-        returns: PeriodReturns,
-        inflation: Decimal,
-        factors: _NominalFactors,
-        fraction: Decimal,
-    ) -> PersonPeriodResult:
-        """Run the eight steps of planning §5.2 for one person's period.
+    def begin_period(
+        self, period: Period, factors: _NominalFactors, fraction: Decimal
+    ) -> _PersonPeriodContext:
+        """Steps 1-3 of planning §5.2 for this person (§4.11 split).
 
-        ``fraction`` is the whole-month share of the period inside the
-        run window (roadmap 4.6): flows and the annual growth/fee rates
-        are scaled by it, so a mid-period ``today`` never re-models
-        months already reflected in the balance facts, and the final
-        period never models time past the horizon end. Income
-        entitlements pro-rate by their own start dates within the same
-        window (§4.1).
+        Opens the period (ages, stage, glide allocation), prices the
+        period's income and lump sums, runs contributions while
+        working, and computes this person's net income offset toward
+        the household need; the pooled step 4
+        (:meth:`_Projection._household_spending_step`) and the closing
+        steps 5-8 (:meth:`finish_period`) follow. ``fraction`` is the
+        whole-month share of the period inside the run window (roadmap
+        4.6): flows and the annual growth/fee rates are scaled by it,
+        so a mid-period ``today`` never re-models months already
+        reflected in the balance facts, and the final period never
+        models time past the horizon end. Income entitlements pro-rate
+        by their own start dates within the same window (§4.1).
         """
         person = self.person
         # Step 1 — open.
@@ -1403,9 +1920,10 @@ class _PersonProjection:
         # records later this period leaves them pre-trigger inputs
         # (planning §5.2).
         self._mpaa_at_contributions = self._mpaa_triggered_on
-        need = _ZERO
-        outflows = self.run.outflows_due(period, inflation)
         pension_lump_sum = _ZERO
+        up_front = self.config.tax_free_cash is TaxFreeCashStrategy.UP_FRONT_LUMP_SUM
+        if retired and up_front:
+            pension_lump_sum = self._up_front_lump_sums(ledgers, period)
         income = _PeriodIncome(
             employment=employment,
             db_income=db_income,
@@ -1414,34 +1932,27 @@ class _PersonProjection:
             annuity_lump_sum=annuity_lump_sum,
             state_pension=state_pension,
         )
-        if retired:
-            if self.plan.spending is not None:
-                need = _spending_need(self.plan.spending, stage, inflation) * fraction
-            if self.config.tax_free_cash is TaxFreeCashStrategy.UP_FRONT_LUMP_SUM:
-                pension_lump_sum = self._up_front_lump_sums(ledgers, period)
-            income_net = self._decumulation_income_net(period, income, pension_lump_sum)
-            wrapper_need = max(need + outflows - income_net, _ZERO)
-            delivered, spend_target = self._withdrawal_step(
-                ledgers,
-                period,
-                wrapper_need,
-                fraction,
-                self.config.withdrawal_strategy,
-            )
-            # Income and gross draws beyond the need bank into the
-            # first uncapped taxable wrapper when one exists (roadmap
-            # 9.2); with none they are spent, the pre-9.2 behaviour.
-            # A net-defined strategy's adjusted target (a guardrails
-            # prosperity rise) is spending, never swept back: only
-            # delivery beyond that target is surplus.
-            surplus = max(income_net - need - outflows, _ZERO) + max(
-                delivered - spend_target, _ZERO
-            )
-            banked = self._bank_surplus(ledgers, surplus)
-        else:
-            wrapper_need, delivered, banked = self._accumulation_spending(
-                ledgers, period, income, outflows, fraction
-            )
+        return _PersonPeriodContext(
+            age=age,
+            years_to_retirement=ytr,
+            stage=stage,
+            retired=retired,
+            ledgers=ledgers,
+            income=income,
+            employment=employment,
+            pension_lump_sum=pension_lump_sum,
+            income_net=self._income_offset_net(period, income, pension_lump_sum),
+        )
+
+    def finish_period(
+        self,
+        context: _PersonPeriodContext,
+        period: Period,
+        returns: PeriodReturns,
+        fraction: Decimal,
+    ) -> PersonPeriodResult:
+        """Steps 5-8 of planning §5.2 for this person (§4.11 split)."""
+        ledgers = context.ledgers
         # Step 5 — allowance measurement, final assessment, wrapper
         # charge, and any annual-allowance charge, together.
         tax = self._tax_step(ledgers, period, returns, fraction)
@@ -1459,28 +1970,29 @@ class _PersonProjection:
             unfunded_tax = (
                 unfunded_tax + ledger.growth_tax_unfunded + ledger.aa_charge_unfunded
             )
-        shortfall = max(wrapper_need - delivered, _ZERO) + unfunded_tax
+        shortfall = context.household_shortfall + unfunded_tax
+        income = context.income
         return PersonPeriodResult(
-            person_id=person.id,
-            age_at_period_start=age,
-            years_to_retirement=ytr,
-            stage=stage,
-            employment_income=employment.quantized(),
+            person_id=self.person.id,
+            age_at_period_start=context.age,
+            years_to_retirement=context.years_to_retirement,
+            stage=context.stage,
+            employment_income=context.employment.quantized(),
             tax=tax,
-            spending_need=need.quantized(),
-            net_withdrawn=delivered.quantized(),
+            spending_need=context.need.quantized(),
+            net_withdrawn=context.delivered.quantized(),
             shortfall=shortfall.quantized(),
             wrappers=wrapper_results,
-            db_income=db_income.quantized(),
-            db_lump_sum=db_lump_sum.quantized(),
-            state_pension_income=state_pension.quantized(),
-            annuity_income=annuity_income.quantized(),
-            annuity_lump_sum=annuity_lump_sum.quantized(),
-            planned_outflows=outflows.quantized(),
-            pension_lump_sum=pension_lump_sum.quantized(),
+            db_income=income.db_income.quantized(),
+            db_lump_sum=income.db_lump_sum.quantized(),
+            state_pension_income=income.state_pension.quantized(),
+            annuity_income=income.annuity_income.quantized(),
+            annuity_lump_sum=income.annuity_lump_sum.quantized(),
+            planned_outflows=context.outflows.quantized(),
+            pension_lump_sum=context.pension_lump_sum.quantized(),
             lsa_used=self._lsa_used.quantized(),
             mpaa_triggered_on=self._mpaa_triggered_on,
-            banked=banked.quantized(),
+            banked=context.banked.quantized(),
         )
 
     def _accrue_db_step(self, period: Period, factors: _NominalFactors) -> None:
@@ -1654,7 +2166,7 @@ class _PersonProjection:
         free_fraction = ledger.treatment.tax_free_fraction
         if uncrystallised_draw > _ZERO and free_fraction is not None:
             tax_free = uncrystallised_draw * free_fraction.value
-            headroom = self._lsa_headroom(period)
+            headroom = self.lsa_headroom(period)
             if headroom is not None:
                 tax_free = min(tax_free, headroom)
             self._lsa_used = self._lsa_used + tax_free
@@ -1856,126 +2368,49 @@ class _PersonProjection:
             )
             raise EngineError(msg)
 
-    def _decumulation_income_net(
+    def _income_offset_net(
         self, period: Period, income: _PeriodIncome, pension_lump_sum: Money
     ) -> Money:
-        """The §5.2 decumulation income offset: net cash before draws.
+        """The §5.2 income offset this person brings to the pooled need.
 
         Net-of-tax pension, state-pension and annuity income, any
         commutation lump sum (gross here; the tax on its over-headroom
         excess is in the assessment), and any up-front or
-        annuity-purchase tax-free cash meet the net need — spending
-        plus planned outflows — first; only the remainder is drawn
-        from wrappers. The offset excludes the portfolio-income
-        layers: their tax is charged to the taxable wrappers at
-        close, never to the need.
+        annuity-purchase tax-free cash meet the household net need
+        first; only the remainder is drawn from wrappers (planning
+        §4.11). Employment income keeps its own tax — net pay funds
+        working-life spending outside the model — so while working the
+        offset is netted of only the marginal tax the retirement
+        layers add on top of it: the no-portfolio assessment less one
+        of employment income alone, which once retired is identically
+        the whole assessment. The offset excludes the portfolio-income
+        layers: their tax is charged to the taxable wrappers at close,
+        never to the need.
         """
-        income_tax = self.region.tax.assess(
-            period, self._tax_input(include_portfolio=False)
-        ).tax_due
-        return (
+        gross = (
             income.db_income
             + income.state_pension
             + income.annuity_income
             + income.db_lump_sum
             + income.annuity_lump_sum
             + pension_lump_sum
-            - income_tax
         )
+        if self._taxable_income <= income.employment:
+            return gross
+        full = self.region.tax.assess(
+            period, self._tax_input(include_portfolio=False)
+        ).tax_due
+        employment_only = _ZERO
+        if income.employment > _ZERO:
+            employment_only = self.region.tax.assess(
+                period,
+                self._tax_input(
+                    non_savings_override=income.employment, include_portfolio=False
+                ),
+            ).tax_due
+        return gross - (full - employment_only)
 
-    def _accumulation_spending(
-        self,
-        ledgers: list[_WrapperLedger],
-        period: Period,
-        income: _PeriodIncome,
-        outflows: Money,
-        fraction: Decimal,
-    ) -> tuple[Money, Money, Money]:
-        """Steps 3-4 before retirement: fund outflows, bank the rest.
-
-        Retirement income already in payment before the target
-        retirement age — an early DB start or annuity purchase, the
-        state pension alongside work — is real cash: net of the
-        marginal tax it adds on top of employment income
-        (:meth:`_pre_retirement_income_tax`) it meets the period's
-        planned outflows first, and the remainder banks like
-        decumulation surplus (roadmap 9.2). Employment income itself
-        never offsets or banks — net pay funds working-life spending,
-        which the model does not track (planning §5.2). An outflow
-        beyond the offset is a net cash need met in the default
-        tax-aware order; the configured strategy governs decumulation
-        only (module docstring). Returns the wrapper need, the net
-        cash delivered toward it, and the surplus banked.
-        """
-        income_net = (
-            income.db_income
-            + income.state_pension
-            + income.annuity_income
-            + income.db_lump_sum
-            + income.annuity_lump_sum
-            - self._pre_retirement_income_tax(period, income.employment)
-        )
-        wrapper_need = max(outflows - income_net, _ZERO)
-        delivered = _ZERO
-        spend_target = wrapper_need
-        if wrapper_need > _ZERO:
-            delivered, spend_target = self._withdrawal_step(
-                ledgers, period, wrapper_need, fraction, _OUTFLOW_FUNDING
-            )
-        surplus = max(income_net - outflows, _ZERO) + max(
-            delivered - spend_target, _ZERO
-        )
-        return wrapper_need, delivered, self._bank_surplus(ledgers, surplus)
-
-    def _withdrawal_step(
-        self,
-        ledgers: list[_WrapperLedger],
-        period: Period,
-        need: Money,
-        fraction: Decimal,
-        strategy: WithdrawalStrategy,
-    ) -> tuple[Money, Money]:
-        """Step 4: run the withdrawal strategy over the drawable sources.
-
-        The strategy sees every sub-balance — gate-closed ones flagged
-        (planning §5.2) — and returns a net-defined or gross-defined
-        plan; execution enforces the access gates, so a plan drawing on
-        a closed source is an error, never a silent draw. For a
-        strategy declaring ``uses_natural_yield`` (roadmap 5.3), each
-        source also carries the income its balance throws off — the
-        wrapper allocation's weighted ``yield.*`` assumptions, scaled
-        by the period's active fraction; the yield keys are read only
-        then, so other runs' provenance never lists them. Returns the
-        net cash delivered and the plan's net spending target — the
-        strategy-adjusted need for a net-defined plan (a guardrails
-        rise or cut), the caller's need for a gross-defined one, which
-        sets no net target. Delivery toward the target is spending;
-        only delivery beyond it is surplus for the caller to bank
-        (roadmap 9.2).
-        """
-        sources = self._withdrawal_sources(ledgers, period)
-        # Opt-in marker, deliberately not a protocol member: a strategy
-        # that never declares it simply gets no yield pricing (§5.2).
-        price_yield = getattr(strategy, "uses_natural_yield", False)
-        views: list[WithdrawalSource] = []
-        for source in sources.values():
-            natural_yield = _ZERO
-            if price_yield and source.available > _ZERO:
-                natural_yield = source.available * (
-                    self.run.portfolio_yield(source.ledger.allocation) * fraction
-                )
-            views.append(source.view(natural_yield=natural_yield))
-        state = WithdrawalState(
-            sources=tuple(views),
-            year_fraction=fraction,
-            tax_free_cash_headroom=self._lsa_headroom(period),
-        )
-        plan = strategy.withdraw(state, need)
-        if isinstance(plan, NetWithdrawalPlan):
-            return self._execute_net_plan(sources, period, plan), plan.target
-        return self._execute_gross_plan(sources, period, plan), need
-
-    def _withdrawal_sources(
+    def withdrawal_sources(
         self, ledgers: list[_WrapperLedger], period: Period
     ) -> dict[WithdrawalSourceId, _WithdrawalSource]:
         """Every sub-balance keyed for plan execution, in wrapper order.
@@ -2000,6 +2435,7 @@ class _PersonProjection:
                     free_fraction = treatment.tax_free_fraction.value
             entries = (
                 _WithdrawalSource(
+                    owner=self,
                     ledger=ledger,
                     crystallised=False,
                     tax_free_fraction=free_fraction,
@@ -2011,6 +2447,7 @@ class _PersonProjection:
                     pension=pension,
                 ),
                 _WithdrawalSource(
+                    owner=self,
                     ledger=ledger,
                     crystallised=True,
                     tax_free_fraction=crystallised_fraction,
@@ -2021,65 +2458,7 @@ class _PersonProjection:
                 sources[source.source_id] = source
         return sources
 
-    def _execute_net_plan(
-        self,
-        sources: dict[WithdrawalSourceId, _WithdrawalSource],
-        period: Period,
-        plan: NetWithdrawalPlan,
-    ) -> Money:
-        """Deliver the plan's net target, grossing up source by source.
-
-        Walks the plan's order, drawing from each source until the
-        target is met to within ledger tolerance or the listed sources
-        are exhausted; the unmet remainder is the caller's shortfall.
-        """
-        delivered = _ZERO
-        for source_id in plan.order:
-            remaining = plan.target - delivered
-            if remaining <= _NET_TOLERANCE:
-                break
-            source = _plan_source(sources, source_id)
-            if source.available <= _ZERO:
-                continue
-            delivered = delivered + self._draw_from(source, period, remaining)
-        return delivered
-
-    def _execute_gross_plan(
-        self,
-        sources: dict[WithdrawalSourceId, _WithdrawalSource],
-        period: Period,
-        plan: GrossWithdrawalPlan,
-    ) -> Money:
-        """Take the plan's exact gross draws; net is what survives tax.
-
-        No fixed-point iteration (planning §5.2): a gross-defined
-        strategy declares itself gross. Each draw is capped at what its
-        source holds and resolved as a split payment whatever the
-        run's tax-free cash mode — an exact gross amount is a payment
-        instruction, not a designation (planning §5.2). The marginal
-        tax on the taxable share is priced through the same regional
-        assessment the final step-5 pass uses, so the two cannot
-        disagree.
-        """
-        delivered = _ZERO
-        for draw in plan.draws:
-            source = _plan_source(sources, draw.source)
-            remaining = min(draw.amount, source.available)
-            for tranche in self._tranches(
-                source, period, TaxFreeCashStrategy.SPLIT_EACH_PAYMENT
-            ):
-                if remaining <= _ZERO:
-                    break
-                gross = min(remaining, tranche.max_gross)
-                if gross <= _ZERO:
-                    continue
-                delivered = delivered + self._apply_tranche(
-                    source, period, tranche, gross
-                )
-                remaining = remaining - gross
-        return delivered
-
-    def _draw_from(
+    def draw_from(
         self, source: _WithdrawalSource, period: Period, need: Money
     ) -> Money:
         """Draw up to ``need`` net from one source, grossing up for tax.
@@ -2087,7 +2466,7 @@ class _PersonProjection:
         The source resolves into linear tranches per the run's
         tax-free cash mode (roadmap 5.2) — for a plain source exactly
         one — each drawn through the fixed point of
-        :meth:`_draw_tranche` until the need is met to within ledger
+        :meth:`draw_tranche` until the need is met to within ledger
         tolerance or the tranches are exhausted.
         """
         mode = self.config.tax_free_cash
@@ -2097,18 +2476,18 @@ class _PersonProjection:
             # funded before retirement) is a split payment (§5.2).
             mode = TaxFreeCashStrategy.SPLIT_EACH_PAYMENT
         delivered = _ZERO
-        for tranche in self._tranches(source, period, mode):
+        for tranche in self.draw_tranches(source, period, mode):
             remaining = need - delivered
             if remaining <= _NET_TOLERANCE:
                 break
             if tranche.max_gross <= _ZERO:
                 continue
-            delivered = delivered + self._draw_tranche(
+            delivered = delivered + self.draw_tranche(
                 source, period, tranche, remaining
             )
         return delivered
 
-    def _draw_tranche(
+    def draw_tranche(
         self,
         source: _WithdrawalSource,
         period: Period,
@@ -2130,7 +2509,7 @@ class _PersonProjection:
         cash_share = tranche.free_share + tranche.taxable_share
         gross = min(Money(need.amount / cash_share), tranche.max_gross)
         for _ in range(_GROSS_UP_ITERATION_CAP):
-            extra_tax = self._incremental_tax(period, gross * tranche.taxable_share)
+            extra_tax = self.incremental_tax(period, gross * tranche.taxable_share)
             target = Money((need + extra_tax).amount / cash_share)
             if target >= tranche.max_gross:
                 gross = tranche.max_gross
@@ -2138,9 +2517,9 @@ class _PersonProjection:
             if (target - gross) < _NET_TOLERANCE and (gross - target) < _NET_TOLERANCE:
                 break
             gross = target
-        return self._apply_tranche(source, period, tranche, gross)
+        return self.apply_tranche(source, period, tranche, gross)
 
-    def _apply_tranche(
+    def apply_tranche(
         self,
         source: _WithdrawalSource,
         period: Period,
@@ -2158,7 +2537,7 @@ class _PersonProjection:
         tax_free = gross * tranche.free_share
         taxable = gross * tranche.taxable_share
         designated = gross - tax_free - taxable
-        net = tax_free + taxable - self._incremental_tax(period, taxable)
+        net = tax_free + taxable - self.incremental_tax(period, taxable)
         ledger = source.ledger
         if tranche.from_crystallised:
             ledger.crystallised = ledger.crystallised - gross
@@ -2178,7 +2557,7 @@ class _PersonProjection:
                 self._mark_flexible_access(period)
         return net
 
-    def _tranches(
+    def draw_tranches(
         self,
         source: _WithdrawalSource,
         period: Period,
@@ -2212,7 +2591,7 @@ class _PersonProjection:
             )
             return
         fraction = source.tax_free_fraction
-        headroom = self._lsa_headroom(period)
+        headroom = self.lsa_headroom(period)
         free_cap = ledger.uncrystallised
         if headroom is not None:
             free_cap = min(Money(headroom.amount / fraction), free_cap)
@@ -2284,7 +2663,7 @@ class _PersonProjection:
                 continue
             pot = ledger.uncrystallised
             tax_free = pot * fraction.value
-            headroom = self._lsa_headroom(period)
+            headroom = self.lsa_headroom(period)
             if headroom is not None:
                 tax_free = min(tax_free, headroom)
             ledger.uncrystallised = _ZERO
@@ -2295,7 +2674,7 @@ class _PersonProjection:
             total = total + tax_free
         return total
 
-    def _lsa_headroom(self, period: Period) -> Money | None:
+    def lsa_headroom(self, period: Period) -> Money | None:
         """Tax-free cash still allowed under the region's lifetime cap.
 
         ``None`` when the region has no cap. Usage accumulates across
@@ -2319,7 +2698,7 @@ class _PersonProjection:
         """
         if lump_sum <= _ZERO:
             return _ZERO
-        headroom = self._lsa_headroom(period)
+        headroom = self.lsa_headroom(period)
         tax_free = lump_sum if headroom is None else min(lump_sum, headroom)
         self._lsa_used = self._lsa_used + tax_free
         return lump_sum - tax_free
@@ -2335,28 +2714,7 @@ class _PersonProjection:
         if self._mpaa_triggered_on is None:
             self._mpaa_triggered_on = max(period.start, self.config.today)
 
-    def _pre_retirement_income_tax(self, period: Period, employment: Money) -> Money:
-        """The tax the pre-retirement income offset bears (planning §5.2).
-
-        Employment income keeps its own tax — net pay funds
-        working-life spending outside the model — so the offset's
-        DB/state-pension/annuity income (and any commutation excess)
-        is netted of only the marginal tax those layers add on top of
-        it: the no-portfolio assessment less one of employment income
-        alone. The portfolio layers' interaction stays with the
-        wrapper charge, exactly as in decumulation
-        (:meth:`_incremental_tax`).
-        """
-        if self._taxable_income <= employment:
-            return _ZERO
-        full = self.region.tax.assess(period, self._tax_input(include_portfolio=False))
-        base = self.region.tax.assess(
-            period,
-            self._tax_input(non_savings_override=employment, include_portfolio=False),
-        )
-        return full.tax_due - base.tax_due
-
-    def _incremental_tax(self, period: Period, taxable: Money) -> Money:
+    def incremental_tax(self, period: Period, taxable: Money) -> Money:
         """The extra tax ``taxable`` adds on top of the period's income.
 
         Both calls go through the region's one ``assess`` function —
@@ -2381,6 +2739,53 @@ class _PersonProjection:
             period, self._tax_input(extra_income=taxable, include_portfolio=False)
         )
         return with_draw.tax_due - base.tax_due
+
+    def linear_gross_cap(self, period: Period, tranche: _DrawTranche) -> Money:
+        """The largest slice of ``tranche`` with one marginal cost (§4.11).
+
+        The pooled household draw prices each person's next slice and
+        takes the cheaper, so a slice must not straddle a change in
+        the person's marginal rate — otherwise a whole-tranche draw
+        would sail past the point where the other person became the
+        better source and waste their allowance. The boundary is
+        found through the existing incremental-tax machinery alone
+        (no band introspection crosses the §4.2 core/region
+        boundary): the largest gross whose tax cost is linear — the
+        midpoint's cost doubles to the whole's within the region's
+        penny-rounding slack — located by bisection to a £1 quantum.
+        A wholly tax-free tranche has one cost (zero) by construction.
+        """
+        cap = tranche.max_gross
+        share = tranche.taxable_share
+        if share <= Decimal(0) or cap <= _GREEDY_QUANTUM:
+            return cap
+        base = self.region.tax.assess(
+            period, self._tax_input(include_portfolio=False)
+        ).tax_due
+
+        def cost(gross: Money) -> Money:
+            """The extra tax a draw of ``gross`` from the tranche adds."""
+            assessed = self.region.tax.assess(
+                period,
+                self._tax_input(extra_income=gross * share, include_portfolio=False),
+            )
+            return assessed.tax_due - base
+
+        def linear(gross: Money) -> bool:
+            """Whether the cost over [0, gross] shows a single rate."""
+            drift = cost(gross) - cost(Money(gross.amount / 2)) * Decimal(2)
+            return -_LINEARITY_TOLERANCE <= drift <= _LINEARITY_TOLERANCE
+
+        if linear(cap):
+            return cap
+        low, high = _GREEDY_QUANTUM, cap
+        while high - low > _GREEDY_QUANTUM:
+            midpoint = Money((low.amount + high.amount) / 2).quantized()
+            if linear(midpoint):
+                low = midpoint
+            else:
+                high = midpoint
+        return low
 
     def _tax_input(
         self,
@@ -2682,26 +3087,6 @@ class _PersonProjection:
             remaining = remaining - share
         self._aa_charge_unallocated = remaining
 
-    def _bank_surplus(self, ledgers: list[_WrapperLedger], surplus: Money) -> Money:
-        """Sweep decumulation surplus into the first taxable wrapper.
-
-        Income and gross draws beyond the period's need land in the
-        first wrapper (plan order) whose treatment marks it a bare
-        taxable account — paid from taxed income, growth taxable,
-        withdrawals tax-free (a GIA or cash account) — rather than
-        being spent (roadmap 9.2). Banking is not a contribution: no
-        cap, relief, or bonus machinery applies. With no such wrapper
-        the surplus is spent, the pre-9.2 behaviour (planning §5.2).
-        """
-        if surplus <= _ZERO:
-            return _ZERO
-        for ledger in ledgers:
-            if _is_bare_taxable(ledger.treatment):
-                ledger.uncrystallised = ledger.uncrystallised + surplus
-                ledger.banked_in = ledger.banked_in + surplus
-                return surplus
-        return _ZERO
-
     def _close_wrapper(
         self, ledger: _WrapperLedger, returns: PeriodReturns, fraction: Decimal
     ) -> WrapperPeriodResult:
@@ -2865,6 +3250,53 @@ def _apply_contribution_caps(
             used_by_group.get(cap.group, _ZERO) + employer + employee
         )
     return employee, employer
+
+
+_FIRST_TAXED_BUCKET = 2
+"""The first §5.2 treatment group whose draws bear income tax (§4.11)."""
+
+
+def _source_bucket(source: _WithdrawalSource) -> int:
+    """The §5.2 treatment group a source draws in, as the order ranks them.
+
+    The same four groups :func:`~glidepath.core.withdrawals.tax_aware_order`
+    builds — taxable-growth (0), tax-free (1), crystallised (2),
+    uncrystallised (3) — read off the source's own attributes so a
+    custom strategy's ordering segments identically. Draws from the
+    first two groups arrive wholly tax-free; the §4.11 greedy
+    marginal-cost pooling applies from ``_FIRST_TAXED_BUCKET`` up.
+    """
+    if source.tax_free_fraction == _ONE:
+        growth_taxable = source.ledger.treatment.growth is GrowthTaxTreatment.TAXABLE
+        return 0 if growth_taxable else 1
+    return _FIRST_TAXED_BUCKET if source.crystallised else _FIRST_TAXED_BUCKET + 1
+
+
+def _plan_segments(
+    sources: dict[WithdrawalSourceId, _WithdrawalSource],
+    order: tuple[WithdrawalSourceId, ...],
+) -> Iterator[list[_WithdrawalSource]]:
+    """Maximal same-treatment-group runs of a plan's order (§4.11).
+
+    Consecutive sources in one §5.2 treatment group form a segment:
+    the pooled execution draws tax-free segments in the listed order
+    and drains tax-bearing segments greedily by marginal cost across
+    persons. Sources resolve — and access gates are enforced — one
+    segment at a time, so an order whose target is met never resolves
+    the segments after it.
+    """
+    segment: list[_WithdrawalSource] = []
+    bucket: int | None = None
+    for source_id in order:
+        source = _plan_source(sources, source_id)
+        source_bucket = _source_bucket(source)
+        if bucket is not None and source_bucket != bucket:
+            yield segment
+            segment = []
+        bucket = source_bucket
+        segment.append(source)
+    if segment:
+        yield segment
 
 
 def _plan_source(

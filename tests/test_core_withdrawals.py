@@ -41,6 +41,7 @@ def source_of(
     access_open: bool = True,
     natural_yield: str = "0",
     growth_taxable: bool = False,
+    person: str = "person-1",
 ) -> WithdrawalSource:
     """One drawable sub-balance view."""
     return WithdrawalSource(
@@ -49,6 +50,7 @@ def source_of(
         available=Money(Decimal(available)),
         tax_free_fraction=Decimal(tax_free_fraction),
         access_open=access_open,
+        person_id=EntityId(person),
         natural_yield=Money(Decimal(natural_yield)),
         growth_taxable=growth_taxable,
     )
@@ -415,7 +417,7 @@ class TestValidation:
 
     def test_state_rejects_negative_headroom(self) -> None:
         """Remaining tax-free cash headroom cannot be negative."""
-        headroom = Money(Decimal(-1))
+        headroom = {EntityId("person-1"): Money(Decimal(-1))}
         year_fraction = Decimal(1)
         with pytest.raises(ValueError, match="non-negative"):
             WithdrawalState(
@@ -423,6 +425,16 @@ class TestValidation:
                 year_fraction=year_fraction,
                 tax_free_cash_headroom=headroom,
             )
+
+    def test_state_accepts_uncapped_headroom_entries(self) -> None:
+        """A person under a region with no cap maps to ``None``."""
+        headroom = {EntityId("person-1"): None}
+        state = WithdrawalState(
+            sources=(),
+            year_fraction=Decimal(1),
+            tax_free_cash_headroom=headroom,
+        )
+        assert state.tax_free_cash_headroom == {EntityId("person-1"): None}
 
     def test_net_plan_rejects_negative_target(self) -> None:
         """A negative net target is a strategy bug, not a plan."""
