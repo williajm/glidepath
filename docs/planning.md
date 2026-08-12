@@ -809,6 +809,7 @@ class AnnuityPurchase:  # wholly a decision record (5.1)
     fraction_of_pot: Decision[Decimal]  # partial annuitisation supported
     annuity_type: AnnuityType  # LEVEL | ESCALATING | INFLATION_LINKED
     basis: AnnuityBasis  # SINGLE | JOINT
+    survivor_fraction: Decision[Decimal] | None  # JOINT only: 50/66/100% (§6)
     # rate comes from the annuity-rate assumption table by age/type
 ```
 
@@ -933,7 +934,20 @@ convention). Pricing is assumption-driven (§7): the single-life-at-65
 base rate for the type, times the `annuity.age_adjustment` table's
 per-age multiplier (whole-year knots, linear interpolation between,
 no extrapolation outside), times its joint-life factor on a joint
-basis. Income is wholly taxable, starts at the exact purchase date
+basis — the one factor whatever survivor fraction the purchase
+carries, a labelled v1 limitation of the §7 table (real quotes price
+the 50/66/100% options differently). On the buyer's death a
+joint-life stream continues to the surviving partner at the purchased
+fraction, escalating as before (§4.11, roadmap 9.34); a single-life
+stream dies with the buyer. A joint-life purchase executed with no
+living modelled partner — none in the plan, or the partner already
+dead at the purchase date — still prices at the joint factor and buys
+a survivor income the model can never pay: a recorded convention (the
+purchase is the user's stated decision, and the engine executes it as
+priced). The facts form refuses entering a joint-life purchase with
+no partner on the form, so the convention is reachable only through a
+death predating the purchase or a plan built outside the form.
+Income is wholly taxable, starts at the exact purchase date
 (pro-rated in its first period, §4.1), and escalates per product:
 level holds nominal; escalating compounds the table's fixed rate;
 inflation-linked tracks the run's CPI path exactly — annuity
@@ -1635,7 +1649,12 @@ the default claim-when-eligible (§4.11); v6→v7 (roadmap 9.33) adds
 `"death_age": null` to every person and `"survivor_fraction": null` to
 every DB pension — a v6 file's persons all load alive to the horizon
 and its schemes keep the `db.survivor_fraction` assumption default
-(§4.11).
+(§4.11); v7→v8 (roadmap 9.34) adds `"survivor_fraction"` to every
+annuity purchase — `null` for single-life, while a v7 joint-life
+purchase gains the 50% decision its priced joint factor was always
+quoting (the §7 table's joint factor is the joint-life 50% product's
+relativity, so this records what the price already meant rather than
+guessing among the §6 options).
 
 ## 6. Verified UK policy figures (2026/27)
 
@@ -1804,7 +1823,7 @@ Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 | `annuity.level.single.65` | 7.75%/yr per £ purchase | Which? market table, snapshot 2026-07-27, retrieved 2026-08-01 ([which.co.uk](https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm)); best rate 7.946% — volatile market snapshot, refresh before relying on |
 | `annuity.escalating3.single.65` | 5.47%/yr | same snapshot |
 | `annuity.inflation_linked.single.65` | 5.5%/yr | Indicative only — secondary source ([IFA Magazine](https://ifamagazine.com/annuity-rates-hit-7-75-as-retirement-incomes-reach-18-year-high/)); weakest-sourced default here |
-| `annuity.age_adjustment` | Per-age/type multipliers on the single-65 base rates (knots at 55–75, linear interpolation between, no extrapolation outside); joint-life factor 0.92; escalating products increase 3%/yr | Relativities from the Hargreaves Lansdown best-buy annuity tables (single/joint life; level, RPI-linked, 3% escalation), snapshot 2026-07-31, retrieved 2026-08-03 ([hl.co.uk](https://www.hl.co.uk/retirement/annuities/best-buy-rates)); the inflation-linked curve uses the RPI-linked product's relativities |
+| `annuity.age_adjustment` | Per-age/type multipliers on the single-65 base rates (knots at 55–75, linear interpolation between, no extrapolation outside); joint-life factor 0.92 — the one factor whatever the purchase's survivor fraction, a **v1 limitation** (real quotes price the 50/66/100% options differently; the HL snapshot prices a 50% survivor product); escalating products increase 3%/yr | Relativities from the Hargreaves Lansdown best-buy annuity tables (single/joint life; level, RPI-linked, 3% escalation), snapshot 2026-07-31, retrieved 2026-08-03 ([hl.co.uk](https://www.hl.co.uk/retirement/annuities/best-buy-rates)); the inflation-linked curve uses the RPI-linked product's relativities |
 
 *The `yield.*` rows price the natural-yield withdrawal strategy
 (roadmap 5.3) and the portfolio income of taxable-growth wrappers
@@ -2483,13 +2502,24 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   unchanged); death is deterministic across Monte Carlo paths; with
   no survivor the estate stays invested with no further modelled
   flows (§4.11 shipped conventions).*
-- [ ] 9.34 Couples: joint-life annuities end-to-end — *the purchase
-  gains a survivor-fraction decision (50/66/100%, §6); the facts form
-  enters joint-life purchases (`form_cannot_represent` drops its last
-  couples refusal); on the buyer's death (9.33) the stream continues
-  to the survivor at that fraction; single joint pricing factor (0.92)
-  regardless of fraction recorded as a labelled v1 limitation of the
-  §7 age-adjustment table.*
+- [x] 9.34 Couples: joint-life annuities end-to-end (#175) — *the
+  purchase gains a survivor-fraction decision (50/66/100%, §6),
+  validated against the basis (joint-life requires one, single-life
+  forbids it); on the buyer's death (9.33) the stream passes to the
+  survivor at that fraction, escalating as before; the single joint
+  pricing factor (0.92) applies whatever the fraction — a labelled v1
+  limitation of the §7 age-adjustment table; the facts form's
+  survivor-income choice implies the basis, so
+  `form_cannot_represent` drops its last couples refusal — while a
+  joint-life purchase with no partner is refused on entry and on
+  open (the §5 convention records that the engine still prices the
+  joint factor with no one to pay); the survivor fraction joins the
+  scenario whitelist (synthesized over a single-life base like
+  `death_age`; a basis flip to single entails dropping it), and the
+  scenario editor pairs the two overrides so the joint-life what-if
+  is reachable one edit at a time; schema v8 adds `survivor_fraction`
+  to every annuity purchase — `null` for single-life, the 50% the
+  joint factor was always quoting for a v7 joint-life purchase.*
 
 ## 9. Open questions
 

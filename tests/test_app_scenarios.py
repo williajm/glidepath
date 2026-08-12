@@ -43,6 +43,8 @@ from glidepath.app.scenarios import (
 )
 from glidepath.core import (
     BASE_RUN_NAME,
+    AnnuityBasis,
+    AnnuityPurchase,
     AnnuityType,
     AssumptionKey,
     AssumptionTarget,
@@ -62,7 +64,7 @@ from glidepath.core import (
     TaxResidencyId,
     Wrapper,
 )
-from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
+from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY, SIPP_KIND
 
 TODAY = date(2026, 8, 2)
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -71,11 +73,14 @@ AS_OF = date(2026, 8, 1)
 PERSON_ID = EntityId("scen-person")
 OUTFLOW_ID = EntityId("scen-outflow")
 OUTFLOW_2_ID = EntityId("scen-outflow-2")
+ANNUITY_ID = EntityId("scen-annuity")
 
 RETIREMENT_KEY = f"{PERSON_ID}:target_retirement_age"
 DEATH_AGE_KEY = f"{PERSON_ID}:death_age"
 OUTFLOW_KEY = f"{OUTFLOW_ID}:amount_real"
 OUTFLOW_2_KEY = f"{OUTFLOW_2_ID}:amount_real"
+SURVIVOR_KEY = f"{ANNUITY_ID}:survivor_fraction"
+BASIS_KEY = f"{ANNUITY_ID}:basis"
 CPI_KEY = AssumptionKey.INFLATION_CPI.value
 
 SCENARIO = "Retire at 58"
@@ -96,16 +101,36 @@ def household(
     *,
     with_outflow: bool = True,
     with_second_outflow: bool = False,
+    with_purchase: bool = False,
 ) -> Household:
-    """An ISA saver retiring at 60, with optional planned outflows."""
+    """An ISA saver retiring at 60, with optional planned outflows.
+
+    ``with_purchase`` adds a SIPP and one single-life annuity purchase
+    for the joint-life pairing what-ifs (9.34).
+    """
     isa = Wrapper(id=EntityId("scen-isa"), kind=ISA_KIND, balance=money_fact("25000"))
+    wrappers: tuple[Wrapper, ...] = (isa,)
+    purchases: tuple[AnnuityPurchase, ...] = ()
+    if with_purchase:
+        sipp = Wrapper(
+            id=EntityId("scen-sipp"), kind=SIPP_KIND, balance=money_fact("50000")
+        )
+        wrappers = (isa, sipp)
+        purchases = (
+            AnnuityPurchase(
+                id=ANNUITY_ID,
+                at_age=Decision(value=70, recorded_on=RECORDED),
+                fraction_of_pot=Decision(value=Decimal("0.5"), recorded_on=RECORDED),
+            ),
+        )
     person = Person(
         id=PERSON_ID,
         date_of_birth=Fact(value=date(1991, 2, 1), as_of=AS_OF, recorded_on=RECORDED),
         target_retirement_age=Decision(value=60, recorded_on=RECORDED),
         tax_residency=tax_residency,
         employment_income=money_fact("42000"),
-        wrappers=(isa,),
+        wrappers=wrappers,
+        annuity_purchases=purchases,
     )
     outflows: tuple[PlannedOutflow, ...] = ()
     if with_outflow:
@@ -616,42 +641,137 @@ class TestScenariosViewModel:
         assert any(row[2] == "" for row in view_model.comparison_rows)
 
 
+@pytest.fixture(scope="module", name="purchase_scenario")
+def purchase_scenario_fixture() -> PlanState:
+    """A projected single-life-purchase plan carrying one scenario."""
+    projected = state_with_household(
+        initial_plan_state(), household(with_purchase=True), today=TODAY
+    )
+    outcome = state_with_scenario_added(projected, SCENARIO, today=TODAY)
+    assert outcome.error is None
+    return outcome.state
+
+
+class TestJointLifePairing:
+    """The survivor-income override implies the basis (9.34).
+
+    Neither half of the single-to-joint what-if passes the purchase's
+    basis/fraction invariant alone, so the editor pairs them — exactly
+    as the facts form's survivor-income choice implies the basis.
+    """
+
+    def paired(self, purchase_scenario: PlanState) -> PlanState:
+        """The scenario with the joint-life pair set via one edit."""
+        outcome = state_with_scenario_override(
+            purchase_scenario, SCENARIO, SURVIVOR_KEY, "0.66", today=TODAY
+        )
+        assert outcome.error is None
+        return outcome.state
+
+    def test_a_fraction_override_pairs_a_joint_basis(
+        self, purchase_scenario: PlanState
+    ) -> None:
+        """One edit sets both halves of the joint-life what-if."""
+        state = self.paired(purchase_scenario)
+        fraction, basis = state.scenarios[0].overrides
+        assert fraction.value == Decimal("0.66")
+        assert basis.value is AnnuityBasis.JOINT
+        assert state.scenario_runs is not None
+
+    def test_a_joint_basis_alone_is_rejected(
+        self, purchase_scenario: PlanState
+    ) -> None:
+        """The basis flip never invents a fraction; it demands one."""
+        outcome = state_with_scenario_override(
+            purchase_scenario, SCENARIO, BASIS_KEY, "joint", today=TODAY
+        )
+        assert outcome.error is not None
+        assert "survivor_fraction" in outcome.error
+        assert outcome.state is purchase_scenario
+
+    def test_an_off_menu_fraction_is_rejected_at_edit_time(
+        self, purchase_scenario: PlanState
+    ) -> None:
+        """A fraction outside the §6 options is refused with the menu."""
+        outcome = state_with_scenario_override(
+            purchase_scenario, SCENARIO, SURVIVOR_KEY, "0.75", today=TODAY
+        )
+        assert outcome.error is not None
+        assert "must be one of" in outcome.error
+        assert outcome.state is purchase_scenario
+
+    def test_a_blank_fraction_removes_the_pair(
+        self, purchase_scenario: PlanState
+    ) -> None:
+        """Blank removes the fraction and the basis it carried along."""
+        outcome = state_with_scenario_override(
+            self.paired(purchase_scenario), SCENARIO, SURVIVOR_KEY, " ", today=TODAY
+        )
+        assert outcome.error is None
+        assert outcome.state.scenarios[0].overrides == ()
+
+    def test_a_single_basis_override_drops_the_fraction(
+        self, purchase_scenario: PlanState
+    ) -> None:
+        """Flipping back to single entails no survivor income."""
+        outcome = state_with_scenario_override(
+            self.paired(purchase_scenario), SCENARIO, BASIS_KEY, "single", today=TODAY
+        )
+        assert outcome.error is None
+        [basis] = outcome.state.scenarios[0].overrides
+        assert basis.value is AnnuityBasis.SINGLE
+
+    def test_removing_the_basis_drops_the_fraction_too(
+        self, purchase_scenario: PlanState
+    ) -> None:
+        """On a single-life base the pair only stands together."""
+        state = state_without_scenario_override(
+            self.paired(purchase_scenario), SCENARIO, BASIS_KEY, today=TODAY
+        )
+        assert state.scenarios[0].overrides == ()
+
+
 class TestValueParsingHelpers:
     """Decision values parse by the base value's shape."""
 
     def test_money_parses_from_plain_text(self) -> None:
         """Money comes back as Money."""
-        parsed = _parsed_decision_value(Money(Decimal(1)), "2500.50")
+        parsed = _parsed_decision_value(Money(Decimal(1)), "2500.50", "amount_real")
         assert parsed == Money(Decimal("2500.50"))
 
     def test_decimal_parses_and_rejects_nonsense(self) -> None:
         """Decimals parse; non-numbers report the expected shape."""
         base = Decimal(1)
-        assert _parsed_decision_value(base, "0.5") == Decimal("0.5")
+        assert _parsed_decision_value(base, "0.5", "commuted_fraction") == Decimal(
+            "0.5"
+        )
         with pytest.raises(ValueError, match="plain number"):
-            _parsed_decision_value(base, "half")
+            _parsed_decision_value(base, "half", "commuted_fraction")
 
     def test_int_rejects_fractions(self) -> None:
         """An int target refuses fractional text."""
         with pytest.raises(ValueError, match="whole number"):
-            _parsed_decision_value(60, "58.5")
+            _parsed_decision_value(60, "58.5", "target_retirement_age")
 
     def test_enum_parses_by_display_text_or_name(self) -> None:
         """Enum choices accept the display form, case-insensitively."""
-        assert _parsed_decision_value(AnnuityType.LEVEL, "inflation linked") is (
-            AnnuityType.INFLATION_LINKED
+        assert _parsed_decision_value(
+            AnnuityType.LEVEL, "inflation linked", "annuity_type"
+        ) is (AnnuityType.INFLATION_LINKED)
+        assert (
+            _parsed_decision_value(AnnuityType.LEVEL, "level", "annuity_type")
+            is AnnuityType.LEVEL
         )
-        assert _parsed_decision_value(AnnuityType.LEVEL, "level") is AnnuityType.LEVEL
 
     def test_enum_rejection_lists_the_choices(self) -> None:
         """A wrong choice names the valid ones."""
         with pytest.raises(ValueError, match="choose one of"):
-            _parsed_decision_value(AnnuityType.LEVEL, "gilt")
+            _parsed_decision_value(AnnuityType.LEVEL, "gilt", "annuity_type")
 
     def test_unsupported_shape_is_rejected(self) -> None:
         """A shape outside the whitelist cannot be overridden."""
         with pytest.raises(ValueError, match="cannot override"):
-            _parsed_decision_value("a string", "text")
+            _parsed_decision_value("a string", "text", "target_retirement_age")
 
     def test_edit_text_round_trips_each_shape(self) -> None:
         """Prompt prefills parse back to the value they came from."""
@@ -666,12 +786,19 @@ class TestValueParsingHelpers:
 
     def test_a_none_base_parses_as_a_whole_number(self) -> None:
         """The unset-death-age template is an int (planning §4.11)."""
-        assert _parsed_decision_value(None, "75") == 75
+        assert _parsed_decision_value(None, "75", "death_age") == 75
 
     def test_a_none_base_rejects_non_integers(self) -> None:
         """Bad text over an unset base gets the whole-number message."""
         with pytest.raises(ValueError, match="whole number"):
-            _parsed_decision_value(None, "soon")
+            _parsed_decision_value(None, "soon", "death_age")
+
+    def test_an_unset_survivor_fraction_parses_as_a_decimal(self) -> None:
+        """The unset-fraction template is the §6 decimal (9.34)."""
+        parsed = _parsed_decision_value(None, "0.66", "survivor_fraction")
+        assert parsed == Decimal("0.66")
+        with pytest.raises(ValueError, match="plain number"):
+            _parsed_decision_value(None, "two thirds", "survivor_fraction")
 
 
 class TestCellFormatting:

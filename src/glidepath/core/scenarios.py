@@ -28,6 +28,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
+from glidepath.core.annuities import AnnuityBasis
 from glidepath.core.provenance import (
     Assumption,
     AssumptionKey,
@@ -70,7 +71,7 @@ class DecisionTarget:
     - DB pension: ``taken_at_age``, ``commuted_fraction``,
       ``active_membership.active_until_age``
     - annuity purchase: ``at_age``, ``fraction_of_pot``,
-      ``annuity_type``, ``basis``
+      ``annuity_type``, ``basis``, ``survivor_fraction``
     - planned outflow: ``amount_real``
 
     Most paths name ``Decision[T]`` fields; the annuity purchase's
@@ -79,10 +80,13 @@ class DecisionTarget:
     household's ``claim_marriage_allowance`` decision (planning §4.11)
     is not addressable: the household carries no ``EntityId``, and a
     what-if over a bounded relief reads directly off the base run —
-    a recorded 9.32 limitation. ``death_age`` alone is addressable
-    even when the base plan leaves it unset — "what if I die at 75"
-    must work over an alive-to-horizon base (§4.11), so a ``None``
-    base synthesizes a fresh decision at resolution.
+    a recorded 9.32 limitation. ``death_age`` and the purchase's
+    ``survivor_fraction`` are addressable even when the base plan
+    leaves them unset — "what if I die at 75" must work over an
+    alive-to-horizon base (§4.11), and "what if joint-life at 66%"
+    needs a fraction a single-life base never carried (roadmap
+    9.34) — so a ``None`` base synthesizes a fresh decision at
+    resolution.
     """
 
     entity_id: EntityId
@@ -358,7 +362,14 @@ def _person_decision_target_labels(person: Person) -> dict[tuple[EntityId, str],
                 f"db_pension[{pension.id}].active_membership.active_until_age"
             )
     for purchase in person.annuity_purchases:
-        for field in ("at_age", "fraction_of_pot", "annuity_type", "basis"):
+        fields = (
+            "at_age",
+            "fraction_of_pot",
+            "annuity_type",
+            "basis",
+            "survivor_fraction",
+        )
+        for field in fields:
             labels[(purchase.id, field)] = f"annuity_purchase[{purchase.id}].{field}"
     return labels
 
@@ -592,7 +603,16 @@ def _apply_to_annuity_purchase(
     ``annuity_type`` and ``basis`` are plain enum fields — the whole
     record is a decision (planning §5.1) — so their overrides replace
     the value directly; the override's note lives only in the
-    resolution's ``applied`` record.
+    resolution's ``applied`` record. A basis override to ``SINGLE``
+    entails dropping the survivor fraction — a single-life purchase
+    cannot carry one, so the drop is the override's definition, not a
+    guess. A combination the record still rejects — joint-life with
+    no fraction to apply, or a fraction override alongside a single
+    basis — fails resolution loudly (roadmap 9.34).
+
+    Raises:
+        ScenarioError: If the overridden purchase violates the
+            basis/survivor-fraction invariant.
     """
     changes: dict[str, Any] = {}
     for field in ("at_age", "fraction_of_pot"):
@@ -609,4 +629,40 @@ def _apply_to_annuity_purchase(
             label = f"annuity_purchase[{purchase.id}].{field}"
             _check_value_type(getattr(purchase, field), override.value, label)
             changes[field] = override.value
-    return replace(purchase, **changes) if changes else purchase
+    override = picks.get((purchase.id, "survivor_fraction"))
+    if override is not None:
+        changes["survivor_fraction"] = _resolved_survivor_fraction(purchase, override)
+    elif (
+        changes.get("basis", purchase.basis) is AnnuityBasis.SINGLE
+        and purchase.survivor_fraction is not None
+    ):
+        changes["survivor_fraction"] = None
+    try:
+        return replace(purchase, **changes) if changes else purchase
+    except ValueError as exc:
+        msg = f"annuity_purchase[{purchase.id}]: {exc}"
+        raise ScenarioError(msg) from exc
+
+
+def _resolved_survivor_fraction(
+    purchase: AnnuityPurchase, override: Override
+) -> Decision[Any]:
+    """The survivor-fraction decision the override resolves to (9.34).
+
+    Addressable even when the base purchase is single-life — flipping
+    the basis to joint needs a fraction the base never carried — so a
+    ``None`` base synthesizes a fresh decision. Resolution reads no
+    clock (§4.6): the synthesized decision borrows
+    ``fraction_of_pot.recorded_on``, the purchase's ever-present
+    decision timestamp, which also supplies the ``Decimal`` template
+    the value's type is checked against.
+    """
+    label = f"annuity_purchase[{purchase.id}].survivor_fraction"
+    if purchase.survivor_fraction is not None:
+        return _resolved_decision(purchase.survivor_fraction, override, label)
+    _check_value_type(purchase.fraction_of_pot.value, override.value, label)
+    return Decision(
+        value=override.value,
+        recorded_on=purchase.fraction_of_pot.recorded_on,
+        note=override.note,
+    )

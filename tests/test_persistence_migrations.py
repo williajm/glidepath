@@ -303,6 +303,99 @@ class TestV6ToV7:
         assert migrated["schema_version"] == SCHEMA_VERSION
 
 
+class TestV7ToV8:
+    """The 9.34 migration: annuity purchases gain ``survivor_fraction``."""
+
+    def test_annuity_purchases_gain_the_null_survivor_key(self) -> None:
+        """Every single-life purchase in a v7 file gains the null key."""
+        raw: RawDocument = {
+            "schema_version": 7,
+            "household": {
+                "persons": [
+                    {
+                        "annuity_purchases": [
+                            {"id": "a", "basis": "single"},
+                            {"id": "b", "basis": "single"},
+                        ]
+                    },
+                    {"annuity_purchases": []},
+                ]
+            },
+        }
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        persons = migrated["household"]["persons"]
+        assert persons[0] == {
+            "annuity_purchases": [
+                {"id": "a", "basis": "single", "survivor_fraction": None},
+                {"id": "b", "basis": "single", "survivor_fraction": None},
+            ]
+        }
+        assert persons[1] == {"annuity_purchases": []}
+
+    def test_a_joint_purchase_gains_the_priced_50_percent_decision(self) -> None:
+        """A v7 joint-life purchase records what its price already meant.
+
+        The §7 joint factor quotes the joint-life 50% product, so the
+        migration writes that fraction as a decision borrowing the
+        purchase's ``at_age`` timestamp (migrations read no clock).
+        """
+        raw: RawDocument = {
+            "schema_version": 7,
+            "household": {
+                "persons": [
+                    {
+                        "annuity_purchases": [
+                            {
+                                "id": "a",
+                                "basis": "joint",
+                                "at_age": {
+                                    "value": 70,
+                                    "recorded_on": "2026-08-01T12:00:00+00:00",
+                                    "note": None,
+                                },
+                            }
+                        ]
+                    }
+                ]
+            },
+        }
+        migrated = apply_migrations(raw)
+        [purchase] = migrated["household"]["persons"][0]["annuity_purchases"]
+        assert purchase["survivor_fraction"] == {
+            "value": "0.5",
+            "recorded_on": "2026-08-01T12:00:00+00:00",
+            "note": None,
+        }
+
+    def test_a_document_without_persons_just_bumps_the_version(self) -> None:
+        """Nothing to upgrade still steps the version."""
+        raw: RawDocument = {"schema_version": 7, "marker": "untouched"}
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        assert migrated["marker"] == "untouched"
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            {"schema_version": 7, "household": "not-an-object"},
+            {"schema_version": 7, "household": {"persons": "not-a-list"}},
+            {
+                "schema_version": 7,
+                "household": {
+                    "persons": [{"annuity_purchases": "not-a-list"}, "not-a-dict"]
+                },
+            },
+        ],
+    )
+    def test_malformed_shapes_pass_through_for_the_strict_decoder(
+        self, raw: RawDocument
+    ) -> None:
+        """The upgrader never crashes on shapes the decoder will reject."""
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+
+
 class TestUpgradeSequencing:
     """Synthetic registries prove the harness ahead of real migrations."""
 

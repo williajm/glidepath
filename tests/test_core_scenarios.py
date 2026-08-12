@@ -102,7 +102,9 @@ def db_pension_of(
     )
 
 
-def base_household(*, with_state_pension: bool = True) -> Household:
+def base_household(
+    *, with_state_pension: bool = True, joint_purchase: bool = False
+) -> Household:
     """One of every override-targetable entity, under a single person."""
     schedule = ContributionSchedule(
         employee_amount=decision(Money(Decimal(5000))),
@@ -141,7 +143,8 @@ def base_household(*, with_state_pension: bool = True) -> Household:
         at_age=decision(70),
         fraction_of_pot=decision(Decimal("0.5")),
         annuity_type=AnnuityType.LEVEL,
-        basis=AnnuityBasis.SINGLE,
+        basis=AnnuityBasis.JOINT if joint_purchase else AnnuityBasis.SINGLE,
+        survivor_fraction=decision(Decimal("0.5")) if joint_purchase else None,
     )
     person = Person(
         id=PERSON_ID,
@@ -494,7 +497,12 @@ class TestResolution:
         assert purchase.fraction_of_pot.value == Decimal("0.75")
 
     def test_annuity_product_overrides(self) -> None:
-        """Product type and basis are addressable: the record is a decision."""
+        """Product type and basis are addressable: the record is a decision.
+
+        Flipping a single-life base to joint pairs the basis override
+        with a survivor fraction the base never carried — synthesized
+        exactly like ``death_age`` (9.34).
+        """
         scenario = Scenario(
             name="inflation-linked-joint",
             overrides=(
@@ -502,6 +510,9 @@ class TestResolution:
                     ANNUITY_ID, "annuity_type", AnnuityType.INFLATION_LINKED
                 ),
                 decision_override(ANNUITY_ID, "basis", AnnuityBasis.JOINT),
+                decision_override(
+                    ANNUITY_ID, "survivor_fraction", Decimal("0.66"), note="what if"
+                ),
             ),
         )
         resolution = resolve_scenario(base_household(), base_assumptions(), scenario)
@@ -509,6 +520,62 @@ class TestResolution:
         assert purchase.annuity_type is AnnuityType.INFLATION_LINKED
         assert purchase.basis is AnnuityBasis.JOINT
         assert purchase.at_age.value == 70
+        survivor = purchase.survivor_fraction
+        assert survivor is not None
+        assert survivor.value == Decimal("0.66")
+        assert survivor.note == "what if"
+        assert survivor.recorded_on == RECORDED
+
+    def test_a_joint_basis_flip_without_a_fraction_fails(self) -> None:
+        """Joint-life needs a survivor income; resolution never guesses."""
+        scenario = Scenario(
+            name="joint-no-fraction",
+            overrides=(decision_override(ANNUITY_ID, "basis", AnnuityBasis.JOINT),),
+        )
+        household = base_household()
+        assumptions = base_assumptions()
+        with pytest.raises(ScenarioError, match="needs a survivor_fraction"):
+            resolve_scenario(household, assumptions, scenario)
+
+    def test_a_single_basis_flip_drops_the_survivor_fraction(self) -> None:
+        """'What if single-life' entails no survivor income (9.34)."""
+        scenario = Scenario(
+            name="single-life",
+            overrides=(decision_override(ANNUITY_ID, "basis", AnnuityBasis.SINGLE),),
+        )
+        resolution = resolve_scenario(
+            base_household(joint_purchase=True), base_assumptions(), scenario
+        )
+        purchase = resolution.household.persons[0].annuity_purchases[0]
+        assert purchase.basis is AnnuityBasis.SINGLE
+        assert purchase.survivor_fraction is None
+
+    def test_a_survivor_fraction_what_if_on_a_joint_base(self) -> None:
+        """The §6 survivor option varies like any other decision."""
+        scenario = Scenario(
+            name="richer-survivor",
+            overrides=(decision_override(ANNUITY_ID, "survivor_fraction", Decimal(1)),),
+        )
+        resolution = resolve_scenario(
+            base_household(joint_purchase=True), base_assumptions(), scenario
+        )
+        purchase = resolution.household.persons[0].annuity_purchases[0]
+        survivor = purchase.survivor_fraction
+        assert survivor is not None
+        assert survivor.value == Decimal(1)
+
+    def test_a_survivor_fraction_on_a_single_basis_fails(self) -> None:
+        """A fraction override cannot ride on a single-life purchase."""
+        scenario = Scenario(
+            name="fraction-no-joint",
+            overrides=(
+                decision_override(ANNUITY_ID, "survivor_fraction", Decimal("0.5")),
+            ),
+        )
+        household = base_household()
+        assumptions = base_assumptions()
+        with pytest.raises(ScenarioError, match="cannot carry a survivor_fraction"):
+            resolve_scenario(household, assumptions, scenario)
 
     def test_mapping_assumption_accepts_any_mapping(self) -> None:
         """Shipped mapping defaults are proxies; dict overrides are legal."""
@@ -676,8 +743,9 @@ class TestDecisionTargetCatalogue:
             (ANNUITY_ID, "fraction_of_pot"),
             (ANNUITY_ID, "annuity_type"),
             (ANNUITY_ID, "basis"),
+            (ANNUITY_ID, "survivor_fraction"),
         }
-        assert len(catalogue) == 13
+        assert len(catalogue) == 14
 
     def test_values_are_bare_with_decisions_unwrapped(self) -> None:
         """Each entry carries the current bare value an override replaces."""
@@ -694,6 +762,7 @@ class TestDecisionTargetCatalogue:
         assert values[(PERSON_ID, "state_pension.deferral_years")] == Decimal(0)
         assert values[(ANNUITY_ID, "annuity_type")] is AnnuityType.LEVEL
         assert values[(ANNUITY_ID, "basis")] is AnnuityBasis.SINGLE
+        assert values[(ANNUITY_ID, "survivor_fraction")] is None
 
     def test_labels_use_the_provenance_grammar(self) -> None:
         """Labels match the stable resolution/provenance label grammar."""

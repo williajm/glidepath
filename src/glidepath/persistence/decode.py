@@ -668,6 +668,12 @@ def _annuity_purchase(raw: object, path: str) -> AnnuityPurchase:
         reader.take("annuity_type"), reader.at("annuity_type")
     )
     basis = ANNUITY_BASIS_TOKENS.member(reader.take("basis"), reader.at("basis"))
+    survivor_raw = reader.take("survivor_fraction")
+    survivor = (
+        None
+        if survivor_raw is None
+        else _decision(survivor_raw, reader.at("survivor_fraction"), parse_decimal)
+    )
     reader.finish()
     return _built(
         lambda: AnnuityPurchase(
@@ -676,6 +682,7 @@ def _annuity_purchase(raw: object, path: str) -> AnnuityPurchase:
             fraction_of_pot=fraction,
             annuity_type=annuity_type,
             basis=basis,
+            survivor_fraction=survivor,
         ),
         path,
     )

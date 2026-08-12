@@ -706,12 +706,20 @@ class _AnnuityStream:
     by), and the first boundary advance consumes it in place of the
     whole period's fraction — a mid-period purchase must not collect a
     full period of escalation (§4.1 linear whole-month convention).
+
+    ``survivor_fraction`` marks a joint-life purchase (roadmap 9.34):
+    on the buyer's death the stream passes to the surviving partner
+    with ``base_annual`` scaled by the fraction, so the survivor's
+    income is that share of what would have been paid — escalation
+    carries on through ``factor`` uninterrupted. ``None`` is a
+    single-life stream, which dies with the buyer.
     """
 
     annuity_type: AnnuityType
     start: date
     base_annual: Money
     escalation: Rate
+    survivor_fraction: Decimal | None = None
     purchase_period_share: Decimal | None = None
     factor: Decimal = _ONE
 
@@ -1628,9 +1636,11 @@ class _PersonProjection:
         """Apply this person's death at the period open (§4.11, 9.33).
 
         Income streams stop: the state pension dies with the person
-        (nothing is inherited, planning §6), and annuity streams end —
-        every purchasable stream is single-life until roadmap 9.34
-        continues joint-life ones. DB streams pass to the survivor at
+        (nothing is inherited, planning §6), and single-life annuity
+        streams end. A joint-life annuity stream passes to the
+        survivor at its purchased survivor fraction (roadmap 9.34) —
+        income continues at that share of what would have been paid,
+        escalating as before. DB streams pass to the survivor at
         each scheme's survivor fraction — the stated per-scheme fact,
         else the ``db.survivor_fraction`` assumption — with accrual and
         the commutation lump sum ended (death ends service; a survivor
@@ -1641,35 +1651,27 @@ class _PersonProjection:
         exactly when the region's death-benefit rule says so), ISA
         money passes via the additional permitted subscription, and
         GIA/cash pass at the spouse exemption — the latter two keeping
-        their own treatments. With no survivor the streams still stop;
-        the wrappers stay where they are, invested but with no further
-        flows modelled (§4.11 recorded convention).
+        their own treatments. With no survivor every stream still
+        stops, joint-life included; the wrappers stay where they are,
+        invested but with no further flows modelled (§4.11 recorded
+        convention).
         """
         self._dead = True
         self._sp_stream = None
-        self._annuity_streams.clear()
+        annuities = self._annuity_streams
+        self._annuity_streams = []
         streams = self._db_streams
         self._db_streams = []
         if survivor is None:
             return
+        self._bequeath_annuity_streams(annuities, survivor)
         tax_free = self.region.wrappers.death_benefits_income_tax_free(
             self.person.date_of_birth.value, death_date
         )
         for pension, stream in zip(self.person.db_pensions, streams, strict=True):
-            if pension.survivor_fraction is not None:
-                fraction = pension.survivor_fraction.value
-            else:
-                fraction = decimal_assumption_value(
-                    self.tracked.get(AssumptionKey.DB_SURVIVOR_FRACTION)
-                )
-                if not Decimal(0) <= fraction <= _ONE:
-                    # The stated fact enforces this at construction;
-                    # the assumption route must match (§4.6 fail-loud).
-                    msg = (
-                        f"db.survivor_fraction must lie between 0 and 1, got {fraction}"
-                    )
-                    raise EngineError(msg)
-            stream.accrued_annual = stream.accrued_annual * fraction
+            stream.accrued_annual = stream.accrued_annual * self._db_survivor_fraction(
+                pension
+            )
             stream.lump_sum_factor = Decimal(0)
             stream.accrual = None
             survivor.inherit_db_stream(stream)
@@ -1688,6 +1690,48 @@ class _PersonProjection:
                 pension_tax_free=tax_free if pension_pot else None,
             )
         self._wrappers = []
+
+    @staticmethod
+    def _bequeath_annuity_streams(
+        annuities: list[_AnnuityStream], survivor: _PersonProjection
+    ) -> None:
+        """Pass each joint-life stream over at its purchased fraction (9.34).
+
+        Single-life streams are simply left behind — already detached
+        from the deceased by ``die``, they pay no one.
+        """
+        for annuity in annuities:
+            if annuity.survivor_fraction is not None:
+                annuity.base_annual = annuity.base_annual * annuity.survivor_fraction
+                survivor.inherit_annuity_stream(annuity)
+
+    def _db_survivor_fraction(self, pension: DBPension) -> Decimal:
+        """One dying scheme's survivor fraction (§4.11): fact, else assumption.
+
+        Raises:
+            EngineError: If the assumption falls outside [0, 1] — the
+                stated fact enforces this at construction, and the
+                assumption route must match (§4.6 fail-loud).
+        """
+        if pension.survivor_fraction is not None:
+            return pension.survivor_fraction.value
+        fraction = decimal_assumption_value(
+            self.tracked.get(AssumptionKey.DB_SURVIVOR_FRACTION)
+        )
+        if not Decimal(0) <= fraction <= _ONE:
+            msg = f"db.survivor_fraction must lie between 0 and 1, got {fraction}"
+            raise EngineError(msg)
+        return fraction
+
+    def inherit_annuity_stream(self, stream: _AnnuityStream) -> None:
+        """Receive a deceased partner's joint-life annuity stream (9.34).
+
+        ``base_annual`` arrives already rescaled to the purchased
+        survivor fraction. The stream joins this person's own: its
+        income is taxed as theirs and escalates with their
+        ``advance_streams``.
+        """
+        self._annuity_streams.append(stream)
 
     def inherit_db_stream(self, stream: _DbStream) -> None:
         """Receive a deceased partner's DB stream, already rescaled (§4.11).
@@ -2348,6 +2392,11 @@ class _PersonProjection:
                     start=due,
                     base_annual=capital * rate,
                     escalation=self.run.annuity_pricing_table().escalation,
+                    survivor_fraction=(
+                        None
+                        if purchase.survivor_fraction is None
+                        else purchase.survivor_fraction.value
+                    ),
                     purchase_period_share=entitlement_active_fraction(
                         due, period, self.config.today, self.run.horizon_end()
                     ),

@@ -491,6 +491,13 @@ def _person_decisions(person: Person) -> list[LabelledDecision]:
                 decision=purchase.fraction_of_pot,
             )
         )
+        if purchase.survivor_fraction is not None:
+            decisions.append(
+                LabelledDecision(
+                    label=f"{purchase_prefix}.survivor_fraction",
+                    decision=purchase.survivor_fraction,
+                )
+            )
     if person.state_pension is not None:
         decisions.append(
             LabelledDecision(

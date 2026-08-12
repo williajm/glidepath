@@ -81,7 +81,8 @@
               "recorded_on": "2026-08-01T12:00:00+00:00",
               "value": "0.5"
             },
-            "id": "annuity-1"
+            "id": "annuity-1",
+            "survivor_fraction": null
           },
           {
             "annuity_type": "inflation_linked",
@@ -96,7 +97,12 @@
               "recorded_on": "2026-08-01T12:00:00+00:00",
               "value": "0.25"
             },
-            "id": "annuity-2"
+            "id": "annuity-2",
+            "survivor_fraction": {
+              "note": null,
+              "recorded_on": "2026-08-01T12:00:00+00:00",
+              "value": "0.66"
+            }
           },
           {
             "annuity_type": "escalating",
@@ -111,7 +117,8 @@
               "recorded_on": "2026-08-01T12:00:00+00:00",
               "value": "1"
             },
-            "id": "annuity-3"
+            "id": "annuity-3",
+            "survivor_fraction": null
           }
         ],
         "date_of_birth": {
@@ -554,5 +561,5 @@
       "overrides": []
     }
   ],
-  "schema_version": 7
+  "schema_version": 8
 }

@@ -6,6 +6,7 @@ and never contains policy figures, which live in region data files.
 """
 
 from glidepath.core.annuities import (
+    JOINT_SURVIVOR_FRACTIONS,
     AnnuityBasis,
     AnnuityPurchase,
     AnnuityRateTable,
@@ -220,6 +221,7 @@ from glidepath.core.wrappers import (
 
 __all__ = [
     "BASE_RUN_NAME",
+    "JOINT_SURVIVOR_FRACTIONS",
     "AgeRules",
     "AnnualAllowanceFunding",
     "AnnualAllowanceMeasurement",

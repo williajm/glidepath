@@ -42,8 +42,10 @@ from glidepath.app.plan import (
 from glidepath.app.tables import table_edit_text
 from glidepath.core import (
     BASE_RUN_NAME,
+    AnnuityBasis,
     AssumptionKey,
     AssumptionTarget,
+    DecisionTarget,
     EntityId,
     Money,
     Override,
@@ -439,6 +441,7 @@ def state_with_scenario_override(
     except ValueError as exc:
         return OverrideOutcome(state=state, error=str(exc))
     candidate = _scenario_with_override(scenario, override)
+    candidate = _with_basis_pairing(candidate, state.household, override)
     checkable = _without_orphans(candidate, state.household, state.assumptions)
     try:
         resolve_scenario(state.household, state.assumptions, checkable)
@@ -465,6 +468,7 @@ def state_without_scenario_override(
     if len(overrides) == len(scenario.overrides):
         return state
     changed = Scenario(name=scenario.name, overrides=overrides, note=scenario.note)
+    changed = _without_removed_pair(changed, state.household, target_key)
     scenarios = tuple(
         changed if s.name == scenario_name else s for s in state.scenarios
     )
@@ -495,6 +499,95 @@ def _without_orphans(
     overrides = tuple(
         override for override in scenario.overrides if override not in orphans
     )
+    return Scenario(name=scenario.name, overrides=overrides, note=scenario.note)
+
+
+def _with_basis_pairing(
+    scenario: Scenario, household: Household | None, override: Override
+) -> Scenario:
+    """The basis/survivor-fraction pairing ``override`` entails (9.34).
+
+    The editor matches the form and core resolution: a survivor
+    fraction implies the joint basis — setting one on an effectively
+    single-life purchase also flips the basis — and a basis override
+    to single entails no survivor income, dropping any fraction
+    override. Without the pairing neither override of a single-life
+    what-if could ever pass the record's basis/fraction invariant on
+    its own, so the joint-life what-if would be unreachable one edit
+    at a time.
+    """
+    target = override.target
+    if not isinstance(target, DecisionTarget):
+        return scenario
+    if target.field_path == "survivor_fraction":
+        return _with_joint_basis(scenario, household, target.entity_id)
+    if target.field_path == "basis" and override.value is AnnuityBasis.SINGLE:
+        return _without_decision_override(
+            scenario, target.entity_id, "survivor_fraction"
+        )
+    return scenario
+
+
+def _with_joint_basis(
+    scenario: Scenario, household: Household | None, entity_id: EntityId
+) -> Scenario:
+    """The scenario with the purchase's effective basis made joint.
+
+    Dropping a stored single-life override restores a joint base;
+    a single-life base gains a joint override. An already-joint
+    effective basis passes through untouched.
+    """
+    info = _decision_infos(household).get((entity_id, "basis"))
+    if info is None:
+        return scenario
+    stored = next(
+        (entry for entry in scenario.overrides if entry.target == info.target), None
+    )
+    effective = stored.value if stored is not None else info.value
+    if effective is AnnuityBasis.JOINT:
+        return scenario
+    if info.value is AnnuityBasis.JOINT:
+        return _without_decision_override(scenario, entity_id, "basis")
+    return _scenario_with_override(
+        scenario, Override(target=info.target, value=AnnuityBasis.JOINT)
+    )
+
+
+def _without_removed_pair(
+    scenario: Scenario, household: Household | None, target_key: str
+) -> Scenario:
+    """Drop the partner of a removed basis/fraction override (9.34).
+
+    On a single-life base the two overrides only stand together — the
+    fraction cannot ride a single basis and a joint basis needs a
+    fraction — so removing either one also removes the other. On a
+    joint base each override stands alone and nothing pairs.
+    """
+    if _DECISION_KEY_SEPARATOR not in target_key:
+        return scenario
+    entity_text, _, field_path = target_key.partition(_DECISION_KEY_SEPARATOR)
+    if field_path not in ("survivor_fraction", "basis"):
+        return scenario
+    entity_id = EntityId(entity_text)
+    info = _decision_infos(household).get((entity_id, "basis"))
+    if info is None or info.value is not AnnuityBasis.SINGLE:
+        return scenario
+    other = "basis" if field_path == "survivor_fraction" else "survivor_fraction"
+    return _without_decision_override(scenario, entity_id, other)
+
+
+def _without_decision_override(
+    scenario: Scenario, entity_id: EntityId, field_path: str
+) -> Scenario:
+    """The scenario with any override on that decision target removed."""
+    key = f"{entity_id}{_DECISION_KEY_SEPARATOR}{field_path}"
+    overrides = tuple(
+        override
+        for override in scenario.overrides
+        if _target_key(override.target) != key
+    )
+    if len(overrides) == len(scenario.overrides):
+        return scenario
     return Scenario(name=scenario.name, overrides=overrides, note=scenario.note)
 
 
@@ -539,7 +632,8 @@ def _parsed_override(
         if info is None:
             raise ValueError(_ORPHANED_TARGET_MESSAGE)
         return Override(
-            target=info.target, value=_parsed_decision_value(info.value, text)
+            target=info.target,
+            value=_parsed_decision_value(info.value, text, field_path),
         )
     try:
         key = AssumptionKey(target_key)
@@ -551,37 +645,45 @@ def _parsed_override(
     )
 
 
-def _parsed_decision_value(base_value: object, raw: str) -> object:
+def _parsed_decision_value(base_value: object, raw: str, field_path: str) -> object:
     """The typed value ``raw`` denotes for a decision target's shape.
 
     The §4.3 whitelist holds ``Money``, ``int``, ``Decimal``, and enum
     decisions only, so those are the shapes parsed here. A ``None``
-    base is the whitelist's one optional-base decision — an unset
-    ``death_age`` (§4.11), whose "what if I die at 75" must work over
-    an alive-to-horizon base — and parses as the same whole-number
-    template core resolution checks against.
+    base is one of the whitelist's optional-base decisions, whose
+    shape ``field_path`` names: an unset ``death_age`` (§4.11) parses
+    as the whole-number template core resolution checks against; an
+    unset ``survivor_fraction`` (9.34) as the §6 decimal fraction.
 
     Raises:
         ValueError: If ``raw`` does not parse as the base value's shape.
     """
     if base_value is None:
-        try:
-            return int(raw, 10)
-        except ValueError:
-            raise ValueError(_INT_VALUE_MESSAGE) from None
+        if field_path == "survivor_fraction":
+            return _parsed_decimal(raw)
+        return _parsed_int(raw)
     if isinstance(base_value, Money):
         return Money(_parsed_decimal(raw))
     if isinstance(base_value, Enum):
         return _parsed_choice(base_value, raw)
     if isinstance(base_value, int):
-        try:
-            return int(raw, 10)
-        except ValueError:
-            raise ValueError(_INT_VALUE_MESSAGE) from None
+        return _parsed_int(raw)
     if isinstance(base_value, Decimal):
         return _parsed_decimal(raw)
     msg = f"cannot override a {type(base_value).__name__} value"
     raise ValueError(msg)
+
+
+def _parsed_int(raw: str) -> int:
+    """A whole number from user text.
+
+    Raises:
+        ValueError: If ``raw`` is not a plain whole number.
+    """
+    try:
+        return int(raw, 10)
+    except ValueError:
+        raise ValueError(_INT_VALUE_MESSAGE) from None
 
 
 def _parsed_decimal(raw: str) -> Decimal:
