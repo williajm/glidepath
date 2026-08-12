@@ -197,10 +197,15 @@ class DrawdownPanelViewModel:
     the Monte Carlo mode. ``person_options`` name the persons a probe
     can move (household order); ``person_visible`` shows that selector
     only for a couple, and ``person_value`` echoes the held answer's
-    selection as its option position. ``answer`` is the headline;
-    ``detail`` names the age, the searched bracket, and the basis;
-    ``message`` carries the no-run or failure copy — blank whenever
-    ``answer`` is populated, and vice versa.
+    selection as its option position. ``person_age_defaults`` carry
+    each person's stated retirement-age decision (household order): a
+    shell writes the newly selected person's default into the age
+    field when the selector changes, so switching to the partner
+    tests *their* stated age rather than the first person's (§4.11).
+    ``answer`` is the headline; ``detail`` names the age, the
+    searched bracket, and the basis; ``message`` carries the no-run
+    or failure copy — blank whenever ``answer`` is populated, and
+    vice versa.
     """
 
     heading: str
@@ -213,6 +218,7 @@ class DrawdownPanelViewModel:
     person_options: tuple[str, ...]
     person_value: str
     person_visible: bool
+    person_age_defaults: tuple[str, ...]
     run_label: str
     answer: str
     detail: str
@@ -314,6 +320,14 @@ def build_drawdown_panel(state: PlanState, mode: RunMode) -> DrawdownPanelViewMo
         headline = _headline(answer)
         detail = _detail(answer)
     person_count = 1 if state.household is None else len(state.household.persons)
+    age_defaults = (
+        ()
+        if state.household is None
+        else tuple(
+            str(person.target_retirement_age.value)
+            for person in state.household.persons
+        )
+    )
     return DrawdownPanelViewModel(
         heading=DRAWDOWN_HEADING,
         age_label=DRAWDOWN_AGE_LABEL,
@@ -325,6 +339,7 @@ def build_drawdown_panel(state: PlanState, mode: RunMode) -> DrawdownPanelViewMo
         person_options=PERSON_NAMES[:person_count],
         person_value=_person_echo(answer),
         person_visible=person_count > 1,
+        person_age_defaults=age_defaults,
         run_label=FIND_DRAWDOWN_LABEL,
         answer=headline,
         detail=detail,

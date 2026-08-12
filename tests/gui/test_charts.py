@@ -740,6 +740,24 @@ class TestWhoseAgeSelectors:
         pane.drawdown_button.click()
         assert drawdown_persons == ["1"]
 
+    def test_picking_a_person_seeds_their_stated_age(self) -> None:
+        """The drawdown age field re-seeds to the picked person's age.
+
+        Without the re-seed, picking "Your partner" and pressing run
+        would test the partner at the first person's stated age
+        (planning §4.11 — the age asked about is the selected
+        person's own decision).
+        """
+        pane = ChartsPane(callbacks())
+        pane.refresh(build_charts_view_model(couple_state()))
+        combo = pane.drawdown_person_combo
+        combo.setCurrentIndex(1)
+        combo.activated.emit(1)
+        assert pane.drawdown_age_edit.text() == "58"
+        combo.setCurrentIndex(0)
+        combo.activated.emit(0)
+        assert pane.drawdown_age_edit.text() == "60"
+
 
 class TestChartTheme:
     """The charts wear the theme's series palette and chrome (§4.7)."""

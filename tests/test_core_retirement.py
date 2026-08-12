@@ -469,6 +469,40 @@ class TestCoupleSelection:
                 person_id=nobody,
             )
 
+    def test_a_partner_past_the_horizon_leaves_no_exposure(self) -> None:
+        """No period opens the household fully retired, so no answer.
+
+        The partner's fixed decision (age 62, attained 2034-01-01)
+        falls past the 2026-2033 horizon: household spending never
+        starts, so every candidate would succeed vacuously — the
+        search answers ``None`` instead of the bracket's minimum.
+        """
+        age = earliest_retirement_age(
+            couple_of(partner_retirement_age=62),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            search_of(),
+        )
+        assert age is None
+
+    def test_the_income_search_needs_household_exposure(self) -> None:
+        """The drawdown dual answers ``None`` past the partner's date.
+
+        With the partner retiring beyond the horizon there is no
+        retired period to test any income in — without the household
+        gate the search would report its £50,000 ceiling.
+        """
+        income = sustainable_income_at_age(
+            couple_of(partner_retirement_age=62),
+            flat_assumptions(),
+            stub_region(),
+            deterministic_config(),
+            age=56,
+            search=income_search_of(),
+        )
+        assert income is None
+
     def test_none_selects_the_first_person(self) -> None:
         """An explicit first-person id changes nothing.
 

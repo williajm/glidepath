@@ -414,6 +414,21 @@ class TestCoupleSelection:
         assert pair.person_label == DRAWDOWN_PERSON_LABEL
         assert pair.person_value == "0"
 
+    def test_the_panel_carries_each_persons_stated_age(
+        self, projected: PlanState, couple_projected: PlanState
+    ) -> None:
+        """A shell re-seeds the age field from these on person change.
+
+        Without them, picking "Your partner" and pressing run would
+        test the partner at the first person's stated age (§4.11).
+        """
+        single = build_drawdown_panel(projected, RunMode.DETERMINISTIC)
+        pair = build_drawdown_panel(couple_projected, RunMode.DETERMINISTIC)
+        empty = build_drawdown_panel(initial_plan_state(), RunMode.DETERMINISTIC)
+        assert single.person_age_defaults == ("63",)
+        assert pair.person_age_defaults == ("63", "63")
+        assert empty.person_age_defaults == ()
+
 
 class TestDrawdownPanel:
     """The card view model over the session state."""

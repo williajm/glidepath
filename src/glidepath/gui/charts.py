@@ -587,6 +587,11 @@ class ChartsPane(QWidget):
         self.drawdown_success_edit = QLineEdit(self._drawdown_box)
         self.drawdown_person_label = QLabel("", self._drawdown_box)
         self.drawdown_person_combo = ScrollSafeComboBox(self._drawdown_box)
+        self._drawdown_age_defaults: tuple[str, ...] = ()
+        # activated fires only on a user pick, never on the programmatic
+        # selection a panel sync applies — a sync must not clobber a
+        # hand-typed age.
+        self.drawdown_person_combo.activated.connect(self._drawdown_person_picked)
         self.drawdown_button = QPushButton("", self._drawdown_box)
         self.drawdown_button.clicked.connect(self._drawdown_clicked)
         drawdown_controls.addWidget(self.drawdown_age_label)
@@ -660,6 +665,17 @@ class ChartsPane(QWidget):
             self.paths_edit.text(),
             str(max(self.retirement_person_combo.currentIndex(), 0)),
         )
+
+    def _drawdown_person_picked(self, index: int) -> None:
+        """Seed the age field with the picked person's stated age (9.31).
+
+        The age asked about is the *selected* person's retirement age,
+        so switching persons re-seeds the field with that person's own
+        decision — otherwise picking "Your partner" and pressing run
+        would silently test the partner at the first person's age.
+        """
+        if 0 <= index < len(self._drawdown_age_defaults):
+            self.drawdown_age_edit.setText(self._drawdown_age_defaults[index])
 
     def _drawdown_clicked(self) -> None:
         """Forward the card's raw text to the shell (roadmap 9.25).
@@ -858,6 +874,7 @@ class ChartsPane(QWidget):
         self._sync_person_combo(
             self.drawdown_person_label, self.drawdown_person_combo, panel
         )
+        self._drawdown_age_defaults = panel.person_age_defaults
         self.drawdown_answer_label.setText(panel.answer)
         self.drawdown_answer_label.setVisible(bool(panel.answer))
         self.drawdown_detail_label.setText(panel.detail)

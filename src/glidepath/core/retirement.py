@@ -10,9 +10,12 @@ is a few dozen whole years, so an ascending scan probes every
 candidate: the returned age is exactly the earliest succeeding one
 even when success is not monotone in age (a DB scheme's early-payment
 factors or a dated outflow can make it dip), and every answer was
-actually probed, never interpolated. A candidate whose retirement
-date falls at or past the run's horizon has no retired period to test
-the income in — it fails rather than succeeding vacuously.
+actually probed, never interpolated. Household spending begins once
+*every* person has retired (planning §4.11), so a candidate has a
+retired period to test the income in only when the whole household —
+the candidate age for the selected person, the partner's stated
+decision held fixed — is retired inside the run's horizon; a
+candidate without one fails rather than succeeding vacuously.
 
 Each probe replaces the *selected* person's retirement-age decision
 with the candidate — a partner's decision is held fixed (planning
@@ -139,10 +142,12 @@ def earliest_retirement_age(  # noqa: PLR0913
     returns the first that succeeds — exactly the earliest, whatever
     the success shape over ages (module docstring) — or ``None`` when
     no age in the bracket does. A candidate with no *retirement
-    exposure* — no projected period opening the plan retired under the
-    §4.1 gate convention, because its retirement date falls at or past
-    the run's horizon — never tests the target income at all, so it
-    fails rather than succeeding vacuously; such candidates are never
+    exposure* — no projected period opening the whole household
+    retired under the §4.1 gate convention (household spending starts
+    once every person has retired, §4.11), because the candidate's or
+    a partner's fixed retirement date falls at or past the run's
+    horizon — never tests the target income at all, so it fails
+    rather than succeeding vacuously; such candidates are never
     probed. The plan's stated retirement age and spending level are
     irrelevant to the search: each probe carries the candidate age and
     the target income instead, everything else unchanged, and
@@ -160,13 +165,12 @@ def earliest_retirement_age(  # noqa: PLR0913
             Monte Carlo config without a seed (planning §5.2).
     """
     selected = _selected_person(plan, search.person_id)
-    date_of_birth = selected.date_of_birth.value
     periods = _projected_periods(plan, assumptions, region, config)
 
     def has_retired_period(age: int) -> bool:
-        """Whether any projected period opens the plan retired (§4.1)."""
+        """Whether any period opens the whole household retired (§4.1)."""
         return any(
-            is_age_attained_by_period_start(date_of_birth, age, period)
+            _household_retired_by(period, plan.persons, selected.id, age)
             for period in periods
         )
 
@@ -223,13 +227,15 @@ def sustainable_income_at_age(  # noqa: PLR0913
     age and the candidate spending instead, everything else unchanged.
 
     An ``age`` with no *retirement exposure* — no projected period
-    opening the plan retired under the §4.1 gate convention, because
-    its retirement date falls at or past the run's horizon — has no
-    retired period to test any income in: spending is modelled only in
-    retirement, so every level would succeed vacuously. It answers
-    ``None`` without probing, exactly as such candidates fail in the
-    age search. ``None`` otherwise means what the income search means
-    by it: not even zero spending survives the plan's outflows.
+    opening the whole household retired under the §4.1 gate convention
+    (household spending starts once every person has retired, §4.11),
+    because the chosen or a partner's fixed retirement date falls at
+    or past the run's horizon — has no retired period to test any
+    income in: spending is modelled only in retirement, so every level
+    would succeed vacuously. It answers ``None`` without probing,
+    exactly as such candidates fail in the age search. ``None``
+    otherwise means what the income search means by it: not even zero
+    spending survives the plan's outflows.
 
     Raises:
         ValueError: If ``age`` is negative, or ``person_id`` selects a
@@ -241,9 +247,8 @@ def sustainable_income_at_age(  # noqa: PLR0913
         msg = f"age must be non-negative, got {age}"
         raise ValueError(msg)
     selected = _selected_person(plan, person_id)
-    date_of_birth = selected.date_of_birth.value
     exposed = any(
-        is_age_attained_by_period_start(date_of_birth, age, period)
+        _household_retired_by(period, plan.persons, selected.id, age)
         for period in _projected_periods(plan, assumptions, region, config)
     )
     if not exposed:
@@ -289,6 +294,30 @@ def _horizon_end(
     return max(
         date_age_attained(person.date_of_birth.value, planning_age)
         for person in plan.persons
+    )
+
+
+def _household_retired_by(
+    period: Period,
+    persons: tuple[Person, ...],
+    selected_id: EntityId,
+    age: int,
+) -> bool:
+    """Whether every person opens ``period`` retired (§4.1, §4.11).
+
+    The exposure predicate of both solvers: the selected person
+    retires at the probed ``age`` while a partner's stated
+    retirement-age decision is held fixed — matching the engine, where
+    household spending begins once every person has retired, so only
+    such a period can test a retirement income at all.
+    """
+    return all(
+        is_age_attained_by_period_start(
+            person.date_of_birth.value,
+            age if person.id == selected_id else person.target_retirement_age.value,
+            period,
+        )
+        for person in persons
     )
 
 
