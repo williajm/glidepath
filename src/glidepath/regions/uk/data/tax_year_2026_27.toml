@@ -33,6 +33,7 @@ sources = [
   "https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar",
   "https://www.gov.uk/marriage-allowance",
   "https://www.legislation.gov.uk/ukpga/2007/3/section/55B",
+  "https://www.gov.uk/hmrc-internal-manuals/paye-manual/paye100060",
 ]
 
 [income_tax.ruk]
@@ -105,6 +106,6 @@ rates = [
 # recipient gates name the highest band each schedule's recipient may
 # be liable at (gov.uk: basic rUK; starter/basic/intermediate Scotland).
 [marriage_allowance]
-transferable_amount         = "1260"  # statutorily 10% of the PA, rounded up
+transferable_amount         = "1260"  # 10% of the PA, rounded up to the nearest £10
 recipient_top_band_ruk      = "basic"
 recipient_top_band_scotland = "intermediate"

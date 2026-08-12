@@ -289,11 +289,12 @@ class MarriageAllowanceRules:
     """Marriage allowance figures for one tax year (planning §6, roadmap 9.32).
 
     ``transferable_amount`` is the s55A transferable tax allowance
-    (statutorily 10% of the PA, rounded up); the s55B reducer is the
-    rUK basic rate of it. The ``recipient_top_band_*`` gates name the
-    highest band of each schedule a recipient may be liable at and
-    still qualify — every band at or below it is permitted (gov.uk:
-    basic for rUK; starter/basic/intermediate for Scotland).
+    (10% of the PA, rounded up to the nearest £10 — HMRC PAYE100060);
+    the s55B reducer is the rUK basic rate of it. The
+    ``recipient_top_band_*`` gates name the highest band of each
+    schedule a recipient may be liable at and still qualify — every
+    band at or below it is permitted (gov.uk: basic for rUK;
+    starter/basic/intermediate for Scotland).
     """
 
     transferable_amount: Money

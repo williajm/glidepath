@@ -1498,7 +1498,7 @@ rates = [  # aligned positionally with the rUK bands (dividends are UK-wide)
 # amount, and per-schedule gates naming the highest band a recipient
 # may be liable at (every band at or below it qualifies).
 [marriage_allowance]
-transferable_amount         = "1260"  # statutorily 10% of the PA, rounded up
+transferable_amount         = "1260"  # 10% of the PA, rounded up to the nearest £10
 recipient_top_band_ruk      = "basic"
 recipient_top_band_scotland = "intermediate"
 ```
@@ -1532,13 +1532,14 @@ always beats extrapolation.
 Extension conventions: indexation compounds assumed CPI once from the last
 shipped file (a target year never depends on intermediate synthesized
 years) and scales the money figures of the income-tax schedules, the
-pension/ISA allowances, the savings/dividend nil-rate amounts (the
+pension/ISA allowances, and the savings/dividend nil-rate amounts (the
 starting-rate limit is legislated frozen with the rUK schedule, §6; the
-PSA and dividend allowance follow the same reserved policy), and the
-marriage-allowance transferable amount (statutorily 10% of the PA, so
-it tracks the reserved PA factor), quantized to whole pounds
-(half-even); band, taper and dividend *rates* never extrapolate, and
-the marriage-allowance band gates never move. **Recurring task** after each Budget: copy previous
+PSA and dividend allowance follow the same reserved policy), quantized
+to whole pounds (half-even); band, taper and dividend *rates* never
+extrapolate. The marriage-allowance transferable amount is derived,
+not indexed: each synthesized year computes 10% of its own reserved
+PA, rounded up to the nearest £10 (HMRC PAYE100060 — §6), and the
+recipient band gates never move. **Recurring task** after each Budget: copy previous
 year's file, re-verify every figure, update `verified_on`/`sources`,
 update §6.
 
@@ -1723,7 +1724,7 @@ these figures back the §4.11 decision record and become data keys as the
 
 | Figure | Value | Source |
 | --- | --- | --- |
-| Marriage allowance mechanics | A **tax reducer**, not a PA transfer: the recipient's tax is reduced by the basic-rate percentage of the transferable amount (£1,260, statutorily 10% of the PA), max £252/yr. Transferor's income must be below their PA; recipient liable at no more than basic rate (rUK) or the starter/basic/intermediate rates (Scotland) | [gov.uk/marriage-allowance](https://www.gov.uk/marriage-allowance); [ITA 2007 s55B](https://www.legislation.gov.uk/ukpga/2007/3/section/55B) |
+| Marriage allowance mechanics | A **tax reducer**, not a PA transfer: the recipient's tax is reduced by the basic-rate percentage of the transferable amount (£1,260, statutorily 10% of the PA **rounded up to the nearest £10** — 2018/19's PA of £11,850 gave £1,190), max £252/yr. Transferor's income must be below their PA; recipient liable at no more than basic rate (rUK) or the starter/basic/intermediate rates (Scotland) | [gov.uk/marriage-allowance](https://www.gov.uk/marriage-allowance); [ITA 2007 s55B](https://www.legislation.gov.uk/ukpga/2007/3/section/55B); [PAYE100060](https://www.gov.uk/hmrc-internal-manuals/paye-manual/paye100060) (rounding, verified 2026-08-12) |
 | New state pension inheritance | A survivor inherits **half the deceased's protected payment** only if the marriage/CP began before 6 April 2016 and the deceased reached SPA (and died) on/after that date; inherited additional state pension and deferral-increment inheritance attach only to pre-2016 SPA cases; remarriage before the survivor's own SPA disqualifies. Net: a post-2016 couple with no protected payment passes on **nothing** | [inheriting state pension](https://www.gov.uk/new-state-pension/inheriting-or-increasing-state-pension-from-a-spouse-or-civil-partner) |
 | DC death benefits | Death **before 75**: beneficiary drawdown income tax-free (funds first designated post-April 2015); lump sums tax-free up to the deceased's LSDBA (£1,073,100). Death **at/after 75**: income and lump sums taxed at the beneficiary's marginal rate. Lump sums paid >2 years after notification taxed regardless | [tax on pension death benefits](https://www.gov.uk/tax-on-pension-death-benefits); [individual lump sum allowances](https://www.gov.uk/guidance/find-out-the-rules-around-individual-lump-sum-allowances) |
 | Pensions into IHT | **Enacted** (FA 2026, Royal Assent 18 March 2026): unused pension funds and death benefits join the estate for deaths on/after **6 April 2027**; death-in-service and DB dependants' scheme pensions excluded; the **spouse/civil-partner exemption is maintained**, so partner-to-partner transfers stay IHT-free (§4.11 keeps IHT out of scope on that basis) | [technical note (upd. 29 May 2026)](https://www.gov.uk/government/publications/inheritance-tax-on-pensions-technical-note/technical-note-inheritance-tax-on-pensions); [policy paper](https://www.gov.uk/government/publications/inheritance-tax-unused-pension-funds-and-death-benefits/inheritance-tax-unused-pension-funds-and-death-benefits) |

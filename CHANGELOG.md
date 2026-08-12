@@ -20,8 +20,9 @@ in the release PR and becomes the GitHub Release notes verbatim.
   amount, up to £252 a year, capped at their liability). The claim
   is a household decision entered in the partner form section,
   defaulting to "claim when eligible"; the figures ship in the
-  tax-year data files and CPI-index with the personal allowance in
-  synthesized future years. Plan documents step to schema v6 (older
+  tax-year data files, and synthesized future years re-derive the
+  transferable amount from that year's personal allowance (10%,
+  rounded up to the nearest £10 per HMRC PAYE100060). Plan documents step to schema v6 (older
   files migrate on load); the reduction shows in the reported tax
   breakdown as its own "marriage allowance" line and does not alter
   withdrawal sizing — a recorded simplification.

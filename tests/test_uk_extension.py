@@ -315,9 +315,10 @@ def test_first_indexed_year_figures(
     assert savings.psa_higher == Money(Decimal(510))
     assert savings.psa_additional == Money(Decimal(0))  # zero indexes to zero
     assert extended.dividend.allowance == Money(Decimal(510))
-    # 1,260 x 1.02 = 1,285.20 rounds to 1,285 with the reserved PA factor.
+    # Derived, not indexed (PAYE100060): 10% of the synthesized PA of
+    # 12,821 is 1,282.10, rounded up to the nearest £10.
     marriage = extended.marriage_allowance
-    assert marriage.transferable_amount == Money(Decimal(1285))
+    assert marriage.transferable_amount == Money(Decimal(1290))
 
 
 def test_rates_never_extrapolate(
@@ -355,6 +356,8 @@ def test_indexation_compounds_once_from_the_base_year(
     """2035/36 gets five steps in one go: 12,570 x 1.02^5 = 13,878.30."""
     extended = extend_tax_year(base, 2035, policy=default_policy, cpi=CPI)
     assert extended.income_tax_ruk.personal_allowance == Money(Decimal(13878))
+    # 10% of 13,878 is 1,387.80: up to the nearest £10 (PAYE100060).
+    assert extended.marriage_allowance.transferable_amount == Money(Decimal(1390))
 
 
 def test_synthesis_is_memoized(
