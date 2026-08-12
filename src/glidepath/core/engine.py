@@ -1664,28 +1664,14 @@ class _PersonProjection:
         self._db_streams = []
         if survivor is None:
             return
-        for annuity in annuities:
-            if annuity.survivor_fraction is not None:
-                annuity.base_annual = annuity.base_annual * annuity.survivor_fraction
-                survivor.inherit_annuity_stream(annuity)
+        self._bequeath_annuity_streams(annuities, survivor)
         tax_free = self.region.wrappers.death_benefits_income_tax_free(
             self.person.date_of_birth.value, death_date
         )
         for pension, stream in zip(self.person.db_pensions, streams, strict=True):
-            if pension.survivor_fraction is not None:
-                fraction = pension.survivor_fraction.value
-            else:
-                fraction = decimal_assumption_value(
-                    self.tracked.get(AssumptionKey.DB_SURVIVOR_FRACTION)
-                )
-                if not Decimal(0) <= fraction <= _ONE:
-                    # The stated fact enforces this at construction;
-                    # the assumption route must match (§4.6 fail-loud).
-                    msg = (
-                        f"db.survivor_fraction must lie between 0 and 1, got {fraction}"
-                    )
-                    raise EngineError(msg)
-            stream.accrued_annual = stream.accrued_annual * fraction
+            stream.accrued_annual = stream.accrued_annual * self._db_survivor_fraction(
+                pension
+            )
             stream.lump_sum_factor = Decimal(0)
             stream.accrual = None
             survivor.inherit_db_stream(stream)
@@ -1704,6 +1690,38 @@ class _PersonProjection:
                 pension_tax_free=tax_free if pension_pot else None,
             )
         self._wrappers = []
+
+    @staticmethod
+    def _bequeath_annuity_streams(
+        annuities: list[_AnnuityStream], survivor: _PersonProjection
+    ) -> None:
+        """Pass each joint-life stream over at its purchased fraction (9.34).
+
+        Single-life streams are simply left behind — already detached
+        from the deceased by ``die``, they pay no one.
+        """
+        for annuity in annuities:
+            if annuity.survivor_fraction is not None:
+                annuity.base_annual = annuity.base_annual * annuity.survivor_fraction
+                survivor.inherit_annuity_stream(annuity)
+
+    def _db_survivor_fraction(self, pension: DBPension) -> Decimal:
+        """One dying scheme's survivor fraction (§4.11): fact, else assumption.
+
+        Raises:
+            EngineError: If the assumption falls outside [0, 1] — the
+                stated fact enforces this at construction, and the
+                assumption route must match (§4.6 fail-loud).
+        """
+        if pension.survivor_fraction is not None:
+            return pension.survivor_fraction.value
+        fraction = decimal_assumption_value(
+            self.tracked.get(AssumptionKey.DB_SURVIVOR_FRACTION)
+        )
+        if not Decimal(0) <= fraction <= _ONE:
+            msg = f"db.survivor_fraction must lie between 0 and 1, got {fraction}"
+            raise EngineError(msg)
+        return fraction
 
     def inherit_annuity_stream(self, stream: _AnnuityStream) -> None:
         """Receive a deceased partner's joint-life annuity stream (9.34).
