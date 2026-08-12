@@ -24,6 +24,7 @@ from glidepath.core import (
     ContributionTerms,
     Fact,
     GrowthTaxTreatment,
+    HouseholdAssessment,
     MemberContributionOutcome,
     MemberContributionRequest,
     Money,
@@ -63,8 +64,23 @@ def money_fact(
     return Fact(value=Money(value), as_of=as_of, recorded_on=recorded_on)
 
 
+class NoHouseholdAdjustment:
+    """TaxSystem mixin: a region with no joint reliefs (planning §4.11).
+
+    The core protocol's ``adjust_household`` contract for such a
+    region: every assessment passes through unchanged.
+    """
+
+    def adjust_household(
+        self, period: Period, assessments: tuple[HouseholdAssessment, ...]
+    ) -> tuple[TaxResult, ...]:
+        """Return the results unchanged."""
+        del period
+        return tuple(entry.result for entry in assessments)
+
+
 @dataclass(frozen=True)
-class ZeroTaxSystem:
+class ZeroTaxSystem(NoHouseholdAdjustment):
     """No tax on anything — expectations stay hand-computable."""
 
     def assess(self, period: Period, tax_input: TaxInput) -> TaxResult:

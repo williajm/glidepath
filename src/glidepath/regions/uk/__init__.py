@@ -83,6 +83,7 @@ from glidepath.regions.uk.state_pension import (
 )
 from glidepath.regions.uk.tax import (
     DIVIDEND_NIL_RATE_BAND,
+    MARRIAGE_ALLOWANCE_BAND,
     RUK_RESIDENCY,
     SAVINGS_NIL_RATE_BAND,
     SAVINGS_STARTING_RATE_BAND,
@@ -114,6 +115,7 @@ __all__ = [
     "ISA_KIND",
     "LISA_ALLOWANCE_GROUP",
     "LISA_KIND",
+    "MARRIAGE_ALLOWANCE_BAND",
     "RETURNS_HISTORY_FILENAME",
     "RUK_RESIDENCY",
     "SAVINGS_NIL_RATE_BAND",

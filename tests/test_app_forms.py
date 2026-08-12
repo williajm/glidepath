@@ -263,7 +263,12 @@ class TestFormSpec:
         ]
 
     def test_partner_sections_mirror_their_base_field_lists(self) -> None:
-        """Each partner spec carries its base section's exact fields."""
+        """Each partner spec carries its base section's exact fields.
+
+        The partner person section additionally carries the household
+        marriage-allowance claim decision (roadmap 9.32) after the
+        mirrored fields — a choice that only exists with a partner.
+        """
         form = build_facts_form_view_model()
         pairs = (
             (form.partner, form.person, "About your partner"),
@@ -286,8 +291,12 @@ class TestFormSpec:
         )
         for partner_spec, base_spec, title in pairs:
             assert partner_spec.title == title
-            assert partner_spec.fields == base_spec.fields
+            assert partner_spec.fields[: len(base_spec.fields)] == base_spec.fields
             assert partner_spec.repeatable == base_spec.repeatable
+        extras = form.partner.fields[len(form.person.fields) :]
+        assert [spec.key for spec in extras] == ["claim_marriage_allowance"]
+        for partner_spec, base_spec, _title in pairs[1:]:
+            assert partner_spec.fields == base_spec.fields
 
     def test_partner_actions_carry_their_copy(self) -> None:
         """The add/remove-partner actions and the removal warning exist."""
@@ -2356,3 +2365,75 @@ class TestFormDataFromHousehold:
         assert rendered.wrappers == ()
         assert rendered.db_pensions == ()
         assert rendered.annuity_purchases == ()
+
+
+class TestMarriageAllowanceClaim:
+    """The 9.32 household claim decision, entered in the partner section."""
+
+    def test_blank_choice_keeps_the_default(self) -> None:
+        """No selection means claim-when-eligible: the field stays None."""
+        household = parse(couple_form_data())
+        assert household.claim_marriage_allowance is None
+
+    def test_yes_records_a_true_decision(self) -> None:
+        """An explicit Yes lands as a Decision recorded at submission."""
+        partner = partner_values() | {"claim_marriage_allowance": "yes"}
+        household = parse(couple_form_data(partner=partner))
+        claim = household.claim_marriage_allowance
+        assert claim is not None
+        assert claim.value is True
+        assert claim.recorded_on == RECORDED
+
+    def test_no_records_a_false_decision(self) -> None:
+        """Declining the claim is an explicit choice, not the default."""
+        partner = partner_values() | {"claim_marriage_allowance": "no"}
+        household = parse(couple_form_data(partner=partner))
+        claim = household.claim_marriage_allowance
+        assert claim is not None
+        assert claim.value is False
+
+    def test_unknown_choice_is_an_error(self) -> None:
+        """A value outside the offered options is refused."""
+        partner = partner_values() | {"claim_marriage_allowance": "maybe"}
+        result = parse_facts_form(
+            couple_form_data(partner=partner), recorded_on=RECORDED, today=TODAY
+        )
+        assert result.household is None
+        assert any(
+            error.field_key == "claim_marriage_allowance" for error in result.errors
+        )
+
+    def test_single_person_submission_records_no_claim(self) -> None:
+        """With no partner on the form the household keeps the default."""
+        household = parse(form_data(person=person_values()))
+        assert household.claim_marriage_allowance is None
+
+    def test_round_trips_through_the_rendered_form(self) -> None:
+        """Render-back emits the choice and a resubmission rebuilds it."""
+        partner = partner_values() | {"claim_marriage_allowance": "no"}
+        household = parse(couple_form_data(partner=partner))
+        rendered = facts_form_data_from_household(household)
+        assert rendered.persons[1].person["claim_marriage_allowance"] == "no"
+        assert rendered.persons[0].person.get("claim_marriage_allowance") is None
+        reparsed = parse(rendered)
+        claim = reparsed.claim_marriage_allowance
+        assert claim is not None
+        assert claim.value is False
+
+    def test_default_renders_as_the_blank_choice(self) -> None:
+        """A defaulted claim renders blank, not as a fabricated Yes."""
+        household = parse(couple_form_data())
+        rendered = facts_form_data_from_household(household)
+        assert rendered.persons[1].person["claim_marriage_allowance"] == ""
+
+    def test_claim_without_a_partner_refuses_the_form(self) -> None:
+        """A one-person plan carrying a claim has no field to show it."""
+        household = parse(form_data(person=person_values()))
+        [person] = household.persons
+        stored = _altered(
+            household,
+            claim_marriage_allowance=Decision(value=True, recorded_on=RECORDED),
+        )
+        assert person is stored.persons[0]
+        reason = form_cannot_represent(stored)
+        assert reason == "a marriage allowance claim with no partner"

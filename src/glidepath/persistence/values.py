@@ -142,6 +142,18 @@ def parse_int(raw: object, path: str) -> int:
     return raw
 
 
+def parse_bool(raw: object, path: str) -> bool:
+    """Parse a stored JSON boolean (a decision payload, never an override).
+
+    Raises:
+        PersistenceError: If ``raw`` is not a boolean.
+    """
+    if not isinstance(raw, bool):
+        msg = f"{path}: expected a boolean, got {type(raw).__name__}"
+        raise PersistenceError(msg)
+    return raw
+
+
 def parse_str(raw: object, path: str) -> str:
     """Parse a stored string.
 

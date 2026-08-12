@@ -165,7 +165,7 @@ v1 engine conventions, superseded as later phases land:
   year's pro-rated income meets full-year bands (accepted cost, §5.2).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -230,7 +230,7 @@ from glidepath.core.state_pension import (
     StatePensionEntitlement,
     StatePensionUprating,
 )
-from glidepath.core.tax import TaxInput, TaxResult
+from glidepath.core.tax import HouseholdAssessment, TaxInput, TaxResult
 from glidepath.core.withdrawals import (
     FixedRealWithdrawalStrategy,
     NetWithdrawalPlan,
@@ -276,6 +276,8 @@ _NET_TOLERANCE = Money(Decimal("0.005"))
 """Half a penny: residuals below ledger precision are settled, not chased."""
 _GREEDY_QUANTUM = Money(Decimal(1))
 """Bisection floor for the §4.11 marginal-cost slice discovery: one pound."""
+_COUPLE = 2
+"""The household size the §4.11 joint tax adjustment applies to."""
 _LINEARITY_TOLERANCE = Money(Decimal("0.03"))
 """Slack for the constant-marginal-cost test (§4.11 pooled draws).
 
@@ -900,9 +902,12 @@ class _Projection:
             for person in self._persons
         ]
         self._household_spending_step(entries, period, inflation, fraction)
-        persons = tuple(
-            person.finish_period(context, period, returns, fraction)
-            for person, context in entries
+        persons = self._household_tax_step(
+            period,
+            tuple(
+                person.finish_period(context, period, returns, fraction)
+                for person, context in entries
+            ),
         )
         return PeriodSnapshot(
             period=period,
@@ -910,6 +915,35 @@ class _Projection:
             inflation_factor=inflation,
             persons=persons,
             year_fraction=fraction,
+        )
+
+    def _household_tax_step(
+        self, period: Period, persons: tuple[PersonPeriodResult, ...]
+    ) -> tuple[PersonPeriodResult, ...]:
+        """Step 5½ — the region's household adjustment (planning §4.11).
+
+        After every person's strictly per-person step-5 assessment,
+        a two-person household that has not declined joint claims
+        offers both completed assessments to the region, which may
+        replace a result — the UK marriage allowance lands as an s55B
+        reducer line on the recipient (roadmap 9.32). The adjustment
+        is reporting-level: the reducer is flat and capped, so it has
+        no marginal rate, and the withdrawal gross-up and income
+        offsets — differences of ``assess`` results — are untouched
+        by construction (the recorded §4.11 simplification: the
+        reduction never feeds back into the period's cash flows).
+        """
+        claim = self.plan.claim_marriage_allowance
+        if len(persons) != _COUPLE or (claim is not None and not claim.value):
+            return persons
+        assessments = tuple(
+            person.household_assessment(result.tax)
+            for person, result in zip(self._persons, persons, strict=True)
+        )
+        adjusted = self.region.tax.adjust_household(period, assessments)
+        return tuple(
+            result if tax is result.tax else replace(result, tax=tax)
+            for result, tax in zip(persons, adjusted, strict=True)
         )
 
     def _household_spending_step(
@@ -2786,6 +2820,16 @@ class _PersonProjection:
             else:
                 high = midpoint
         return low
+
+    def household_assessment(self, tax: TaxResult) -> HouseholdAssessment:
+        """This person's step-5 assessment paired with its income picture.
+
+        The pair feeds the §4.11 household adjustment step
+        (:meth:`_Projection._household_tax_step`) once every person's
+        period is otherwise closed, so the input reflects the period's
+        final categorised income — withdrawals included.
+        """
+        return HouseholdAssessment(tax_input=self._tax_input(), result=tax)
 
     def _tax_input(
         self,

@@ -47,13 +47,31 @@ schedule's rates (FA 2004 s227B) via
 :meth:`UkTaxSystem.annual_allowance_charge`, whose lines the engine
 appends to the period's final result — never fed back through
 ``assess``, since the excess is a charge, not income.
+
+The marriage allowance (roadmap 9.32) is the §4.11 household
+adjustment step: ``assess`` stays strictly per-person, and
+:meth:`UkTaxSystem.adjust_household` — called by the engine after
+both persons' final assessments — applies the ITA 2007 s55B tax
+reducer to the eligible direction's recipient. Because the reducer is
+flat and capped it has no marginal rate, so the withdrawal gross-up
+and income-offset pricing (differences of ``assess`` results) are
+unaffected; the reduction lands in the reported assessment only — a
+recorded §4.11 simplification.
 """
 
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import TYPE_CHECKING
 
-from glidepath.core import Money, Rate, TaxInput, TaxLine, TaxResidencyId, TaxResult
+from glidepath.core import (
+    HouseholdAssessment,
+    Money,
+    Rate,
+    TaxInput,
+    TaxLine,
+    TaxResidencyId,
+    TaxResult,
+)
 from glidepath.regions.uk.loader import available_tax_years, load_tax_year
 from glidepath.regions.uk.schema import BASIC_BAND_NAME, TaxBand
 from glidepath.regions.uk.years import TaxYearSeries, UkTaxYearError
@@ -85,10 +103,15 @@ SAVINGS_NIL_RATE_BAND = "savings_nil_rate"
 DIVIDEND_NIL_RATE_BAND = "dividend_nil_rate"
 """Line label of the dividend allowance nil rate (planning §6)."""
 
+MARRIAGE_ALLOWANCE_BAND = "marriage_allowance"
+"""Line label of the s55B marriage allowance tax reducer (planning §4.11)."""
+
 _ZERO = Money(Decimal(0))
 _POUND = Decimal(1)
 _PENNY = Decimal("0.01")
 _NIL_RATE = Rate(Decimal(0))
+_AA_CHARGE_PREFIX = "aa_charge_"
+_COUPLE = 2
 
 
 def _round_down(money: Money, unit: Decimal) -> Money:
@@ -179,6 +202,39 @@ class UkTaxSystem:
             line_rate=_band_own_rate,
         )
 
+    def adjust_household(
+        self, period: Period, assessments: tuple[HouseholdAssessment, ...]
+    ) -> tuple[TaxResult, ...]:
+        """Apply the marriage allowance across a couple (planning §4.11).
+
+        The engine calls this after both strictly per-person
+        assessments, only when the household holds two persons and has
+        not declined the claim; the two persons are assumed to qualify
+        as spouses/civil partners (§4.11 scope). Each direction is
+        tested against the year's eligibility rules — transferor's
+        income within their personal allowance, recipient liable at no
+        rate above the data file's band gates — and at most one
+        direction can yield a reduction, so the first that does wins.
+        The recipient's result gains the ITA 2007 s55B tax reducer as
+        a negative no-income line: the rUK basic-rate percentage of
+        the transferable amount, capped at their income-tax liability,
+        never refundable, never a PA transfer in computation.
+        """
+        results = tuple(entry.result for entry in assessments)
+        if len(assessments) != _COUPLE:
+            return results
+        year = self._tax_year_for(period)
+        for transferor, recipient in ((0, 1), (1, 0)):
+            adjusted = _marriage_allowance_adjusted(
+                year, assessments[transferor], assessments[recipient]
+            )
+            if adjusted is not None:
+                return tuple(
+                    adjusted if index == recipient else result
+                    for index, result in enumerate(results)
+                )
+        return results
+
     def _series(self) -> TaxYearSeries:
         """The shared year-resolution series over this system's files."""
         return TaxYearSeries(tax_years=self.tax_years, future_years=self.future_years)
@@ -199,6 +255,96 @@ def _schedule_for(year: TaxYearFile, residency: TaxResidencyId) -> IncomeTaxSche
         return year.income_tax_scotland
     msg = f"unknown UK tax residency {residency!r}"
     raise UkTaxError(msg)
+
+
+def _ruk_basic_rate(year: TaxYearFile) -> Rate:
+    """The rUK basic rate — the s55B 'appropriate percentage'.
+
+    The marriage allowance reducer is a reserved UK-wide relief given
+    at the basic rate for Scottish recipients too (ITA 2007 s55B; the
+    Scottish rates apply only to non-savings income under s6A).
+    """
+    return next(
+        band.rate for band in year.income_tax_ruk.bands if band.name == BASIC_BAND_NAME
+    )
+
+
+def _permitted_recipient_bands(
+    year: TaxYearFile, residency: TaxResidencyId
+) -> frozenset[str]:
+    """The line labels a marriage-allowance recipient may be liable at.
+
+    ITA 2007 s55B(2)(b) lists the qualifying rates; the data file
+    names each schedule's highest qualifying band and every band at or
+    below it is permitted. Savings and dividend layers stack on the
+    rUK ladder whatever the residency, so their permitted labels
+    follow the rUK gate — the nil-rate labels (starting rate, PSA,
+    dividend allowance) are qualifying rates in their own right.
+    """
+    gate = (
+        year.marriage_allowance.recipient_top_band_scotland
+        if residency == SCOTLAND_RESIDENCY
+        else year.marriage_allowance.recipient_top_band_ruk
+    )
+    permitted = {
+        SAVINGS_STARTING_RATE_BAND,
+        SAVINGS_NIL_RATE_BAND,
+        DIVIDEND_NIL_RATE_BAND,
+    }
+    for band in _schedule_for(year, residency).bands:
+        permitted.add(band.name)
+        if band.name == gate:
+            break
+    ruk_gate = year.marriage_allowance.recipient_top_band_ruk
+    for index, band in enumerate(year.income_tax_ruk.bands):
+        permitted.add(_savings_band_name(index, band))
+        permitted.add(f"dividend_{year.dividend.rates[index].name}")
+        if band.name == ruk_gate:
+            break
+    return frozenset(permitted)
+
+
+def _marriage_allowance_adjusted(
+    year: TaxYearFile,
+    transferor: HouseholdAssessment,
+    recipient: HouseholdAssessment,
+) -> TaxResult | None:
+    """The recipient's result with the s55B reducer, or ``None``.
+
+    Eligibility (planning §6 "Couples"): the transferor's income sits
+    within their personal allowance (zero taxable income — the PA is
+    never actually transferred in computation, a recorded
+    simplification when their income falls inside the transferable
+    band), and the recipient is liable at no rate above the data
+    file's band gates. Annual-allowance-charge lines are ignored on
+    both sides of the test and the cap: the s55B reducer lands at step
+    6 of the ITA 2007 s23 calculation, before the step-7 charge.
+    """
+    if transferor.result.taxable_income > _ZERO:
+        return None
+    permitted = _permitted_recipient_bands(year, recipient.tax_input.residency)
+    lines = recipient.result.lines
+    income_tax_lines = [
+        line for line in lines if not line.band.startswith(_AA_CHARGE_PREFIX)
+    ]
+    if any(line.band not in permitted for line in income_tax_lines):
+        return None
+    rate = _ruk_basic_rate(year)
+    reducer = _round_down(rate.of(year.marriage_allowance.transferable_amount), _PENNY)
+    liability = sum((line.tax for line in income_tax_lines), start=_ZERO)
+    reduction = min(reducer, liability)
+    if reduction <= _ZERO:
+        return None
+    result = recipient.result
+    reducer_line = TaxLine(
+        band=MARRIAGE_ALLOWANCE_BAND, rate=rate, taxed=_ZERO, tax=-reduction
+    )
+    return TaxResult(
+        tax_due=result.tax_due - reduction,
+        taxable_income=result.taxable_income,
+        tax_free_allowance=result.tax_free_allowance,
+        lines=(*lines, reducer_line),
+    )
 
 
 def _tapered_allowance(
@@ -301,7 +447,7 @@ def _savings_band_name(_index: int, band: TaxBand) -> str:
 
 def _aa_charge_band_name(_index: int, band: TaxBand) -> str:
     """An annual-allowance-charge line label under the layer prefix."""
-    return f"aa_charge_{band.name}"
+    return f"{_AA_CHARGE_PREFIX}{band.name}"
 
 
 def _nil_line(name: str, taxed: Money) -> TaxLine:

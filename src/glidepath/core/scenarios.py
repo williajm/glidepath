@@ -75,7 +75,11 @@ class DecisionTarget:
 
     Most paths name ``Decision[T]`` fields; the annuity purchase's
     ``annuity_type`` and ``basis`` are plain enum fields, addressable
-    because the record is wholly a decision (planning §5.1).
+    because the record is wholly a decision (planning §5.1). The
+    household's ``claim_marriage_allowance`` decision (planning §4.11)
+    is not addressable: the household carries no ``EntityId``, and a
+    what-if over a bounded relief reads directly off the base run —
+    a recorded 9.32 limitation.
     """
 
     entity_id: EntityId

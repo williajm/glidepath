@@ -51,6 +51,7 @@ POLICY_FIGURES = (
     "184.90",  # full basic (old) state pension, weekly
     "5000",  # starting rate for savings limit
     "17570",  # PA + starting-rate limit: savings taper exhaustion point
+    "1260",  # marriage allowance transferable amount
     "0.1075",  # dividend ordinary rate
     "0.3575",  # dividend upper rate
     "0.3935",  # dividend additional rate

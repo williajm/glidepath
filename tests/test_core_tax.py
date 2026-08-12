@@ -62,16 +62,27 @@ def test_tax_line_rejects_empty_band_name() -> None:
 
 
 @pytest.mark.parametrize(
-    ("taxed", "tax"),
-    [("-1", "0"), ("1", "-0.20")],
+    ("taxed", "tax", "message"),
+    [("-1", "0", "non-negative"), ("1", "-0.20", "reducer")],
 )
-def test_tax_line_rejects_negative_amounts(taxed: str, tax: str) -> None:
-    """Taxed amounts and tax charged must be non-negative."""
+def test_tax_line_rejects_negative_amounts(taxed: str, tax: str, message: str) -> None:
+    """Negative taxed income never; negative tax only on a reducer line."""
     rate = Rate(Decimal("0.20"))
     taxed_amount = money(taxed)
     tax_amount = money(tax)
-    with pytest.raises(ValueError, match="non-negative"):
+    with pytest.raises(ValueError, match=message):
         TaxLine(band="basic", rate=rate, taxed=taxed_amount, tax=tax_amount)
+
+
+def test_tax_line_accepts_a_no_income_reducer() -> None:
+    """A statutory tax reducer: negative tax on a line covering no income."""
+    line = TaxLine(
+        band="marriage_allowance",
+        rate=Rate(Decimal("0.20")),
+        taxed=money("0"),
+        tax=money("-252"),
+    )
+    assert line.tax == money("-252")
 
 
 def test_tax_result_accepts_consistent_breakdown() -> None:

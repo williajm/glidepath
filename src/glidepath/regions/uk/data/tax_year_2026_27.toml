@@ -1,16 +1,17 @@
 # UK tax year 2026/27 policy figures (docs/planning.md §5.3, §6).
 # Income tax, pension and ISA figures verified 2026-08-01/02; savings,
 # dividend, AA carry-forward and DB valuation figures 2026-08-04; the
-# scheme-pays minimum 2026-08-06 — all from the primary sources below;
-# never edit a figure without re-verifying and updating [meta].
+# scheme-pays minimum 2026-08-06; the marriage allowance 2026-08-11 —
+# all from the primary sources below; never edit a figure without
+# re-verifying and updating [meta].
 
-schema_version = 2
+schema_version = 3
 
 [meta]
 tax_year    = "2026/27"
 start_date  = 2026-04-06
 end_date    = 2027-04-05
-verified_on = 2026-08-06
+verified_on = 2026-08-11
 sources = [
   "https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm056410",
   "https://www.legislation.gov.uk/ukpga/2004/12/section/237B",
@@ -30,6 +31,8 @@ sources = [
   "https://www.gov.uk/tax-on-dividends",
   "https://www.gov.uk/apply-tax-free-interest-on-savings",
   "https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar",
+  "https://www.gov.uk/marriage-allowance",
+  "https://www.legislation.gov.uk/ukpga/2007/3/section/55B",
 ]
 
 [income_tax.ruk]
@@ -96,3 +99,12 @@ rates = [
   { name = "upper", rate = "0.3575" },
   { name = "additional", rate = "0.3935" },
 ]
+
+# Marriage allowance (ITA 2007 ss 55A-55C): an s55B tax reducer at the
+# rUK basic rate of the transferable amount, never a PA transfer. The
+# recipient gates name the highest band each schedule's recipient may
+# be liable at (gov.uk: basic rUK; starter/basic/intermediate Scotland).
+[marriage_allowance]
+transferable_amount         = "1260"  # statutorily 10% of the PA, rounded up
+recipient_top_band_ruk      = "basic"
+recipient_top_band_scotland = "intermediate"

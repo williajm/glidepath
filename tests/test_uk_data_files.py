@@ -26,7 +26,7 @@ def test_tax_year_2026_27_meta() -> None:
     assert meta.tax_year == "2026/27"
     assert meta.start_date == date(2026, 4, 6)
     assert meta.end_date == date(2027, 4, 5)
-    assert meta.verified_on == date(2026, 8, 6)
+    assert meta.verified_on == date(2026, 8, 11)
     assert meta.sources
     assert all(source.startswith("https://") for source in meta.sources)
 
@@ -130,6 +130,14 @@ def test_dividend_allowance_and_rates() -> None:
         Decimal("0.3575"),
         Decimal("0.3935"),
     ]
+
+
+def test_marriage_allowance_figures() -> None:
+    """Marriage allowance matches §6: £1,260; basic rUK, intermediate Scot."""
+    rules = load_tax_year(2026).marriage_allowance
+    assert rules.transferable_amount == Money(Decimal(1260))
+    assert rules.recipient_top_band_ruk == "basic"
+    assert rules.recipient_top_band_scotland == "intermediate"
 
 
 def test_nmpa_schedule() -> None:

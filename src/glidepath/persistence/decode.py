@@ -54,6 +54,7 @@ from glidepath.persistence.values import (
     REVALUATION_REFERENCE_TOKENS,
     SEX_TOKENS,
     decode_value,
+    parse_bool,
     parse_date,
     parse_datetime,
     parse_decimal,
@@ -353,13 +354,26 @@ def _household(raw: object, path: str) -> Household:
         _planned_outflow,
     )
     spending = _optional(reader.take("spending"), reader.at("spending"), _spending_plan)
+    claim = _optional(
+        reader.take("claim_marriage_allowance"),
+        reader.at("claim_marriage_allowance"),
+        _claim_decision,
+    )
     reader.finish()
     return _built(
         lambda: Household(
-            persons=persons, spending=spending, planned_outflows=outflows
+            persons=persons,
+            spending=spending,
+            planned_outflows=outflows,
+            claim_marriage_allowance=claim,
         ),
         path,
     )
+
+
+def _claim_decision(raw: object, path: str) -> Decision[bool]:
+    """Decode the household's marriage-allowance claim decision."""
+    return _decision(raw, path, parse_bool)
 
 
 def _person(raw: object, path: str) -> Person:

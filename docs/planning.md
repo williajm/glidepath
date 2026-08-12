@@ -1419,7 +1419,7 @@ header). Loader rules: money/rates are TOML **strings** parsed to
 validation into frozen dataclasses, unknown keys error.
 
 ```toml
-schema_version = 2
+schema_version = 3
 
 [meta]
 tax_year    = "2026/27"
@@ -1493,6 +1493,14 @@ rates = [  # aligned positionally with the rUK bands (dividends are UK-wide)
   { name = "upper", rate = "0.3575" },
   { name = "additional", rate = "0.3935" },
 ]
+
+# Marriage allowance (§4.11, roadmap 9.32): the s55B transferable
+# amount, and per-schedule gates naming the highest band a recipient
+# may be liable at (every band at or below it qualifies).
+[marriage_allowance]
+transferable_amount         = "1260"  # statutorily 10% of the PA, rounded up
+recipient_top_band_ruk      = "basic"
+recipient_top_band_scotland = "intermediate"
 ```
 
 There is no `[state_pension]` table: the state pension amount is the
@@ -1524,15 +1532,17 @@ always beats extrapolation.
 Extension conventions: indexation compounds assumed CPI once from the last
 shipped file (a target year never depends on intermediate synthesized
 years) and scales the money figures of the income-tax schedules, the
-pension/ISA allowances, and the savings/dividend nil-rate amounts (the
+pension/ISA allowances, the savings/dividend nil-rate amounts (the
 starting-rate limit is legislated frozen with the rUK schedule, §6; the
-PSA and dividend allowance follow the same reserved policy), quantized
-to whole pounds (half-even); band, taper and dividend *rates* never
-extrapolate. **Recurring task** after each Budget: copy previous
+PSA and dividend allowance follow the same reserved policy), and the
+marriage-allowance transferable amount (statutorily 10% of the PA, so
+it tracks the reserved PA factor), quantized to whole pounds
+(half-even); band, taper and dividend *rates* never extrapolate, and
+the marriage-allowance band gates never move. **Recurring task** after each Budget: copy previous
 year's file, re-verify every figure, update `verified_on`/`sources`,
 update §6.
 
-### 5.4 Plan document format (`.glidepath.json` schema v4)
+### 5.4 Plan document format (`.glidepath.json` schema v6)
 
 Implements the §4.5 decision (`glidepath/persistence/`, roadmap 6.2/6.4;
 region-agnostic like the core — the region's shipped defaults and data
@@ -1540,10 +1550,11 @@ version are function inputs, never imports). Top level:
 
 ```json
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "region": "uk",
   "assumptions_resolved_against": "<region data_version at last save>",
-  "household": { "persons": [...], "spending": ..., "planned_outflows": [...] },
+  "household": { "persons": [...], "spending": ..., "planned_outflows": [...],
+                 "claim_marriage_allowance": ... },
   "assumption_overrides": [ { "key", "value", "source", "recorded_on" } ],
   "scenarios": [ { "name", "note", "overrides": [...] } ]
 }
@@ -1590,7 +1601,11 @@ multiplier keys (`early_accumulation`, `mid_accumulation`,
 modelled only in retirement, so they never scaled anything and the
 drop loses no behaviour (#114 retired the tokens from the
 `SpendingPlan` invariant without a migration, which left genuine
-v1-era files unloadable until this step).
+v1-era files unloadable until this step); v4→v5 (roadmap 9.28) adds
+`"label": null` to every wrapper — a v4 file's wrappers all load
+unnamed; v5→v6 (roadmap 9.32) adds
+`"claim_marriage_allowance": null` to the household — a v5 file keeps
+the default claim-when-eligible (§4.11).
 
 ## 6. Verified UK policy figures (2026/27)
 
@@ -2383,15 +2398,26 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   measured against household employment income — and chart categories
   label both ages (`2032 · 60/58`). A partnerless form renders and
   parses exactly as before.*
-- [ ] 9.32 Couples: marriage allowance — *the §4.11 household-level
-  claim Decision (default claimed-when-eligible): per-tax-year
-  eligibility check (transferor below PA; recipient ≤ basic rate rUK /
-  ≤ intermediate Scotland), automatic direction, applied as the ITA
-  2007 s55B tax reducer (basic-rate % of the transferable amount,
-  capped at the recipient's liability, never refundable);
-  `marriage_allowance` keys (£1,260) in the tax-year data files;
-  `TaxSystem.assess` stays per-person — the region gains the §4.11
-  household adjustment step.*
+- [x] 9.32 Couples: marriage allowance (#173) — *the §4.11
+  household-level claim Decision (default claimed-when-eligible,
+  `Household.claim_marriage_allowance`, plan document schema v6):
+  per-tax-year eligibility check (transferor below PA; recipient ≤
+  basic rate rUK / ≤ intermediate Scotland, read off the assessment's
+  own band lines), automatic direction, applied as the ITA 2007 s55B
+  tax reducer (rUK basic-rate % of the transferable amount, capped at
+  the recipient's pre-AA-charge liability, never refundable) — a
+  negative no-income `TaxLine` on the recipient's final assessment;
+  `[marriage_allowance]` keys (£1,260 + per-schedule recipient band
+  gates, data schema v3) in the tax-year files; `TaxSystem.assess`
+  stays per-person — the protocol gains `adjust_household`, called by
+  the engine's step-5½ between two-person assessments and close. The
+  reducer is flat and capped so the gross-up/income-offset marginal
+  pricing is untouched; the reduction lands in the reported
+  assessment, not the period's cash flows (recorded simplification,
+  as is the unmodelled transferor-side PA reduction when their income
+  sits inside the transferable band). The claim enters via the
+  partner form section and is not scenario-addressable (the household
+  has no EntityId) — both recorded limitations.*
 - [ ] 9.33 Couples: survivor modelling — *optional per-person
   `death_age: Decision[int]` per §4.11 (scenario-overridable; death at
   the §4.1 period gate): DC pots merge to the survivor as beneficiary

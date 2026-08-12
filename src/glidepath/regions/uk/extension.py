@@ -52,6 +52,7 @@ from glidepath.regions.uk.schema import (
     DividendRules,
     IncomeTaxSchedule,
     IsaRules,
+    MarriageAllowanceRules,
     PensionRules,
     SavingsRules,
     TaxBand,
@@ -381,6 +382,22 @@ def _indexed_dividend(dividend: DividendRules, factor: Decimal) -> DividendRules
     )
 
 
+def _indexed_marriage_allowance(
+    rules: MarriageAllowanceRules, factor: Decimal
+) -> MarriageAllowanceRules:
+    """Index the transferable amount; the band gates never move.
+
+    The transferable amount is statutorily 10% of the personal
+    allowance (ITA 2007 s55A), a reserved figure, so it follows the
+    same UK-wide policy factor as the PA it derives from.
+    """
+    return MarriageAllowanceRules(
+        transferable_amount=_indexed_money(rules.transferable_amount, factor),
+        recipient_top_band_ruk=rules.recipient_top_band_ruk,
+        recipient_top_band_scotland=rules.recipient_top_band_scotland,
+    )
+
+
 @lru_cache(maxsize=256)
 def extend_tax_year(
     base: TaxYearFile,
@@ -439,6 +456,7 @@ def extend_tax_year(
             isa=base.isa,
             savings=base.savings,
             dividend=base.dividend,
+            marriage_allowance=base.marriage_allowance,
         )
     factor = cpi.growth_factor**steps
     lower_steps = _indexation_steps(
@@ -477,5 +495,10 @@ def extend_tax_year(
         ),
         dividend=(
             base.dividend if steps == 0 else _indexed_dividend(base.dividend, factor)
+        ),
+        marriage_allowance=(
+            base.marriage_allowance
+            if steps == 0
+            else _indexed_marriage_allowance(base.marriage_allowance, factor)
         ),
     )

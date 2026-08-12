@@ -441,6 +441,13 @@ def collect_plan_decisions(household: Household) -> tuple[LabelledDecision, ...]
     and annuity choices as later phases add them.
     """
     decisions: list[LabelledDecision] = []
+    if household.claim_marriage_allowance is not None:
+        decisions.append(
+            LabelledDecision(
+                label="household.claim_marriage_allowance",
+                decision=household.claim_marriage_allowance,
+            )
+        )
     decisions.extend(
         LabelledDecision(
             label=f"planned_outflow[{outflow.id}].amount_real",

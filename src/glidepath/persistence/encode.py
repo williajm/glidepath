@@ -193,6 +193,9 @@ def _household(household: Household) -> dict[str, object]:
             _planned_outflow(outflow) for outflow in household.planned_outflows
         ],
         "spending": _optional(household.spending, _spending_plan),
+        "claim_marriage_allowance": _optional_decision(
+            household.claim_marriage_allowance, _bool_value
+        ),
     }
 
 
@@ -429,6 +432,15 @@ def _int_value(value: int) -> int:
     if isinstance(value, bool):
         msg = "booleans are not persisted whole numbers"
         raise PersistenceError(msg)
+    return value
+
+
+def _bool_value(value: bool) -> bool:  # noqa: FBT001
+    """A boolean decision payload, natively JSON.
+
+    Positional by design: it is a value encoder passed to
+    :func:`_optional_decision`, exactly like ``_int_value``.
+    """
     return value
 
 

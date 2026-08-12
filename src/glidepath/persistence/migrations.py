@@ -105,12 +105,28 @@ def _upgrade_v4_to_v5(raw: RawDocument) -> RawDocument:
     return raw
 
 
+def _upgrade_v5_to_v6(raw: RawDocument) -> RawDocument:
+    """v6 adds ``claim_marriage_allowance`` to the household (roadmap 9.32).
+
+    A v5 file predates the couples marriage-allowance claim, so every
+    household it holds keeps the default — the new key decodes as
+    ``null``, meaning "claim whenever a tax year's eligibility check
+    passes" (planning §4.11).
+    """
+    household = raw.get("household")
+    if isinstance(household, dict):
+        household["claim_marriage_allowance"] = None
+    raw[_VERSION_KEY] = 6
+    return raw
+
+
 UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
     {
         1: _upgrade_v1_to_v2,
         2: _upgrade_v2_to_v3,
         3: _upgrade_v3_to_v4,
         4: _upgrade_v4_to_v5,
+        5: _upgrade_v5_to_v6,
     }
 )
 """The registered upgraders, keyed by the version each reads."""

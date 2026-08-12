@@ -21,13 +21,17 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from decimal import Decimal
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 """The data-file schema version this code understands.
 
 v2 (#97): tax-year files lose the ``[state_pension]`` table and
 ``age_rules.toml`` the ``[new_state_pension]`` table — the state
 pension amount is the user's stated DWP forecast, never a shipped
 rate.
+
+v3 (#173): tax-year files gain the ``[marriage_allowance]`` table —
+the s55B transferable amount and the per-schedule recipient band
+gates (roadmap 9.32).
 """
 
 _TAX_YEAR_FORMAT = re.compile(r"\d{4}/\d{2}")
@@ -281,6 +285,28 @@ class DividendRules:
 
 
 @dataclass(frozen=True, slots=True)
+class MarriageAllowanceRules:
+    """Marriage allowance figures for one tax year (planning §6, roadmap 9.32).
+
+    ``transferable_amount`` is the s55A transferable tax allowance
+    (statutorily 10% of the PA, rounded up); the s55B reducer is the
+    rUK basic rate of it. The ``recipient_top_band_*`` gates name the
+    highest band of each schedule a recipient may be liable at and
+    still qualify — every band at or below it is permitted (gov.uk:
+    basic for rUK; starter/basic/intermediate for Scotland).
+    """
+
+    transferable_amount: Money
+    recipient_top_band_ruk: str
+    recipient_top_band_scotland: str
+
+    def __post_init__(self) -> None:
+        """Reject empty band gates."""
+        if not self.recipient_top_band_ruk or not self.recipient_top_band_scotland:
+            _fail("MarriageAllowanceRules", "recipient band gates must be named")
+
+
+@dataclass(frozen=True, slots=True)
 class TaxYearFile:
     """One fully validated ``tax_year_YYYY_YY.toml`` data file."""
 
@@ -292,15 +318,30 @@ class TaxYearFile:
     isa: IsaRules
     savings: SavingsRules
     dividend: DividendRules
+    marriage_allowance: MarriageAllowanceRules
 
     def __post_init__(self) -> None:
-        """Reject unsupported versions and misaligned dividend rates."""
+        """Reject unsupported versions and cross-section misalignments."""
         _require_schema_version(self.schema_version, "TaxYearFile")
         if len(self.dividend.rates) != len(self.income_tax_ruk.bands):
             _fail(
                 "TaxYearFile",
                 "dividend.rates must align one-to-one with the rUK bands",
             )
+        gates = (
+            (self.marriage_allowance.recipient_top_band_ruk, self.income_tax_ruk),
+            (
+                self.marriage_allowance.recipient_top_band_scotland,
+                self.income_tax_scotland,
+            ),
+        )
+        for gate, schedule in gates:
+            if all(band.name != gate for band in schedule.bands):
+                _fail(
+                    "TaxYearFile",
+                    f"marriage_allowance recipient band gate {gate!r} names"
+                    " no band of its schedule",
+                )
 
     def __hash__(self) -> int:
         """Hash the meta table only, not the whole figure tree.

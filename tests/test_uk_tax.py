@@ -14,8 +14,19 @@ from decimal import Decimal
 
 import pytest
 
-from glidepath.core import Money, Period, Rate, TaxInput, TaxResidencyId, TaxSystem
+from glidepath.core import (
+    HouseholdAssessment,
+    Money,
+    Period,
+    Rate,
+    TaxInput,
+    TaxLine,
+    TaxResidencyId,
+    TaxResult,
+    TaxSystem,
+)
 from glidepath.regions.uk import (
+    MARRIAGE_ALLOWANCE_BAND,
     RUK_RESIDENCY,
     SCOTLAND_RESIDENCY,
     UkTaxError,
@@ -639,3 +650,157 @@ def test_scottish_aa_charge_uses_scottish_bands(system: UkTaxSystem) -> None:
     )
     assert [line.band for line in lines] == ["aa_charge_starter"]
     assert lines[0].tax == Money(Decimal("190.00"))
+
+
+# --- marriage allowance (roadmap 9.32; planning §4.11, §6 "Couples") ---------
+
+
+def household_assessment(
+    system: UkTaxSystem,
+    income: str,
+    residency: TaxResidencyId = RUK_RESIDENCY,
+    savings: str = "0",
+) -> HouseholdAssessment:
+    """One person's completed 2026/27 assessment at ``income``."""
+    tax_input = TaxInput(
+        residency=residency,
+        non_savings_income=Money(Decimal(income)),
+        savings_income=Money(Decimal(savings)),
+    )
+    return HouseholdAssessment(
+        tax_input=tax_input, result=system.assess(TAX_YEAR_2026_27, tax_input)
+    )
+
+
+class TestMarriageAllowance:
+    """The §4.11 household adjustment applies the ITA 2007 s55B reducer."""
+
+    def test_eligible_couple_gets_the_full_reducer(self, system: UkTaxSystem) -> None:
+        """No-income transferor, basic-rate recipient: £252 off.
+
+        50,000 gross is 37,430 taxable at 20% — 7,486.00 — and the
+        reducer is 20% of the £1,260 transferable amount.
+        """
+        transferor = household_assessment(system, "0")
+        recipient = household_assessment(system, "50000")
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (transferor, recipient))
+        assert adjusted[0] is transferor.result
+        assert adjusted[1].tax_due == Money(Decimal("7234.00"))
+        reducer = adjusted[1].lines[-1]
+        assert reducer.band == MARRIAGE_ALLOWANCE_BAND
+        assert reducer.tax == Money(Decimal("-252.00"))
+        assert reducer.taxed == Money(Decimal(0))
+        assert reducer.rate == Rate(Decimal("0.20"))
+
+    def test_direction_is_picked_automatically(self, system: UkTaxSystem) -> None:
+        """Swapping the couple's order moves the reducer, not the result."""
+        recipient = household_assessment(system, "50000")
+        transferor = household_assessment(system, "0")
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (recipient, transferor))
+        assert adjusted[0].tax_due == Money(Decimal("7234.00"))
+        assert adjusted[1] is transferor.result
+
+    def test_higher_rate_recipient_is_ineligible(self, system: UkTaxSystem) -> None:
+        """A recipient liable at 40% keeps their unadjusted assessment."""
+        transferor = household_assessment(system, "0")
+        recipient = household_assessment(system, "60000")
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (transferor, recipient))
+        assert adjusted == (transferor.result, recipient.result)
+
+    def test_transferor_above_the_allowance_is_ineligible(
+        self, system: UkTaxSystem
+    ) -> None:
+        """Both partners with taxable income: nothing transfers."""
+        low = household_assessment(system, "13000")
+        high = household_assessment(system, "50000")
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (low, high))
+        assert adjusted == (low.result, high.result)
+
+    def test_scottish_recipient_qualifies_to_the_intermediate_rate(
+        self, system: UkTaxSystem
+    ) -> None:
+        """40,000 in Scotland tops out at 21% — eligible, at the UK 20%.
+
+        Starter 3,967 at 19% (753.73), basic 12,989 at 20% (2,597.80),
+        intermediate 10,474 at 21% (2,199.54): 5,551.07 before the
+        reducer.
+        """
+        transferor = household_assessment(system, "0")
+        recipient = household_assessment(system, "40000", SCOTLAND_RESIDENCY)
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (transferor, recipient))
+        assert adjusted[1].tax_due == Money(Decimal("5299.07"))
+        assert adjusted[1].lines[-1].tax == Money(Decimal("-252.00"))
+
+    def test_scottish_higher_rate_recipient_is_ineligible(
+        self, system: UkTaxSystem
+    ) -> None:
+        """A Scottish recipient at 42% keeps their unadjusted assessment."""
+        transferor = household_assessment(system, "0")
+        recipient = household_assessment(system, "60000", SCOTLAND_RESIDENCY)
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (transferor, recipient))
+        assert adjusted == (transferor.result, recipient.result)
+
+    def test_nil_rated_savings_keep_the_recipient_eligible(
+        self, system: UkTaxSystem
+    ) -> None:
+        """PSA-nil savings are a qualifying rate (ITA 2007 s55B(2)(b))."""
+        transferor = household_assessment(system, "0")
+        recipient = household_assessment(system, "20000", savings="500")
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (transferor, recipient))
+        assert adjusted[1].lines[-1].band == MARRIAGE_ALLOWANCE_BAND
+        assert adjusted[1].tax_due == Money(Decimal("1234.00"))
+
+    def test_reducer_caps_at_the_liability(self, system: UkTaxSystem) -> None:
+        """13,000 gross owes 86.00 — the reducer stops there, never refunds."""
+        transferor = household_assessment(system, "0")
+        recipient = household_assessment(system, "13000")
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (transferor, recipient))
+        assert adjusted[1].tax_due == Money(Decimal(0))
+        assert adjusted[1].lines[-1].tax == Money(Decimal("-86.00"))
+
+    def test_no_liability_leaves_the_couple_unchanged(
+        self, system: UkTaxSystem
+    ) -> None:
+        """Both inside their allowances: a claim would reduce nothing."""
+        first = household_assessment(system, "0")
+        second = household_assessment(system, "10000")
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (first, second))
+        assert adjusted == (first.result, second.result)
+
+    def test_a_single_assessment_passes_through(self, system: UkTaxSystem) -> None:
+        """The adjustment only exists between two partners."""
+        only = household_assessment(system, "50000")
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (only,))
+        assert adjusted == (only.result,)
+
+    def test_annual_allowance_charge_lines_stay_outside(
+        self, system: UkTaxSystem
+    ) -> None:
+        """The s55B reducer lands before the s23 step-7 AA charge.
+
+        The charge's lines neither disqualify the recipient nor lift
+        the cap: eligibility and the liability read from the income-tax
+        lines alone.
+        """
+        transferor = household_assessment(system, "0")
+        basic = household_assessment(system, "20000")
+        charged = TaxLine(
+            band="aa_charge_higher",
+            rate=Rate(Decimal("0.40")),
+            taxed=Money(Decimal(1000)),
+            tax=Money(Decimal("400.00")),
+        )
+        recipient = HouseholdAssessment(
+            tax_input=basic.tax_input,
+            result=TaxResult(
+                tax_due=basic.result.tax_due + charged.tax,
+                taxable_income=basic.result.taxable_income,
+                tax_free_allowance=basic.result.tax_free_allowance,
+                lines=(*basic.result.lines, charged),
+            ),
+        )
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (transferor, recipient))
+        # 20,000 gross owes 1,486.00; with the 400.00 charge on top the
+        # reducer still takes the full 252.00: 1,634.00.
+        assert adjusted[1].tax_due == Money(Decimal("1634.00"))
+        assert adjusted[1].lines[-1].band == MARRIAGE_ALLOWANCE_BAND

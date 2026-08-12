@@ -100,7 +100,7 @@ class TestUkRegionBundle:
         distinguishable version strings (planning §4.6).
         """
         version = uk_region().data_version
-        assert version.startswith("uk schema=2")
+        assert version.startswith("uk schema=3")
         assert "tax_year 2026/27 verified" in version
         assert "age_rules verified" in version
         assert "assumptions verified" in version
@@ -217,7 +217,7 @@ class TestUkEndToEnd:
         assert first.employment_income == Money(Decimal("33333.33"))
         assert first.wrappers[0].provider_relief == Money(Decimal("666.67"))
         assert first.wrappers[1].employee_contribution == Money(Decimal("3333.33"))
-        assert result.provenance.region_data_version.startswith("uk schema=2")
+        assert result.provenance.region_data_version.startswith("uk schema=3")
         keys_read = {entry.key for entry in result.provenance.assumptions}
         assert AssumptionKey.INFLATION_CPI in keys_read
         assert AssumptionKey.GLIDEPATH_DEFAULT_SHAPE in keys_read
@@ -260,3 +260,99 @@ class TestUkEndToEnd:
             [person_result] = snapshot.persons
             assert person_result.shortfall == Money(Decimal(0))
             assert person_result.net_withdrawn == person_result.spending_need
+
+
+def couple_household(
+    earner_income: str,
+    *,
+    earner_first: bool = True,
+    claim: bool | None = None,
+) -> Household:
+    """One earner and one no-income partner (roadmap 9.32).
+
+    ``earner_first`` flips the person order so the automatic direction
+    pick is exercised both ways; ``claim`` records an explicit claim
+    decision (``None`` keeps the default — claim when eligible).
+    """
+    earner = Person(
+        id=EntityId("uk-earner"),
+        date_of_birth=Fact(value=date(1991, 2, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=60, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+        employment_income=money_fact(earner_income),
+    )
+    partner = Person(
+        id=EntityId("uk-partner"),
+        date_of_birth=Fact(value=date(1992, 3, 1), as_of=AS_OF, recorded_on=RECORDED),
+        target_retirement_age=Decision(value=60, recorded_on=RECORDED),
+        tax_residency=RUK_RESIDENCY,
+    )
+    persons = (earner, partner) if earner_first else (partner, earner)
+    decision = None if claim is None else Decision(value=claim, recorded_on=RECORDED)
+    return Household(persons=persons, claim_marriage_allowance=decision)
+
+
+class TestMarriageAllowanceEndToEnd:
+    """The 9.32 acceptance criteria through the real UK region.
+
+    One whole tax year (2026/27): a £50,000 earner owes 7,486.00 at
+    the basic rate, and the eligible couple's default claim takes the
+    s55B reducer off the final assessment — £252 less, at no change to
+    any cash flow (the §4.11 recorded simplification).
+    """
+
+    def run_couple(self, household: Household) -> tuple[Money, Money, list[str]]:
+        """One-year run: earner tax, partner tax, earner line labels."""
+        assumptions = default_assumption_set()
+        region = uk_region(future_years_extension(assumptions))
+        config = RunConfig(today=date(2026, 4, 6), horizon_end=date(2027, 4, 5))
+        result = run(household, assumptions, region, config)
+        [snapshot] = result.snapshots
+        by_id = {person.person_id: person for person in snapshot.persons}
+        earner = by_id[EntityId("uk-earner")]
+        partner = by_id[EntityId("uk-partner")]
+        return (
+            earner.tax.tax_due,
+            partner.tax.tax_due,
+            [line.band for line in earner.tax.lines],
+        )
+
+    def test_eligible_couple_pays_252_less_at_basic_rate(self) -> None:
+        """The default claim lands the reducer on the earner."""
+        earner_tax, partner_tax, bands = self.run_couple(couple_household("50000"))
+        assert earner_tax == Money(Decimal("7234.00"))
+        assert partner_tax == Money(Decimal(0))
+        assert bands == ["basic", "marriage_allowance"]
+
+    def test_direction_follows_the_earner_not_the_order(self) -> None:
+        """With the partner listed first the reducer still lands right."""
+        earner_tax, _partner_tax, bands = self.run_couple(
+            couple_household("50000", earner_first=False)
+        )
+        assert earner_tax == Money(Decimal("7234.00"))
+        assert bands == ["basic", "marriage_allowance"]
+
+    def test_declined_claim_leaves_the_assessment_alone(self) -> None:
+        """An explicit No never calls the household adjustment."""
+        earner_tax, _partner_tax, bands = self.run_couple(
+            couple_household("50000", claim=False)
+        )
+        assert earner_tax == Money(Decimal("7486.00"))
+        assert bands == ["basic"]
+
+    def test_higher_rate_earner_is_ineligible(self) -> None:
+        """60,000 reaches the 40% band: no reducer, tax unchanged."""
+        earner_tax, _partner_tax, bands = self.run_couple(couple_household("60000"))
+        assert earner_tax == Money(Decimal("11432.00"))
+        assert bands == ["basic", "higher"]
+
+    def test_single_person_runs_never_see_the_adjustment(self) -> None:
+        """A one-person plan's assessment carries no reducer line."""
+        assumptions = default_assumption_set()
+        region = uk_region(future_years_extension(assumptions))
+        config = RunConfig(today=TODAY, horizon_end=date(2027, 4, 5))
+        result = run(accumulator_household(), assumptions, region, config)
+        [snapshot] = result.snapshots
+        [person_result] = snapshot.persons
+        bands = [line.band for line in person_result.tax.lines]
+        assert "marriage_allowance" not in bands

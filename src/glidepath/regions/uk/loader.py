@@ -34,6 +34,7 @@ from glidepath.regions.uk.schema import (
     IncomeTaxSchedule,
     IsaRules,
     LisaAges,
+    MarriageAllowanceRules,
     NmpaStep,
     PensionRules,
     ReturnsHistoryFile,
@@ -386,6 +387,26 @@ def _parse_dividend(raw: object, context: str) -> DividendRules:
     return DividendRules(allowance=allowance, rates=rates)
 
 
+def _parse_marriage_allowance(raw: object, context: str) -> MarriageAllowanceRules:
+    """Parse the ``[marriage_allowance]`` table."""
+    table = _Table(raw, context)
+    rules = MarriageAllowanceRules(
+        transferable_amount=_money(
+            table.take("transferable_amount"), f"{context}.transferable_amount"
+        ),
+        recipient_top_band_ruk=_string(
+            table.take("recipient_top_band_ruk"),
+            f"{context}.recipient_top_band_ruk",
+        ),
+        recipient_top_band_scotland=_string(
+            table.take("recipient_top_band_scotland"),
+            f"{context}.recipient_top_band_scotland",
+        ),
+    )
+    table.finish()
+    return rules
+
+
 def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFile:
     """Parse and strictly validate one tax-year TOML document."""
     root = _load_document(text, context)
@@ -403,6 +424,9 @@ def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFil
     isa = _parse_isa(root.take("isa"), f"{context}.isa")
     savings = _parse_savings(root.take("savings"), f"{context}.savings")
     dividend = _parse_dividend(root.take("dividend"), f"{context}.dividend")
+    marriage_allowance = _parse_marriage_allowance(
+        root.take("marriage_allowance"), f"{context}.marriage_allowance"
+    )
     root.finish()
     return TaxYearFile(
         schema_version=schema_version,
@@ -413,6 +437,7 @@ def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFil
         isa=isa,
         savings=savings,
         dividend=dividend,
+        marriage_allowance=marriage_allowance,
     )
 
 
