@@ -2633,48 +2633,58 @@ class _PersonProjection:
         """
         sources: dict[WithdrawalSourceId, _WithdrawalSource] = {}
         for ledger in ledgers:
-            treatment = ledger.treatment
-            pension = treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
-            if treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE:
-                free_fraction = _ONE
-                crystallised_fraction = _ONE
-            else:
-                free_fraction = Decimal(0)
-                crystallised_fraction = Decimal(0)
-                if pension and treatment.tax_free_fraction is not None:
-                    free_fraction = treatment.tax_free_fraction.value
-            access_open = self.region.wrappers.is_access_open(
-                ledger.wrapper.kind,
-                self.person.date_of_birth.value,
-                period,
-            )
-            if ledger.wrapper.id in self._inherited:
-                access_open = True
-                beneficiary_tax_free = self._inherited[ledger.wrapper.id]
-                if beneficiary_tax_free is not None:
-                    pension = False
-                    free_fraction = _ONE if beneficiary_tax_free else Decimal(0)
-                    crystallised_fraction = free_fraction
-            entries = (
-                _WithdrawalSource(
-                    owner=self,
-                    ledger=ledger,
-                    crystallised=False,
-                    tax_free_fraction=free_fraction,
-                    access_open=access_open,
-                    pension=pension,
-                ),
-                _WithdrawalSource(
-                    owner=self,
-                    ledger=ledger,
-                    crystallised=True,
-                    tax_free_fraction=crystallised_fraction,
-                    pension=pension,
-                ),
-            )
-            for source in entries:
+            for source in self._ledger_sources(ledger, period):
                 sources[source.source_id] = source
         return sources
+
+    def _ledger_sources(
+        self, ledger: _WrapperLedger, period: Period
+    ) -> tuple[_WithdrawalSource, _WithdrawalSource]:
+        """One ledger's uncrystallised and crystallised sources (§5.2).
+
+        The tax-free fractions and gate come from the wrapper's own
+        treatment, then the inherited overrides of the class docstring
+        apply on top (§4.11).
+        """
+        treatment = ledger.treatment
+        pension = treatment.withdrawals is WithdrawalTaxTreatment.PARTIALLY_TAX_FREE
+        if treatment.withdrawals is WithdrawalTaxTreatment.TAX_FREE:
+            free_fraction = _ONE
+            crystallised_fraction = _ONE
+        else:
+            free_fraction = Decimal(0)
+            crystallised_fraction = Decimal(0)
+            if pension and treatment.tax_free_fraction is not None:
+                free_fraction = treatment.tax_free_fraction.value
+        access_open = self.region.wrappers.is_access_open(
+            ledger.wrapper.kind,
+            self.person.date_of_birth.value,
+            period,
+        )
+        if ledger.wrapper.id in self._inherited:
+            access_open = True
+            beneficiary_tax_free = self._inherited[ledger.wrapper.id]
+            if beneficiary_tax_free is not None:
+                pension = False
+                free_fraction = _ONE if beneficiary_tax_free else Decimal(0)
+                crystallised_fraction = free_fraction
+        return (
+            _WithdrawalSource(
+                owner=self,
+                ledger=ledger,
+                crystallised=False,
+                tax_free_fraction=free_fraction,
+                access_open=access_open,
+                pension=pension,
+            ),
+            _WithdrawalSource(
+                owner=self,
+                ledger=ledger,
+                crystallised=True,
+                tax_free_fraction=crystallised_fraction,
+                pension=pension,
+            ),
+        )
 
     def draw_from(
         self, source: _WithdrawalSource, period: Period, need: Money

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from glidepath.core.config import RunConfig
-    from glidepath.core.entities import EntityId, Household
+    from glidepath.core.entities import EntityId, Household, Person
     from glidepath.core.glide import LifeStage
     from glidepath.core.investments import AssetAllocation
     from glidepath.core.pensions import DBPension
@@ -457,70 +457,83 @@ def collect_plan_decisions(household: Household) -> tuple[LabelledDecision, ...]
         for outflow in household.planned_outflows
     )
     for person in household.persons:
+        decisions.extend(_person_decisions(person))
+    return tuple(decisions)
+
+
+def _person_decisions(person: Person) -> list[LabelledDecision]:
+    """One person's decision variables under their entity-id prefixes."""
+    decisions: list[LabelledDecision] = [
+        LabelledDecision(
+            label=f"person[{person.id}].target_retirement_age",
+            decision=person.target_retirement_age,
+        )
+    ]
+    if person.death_age is not None:
         decisions.append(
             LabelledDecision(
-                label=f"person[{person.id}].target_retirement_age",
-                decision=person.target_retirement_age,
+                label=f"person[{person.id}].death_age",
+                decision=person.death_age,
             )
         )
-        if person.death_age is not None:
-            decisions.append(
-                LabelledDecision(
-                    label=f"person[{person.id}].death_age",
-                    decision=person.death_age,
-                )
-            )
-        for pension in person.db_pensions:
-            pension_prefix = f"db_pension[{pension.id}]"
-            if pension.taken_at_age is not None:
-                decisions.append(
-                    LabelledDecision(
-                        label=f"{pension_prefix}.taken_at_age",
-                        decision=pension.taken_at_age,
-                    )
-                )
-            decisions.append(
-                LabelledDecision(
-                    label=f"{pension_prefix}.commuted_fraction",
-                    decision=pension.commuted_fraction,
-                )
-            )
-            if (
-                pension.active_membership is not None
-                and pension.active_membership.active_until_age is not None
-            ):
-                decisions.append(
-                    LabelledDecision(
-                        label=f"{pension_prefix}.active_membership.active_until_age",
-                        decision=pension.active_membership.active_until_age,
-                    )
-                )
-        for purchase in person.annuity_purchases:
-            purchase_prefix = f"annuity_purchase[{purchase.id}]"
-            decisions.append(
-                LabelledDecision(
-                    label=f"{purchase_prefix}.at_age", decision=purchase.at_age
-                )
-            )
-            decisions.append(
-                LabelledDecision(
-                    label=f"{purchase_prefix}.fraction_of_pot",
-                    decision=purchase.fraction_of_pot,
-                )
-            )
-        if person.state_pension is not None:
-            decisions.append(
-                LabelledDecision(
-                    label=f"person[{person.id}].state_pension.deferral_years",
-                    decision=person.state_pension.deferral_years,
-                )
-            )
-        decisions.extend(
+    for pension in person.db_pensions:
+        decisions.extend(_db_pension_decisions(pension))
+    for purchase in person.annuity_purchases:
+        purchase_prefix = f"annuity_purchase[{purchase.id}]"
+        decisions.append(
             LabelledDecision(
-                label=f"wrapper[{wrapper.id}].contributions.employee_amount",
-                decision=wrapper.contributions.employee_amount,
+                label=f"{purchase_prefix}.at_age", decision=purchase.at_age
             )
-            for wrapper in person.wrappers
-            if wrapper.contributions is not None
         )
-    return tuple(decisions)
+        decisions.append(
+            LabelledDecision(
+                label=f"{purchase_prefix}.fraction_of_pot",
+                decision=purchase.fraction_of_pot,
+            )
+        )
+    if person.state_pension is not None:
+        decisions.append(
+            LabelledDecision(
+                label=f"person[{person.id}].state_pension.deferral_years",
+                decision=person.state_pension.deferral_years,
+            )
+        )
+    decisions.extend(
+        LabelledDecision(
+            label=f"wrapper[{wrapper.id}].contributions.employee_amount",
+            decision=wrapper.contributions.employee_amount,
+        )
+        for wrapper in person.wrappers
+        if wrapper.contributions is not None
+    )
+    return decisions
+
+
+def _db_pension_decisions(pension: DBPension) -> list[LabelledDecision]:
+    """One DB pension's decision variables under its entity-id prefix."""
+    pension_prefix = f"db_pension[{pension.id}]"
+    decisions: list[LabelledDecision] = []
+    if pension.taken_at_age is not None:
+        decisions.append(
+            LabelledDecision(
+                label=f"{pension_prefix}.taken_at_age",
+                decision=pension.taken_at_age,
+            )
+        )
+    decisions.append(
+        LabelledDecision(
+            label=f"{pension_prefix}.commuted_fraction",
+            decision=pension.commuted_fraction,
+        )
+    )
+    if (
+        pension.active_membership is not None
+        and pension.active_membership.active_until_age is not None
+    ):
+        decisions.append(
+            LabelledDecision(
+                label=f"{pension_prefix}.active_membership.active_until_age",
+                decision=pension.active_membership.active_until_age,
+            )
+        )
+    return decisions
