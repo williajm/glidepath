@@ -32,6 +32,7 @@ def purchase_of(
     fraction: str = "0.5",
     annuity_type: AnnuityType = AnnuityType.LEVEL,
     basis: AnnuityBasis = AnnuityBasis.SINGLE,
+    survivor_fraction: str | None = None,
 ) -> AnnuityPurchase:
     """One annuity purchase decision record."""
     return AnnuityPurchase(
@@ -40,6 +41,11 @@ def purchase_of(
         fraction_of_pot=Decision(value=Decimal(fraction), recorded_on=RECORDED),
         annuity_type=annuity_type,
         basis=basis,
+        survivor_fraction=(
+            None
+            if survivor_fraction is None
+            else Decision(value=Decimal(survivor_fraction), recorded_on=RECORDED)
+        ),
     )
 
 
@@ -90,6 +96,28 @@ class TestAnnuityPurchase:
         """A purchase age must be positive."""
         with pytest.raises(ValueError, match="at_age"):
             purchase_of(at_age=0)
+
+    @pytest.mark.parametrize("survivor", ["0.5", "0.66", "1"])
+    def test_joint_purchase_offers_the_verified_fractions(self, survivor: str) -> None:
+        """Each §6 survivor option (50/66/100%) constructs (roadmap 9.34)."""
+        purchase = purchase_of(basis=AnnuityBasis.JOINT, survivor_fraction=survivor)
+        assert purchase.survivor_fraction is not None
+        assert purchase.survivor_fraction.value == Decimal(survivor)
+
+    def test_joint_purchase_requires_a_survivor_fraction(self) -> None:
+        """A joint-life purchase must name its survivor income."""
+        with pytest.raises(ValueError, match="needs a survivor_fraction"):
+            purchase_of(basis=AnnuityBasis.JOINT)
+
+    def test_an_off_menu_survivor_fraction_is_rejected(self) -> None:
+        """Only the §6 option structure prices — no bespoke fractions."""
+        with pytest.raises(ValueError, match="survivor_fraction must be one of"):
+            purchase_of(basis=AnnuityBasis.JOINT, survivor_fraction="0.75")
+
+    def test_a_single_life_survivor_fraction_is_rejected(self) -> None:
+        """A single-life purchase has no survivor to pay."""
+        with pytest.raises(ValueError, match="cannot carry a survivor_fraction"):
+            purchase_of(survivor_fraction="0.5")
 
 
 class TestBaseRateKeys:

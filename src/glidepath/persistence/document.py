@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from glidepath.core import AssumptionKey, Household, Scenario
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 """The schema version this build reads and writes (planning §4.5).
 
 v2 (roadmap 9.6): every DB pension carries an ``active_membership``
@@ -44,6 +44,12 @@ v7 (roadmap 9.33): every person carries a ``death_age`` key (the §4.11
 survivor-modelling decision, ``null`` for alive to the horizon) and
 every DB pension a ``survivor_fraction`` key (the per-scheme fact,
 ``null`` for the ``db.survivor_fraction`` assumption default).
+
+v8 (roadmap 9.34): every annuity purchase carries a
+``survivor_fraction`` key — the joint-life purchase's §6 survivor
+income decision, ``null`` for a single-life purchase. A migrated v7
+joint-life purchase gains the 50% decision its priced joint factor
+was always quoting (the §7 table's joint-life 50% basis).
 """
 
 

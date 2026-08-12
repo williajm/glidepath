@@ -332,6 +332,12 @@ _ANNUITY_TYPES: Mapping[str, AnnuityType] = {
     "escalating": AnnuityType.ESCALATING,
     "inflation_linked": AnnuityType.INFLATION_LINKED,
 }
+_SURVIVOR_FRACTIONS: Mapping[str, Decimal] = {
+    "50": Decimal("0.5"),
+    "66": Decimal("0.66"),
+    "100": Decimal(1),
+}
+"""The §6 joint-life survivor options as form tokens (roadmap 9.34)."""
 
 _SEX_KEYS: Mapping[Sex, str] = {value: key for key, value in _SEXES.items()}
 _RELIEF_KEYS: Mapping[ReliefMechanic, str] = {
@@ -345,6 +351,9 @@ _REVALUATION_KEYS: Mapping[RevaluationReference, str] = {
 }
 _ANNUITY_TYPE_KEYS: Mapping[AnnuityType, str] = {
     value: key for key, value in _ANNUITY_TYPES.items()
+}
+_SURVIVOR_FRACTION_KEYS: Mapping[Decimal, str] = {
+    value: key for key, value in _SURVIVOR_FRACTIONS.items()
 }
 
 
@@ -771,16 +780,17 @@ def _annuity_purchase_from(
     """One planned annuity purchase from its section values.
 
     The record is wholly a decision (planning §5.1): the age, pot
-    fraction, and product type are all choices, priced from the
-    annuity-rate assumptions at run time. The form offers no basis
-    choice yet, so every purchase it writes is single-life —
-    joint-life annuities land with roadmap 9.34.
+    fraction, product type, and survivor income are all choices,
+    priced from the annuity-rate assumptions at run time. The basis
+    is implied by the survivor-income choice (roadmap 9.34): blank is
+    a single-life purchase; a §6 fraction makes it joint-life.
     """
     at_age = reader.int_value("at_age", required=True)
     fraction = reader.decimal_value("fraction_of_pot", required=True)
     annuity_type = reader.choice("annuity_type", _ANNUITY_TYPES)
     if annuity_type is None and not reader.raw("annuity_type"):
         reader.error("annuity_type", _REQUIRED_MESSAGE)
+    survivor = reader.choice("survivor_fraction", _SURVIVOR_FRACTIONS)
     if at_age is None or fraction is None or annuity_type is None or not reader.ok:
         return None
     recorded = reader.recorded_on
@@ -790,7 +800,12 @@ def _annuity_purchase_from(
             at_age=Decision(value=at_age, recorded_on=recorded),
             fraction_of_pot=Decision(value=fraction, recorded_on=recorded),
             annuity_type=annuity_type,
-            basis=AnnuityBasis.SINGLE,
+            basis=AnnuityBasis.SINGLE if survivor is None else AnnuityBasis.JOINT,
+            survivor_fraction=(
+                None
+                if survivor is None
+                else Decision(value=survivor, recorded_on=recorded)
+            ),
         )
     except ValueError as exc:
         reader.error("", str(exc))
@@ -1304,6 +1319,11 @@ def _annuity_purchase_values(purchase: AnnuityPurchase, owner: int) -> dict[str,
         "at_age": str(purchase.at_age.value),
         "fraction_of_pot": str(purchase.fraction_of_pot.value),
         "annuity_type": _ANNUITY_TYPE_KEYS[purchase.annuity_type],
+        "survivor_fraction": (
+            ""
+            if purchase.survivor_fraction is None
+            else _SURVIVOR_FRACTION_KEYS[purchase.survivor_fraction.value]
+        ),
     }
 
 
@@ -1393,17 +1413,6 @@ def _db_pension_cannot_represent(pension: DBPension) -> str | None:
     return None
 
 
-def _annuity_purchase_cannot_represent(purchase: AnnuityPurchase) -> str | None:
-    """Why the form cannot faithfully edit ``purchase``; ``None`` if it can.
-
-    The form offers no basis choice until roadmap 9.34, so a
-    joint-life purchase would silently become single-life on resave.
-    """
-    if purchase.basis is not AnnuityBasis.SINGLE:
-        return "a joint-life annuity purchase"
-    return None
-
-
 def _carries_note(value: object) -> bool:
     """Whether any fact or decision inside ``value`` carries a note.
 
@@ -1430,10 +1439,6 @@ def _person_cannot_represent(person: Person) -> str | None:
         (_state_pension_cannot_represent(person.state_pension),),
         (_wrapper_cannot_represent(wrapper) for wrapper in person.wrappers),
         (_db_pension_cannot_represent(pension) for pension in person.db_pensions),
-        (
-            _annuity_purchase_cannot_represent(purchase)
-            for purchase in person.annuity_purchases
-        ),
     )
     return next((reason for reason in reasons if reason is not None), None)
 
@@ -1443,9 +1448,9 @@ def form_cannot_represent(household: Household) -> str | None:
 
     ``None`` when every stored detail lands in a form field. The domain
     model legitimately holds more than the form yet offers (planned
-    outflows, joint-life annuity purchases, personal glide paths,
-    whole-retirement spending multipliers, wrapper allocations and
-    fees, independently dated fact pairs, fact and decision notes) —
+    outflows, personal glide paths, whole-retirement spending
+    multipliers, wrapper allocations and fees, independently dated
+    fact pairs, fact and decision notes) —
     resubmitting the populated form would silently rebuild a reduced
     household, so a shell must refuse to open such a plan rather than
     lose the data (§4.5).
@@ -1929,7 +1934,8 @@ def _annuity_purchase_section() -> SectionSpec:
 
     Every field is a choice (planning §5.1): the record is wholly a
     decision, priced at run time from the annuity-rate assumptions in
-    the inspector. Single-life only until roadmap 9.34.
+    the inspector. The survivor-income choice implies the basis
+    (roadmap 9.34): blank buys single-life, a §6 fraction joint-life.
     """
     return SectionSpec(
         key="annuity_purchase",
@@ -1940,8 +1946,7 @@ def _annuity_purchase_section() -> SectionSpec:
             "stays invested in drawdown; add several purchases at "
             "different ages to annuitise in stages. Everything here is "
             "your choice; the annuity rates applied are assumptions, "
-            "shown in the stated-vs-assumed view. Single-life products "
-            "only for now."
+            "shown in the stated-vs-assumed view."
         ),
         repeatable=True,
         add_label="Add annuity purchase",
@@ -1975,6 +1980,23 @@ def _annuity_purchase_section() -> SectionSpec:
                         value="inflation_linked",
                         label="Inflation-linked (tracks CPI)",
                     ),
+                ),
+            ),
+            FieldSpec(
+                key="survivor_fraction",
+                label="Survivor income (your choice)",
+                kind=FieldKind.CHOICE,
+                hint=(
+                    "A joint-life purchase continues income to the "
+                    "surviving partner at this share after the buyer's "
+                    "death, at a lower priced rate; single life stops "
+                    "with the buyer."
+                ),
+                choices=(
+                    ChoiceOption(value="", label="None — single life (default)"),
+                    ChoiceOption(value="50", label="Joint life — survivor gets 50%"),
+                    ChoiceOption(value="66", label="Joint life — survivor gets 66%"),
+                    ChoiceOption(value="100", label="Joint life — survivor gets 100%"),
                 ),
             ),
         ),

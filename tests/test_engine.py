@@ -4433,6 +4433,78 @@ class TestSurvivorModelling:
             snapshot.persons[1].annuity_income == ZERO for snapshot in result.snapshots
         )
 
+    def test_a_joint_life_annuity_continues_at_the_survivor_fraction(self) -> None:
+        """The bought income passes over at the purchased fraction (9.34).
+
+        The age-66 whole-pot purchase buys 40,000 x 0.08 x 1.125 x 0.9
+        (the joint factor) = 3,240 a year; from the 2028 death gate the
+        buyer's stream is gone and the survivor collects the purchased
+        50% — 1,620 — as their own taxable income.
+        """
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "0", crystallised="40000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                annuity_purchases=(
+                    annuity_purchase_of(
+                        at_age=66,
+                        fraction="1",
+                        basis=AnnuityBasis.JOINT,
+                        survivor_fraction="0.5",
+                    ),
+                ),
+                death_at=68,
+            ),
+            partner_of(()),
+        )
+        result = run(
+            plan,
+            annuity_assumptions({"spending.survivor_multiplier": Decimal(1)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 12, 31)),
+        )
+        buyer_by_year = [
+            snapshot.persons[0].annuity_income for snapshot in result.snapshots
+        ]
+        survivor_by_year = [
+            snapshot.persons[1].annuity_income for snapshot in result.snapshots
+        ]
+        assert buyer_by_year[0] == Money(Decimal("3240.00"))
+        assert buyer_by_year[1] == Money(Decimal("3240.00"))
+        assert buyer_by_year[2] == ZERO
+        assert survivor_by_year[0] == ZERO
+        assert survivor_by_year[1] == ZERO
+        assert survivor_by_year[2] == Money(Decimal("1620.00"))
+
+    def test_a_full_survivor_fraction_passes_the_income_whole(self) -> None:
+        """A 100% joint-life purchase continues undiminished (§6)."""
+        plan = couple_of(
+            person_of(
+                (wrapper_of(PENSION, "0", crystallised="40000"),),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                annuity_purchases=(
+                    annuity_purchase_of(
+                        at_age=66,
+                        fraction="1",
+                        basis=AnnuityBasis.JOINT,
+                        survivor_fraction="1",
+                    ),
+                ),
+                death_at=68,
+            ),
+            partner_of(()),
+        )
+        result = run(
+            plan,
+            annuity_assumptions({"spending.survivor_multiplier": Decimal(1)}),
+            stub_region(),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2028, 12, 31)),
+        )
+        _, survivor_2028 = result.snapshots[2].persons
+        assert survivor_2028.annuity_income == Money(Decimal("3240.00"))
+
     def test_a_dead_persons_pending_purchase_never_executes(self) -> None:
         """A purchase due in the death-effect period is not made.
 
@@ -4845,6 +4917,7 @@ def annuity_purchase_of(
     fraction: str = "0.5",
     annuity_type: AnnuityType = AnnuityType.LEVEL,
     basis: AnnuityBasis = AnnuityBasis.SINGLE,
+    survivor_fraction: str | None = None,
 ) -> AnnuityPurchase:
     """One annuity purchase decision record."""
     return AnnuityPurchase(
@@ -4853,6 +4926,11 @@ def annuity_purchase_of(
         fraction_of_pot=Decision(value=Decimal(fraction), recorded_on=RECORDED),
         annuity_type=annuity_type,
         basis=basis,
+        survivor_fraction=(
+            None
+            if survivor_fraction is None
+            else Decision(value=Decimal(survivor_fraction), recorded_on=RECORDED)
+        ),
     )
 
 
@@ -4995,9 +5073,16 @@ class TestAnnuityPurchases:
         [after] = result.snapshots[2].persons
         assert after.annuity_income == Money(Decimal("3025.00"))
 
-    def test_a_joint_basis_prices_at_the_joint_factor(self) -> None:
-        """The 0.9 joint factor turns 2,500 of income into 2,250."""
-        purchase = annuity_purchase_of(basis=AnnuityBasis.JOINT)
+    @pytest.mark.parametrize("survivor", ["0.5", "0.66", "1"])
+    def test_a_joint_basis_prices_at_the_joint_factor(self, survivor: str) -> None:
+        """The 0.9 joint factor turns 2,500 of income into 2,250.
+
+        The same factor prices every §6 survivor fraction — the
+        labelled v1 limitation of the §7 age-adjustment table (9.34).
+        """
+        purchase = annuity_purchase_of(
+            basis=AnnuityBasis.JOINT, survivor_fraction=survivor
+        )
         result = run(
             annuitant_plan(purchase),
             annuity_assumptions(),

@@ -11,6 +11,19 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Couples get joint-life annuities end-to-end (roadmap 9.34, planning
+  §4.11): an annuity purchase can now name a survivor income of 50%,
+  66%, or 100% — the verified UK option structure — via a new
+  survivor-income choice on the annuity form section, which also
+  implies the purchase's basis (blank stays single-life). On the
+  buyer's death the joint-life stream continues to the surviving
+  partner at the purchased fraction, escalating as before;
+  single-life purchases are unchanged. Pricing keeps the single
+  joint-life factor (0.92) whatever the fraction — a labelled v1
+  limitation of the annuity age-adjustment table. The facts form
+  thereby represents every couples plan feature; plan documents step
+  to schema v8 (older files load as before).
+
 - Couples get deterministic survivor modelling (roadmap 9.33, planning
   §4.11): each person can state an optional "model death at age" —
   a choice, so "what if I die at 75" also works as an ordinary

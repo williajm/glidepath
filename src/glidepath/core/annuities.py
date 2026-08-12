@@ -55,7 +55,17 @@ class AnnuityBasis(Enum):
 
     SINGLE = auto()
     JOINT = auto()
-    """Continues (at the priced survivor fraction) to a partner."""
+    """Continues (at the purchase's survivor fraction) to a partner."""
+
+
+JOINT_SURVIVOR_FRACTIONS: tuple[Decimal, ...] = (
+    Decimal("0.5"),
+    Decimal("0.66"),
+    Decimal(1),
+)
+"""The survivor fractions a joint-life purchase offers (planning §6):
+the verified UK option structure — survivor income at 50%, 66%, or
+100% of the income in payment at the first death (roadmap 9.34)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +78,11 @@ class AnnuityPurchase:
     income priced from the annuity-rate assumptions (roadmap 5.5).
     Partial annuitisation mid-drawdown is the ``fraction_of_pot < 1``
     case; several purchases at different ages annuitise in stages.
+
+    A joint-life purchase carries a ``survivor_fraction`` decision —
+    one of :data:`JOINT_SURVIVOR_FRACTIONS`, the §6 option structure —
+    naming how much of the income continues to a surviving partner
+    (roadmap 9.34). A single-life purchase carries none.
     """
 
     id: EntityId
@@ -75,14 +90,26 @@ class AnnuityPurchase:
     fraction_of_pot: Decision[Decimal]
     annuity_type: AnnuityType = AnnuityType.LEVEL
     basis: AnnuityBasis = AnnuityBasis.SINGLE
+    survivor_fraction: Decision[Decimal] | None = None
 
     def __post_init__(self) -> None:
-        """Reject a non-positive age or a fraction outside (0, 1]."""
+        """Reject a non-positive age, a bad fraction, or a basis mismatch."""
         if self.at_age.value <= 0:
             msg = "AnnuityPurchase.at_age must be positive"
             raise ValueError(msg)
         if not _ZERO < self.fraction_of_pot.value <= _ONE:
             msg = "AnnuityPurchase.fraction_of_pot must lie in (0, 1]"
+            raise ValueError(msg)
+        if self.basis is AnnuityBasis.JOINT:
+            if self.survivor_fraction is None:
+                msg = "a joint-life AnnuityPurchase needs a survivor_fraction"
+                raise ValueError(msg)
+            if self.survivor_fraction.value not in JOINT_SURVIVOR_FRACTIONS:
+                offered = ", ".join(str(f) for f in JOINT_SURVIVOR_FRACTIONS)
+                msg = f"AnnuityPurchase.survivor_fraction must be one of {offered}"
+                raise ValueError(msg)
+        elif self.survivor_fraction is not None:
+            msg = "a single-life AnnuityPurchase cannot carry a survivor_fraction"
             raise ValueError(msg)
 
 

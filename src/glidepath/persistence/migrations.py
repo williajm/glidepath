@@ -143,6 +143,43 @@ def _upgrade_v6_to_v7(raw: RawDocument) -> RawDocument:
     return raw
 
 
+def _upgrade_v7_to_v8(raw: RawDocument) -> RawDocument:
+    """v8 adds ``survivor_fraction`` to every annuity purchase (roadmap 9.34).
+
+    A single-life purchase gains the key as ``null``. A v7 joint-life
+    purchase predates the survivor-income decision, but names the
+    product the §7 joint factor was always quoting — the joint-life
+    50% product (the `annuity.age_adjustment` basis) — so the
+    migration records that 50% fraction rather than guessing among
+    the §6 options, borrowing ``at_age.recorded_on`` (the purchase's
+    ever-present decision timestamp; migrations read no clock, §4.6).
+    """
+    household = raw.get("household")
+    persons = household.get("persons") if isinstance(household, dict) else []
+    for person in persons if isinstance(persons, list) else []:
+        purchases = person.get("annuity_purchases") if isinstance(person, dict) else []
+        for purchase in purchases if isinstance(purchases, list) else []:
+            if isinstance(purchase, dict):
+                purchase["survivor_fraction"] = _v8_survivor_fraction(purchase)
+    raw[_VERSION_KEY] = 8
+    return raw
+
+
+def _v8_survivor_fraction(purchase: dict[str, Any]) -> dict[str, Any] | None:
+    """The survivor-fraction value a v7 purchase migrates to (9.34).
+
+    ``None`` (never recorded) except for a joint-life purchase, which
+    gains the 50% decision its priced joint factor was quoting. A
+    malformed ``at_age`` yields a shape the strict decoder rejects
+    with a proper path-carrying error, as ever.
+    """
+    if purchase.get("basis") != "joint":
+        return None
+    at_age = purchase.get("at_age")
+    recorded_on = at_age.get("recorded_on") if isinstance(at_age, dict) else None
+    return {"value": "0.5", "recorded_on": recorded_on, "note": None}
+
+
 UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
     {
         1: _upgrade_v1_to_v2,
@@ -151,6 +188,7 @@ UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
         4: _upgrade_v4_to_v5,
         5: _upgrade_v5_to_v6,
         6: _upgrade_v6_to_v7,
+        7: _upgrade_v7_to_v8,
     }
 )
 """The registered upgraders, keyed by the version each reads."""

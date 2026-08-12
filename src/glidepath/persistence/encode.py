@@ -315,6 +315,9 @@ def _annuity_purchase(purchase: AnnuityPurchase) -> dict[str, object]:
         "fraction_of_pot": _decision(purchase.fraction_of_pot, _decimal_value),
         "annuity_type": ANNUITY_TYPE_TOKENS.token(purchase.annuity_type),
         "basis": ANNUITY_BASIS_TOKENS.token(purchase.basis),
+        "survivor_fraction": _optional_decision(
+            purchase.survivor_fraction, _decimal_value
+        ),
     }
 
 

@@ -208,6 +208,7 @@ def annuity_purchases() -> tuple[AnnuityPurchase, ...]:
             fraction_of_pot=decision(Decimal("0.25")),
             annuity_type=AnnuityType.INFLATION_LINKED,
             basis=AnnuityBasis.JOINT,
+            survivor_fraction=decision(Decimal("0.66")),
         ),
         AnnuityPurchase(
             id=ANNUITY_ESCALATING_ID,
