@@ -9,6 +9,7 @@ higher 40% to £125,140, additional 45% above; Scottish starter 19% to
 above.
 """
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -29,6 +30,7 @@ from glidepath.regions.uk import (
     MARRIAGE_ALLOWANCE_BAND,
     RUK_RESIDENCY,
     SCOTLAND_RESIDENCY,
+    SavingsRate,
     UkTaxError,
     UkTaxSystem,
     load_tax_year,
@@ -235,6 +237,35 @@ def test_additional_rate_has_no_psa(system: UkTaxSystem) -> None:
     assert result.lines[-1].band == "savings_additional"
     assert result.lines[-1].taxed == Money(Decimal(1000))
     assert result.tax_due == Money(Decimal("45153.00"))
+
+
+def test_separate_savings_rates_price_the_savings_layer() -> None:
+    """A file with 22/42/47 savings rates taxes interest above pay rates.
+
+    The 2027/28-shaped schedule (Budget 2025 OOTLAR, #189): £30,000
+    pay + £3,000 interest — pay stays at the main 20% (3,486.00), the
+    PSA still covers 1,000, and the remaining 2,000 pays the separate
+    22% savings basic rate: 440.00 instead of 400.00.
+    """
+    year = load_tax_year(2026)
+    savings_rules = replace(
+        year.savings,
+        rates=(
+            SavingsRate(name="basic", rate=Rate(Decimal("0.22"))),
+            SavingsRate(name="higher", rate=Rate(Decimal("0.42"))),
+            SavingsRate(name="additional", rate=Rate(Decimal("0.47"))),
+        ),
+    )
+    system = UkTaxSystem(tax_years=(replace(year, savings=savings_rules),))
+    result = system.assess(
+        TAX_YEAR_2026_27, categorised_income(RUK_RESIDENCY, "30000", "3000", "0")
+    )
+    assert [(line.band, line.tax) for line in result.lines] == [
+        ("basic", Money(Decimal("3486.00"))),
+        ("savings_nil_rate", Money(Decimal(0))),
+        ("savings_basic", Money(Decimal("440.00"))),
+    ]
+    assert result.tax_due == Money(Decimal("3926.00"))
 
 
 @pytest.mark.parametrize(

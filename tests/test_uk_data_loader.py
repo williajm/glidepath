@@ -28,7 +28,7 @@ from glidepath.regions.uk import (
     tax_year_filename,
 )
 
-TAX_HEADER = "schema_version = 4\n"
+TAX_HEADER = "schema_version = 5\n"
 TAX_META = """
 [meta]
 tax_year = "2026/27"
@@ -90,6 +90,11 @@ starting_rate_limit = "5000"
 psa_basic = "1000"
 psa_higher = "500"
 psa_additional = "0"
+rates = [
+  { name = "basic", rate = "0.20" },
+  { name = "higher", rate = "0.40" },
+  { name = "additional", rate = "0.45" },
+]
 """
 TAX_DIVIDEND = """
 [dividend]
@@ -122,7 +127,7 @@ VALID_TAX_YEAR = (
 )
 
 VALID_AGE_RULES = """
-schema_version = 4
+schema_version = 5
 
 [meta]
 verified_on = 2026-08-02
@@ -157,7 +162,7 @@ per_weeks = 9
 income_tax_free_before_age = 75
 """
 
-ASSUMPTIONS_HEADER = """schema_version = 4
+ASSUMPTIONS_HEADER = """schema_version = 5
 
 [meta]
 verified_on = 2026-08-01
@@ -207,7 +212,14 @@ def test_descending_psa_tier_order_is_enforced_at_load() -> None:
 def test_misaligned_dividend_rates_are_an_error() -> None:
     """Dividend rates must align one-to-one with the rUK bands."""
     broken = _mutated(VALID_TAX_YEAR, '  { name = "ordinary", rate = "0.1075" },\n', "")
-    with pytest.raises(DataFileError, match="align one-to-one with the rUK bands"):
+    with pytest.raises(DataFileError, match=r"dividend\.rates must align one-to-one"):
+        parse_tax_year(broken)
+
+
+def test_misaligned_savings_rates_are_an_error() -> None:
+    """Savings rates must align one-to-one with the rUK bands."""
+    broken = _mutated(VALID_TAX_YEAR, '  { name = "higher", rate = "0.40" },\n', "")
+    with pytest.raises(DataFileError, match=r"savings\.rates must align one-to-one"):
         parse_tax_year(broken)
 
 
@@ -219,21 +231,21 @@ def test_invalid_toml_is_a_load_error() -> None:
 
 def test_missing_schema_version_is_an_error() -> None:
     """schema_version is mandatory."""
-    broken = _mutated(VALID_TAX_YEAR, "schema_version = 4\n", "")
+    broken = _mutated(VALID_TAX_YEAR, "schema_version = 5\n", "")
     with pytest.raises(DataFileError, match="missing required key 'schema_version'"):
         parse_tax_year(broken)
 
 
 def test_unsupported_schema_version_is_an_error() -> None:
-    """Version 5 files must not load into version 4 code."""
-    broken = _mutated(VALID_TAX_YEAR, "schema_version = 4", "schema_version = 5")
-    with pytest.raises(DataFileError, match="schema_version 5 is not supported"):
+    """Version 6 files must not load into version 5 code."""
+    broken = _mutated(VALID_TAX_YEAR, "schema_version = 5", "schema_version = 6")
+    with pytest.raises(DataFileError, match="schema_version 6 is not supported"):
         parse_tax_year(broken)
 
 
 def test_string_schema_version_is_an_error() -> None:
     """schema_version must be an integer."""
-    broken = _mutated(VALID_TAX_YEAR, "schema_version = 4", 'schema_version = "4"')
+    broken = _mutated(VALID_TAX_YEAR, "schema_version = 5", 'schema_version = "5"')
     with pytest.raises(DataFileError, match="expected an integer"):
         parse_tax_year(broken)
 
@@ -255,7 +267,7 @@ def test_missing_meta_key_is_an_error() -> None:
 def test_unknown_top_level_key_is_an_error() -> None:
     """Unknown keys anywhere are load errors."""
     broken = _mutated(
-        VALID_TAX_YEAR, "schema_version = 4\n", "schema_version = 4\nmystery = 1\n"
+        VALID_TAX_YEAR, "schema_version = 5\n", "schema_version = 5\nmystery = 1\n"
     )
     with pytest.raises(DataFileError, match="unknown keys: mystery"):
         parse_tax_year(broken)
@@ -721,7 +733,7 @@ def test_available_tax_years_matches_shipped_files(
 # --- returns_history.toml (issue 9.18) ---------------------------------------
 
 VALID_RETURNS_HISTORY = """
-schema_version = 4
+schema_version = 5
 
 [meta]
 verified_on = 2026-08-05

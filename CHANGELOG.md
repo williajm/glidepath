@@ -11,6 +11,14 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Tax-year data files now carry a savings rate schedule
+  (`savings.rates`, data schema v5), aligned positionally with the
+  rUK bands and consumed by the savings-income layer, so the separate
+  22% / 42% / 47% savings rates enacted from 6 April 2027 (Budget
+  2025 OOTLAR) can ship as data in the 2027/28 file instead of being
+  impossible to represent. The 2026/27 file states the current
+  20/40/45 rates explicitly; assessments are unchanged (#189).
+
 - Release artifacts attached to a GitHub Release now carry signed
   build provenance (`actions/attest-build-provenance`) — the
   GitHub-side mirror of the PEP 740 attestations PyPI already holds —

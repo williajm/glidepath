@@ -368,12 +368,14 @@ def _indexed_savings(savings: SavingsRules, factor: Decimal) -> SavingsRules:
     The starting-rate limit is legislated frozen with the rUK schedule
     (planning §6), and the PSA amounts follow the same reserved policy;
     a zero tier (the additional-rate PSA) stays zero under any factor.
+    The savings rates never extrapolate, like every other rate.
     """
     return SavingsRules(
         starting_rate_limit=_indexed_money(savings.starting_rate_limit, factor),
         psa_basic=_indexed_money(savings.psa_basic, factor),
         psa_higher=_indexed_money(savings.psa_higher, factor),
         psa_additional=_indexed_money(savings.psa_additional, factor),
+        rates=savings.rates,
     )
 
 
