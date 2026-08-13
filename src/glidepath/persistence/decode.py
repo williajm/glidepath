@@ -36,6 +36,7 @@ from glidepath.core import (
     SpendingPlan,
     StatePensionRecord,
     TaxResidencyId,
+    WithdrawalRule,
     Wrapper,
     WrapperKindId,
 )
@@ -53,6 +54,7 @@ from glidepath.persistence.values import (
     RELIEF_MECHANIC_TOKENS,
     REVALUATION_REFERENCE_TOKENS,
     SEX_TOKENS,
+    WITHDRAWAL_RULE_KIND_TOKENS,
     decode_value,
     parse_bool,
     parse_date,
@@ -359,6 +361,11 @@ def _household(raw: object, path: str) -> Household:
         reader.at("claim_marriage_allowance"),
         _claim_decision,
     )
+    withdrawal = _optional(
+        reader.take("withdrawal_strategy"),
+        reader.at("withdrawal_strategy"),
+        _withdrawal_strategy_decision,
+    )
     reader.finish()
     return _built(
         lambda: Household(
@@ -366,6 +373,7 @@ def _household(raw: object, path: str) -> Household:
             spending=spending,
             planned_outflows=outflows,
             claim_marriage_allowance=claim,
+            withdrawal_strategy=withdrawal,
         ),
         path,
     )
@@ -374,6 +382,23 @@ def _household(raw: object, path: str) -> Household:
 def _claim_decision(raw: object, path: str) -> Decision[bool]:
     """Decode the household's marriage-allowance claim decision."""
     return _decision(raw, path, parse_bool)
+
+
+def _withdrawal_strategy_decision(raw: object, path: str) -> Decision[WithdrawalRule]:
+    """Decode the household's withdrawal-strategy decision (schema v9)."""
+    return _decision(raw, path, _withdrawal_rule)
+
+
+def _withdrawal_rule(raw: object, path: str) -> WithdrawalRule:
+    """Decode one withdrawal rule: its kind token and optional rate."""
+    reader = _Reader(raw, path)
+    kind = WITHDRAWAL_RULE_KIND_TOKENS.member(reader.take("kind"), reader.at("kind"))
+    rate = _optional(reader.take("rate"), reader.at("rate"), parse_decimal)
+    reader.finish()
+    return _built(
+        lambda: WithdrawalRule(kind=kind, rate=None if rate is None else Rate(rate)),
+        path,
+    )
 
 
 def _person(raw: object, path: str) -> Person:

@@ -17,6 +17,7 @@ import pytest
 
 from factories import FreeWrapperRules, money_fact, stub_region
 from glidepath.app import (
+    DETERMINISTIC_BASIS_SENTENCE,
     NO_OUTLOOK_MESSAGE,
     OUTLOOK_HEADING,
     OUTLOOK_NO_PLAN_MESSAGE,
@@ -179,12 +180,14 @@ class TestEmptyStates:
         assert panel.detail == ""
         assert panel.message == OUTLOOK_NO_PLAN_MESSAGE
 
-    def test_without_a_run_the_card_says_run_monte_carlo(self) -> None:
-        """A projected plan alone carries the no-run copy."""
+    def test_without_a_run_the_card_shows_the_single_path_outlook(self) -> None:
+        """A projected plan alone reads the deterministic path (10.4)."""
         state = state_with_household(short_horizon_state(), household(), today=TODAY)
         panel = build_outlook_panel(state)
-        assert panel.answer == ""
-        assert panel.message == NO_OUTLOOK_MESSAGE
+        assert panel.answer.startswith("At age 63, your pots are on course")
+        assert "today's money" in panel.answer
+        assert DETERMINISTIC_BASIS_SENTENCE in panel.detail
+        assert panel.message == ""
 
     def test_the_charts_view_model_carries_the_panel(self) -> None:
         """The outlook rides the charts screen in either run mode."""
@@ -396,8 +399,8 @@ class TestStaleness:
         panel = build_outlook_panel(drifted)
         assert panel.message == NO_OUTLOOK_MESSAGE
 
-    def test_paths_over_differing_periods_read_as_no_run(self) -> None:
-        """Unaligned paths cannot be summarised."""
+    def test_paths_over_differing_periods_fall_back_to_the_single_path(self) -> None:
+        """Unaligned paths cannot be summarised; the deterministic card shows."""
         state = outlook_state()
         assert state.monte_carlo is not None
         result = state.monte_carlo
@@ -408,9 +411,10 @@ class TestStaleness:
         )
         mismatched = replace(result, outcomes=(truncated, *result.outcomes[1:]))
         panel = build_outlook_panel(replace(state, monte_carlo=mismatched))
-        assert panel.message == NO_OUTLOOK_MESSAGE
+        assert panel.message == ""
+        assert DETERMINISTIC_BASIS_SENTENCE in panel.detail
 
-    def test_a_run_over_fewer_periods_reads_as_no_run(self) -> None:
+    def test_a_run_over_fewer_periods_falls_back_to_the_single_path(self) -> None:
         """A uniformly shorter household series misaligns with the charts."""
         state = outlook_state()
         assert state.monte_carlo is not None
@@ -426,9 +430,12 @@ class TestStaleness:
         panel = build_outlook_panel(
             replace(state, monte_carlo=replace(result, outcomes=shortened))
         )
-        assert panel.message == NO_OUTLOOK_MESSAGE
+        assert panel.message == ""
+        assert DETERMINISTIC_BASIS_SENTENCE in panel.detail
 
-    def test_a_shorter_pension_series_alone_reads_as_no_run(self) -> None:
+    def test_a_shorter_pension_series_alone_falls_back_to_the_single_path(
+        self,
+    ) -> None:
         """The pension series carries the same alignment rule."""
         state = outlook_state()
         assert state.monte_carlo is not None
@@ -443,7 +450,8 @@ class TestStaleness:
         panel = build_outlook_panel(
             replace(state, monte_carlo=replace(result, outcomes=shortened))
         )
-        assert panel.message == NO_OUTLOOK_MESSAGE
+        assert panel.message == ""
+        assert DETERMINISTIC_BASIS_SENTENCE in panel.detail
 
 
 @dataclass(frozen=True)

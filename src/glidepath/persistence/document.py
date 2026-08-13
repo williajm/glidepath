@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from glidepath.core import AssumptionKey, Household, Scenario
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 """The schema version this build reads and writes (planning §4.5).
 
 v2 (roadmap 9.6): every DB pension carries an ``active_membership``
@@ -50,6 +50,11 @@ v8 (roadmap 9.34): every annuity purchase carries a
 income decision, ``null`` for a single-life purchase. A migrated v7
 joint-life purchase gains the 50% decision its priced joint factor
 was always quoting (the §7 table's joint-life 50% basis).
+
+v9 (roadmap 10.3): the household carries a ``withdrawal_strategy``
+key — the decumulation withdrawal-strategy decision (its kind token
+plus the fixed-percentage rate), ``null`` for the default (fixed
+real spending).
 """
 
 

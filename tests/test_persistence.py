@@ -63,6 +63,8 @@ from glidepath.core import (
     SpendingPlan,
     StatePensionRecord,
     TaxResidencyId,
+    WithdrawalRule,
+    WithdrawalRuleKind,
     Wrapper,
     WrapperKindId,
 )
@@ -314,6 +316,12 @@ def kitchen_sink_household(
         spending=spending,
         planned_outflows=(outflow,),
         claim_marriage_allowance=decision(value=False, note="we cohabit"),
+        withdrawal_strategy=decision(
+            WithdrawalRule(
+                kind=WithdrawalRuleKind.FIXED_PERCENT, rate=Rate(Decimal("0.04"))
+            ),
+            note="the classic 4%",
+        ),
     )
 
 
@@ -1393,3 +1401,45 @@ class TestUkIntegration:
         )
         untouched = resolved.get(AssumptionKey.RETURNS_EQUITY_REAL)
         assert untouched.provenance is Provenance.DEFAULT_ASSUMPTION
+
+
+class TestWithdrawalStrategyDecoding:
+    """The v9 household withdrawal-strategy decision (roadmap 10.3)."""
+
+    def test_an_unknown_kind_token_is_refused(self) -> None:
+        """The strategy vocabulary is closed; typos fail loudly."""
+        payload = payload_of(kitchen_sink_document())
+        payload["household"]["withdrawal_strategy"]["value"]["kind"] = "martingale"
+        with pytest.raises(PersistenceError, match="unknown token"):
+            loads_payload(payload)
+
+    def test_a_rate_on_a_parameterless_strategy_is_refused(self) -> None:
+        """The domain invariant surfaces as a path-carrying error."""
+        payload = payload_of(kitchen_sink_document())
+        payload["household"]["withdrawal_strategy"]["value"] = {
+            "kind": "guardrails",
+            "rate": "0.04",
+        }
+        with pytest.raises(PersistenceError, match="only valid for FIXED_PERCENT"):
+            loads_payload(payload)
+
+    def test_a_missing_rate_key_is_refused(self) -> None:
+        """The rate key is part of the value shape, null when unused."""
+        payload = payload_of(kitchen_sink_document())
+        payload["household"]["withdrawal_strategy"]["value"] = {"kind": "fixed_real"}
+        with pytest.raises(PersistenceError, match="missing required key"):
+            loads_payload(payload)
+
+    def test_a_parameterless_strategy_round_trips(self) -> None:
+        """A null rate survives the round trip as no rate at all."""
+        base = kitchen_sink_document()
+        document = replace(
+            base,
+            household=replace(
+                base.household,
+                withdrawal_strategy=decision(
+                    WithdrawalRule(kind=WithdrawalRuleKind.NATURAL_YIELD)
+                ),
+            ),
+        )
+        assert loads_plan(dumps_plan(document)) == document

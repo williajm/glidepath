@@ -180,6 +180,21 @@ def _v8_survivor_fraction(purchase: dict[str, Any]) -> dict[str, Any] | None:
     return {"value": "0.5", "recorded_on": recorded_on, "note": None}
 
 
+def _upgrade_v8_to_v9(raw: RawDocument) -> RawDocument:
+    """v9 adds ``withdrawal_strategy`` to the household (roadmap 10.3).
+
+    A v8 file predates the withdrawal-strategy choice, so every
+    household it holds keeps the default — the new key decodes as
+    ``null``, meaning fixed real spending (planning §5.2), exactly the
+    strategy every earlier build always ran.
+    """
+    household = raw.get("household")
+    if isinstance(household, dict):
+        household["withdrawal_strategy"] = None
+    raw[_VERSION_KEY] = 9
+    return raw
+
+
 UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
     {
         1: _upgrade_v1_to_v2,
@@ -189,6 +204,7 @@ UPGRADERS: Mapping[int, Upgrader] = MappingProxyType(
         5: _upgrade_v5_to_v6,
         6: _upgrade_v6_to_v7,
         7: _upgrade_v7_to_v8,
+        8: _upgrade_v8_to_v9,
     }
 )
 """The registered upgraders, keyed by the version each reads."""

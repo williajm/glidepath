@@ -14,6 +14,7 @@ from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -21,9 +22,16 @@ from PySide6.QtWidgets import (
 
 from glidepath.app import (
     ENTITY_ID_KEY,
+    HIDE_ADVANCED_LABEL,
+    INCOME_PREFERENCE_ANNUITY,
+    INCOME_PREFERENCE_KEY,
     OWNER_KEY,
+    REQUIRED_MARKER,
+    SHOW_ADVANCED_LABEL,
     FactsFormData,
+    FactsSubmissionOutcome,
     FieldKind,
+    FormError,
     PersonFormData,
     PlanEntityIds,
     build_facts_form_view_model,
@@ -287,7 +295,9 @@ class TestRepeatableSection:
 
 
 def _pane(
-    on_submit: Callable[[FactsFormData], str] = lambda _data: "",
+    on_submit: Callable[[FactsFormData], FactsSubmissionOutcome] = (
+        lambda _data: FactsSubmissionOutcome(status="")
+    ),
     on_clear: Callable[[], str] = lambda: "",
 ) -> FactsEntryPane:
     """A pane with no-op callbacks unless a test supplies its own."""
@@ -301,9 +311,9 @@ class TestFactsEntryPane:
         """Submission carries every section's raw text to the callback."""
         received: list[FactsFormData] = []
 
-        def on_submit(data: FactsFormData) -> str:
+        def on_submit(data: FactsFormData) -> FactsSubmissionOutcome:
             received.append(data)
-            return "status text"
+            return FactsSubmissionOutcome(status="status text")
 
         pane = _pane(on_submit=on_submit)
         pane.person_form.set_value("date_of_birth", "1984-05-20")
@@ -542,3 +552,228 @@ class TestFactsEntryPanePartner:
             "id-pw0",
         ]
         assert [row[ENTITY_ID_KEY] for row in data.annuity_purchases] == ["id-pa0"]
+
+
+class TestAdvancedDisclosure:
+    """Rarely needed fields sit behind "More options" (roadmap 10.1)."""
+
+    @staticmethod
+    def person_form() -> SectionForm:
+        """The person section — it carries advanced fields."""
+        return SectionForm(build_facts_form_view_model().person)
+
+    def test_advanced_fields_start_hidden_behind_the_toggle(self) -> None:
+        """The advanced sub-form is tucked away and the toggle offers it."""
+        form = self.person_form()
+        assert not form.advanced_visible
+        assert form.advanced_toggle.text() == SHOW_ADVANCED_LABEL
+        assert form.advanced_toggle.isVisibleTo(form)
+
+    def test_the_toggle_discloses_and_tucks_away(self) -> None:
+        """Clicking flips the sub-form and the toggle's own label."""
+        form = self.person_form()
+        form.advanced_toggle.click()
+        disclosed = form.advanced_visible
+        assert disclosed
+        assert form.advanced_toggle.text() == HIDE_ADVANCED_LABEL
+        form.advanced_toggle.click()
+        tucked_away = not form.advanced_visible
+        assert tucked_away
+        assert form.advanced_toggle.text() == SHOW_ADVANCED_LABEL
+
+    def test_a_section_without_advanced_fields_hides_the_toggle(self) -> None:
+        """No disclosure is offered where there is nothing to disclose."""
+        form = SectionForm(build_facts_form_view_model().retirement_income)
+        assert not form.advanced_toggle.isVisibleTo(form)
+
+    def test_loading_a_value_into_an_advanced_field_reveals_it(self) -> None:
+        """A populated advanced field must never stay hidden."""
+        form = self.person_form()
+        form.set_value("death_age", "82")
+        assert form.advanced_visible
+
+    def test_clear_tucks_the_advanced_fields_away_again(self) -> None:
+        """A cleared section returns to its compact rendering."""
+        form = self.person_form()
+        form.set_value("death_age", "82")
+        form.clear()
+        assert not form.advanced_visible
+
+    def test_blank_values_do_not_reveal(self) -> None:
+        """Loading blanks (the common case) keeps the compact view."""
+        form = self.person_form()
+        form.set_values({"death_age": "", "lsa_used": ""})
+        assert not form.advanced_visible
+
+
+class TestRequiredMarkersAndTooltips:
+    """Required labels are flagged; hints survive typing (10.2, 10.4)."""
+
+    def test_required_fields_carry_the_marker_on_their_labels(self) -> None:
+        """The date of birth is required; its rendered label says so."""
+        spec = build_facts_form_view_model().person
+        form = SectionForm(spec)
+        labels = {label.text() for label in form.findChildren(QLabel)}
+        dob = next(field for field in spec.fields if field.key == "date_of_birth")
+        income = next(
+            field for field in spec.fields if field.key == "employment_income"
+        )
+        assert f"{dob.label} {REQUIRED_MARKER}" in labels
+        assert income.label in labels
+
+    def test_every_hinted_editor_carries_its_hint_as_a_tooltip(self) -> None:
+        """Placeholder guidance stays reachable after the user types."""
+        spec = build_facts_form_view_model().person
+        form = SectionForm(spec)
+        for field in spec.fields:
+            if field.hint:
+                assert form.editor(field.key).toolTip() == field.hint
+
+
+def _error_labels_showing(form: SectionForm) -> list[str]:
+    """The texts of the form's visible inline error labels."""
+    return [
+        label.text()
+        for label in form.findChildren(QLabel)
+        if label.objectName() == "fieldErrorLabel" and label.isVisibleTo(form)
+    ]
+
+
+class TestInlineErrors:
+    """Submission errors land under their fields (roadmap 10.2)."""
+
+    @staticmethod
+    def rejecting_pane(errors: tuple[FormError, ...]) -> FactsEntryPane:
+        """A pane whose submit callback always reports ``errors``."""
+        return _pane(
+            on_submit=lambda _data: FactsSubmissionOutcome(
+                status="fix the errors", errors=errors
+            )
+        )
+
+    def test_an_error_renders_under_its_field(self) -> None:
+        """The message shows inline on the addressed section."""
+        error = FormError("person", None, "date_of_birth", "this field is required")
+        pane = self.rejecting_pane((error,))
+        pane.submit_button.click()
+        assert _error_labels_showing(pane.person_form) == ["this field is required"]
+        assert pane.status_label.text() == "fix the errors"
+
+    def test_an_error_on_a_repeatable_row_lands_on_that_row(self) -> None:
+        """The row index routes the message to the right instance."""
+        pane = self.rejecting_pane((FormError("wrapper", 1, "balance", "bad amount"),))
+        pane.wrappers.add_entry()
+        pane.wrappers.add_entry()
+        pane.submit_button.click()
+        first, second = pane.wrappers.forms
+        assert _error_labels_showing(first) == []
+        assert _error_labels_showing(second) == ["bad amount"]
+
+    def test_an_error_on_an_advanced_field_reveals_it(self) -> None:
+        """A hidden error would read as the app ignoring the save."""
+        error = FormError("person", None, "death_age", "enter a whole number")
+        pane = self.rejecting_pane((error,))
+        pane.submit_button.click()
+        assert pane.person_form.advanced_visible
+
+    def test_a_sectionwide_error_uses_the_section_label(self) -> None:
+        """An empty field key errors the section as a whole."""
+        pane = self.rejecting_pane((FormError("person", None, "", "whole-form no"),))
+        pane.submit_button.click()
+        label = pane.person_form.section_error_label
+        assert label.isVisibleTo(pane.person_form)
+        assert label.text() == "whole-form no"
+
+    def test_the_next_submission_clears_previous_errors(self) -> None:
+        """A clean resubmission leaves no stale inline messages."""
+        outcomes = [
+            FactsSubmissionOutcome(
+                status="fix",
+                errors=(FormError("person", None, "date_of_birth", "required"),),
+            ),
+            FactsSubmissionOutcome(status="saved"),
+        ]
+        pane = _pane(on_submit=lambda _data: outcomes.pop(0))
+        pane.submit_button.click()
+        assert _error_labels_showing(pane.person_form) == ["required"]
+        pane.submit_button.click()
+        assert _error_labels_showing(pane.person_form) == []
+        assert pane.status_label.text() == "saved"
+
+    def test_an_error_off_the_pane_is_status_only(self) -> None:
+        """An unaddressable error never crashes the rendering."""
+        pane = self.rejecting_pane((FormError("wrapper", 3, "balance", "no row"),))
+        pane.submit_button.click()
+        assert pane.status_label.text() == "fix the errors"
+
+
+class TestIncomePreference:
+    """The annuity sections follow the preference dropdown (10.3)."""
+
+    def test_annuity_sections_start_hidden(self) -> None:
+        """Drawdown-only is the default; no purchase sections show."""
+        pane = _pane()
+        assert pane.annuity_purchases.isHidden()
+        assert pane.partner_annuity_purchases.isHidden()
+
+    def test_choosing_annuity_reveals_the_sections(self) -> None:
+        """The preference dropdown is the disclosure control."""
+        pane = _pane()
+        pane.retirement_income_form.set_value(
+            INCOME_PREFERENCE_KEY, INCOME_PREFERENCE_ANNUITY
+        )
+        assert pane.annuity_purchases.isVisibleTo(pane)
+
+    def test_switching_back_confirms_then_deletes_the_rows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Answering Yes clears every purchase row and hides the sections."""
+        pane = _pane()
+        pane.retirement_income_form.set_value(
+            INCOME_PREFERENCE_KEY, INCOME_PREFERENCE_ANNUITY
+        )
+        pane.annuity_purchases.add_entry().set_value("at_age", "68")
+        monkeypatch.setattr(
+            forms_module,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.Yes),
+        )
+        pane.retirement_income_form.set_value(INCOME_PREFERENCE_KEY, "")
+        assert pane.form_data().annuity_purchases == ()
+        assert not pane.annuity_purchases.isVisibleTo(pane)
+
+    def test_declining_the_confirm_keeps_the_rows_and_reverts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Answering No keeps the purchases and the annuity preference."""
+        pane = _pane()
+        pane.retirement_income_form.set_value(
+            INCOME_PREFERENCE_KEY, INCOME_PREFERENCE_ANNUITY
+        )
+        pane.annuity_purchases.add_entry().set_value("at_age", "68")
+        monkeypatch.setattr(
+            forms_module,
+            "QMessageBox",
+            _message_box_answering(QMessageBox.StandardButton.No),
+        )
+        pane.retirement_income_form.set_value(INCOME_PREFERENCE_KEY, "")
+        [row] = pane.form_data().annuity_purchases
+        assert row["at_age"] == "68"
+        values = pane.retirement_income_form.values()
+        assert values[INCOME_PREFERENCE_KEY] == INCOME_PREFERENCE_ANNUITY
+        assert pane.annuity_purchases.isVisibleTo(pane)
+
+    def test_loaded_rows_show_even_with_a_blank_preference(self) -> None:
+        """Rows on the form are never hidden by the preference."""
+        pane = _pane()
+        pane.set_form_data(FactsFormData(annuity_purchases=({"at_age": "68"},)))
+        assert pane.annuity_purchases.isVisibleTo(pane)
+
+    def test_loading_a_drawdown_plan_hides_the_sections_again(self) -> None:
+        """A plan without purchases returns to the compact form."""
+        pane = _pane()
+        pane.retirement_income_form.set_value(
+            INCOME_PREFERENCE_KEY, INCOME_PREFERENCE_ANNUITY
+        )
+        pane.set_form_data(FactsFormData())
+        assert not pane.annuity_purchases.isVisibleTo(pane)

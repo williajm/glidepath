@@ -25,6 +25,8 @@ from glidepath.core import (
     NaturalYieldWithdrawalStrategy,
     NetWithdrawalPlan,
     Rate,
+    WithdrawalRule,
+    WithdrawalRuleKind,
     WithdrawalSource,
     WithdrawalSourceId,
     WithdrawalState,
@@ -609,3 +611,48 @@ class TestStrategyConservationProperties:
             Money(need * Decimal("1.1")),
         }
         assert plan.target in allowed
+
+
+class TestWithdrawalRule:
+    """The withdrawal-strategy decision value (roadmap 10.3, §5.1)."""
+
+    def test_each_kind_builds_its_strategy(self) -> None:
+        """The rule configures exactly the strategy its kind names."""
+        assert (
+            WithdrawalRule(kind=WithdrawalRuleKind.FIXED_REAL).strategy()
+            == FixedRealWithdrawalStrategy()
+        )
+        assert (
+            WithdrawalRule(kind=WithdrawalRuleKind.GUARDRAILS).strategy()
+            == GuardrailsWithdrawalStrategy()
+        )
+        assert (
+            WithdrawalRule(kind=WithdrawalRuleKind.NATURAL_YIELD).strategy()
+            == NaturalYieldWithdrawalStrategy()
+        )
+
+    def test_fixed_percent_carries_its_rate_into_the_strategy(self) -> None:
+        """The one parameterised strategy takes the recorded rate."""
+        rule = WithdrawalRule(
+            kind=WithdrawalRuleKind.FIXED_PERCENT, rate=Rate(Decimal("0.04"))
+        )
+        assert rule.strategy() == FixedPercentWithdrawalStrategy(
+            rate=Rate(Decimal("0.04"))
+        )
+
+    def test_fixed_percent_requires_a_rate(self) -> None:
+        """A rate-less fixed-percentage rule is rejected at construction."""
+        with pytest.raises(ValueError, match="rate is required"):
+            WithdrawalRule(kind=WithdrawalRuleKind.FIXED_PERCENT)
+
+    def test_other_kinds_refuse_a_rate(self) -> None:
+        """A rate on a strategy that cannot use it is never ignored."""
+        rate = Rate(Decimal("0.04"))
+        with pytest.raises(ValueError, match="only valid for FIXED_PERCENT"):
+            WithdrawalRule(kind=WithdrawalRuleKind.GUARDRAILS, rate=rate)
+
+    def test_an_out_of_range_rate_is_rejected(self) -> None:
+        """The strategy's own bounds run at rule construction."""
+        rate = Rate(Decimal("1.5"))
+        with pytest.raises(ValueError, match="between 0 and 1"):
+            WithdrawalRule(kind=WithdrawalRuleKind.FIXED_PERCENT, rate=rate)

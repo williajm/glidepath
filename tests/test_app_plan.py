@@ -17,6 +17,7 @@ from glidepath.app import (
     PlanState,
     facts_saved_message,
     initial_plan_state,
+    plan_run_config,
     state_marked_saved,
     state_with_household,
     state_with_override,
@@ -28,12 +29,19 @@ from glidepath.core import (
     Decision,
     EntityId,
     Fact,
+    FixedPercentWithdrawalStrategy,
+    FixedRealWithdrawalStrategy,
+    GuardrailsWithdrawalStrategy,
     Household,
     Person,
     Provenance,
+    Rate,
+    RunMode,
     Scenario,
     SpendingPlan,
     TaxResidencyId,
+    WithdrawalRule,
+    WithdrawalRuleKind,
     Wrapper,
 )
 from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY, SCOTLAND_RESIDENCY
@@ -117,6 +125,61 @@ class TestStateWithHousehold:
             initial_plan_state(), household(TaxResidencyId("uk.mars")), today=TODAY
         )
         assert "failed" in facts_saved_message(failed)
+
+
+class TestPlanRunConfig:
+    """The plan's withdrawal-strategy decision rides every run (10.3)."""
+
+    def test_no_household_keeps_the_engine_default(self) -> None:
+        """With nothing to read, the config carries fixed real spending."""
+        config = plan_run_config(None, today=TODAY)
+        assert config.withdrawal_strategy == FixedRealWithdrawalStrategy()
+
+    def test_no_choice_keeps_the_engine_default(self) -> None:
+        """A household without the decision runs fixed real spending."""
+        config = plan_run_config(household(), today=TODAY)
+        assert config.withdrawal_strategy == FixedRealWithdrawalStrategy()
+
+    def test_the_recorded_choice_configures_the_strategy(self) -> None:
+        """A fixed-percentage decision arrives with its rate."""
+        chosen = Household(
+            persons=household().persons,
+            withdrawal_strategy=Decision(
+                value=WithdrawalRule(
+                    kind=WithdrawalRuleKind.FIXED_PERCENT,
+                    rate=Rate(Decimal("0.04")),
+                ),
+                recorded_on=RECORDED,
+            ),
+        )
+        config = plan_run_config(chosen, today=TODAY)
+        assert config.withdrawal_strategy == FixedPercentWithdrawalStrategy(
+            rate=Rate(Decimal("0.04"))
+        )
+
+    def test_mode_and_seed_pass_through(self) -> None:
+        """The Monte Carlo parameters ride alongside the strategy."""
+        config = plan_run_config(
+            household(), today=TODAY, mode=RunMode.MONTE_CARLO, seed=7
+        )
+        assert config.mode is RunMode.MONTE_CARLO
+        assert config.seed == 7
+        assert config.today == TODAY
+
+    def test_the_projection_runs_under_the_chosen_strategy(self) -> None:
+        """The held result's config carries the plan's own decision."""
+        chosen = Household(
+            persons=household().persons,
+            spending=household().spending,
+            withdrawal_strategy=Decision(
+                value=WithdrawalRule(kind=WithdrawalRuleKind.GUARDRAILS),
+                recorded_on=RECORDED,
+            ),
+        )
+        state = state_with_household(initial_plan_state(), chosen, today=TODAY)
+        assert state.run_error is None
+        assert state.result is not None
+        assert state.result.config.withdrawal_strategy == GuardrailsWithdrawalStrategy()
 
 
 class TestStateWithOverride:

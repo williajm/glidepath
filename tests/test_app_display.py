@@ -6,7 +6,14 @@ from decimal import Decimal
 import pytest
 
 from glidepath.app import format_money, format_percent, format_recorded, format_value
-from glidepath.core import LifeStage, Money, Sex
+from glidepath.core import (
+    LifeStage,
+    Money,
+    Rate,
+    Sex,
+    WithdrawalRule,
+    WithdrawalRuleKind,
+)
 
 
 class TestFormatMoney:
@@ -63,6 +70,25 @@ class TestFormatValue:
             (LifeStage.NO_GO, "No-go"),
             ({"a": 1, "b": 2}, "a=1; b=2"),
             ({"rule": "cpi", "floor": Decimal("0.025")}, "rule=cpi; floor=0.025"),
+            (
+                WithdrawalRule(kind=WithdrawalRuleKind.FIXED_REAL),
+                "Fixed real spending",
+            ),
+            (
+                WithdrawalRule(
+                    kind=WithdrawalRuleKind.FIXED_PERCENT,
+                    rate=Rate(Decimal("0.0425")),
+                ),
+                "Fixed percentage of pot (4.25% a year)",
+            ),
+            (
+                WithdrawalRule(kind=WithdrawalRuleKind.GUARDRAILS),
+                "Guardrails (cut or raise on crossings)",
+            ),
+            (
+                WithdrawalRule(kind=WithdrawalRuleKind.NATURAL_YIELD),
+                "Natural yield only",
+            ),
         ],
     )
     def test_values(self, value: object, expected: str) -> None:

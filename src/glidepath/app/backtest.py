@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING, Any, Final
 
 from glidepath.app.display import format_money, format_percent
 from glidepath.app.montecarlo import BAND_SPECS, SUCCESS_RATE_LABEL
-from glidepath.app.plan import PlanState, region_for, replanned_state
-from glidepath.core import Money, RunConfig, run_windows
+from glidepath.app.plan import PlanState, plan_run_config, region_for, replanned_state
+from glidepath.core import Money, run_windows
 from glidepath.regions.uk import load_returns_history
 
 if TYPE_CHECKING:
@@ -122,7 +122,7 @@ def state_with_backtest(state: PlanState, *, today: date) -> PlanState:
         today=today,
         modified=state.modified,
     )
-    config = RunConfig(today=today)
+    config = plan_run_config(state.household, today=today)
     try:
         series = load_returns_history().series
         result = run_windows(

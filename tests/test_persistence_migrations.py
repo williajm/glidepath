@@ -224,8 +224,9 @@ class TestV3ToV4:
     def test_a_document_without_spending_just_bumps_the_version(self) -> None:
         """Nothing to upgrade still steps the version.
 
-        The later v5→v6 step of the full chain adds the household's
-        marriage-allowance claim key (roadmap 9.32).
+        The later v5→v6 and v8→v9 steps of the full chain add the
+        household's marriage-allowance claim key (roadmap 9.32) and
+        withdrawal-strategy key (roadmap 10.3).
         """
         raw: RawDocument = {"schema_version": 3, "household": {"spending": None}}
         migrated = apply_migrations(raw)
@@ -233,6 +234,7 @@ class TestV3ToV4:
         assert migrated["household"] == {
             "spending": None,
             "claim_marriage_allowance": None,
+            "withdrawal_strategy": None,
         }
 
     @pytest.mark.parametrize(
@@ -392,6 +394,36 @@ class TestV7ToV8:
         self, raw: RawDocument
     ) -> None:
         """The upgrader never crashes on shapes the decoder will reject."""
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+
+
+class TestV8ToV9:
+    """The 10.3 migration: the household gains ``withdrawal_strategy``."""
+
+    def test_the_household_gains_the_null_strategy_key(self) -> None:
+        """A v8 household decodes with the fixed-real default."""
+        raw: RawDocument = {
+            "schema_version": 8,
+            "household": {"persons": []},
+        }
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        assert migrated["household"] == {
+            "persons": [],
+            "withdrawal_strategy": None,
+        }
+
+    def test_a_document_without_a_household_just_bumps_the_version(self) -> None:
+        """Nothing to upgrade still steps the version."""
+        raw: RawDocument = {"schema_version": 8, "marker": "untouched"}
+        migrated = apply_migrations(raw)
+        assert migrated["schema_version"] == SCHEMA_VERSION
+        assert migrated["marker"] == "untouched"
+
+    def test_malformed_shapes_pass_through_for_the_strict_decoder(self) -> None:
+        """The upgrader never crashes on shapes the decoder will reject."""
+        raw: RawDocument = {"schema_version": 8, "household": "not-an-object"}
         migrated = apply_migrations(raw)
         assert migrated["schema_version"] == SCHEMA_VERSION
 

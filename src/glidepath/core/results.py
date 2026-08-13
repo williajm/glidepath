@@ -449,6 +449,13 @@ def collect_plan_decisions(household: Household) -> tuple[LabelledDecision, ...]
                 decision=household.claim_marriage_allowance,
             )
         )
+    if household.withdrawal_strategy is not None:
+        decisions.append(
+            LabelledDecision(
+                label="household.withdrawal_strategy",
+                decision=household.withdrawal_strategy,
+            )
+        )
     decisions.extend(
         LabelledDecision(
             label=f"planned_outflow[{outflow.id}].amount_real",

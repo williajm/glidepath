@@ -41,6 +41,8 @@ from glidepath.core import (
     TaxResidencyId,
     TaxResult,
     TrackedAssumptions,
+    WithdrawalRule,
+    WithdrawalRuleKind,
     Wrapper,
     WrapperKindId,
     WrapperPeriodResult,
@@ -405,7 +407,15 @@ def sample_household() -> Household:
         amount_real=Decision(value=Money(Decimal(15000)), recorded_on=RECORDED),
         at_age_of=(EntityId("person-1"), 55),
     )
-    return Household(persons=(person,), spending=spending, planned_outflows=(outflow,))
+    return Household(
+        persons=(person,),
+        spending=spending,
+        planned_outflows=(outflow,),
+        withdrawal_strategy=Decision(
+            value=WithdrawalRule(kind=WithdrawalRuleKind.GUARDRAILS),
+            recorded_on=RECORDED,
+        ),
+    )
 
 
 class TestPlanCollectors:
@@ -427,6 +437,7 @@ class TestPlanCollectors:
         """Decisions are the scenario what-if whitelist (planning §4.3)."""
         labels = {entry.label for entry in collect_plan_decisions(sample_household())}
         assert labels == {
+            "household.withdrawal_strategy",
             "planned_outflow[outflow-1].amount_real",
             "person[person-1].target_retirement_age",
             "wrapper[wrapper-scheduled].contributions.employee_amount",

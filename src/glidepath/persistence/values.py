@@ -29,6 +29,7 @@ from glidepath.core import (
     ReliefMechanic,
     RevaluationReference,
     Sex,
+    WithdrawalRuleKind,
 )
 from glidepath.persistence.document import PersistenceError
 
@@ -95,6 +96,14 @@ ANNUITY_TYPE_TOKENS = EnumTokens(
 )
 ANNUITY_BASIS_TOKENS = EnumTokens(
     {AnnuityBasis.SINGLE: "single", AnnuityBasis.JOINT: "joint"}
+)
+WITHDRAWAL_RULE_KIND_TOKENS = EnumTokens(
+    {
+        WithdrawalRuleKind.FIXED_REAL: "fixed_real",
+        WithdrawalRuleKind.FIXED_PERCENT: "fixed_percent",
+        WithdrawalRuleKind.GUARDRAILS: "guardrails",
+        WithdrawalRuleKind.NATURAL_YIELD: "natural_yield",
+    }
 )
 LIFE_STAGE_TOKENS = EnumTokens(
     {

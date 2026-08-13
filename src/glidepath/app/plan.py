@@ -25,6 +25,7 @@ from glidepath.core import (
     ProjectionResult,
     Provenance,
     RunConfig,
+    RunMode,
     Scenario,
     StatePensionUprating,
     glide_path_from_shape,
@@ -115,6 +116,32 @@ def initial_plan_state() -> PlanState:
     return PlanState(assumptions=default_assumption_set())
 
 
+def plan_run_config(
+    household: Household | None,
+    *,
+    today: date,
+    mode: RunMode = RunMode.DETERMINISTIC,
+    seed: int | None = None,
+) -> RunConfig:
+    """The run configuration the plan's own decisions imply (roadmap 10.3).
+
+    The household's withdrawal-strategy decision (planning §5.1) rides
+    into every projection of the plan — the base run, scenario runs,
+    Monte Carlo, and the backtest — so the charts always show the
+    strategy the user chose. ``None`` (no household, or no explicit
+    choice) keeps the engine default: fixed real spending. The "When
+    can I retire?" and "How much can I draw down?" cards deliberately
+    stay on fixed real spending — each answers a fixed-real-income
+    question by construction (roadmap 9.14, 9.25).
+    """
+    rule = None if household is None else household.withdrawal_strategy
+    if rule is None:
+        return RunConfig(today=today, mode=mode, seed=seed)
+    return RunConfig(
+        today=today, mode=mode, seed=seed, withdrawal_strategy=rule.value.strategy()
+    )
+
+
 def region_for(assumptions: AssumptionSet) -> Region:
     """The region bundle one run's *effective* assumption set implies.
 
@@ -131,7 +158,7 @@ def _projected(
 ) -> tuple[ProjectionResult | None, str | None]:
     """Run the projection, folding any run failure into a message."""
     try:
-        config = RunConfig(today=today)
+        config = plan_run_config(household, today=today)
         result = run(household, assumptions, region_for(assumptions), config)
     except ValueError as exc:
         return None, str(exc)
@@ -160,7 +187,11 @@ def _scenario_runs(
         return None, None
     try:
         runs = run_scenarios(
-            household, assumptions, valid, region_for, RunConfig(today=today)
+            household,
+            assumptions,
+            valid,
+            region_for,
+            plan_run_config(household, today=today),
         )
     except ValueError as exc:
         return None, str(exc)
