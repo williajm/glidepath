@@ -366,6 +366,23 @@ class TestLoadGuards:
         assert "Riskier shape" in outcome.message
         assert "glidepath.default_shape" in outcome.message
 
+    def test_valid_table_override_passes_the_load_vet(self, tmp_path: Path) -> None:
+        """A stored table its policy parser accepts loads intact."""
+        path = tmp_path / "plan.glidepath.json"
+        override = AssumptionOverride(
+            key=AssumptionKey.POLICY_STATE_PENSION_UPRATING,
+            value={"rule": "cpi"},
+            source="hand-edited",
+            recorded_on=RECORDED,
+        )
+        _saved_document(path, assumption_overrides=(override,))
+        outcome = load_plan_state(path, today=TODAY)
+        assert outcome.state is not None
+        loaded = outcome.state.assumptions.get(
+            AssumptionKey.POLICY_STATE_PENSION_UPRATING
+        )
+        assert loaded.value == {"rule": "cpi"}
+
     def test_override_on_an_unregistered_key_is_refused(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

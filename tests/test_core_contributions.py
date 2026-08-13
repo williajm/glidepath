@@ -6,16 +6,20 @@ from decimal import Decimal
 import pytest
 
 from glidepath.core import (
+    AnnualAllowanceFunding,
     AnnualAllowanceMeasurement,
     AnnualAllowanceOutcome,
     AssumptionKey,
     ContributionSchedule,
     DbArrangementInput,
     Decision,
+    EntityId,
     Fact,
     MemberContributionOutcome,
     Money,
     ReliefMechanic,
+    SchemeInput,
+    SchemePayment,
 )
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -160,3 +164,26 @@ def test_outcome_rejects_negative_carry_forward() -> None:
     pool = (money("-1"),)
     with pytest.raises(ValueError, match="non-negative"):
         AnnualAllowanceOutcome(chargeable_excess=excess, carry_forward=pool)
+
+
+def test_scheme_input_rejects_negative_amount() -> None:
+    """A wrapper's own pension input must be non-negative."""
+    wrapper = EntityId("scheme")
+    negative = money("-1")
+    with pytest.raises(ValueError, match="input_amount must be non-negative"):
+        SchemeInput(wrapper_id=wrapper, input_amount=negative)
+
+
+def test_scheme_payment_rejects_negative_amount() -> None:
+    """A scheme-funded charge debit must be non-negative."""
+    wrapper = EntityId("scheme")
+    negative = money("-1")
+    with pytest.raises(ValueError, match="amount must be non-negative"):
+        SchemePayment(wrapper_id=wrapper, amount=negative)
+
+
+def test_funding_rejects_negative_cash_share() -> None:
+    """The cash share of a priced charge must be non-negative."""
+    negative = money("-1")
+    with pytest.raises(ValueError, match="cash must be non-negative"):
+        AnnualAllowanceFunding(scheme_payments=(), cash=negative)
