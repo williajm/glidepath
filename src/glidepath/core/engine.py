@@ -2653,7 +2653,12 @@ class _PersonProjection:
         offset is netted of only the marginal tax the retirement
         layers add on top of it: the no-portfolio assessment less one
         of employment income alone, which once retired is identically
-        the whole assessment. The offset excludes the portfolio-income
+        the whole assessment. The employment-only baseline is net of
+        net-pay deductions, matching their treatment in the full
+        assessment: a gross baseline would understate the marginal
+        tax by the contribution's relief, leaking that relief — which
+        in reality lands in out-of-model take-home pay — into
+        in-model cash. The offset excludes the portfolio-income
         layers: their tax is charged to the taxable wrappers at close,
         never to the need.
         """
@@ -2665,17 +2670,18 @@ class _PersonProjection:
             + income.annuity_lump_sum
             + pension_lump_sum
         )
-        if self._taxable_income <= income.employment:
+        employment_taxable = max(income.employment - self._net_pay_deductions, _ZERO)
+        if self._taxable_income <= employment_taxable:
             return gross
         full = self.region.tax.assess(
             period, self._tax_input(include_portfolio=False)
         ).tax_due
         employment_only = _ZERO
-        if income.employment > _ZERO:
+        if employment_taxable > _ZERO:
             employment_only = self.region.tax.assess(
                 period,
                 self._tax_input(
-                    non_savings_override=income.employment, include_portfolio=False
+                    non_savings_override=employment_taxable, include_portfolio=False
                 ),
             ).tax_due
         return gross - (full - employment_only)
@@ -3106,7 +3112,7 @@ class _PersonProjection:
         (:meth:`_charge_portfolio_tax`), never to the spending need.
         ``non_savings_override`` replaces the accumulated non-savings
         income — the employment-only baseline of the pre-retirement
-        income offset (:meth:`_pre_retirement_income_tax`).
+        income offset (:meth:`_income_offset_net`).
         """
         non_savings = (
             self._taxable_income

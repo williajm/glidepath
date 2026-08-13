@@ -684,7 +684,8 @@ class TestMarriageAllowance:
         transferor = household_assessment(system, "0")
         recipient = household_assessment(system, "50000")
         adjusted = system.adjust_household(TAX_YEAR_2026_27, (transferor, recipient))
-        assert adjusted[0] is transferor.result
+        assert adjusted[0].tax_due == Money(Decimal(0))
+        assert adjusted[0].tax_free_allowance == Money(Decimal(11310))
         assert adjusted[1].tax_due == Money(Decimal("7234.00"))
         reducer = adjusted[1].lines[-1]
         assert reducer.band == MARRIAGE_ALLOWANCE_BAND
@@ -692,13 +693,35 @@ class TestMarriageAllowance:
         assert reducer.taxed == Money(Decimal(0))
         assert reducer.rate == Rate(Decimal("0.20"))
 
+    def test_transferor_in_the_band_pays_on_the_surrender(
+        self, system: UkTaxSystem
+    ) -> None:
+        """GOV.UK's example: £252 off the recipient, £38 due from the donor.
+
+        11,500 sits within the 12,570 allowance, so the claim stands,
+        but the surrendered 1,260 leaves an 11,310 allowance: 190 is
+        exposed at 20% — 38.00 — and the household nets 214.00.
+        """
+        transferor = household_assessment(system, "11500")
+        recipient = household_assessment(system, "50000")
+        adjusted = system.adjust_household(TAX_YEAR_2026_27, (transferor, recipient))
+        assert adjusted[0].tax_due == Money(Decimal("38.00"))
+        assert adjusted[0].taxable_income == Money(Decimal(190))
+        assert adjusted[0].tax_free_allowance == Money(Decimal(11310))
+        [basic] = adjusted[0].lines
+        assert basic.band == "basic"
+        assert basic.taxed == Money(Decimal(190))
+        assert adjusted[1].tax_due == Money(Decimal("7234.00"))
+
     def test_direction_is_picked_automatically(self, system: UkTaxSystem) -> None:
         """Swapping the couple's order moves the reducer, not the result."""
         recipient = household_assessment(system, "50000")
         transferor = household_assessment(system, "0")
         adjusted = system.adjust_household(TAX_YEAR_2026_27, (recipient, transferor))
         assert adjusted[0].tax_due == Money(Decimal("7234.00"))
-        assert adjusted[1] is transferor.result
+        assert adjusted[0].lines[-1].band == MARRIAGE_ALLOWANCE_BAND
+        assert adjusted[1].tax_due == Money(Decimal(0))
+        assert adjusted[1].tax_free_allowance == Money(Decimal(11310))
 
     def test_higher_rate_recipient_is_ineligible(self, system: UkTaxSystem) -> None:
         """A recipient liable at 40% keeps their unadjusted assessment."""
