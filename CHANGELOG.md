@@ -17,6 +17,23 @@ in the release PR and becomes the GitHub Release notes verbatim.
   so a file downloaded from the release page verifies with
   `gh attestation verify <file> -R williajm/glidepath`.
 
+### Changed
+
+- The "When can I retire?" card now says its target is enforced after
+  tax ("Target income £X a year after tax — N% of gross employment
+  income £Y"), and the help guide explains that this is deliberately
+  more demanding than the same share of take-home pay (#187).
+- The help guide gains a "How spending is funded" section describing
+  the fixed withdrawal order (general accounts and cash, then
+  ISAs/LISAs, then crystallised and finally uncrystallised pension
+  funds) as a deliberate, non-configurable simplification; the
+  planning document no longer calls the ordering "configurable"
+  (#192).
+- The planning document's §4.1 now records retirement as a
+  whole-period gate rather than claiming mid-year retirements are
+  pro-rated, including the non-conservative direction of the delay
+  for post-6-April birthdays (#186).
+
 ### Fixed
 
 - Working alongside retirement income with net-pay pension

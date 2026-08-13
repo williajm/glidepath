@@ -91,8 +91,22 @@ dates** and follow one convention, tested at boundaries:
   whole months like other partial years — so a 7-April 18th birthday
   is eligible from that date within that same tax year.
 
-Other partial years (starting work, retiring mid-year) are pro-rated by
-whole months as a `Decimal` fraction the same way; no sub-stepping.
+Other partial years (a run starting mid-year, an eligibility window
+opening or closing mid-period) are pro-rated by whole months as a
+`Decimal` fraction the same way; no sub-stepping.
+
+- **Retirement is a whole-period gate**, not a pro-rated event: a
+  person counts as retired for a period only when the target
+  retirement age is attained by the period's first day, so employment
+  income, contributions, and DB accrual run whole-period until then
+  (someone born 7 April retiring "at 60" is modelled as employed for
+  the whole tax year their birthday falls just inside). Recorded
+  convention (#186): unlike the access gates, whose delay is
+  conservative, delaying *retirement* models up to one extra year of
+  salary, contributions, and accrual — a non-conservative direction
+  for post-6-April birthdays, accepted for the same annual-granularity
+  reasons; a user can state the earlier whole age to stay
+  conservative.
 
 **Why.** All UK tax and allowances are assessed per tax year, so a tax-year
 step makes tax exact where it matters and keeps state small and auditable.
@@ -1217,7 +1231,10 @@ internally consistent after penny rounding.
 **Withdrawal strategies** are a protocol
 (`withdraw(state, need) -> WithdrawalPlan`): v1 fixed-real and fixed-%;
 then guardrails (Guyton–Klinger-style bands) and natural yield. Strategies
-also encode wrapper ordering (tax-aware, configurable; the full default is
+also encode wrapper ordering (tax-aware and **fixed** — no alternative
+ordering is exposed anywhere (#192), a deliberate simplification
+described to the user in the help guide; a cross-horizon optimiser
+stays rejected as advice-shaped, §4.11. The order is
 GIA/cash → ISA → pension — taxable-growth accounts first, since every
 pound left in them keeps accruing income tax, then wholly tax-free
 sub-balances, then crystallised and finally uncrystallised pension
@@ -1433,6 +1450,11 @@ the spending plan with the target income — a whole-percent replacement
 rate times stated employment income, treated as the net spending need
 in today's money — and reuses one config, so probes share common
 random numbers and the result is reproducible from the seed (§4.6).
+Applying the rate to *gross* pay but enforcing the product as an
+*after-tax* need is a recorded convention (#187): 66% of gross is
+materially more demanding than 66% of take-home, so the answer errs
+later, never earlier — conservative — and the card's copy labels the
+target "a year after tax" so the basis is visible.
 The age domain is a few dozen whole years, so the ascending scan
 returns the exact earliest success even where success is not monotone
 in age — cheaper and more robust than the spending search's

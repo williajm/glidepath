@@ -333,8 +333,8 @@ def _detail(answer: RetirementAnswer) -> str:
         else "searched your partner's ages"
     )
     target = (
-        f"Target income {format_money(answer.target_income)} a year"
-        f" — {format_percent(answer.replacement_rate)} of employment income"
+        f"Target income {format_money(answer.target_income)} a year after tax"
+        f" — {format_percent(answer.replacement_rate)} of gross employment income"
         f" {format_money(answer.employment_income)} — {searched}"
         f" {answer.minimum_age} to {answer.maximum_age}."
     )
