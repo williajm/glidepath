@@ -53,6 +53,13 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Changed
 
+- The "How much can I draw down?" card's detail now also restates the
+  sustainable income as a starting withdrawal rate of the household's
+  total wrapper balances (recorded on the answer at solve time), so
+  the computed answer can be compared against rule-of-thumb rates
+  like the 4% rule. The rate is derived from the user's own plan —
+  glidepath still ships no "safe withdrawal rate" figure.
+
 - The "When can I retire?" card now says its target is enforced after
   tax ("Target income £X a year after tax — N% of gross employment
   income £Y"), and the help guide explains that this is deliberately

@@ -169,11 +169,14 @@ class DrawdownAnswer:
 
     ``income`` is the highest sustainable net annual income in today's
     money, or ``None`` when not even zero spending survives the plan's
-    outflows. The rest is the manifest side: the retirement age the
-    answer assumed and whose it was (``person_position``, the
-    household position), the searched bracket's upper bound, and the
-    basis — ``seed``, ``paths``, and ``target_success_rate`` are
-    carried only for a Monte Carlo basis.
+    outflows. ``pot`` is the household's total wrapper balances as
+    stated at solve time — the denominator presenting the answer as a
+    starting withdrawal rate, recorded here so the rate always
+    describes the plan the answer was solved on. The rest is the
+    manifest side: the retirement age the answer assumed and whose it
+    was (``person_position``, the household position), the searched
+    bracket's upper bound, and the basis — ``seed``, ``paths``, and
+    ``target_success_rate`` are carried only for a Monte Carlo basis.
     """
 
     income: Money | None
@@ -184,6 +187,7 @@ class DrawdownAnswer:
     paths: int | None = None
     target_success_rate: Decimal | None = None
     person_position: int = 0
+    pot: Money | None = None
 
 
 @dataclass(frozen=True)
@@ -296,6 +300,7 @@ def state_with_drawdown(
         paths=inputs.paths,
         target_success_rate=inputs.target_success_rate,
         person_position=inputs.person_position,
+        pot=_household_pot(household),
     )
     changes: dict[str, Any] = {"drawdown": answer, "drawdown_error": None}
     return replace(base, **changes) if changes else base
@@ -358,7 +363,7 @@ def _headline(answer: DrawdownAnswer) -> str:
 
 
 def _detail(answer: DrawdownAnswer) -> str:
-    """The assumed age, searched bracket, and basis under the headline."""
+    """The assumed age, searched bracket, rate, and basis under the headline."""
     retiring = (
         f"Retiring at age {answer.age}"
         if answer.person_position == 0
@@ -376,7 +381,41 @@ def _detail(answer: DrawdownAnswer) -> str:
             f" Monte Carlo success over {answer.paths} paths"
             f" (seed {answer.seed})."
         )
-    return f"{target}\n{basis}"
+    rate = _rate_line(answer)
+    lines = [target, rate, basis] if rate else [target, basis]
+    return "\n".join(lines)
+
+
+def _rate_line(answer: DrawdownAnswer) -> str:
+    """The answer as a starting withdrawal rate of today's pot, if any.
+
+    Blank when nothing is sustainable or the household holds no
+    wrapper balances to take a rate of. The rate is derived from the
+    answer, never asserted: the product ships no "safe withdrawal
+    rate" figure — this line only lets users compare the computed
+    answer against rules of thumb they know.
+    """
+    if answer.income is None or answer.pot is None or answer.pot.amount <= 0:
+        return ""
+    rate = answer.income.amount / answer.pot.amount
+    return (
+        f"A starting withdrawal rate of {format_percent(rate)} of"
+        f" today's total pot ({format_money(answer.pot)})."
+    )
+
+
+def _household_pot(household: Household) -> Money:
+    """Every wrapper balance across the household, as stated.
+
+    The whole household's pot — the §4.11 "our pot" meaning — since
+    the sustainable income is drawn from every accessible source, not
+    the tested person's alone.
+    """
+    total = Money(Decimal(0))
+    for person in household.persons:
+        for wrapper in person.wrappers:
+            total = total + wrapper.balance.value
+    return total
 
 
 def _age_echo(answer: DrawdownAnswer | None, household: Household | None) -> str:
