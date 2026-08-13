@@ -358,9 +358,14 @@
       manages the Python toolchain for you.
     </p>
     <div class="steps">
-<pre><code><span class="p">$</span> git clone https://github.com/williajm/glidepath.git
-<span class="p">$</span> cd glidepath
-<span class="p">$</span> uv run glidepath  <span class="c"># first run installs the locked dependencies</span></code></pre>
+<pre><code><span class="p">$</span> uv tool install glidepath  <span class="c"># installs the latest release from PyPI</span>
+<span class="p">$</span> glidepath</code></pre>
+      <p>
+        <code class="inline">pipx install glidepath</code> works too. Or run
+        straight from a <a href="https://github.com/williajm/glidepath">checkout</a>:
+        <code class="inline">uv run glidepath</code> installs the locked
+        dependencies on first run.
+      </p>
       <p>
         The app launches with an example plan already projected, so every tab has
         something to show &mdash; replace its values with your own facts, or clear
