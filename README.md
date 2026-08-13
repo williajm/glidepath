@@ -177,7 +177,10 @@ carrying its notes from
 [`CHANGELOG.md`](https://github.com/williajm/glidepath/blob/main/CHANGELOG.md)
 with the same artifacts attached, each carrying signed build
 provenance — verify a downloaded file with
-`gh attestation verify <file> -R williajm/glidepath`. There are no
+`gh attestation verify <file> -R williajm/glidepath`. The signed
+provenance bundle is attached to each release too
+(`glidepath-X.Y.Z-provenance.intoto.jsonl`), so verification also
+works offline with `--bundle`. There are no
 packaged binary builds (installer/exe) yet — install from PyPI as
 above.
 

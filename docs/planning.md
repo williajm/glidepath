@@ -441,7 +441,14 @@ artifacts via `actions/attest-build-provenance` — the GitHub-side
 mirror of the PEP 740 attestations, so a file downloaded from the
 release page verifies with
 `gh attestation verify <file> -R williajm/glidepath` instead of
-trusting the download channel. No checksum files are published:
+trusting the download channel. The signed Sigstore bundle itself is
+also attached to the release
+(`glidepath-X.Y.Z-provenance.intoto.jsonl`): the attestation store
+and PyPI already hold the same provenance, but an attached bundle is
+visible next to the artifacts, verifiable offline
+(`gh attestation verify --bundle`), and recognised by the OpenSSF
+Scorecard Signed-Releases check, which inspects only release asset
+filenames. No checksum files are published:
 digests without provenance add nothing an attacker who could swap
 the artifact could not also swap, and SHA-256 digests already ship
 in PyPI's own file metadata.
