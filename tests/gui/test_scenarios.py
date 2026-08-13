@@ -12,11 +12,15 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QInputDialog,
     QRadioButton,
     QTableWidget,
+    QTabWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 from glidepath.app import (
@@ -201,6 +205,32 @@ def cell_text(table: QTableWidget, row: int, column: int) -> str:
     item = table.item(row, column)
     assert item is not None
     return item.text()
+
+
+def shown_tab(window: MainWindow, pane: QWidget) -> None:
+    """Show the window with ``pane``'s tab in front, laid out for clicks.
+
+    Simulated mouse input hit-tests against real geometry, so the
+    target widgets need the layout pass a shown window performs.
+    """
+    tabs = window.centralWidget()
+    assert isinstance(tabs, QTabWidget)
+    tabs.setCurrentWidget(pane)
+    window.show()
+
+
+def comparison_cells(pane: ScenariosPane) -> tuple[str, ...]:
+    """Every populated comparison value cell, row-major.
+
+    Column 0 is the period label, identical in every basis and metric,
+    so only the value columns are collected.
+    """
+    table = pane.comparison_table
+    return tuple(
+        cell_text(table, row, column)
+        for row in range(table.rowCount())
+        for column in range(1, table.columnCount())
+    )
 
 
 class ProbingPane(ScenariosPane):
@@ -640,3 +670,75 @@ class TestMainWindowScenariosFlow:
         window.facts_pane.submit_button.click()
         assert pane.scenario_status_label.text() == VALID_STATUS
         assert cell_text(pane.overrides_table, 0, 3) == ""
+
+    def test_a_rejected_override_value_lands_on_the_status_line(
+        self, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unparseable override value surfaces the app-layer rejection."""
+        pane = window.scenarios_pane
+        patch_text_dialog(monkeypatch, SCENARIO)
+        pane.add_scenario_button.click()
+        patch_item_dialog(monkeypatch, RETIREMENT_LABEL)
+        patch_text_dialog(monkeypatch, "sixty")
+        pane.add_override_button.click()
+        assert pane.overrides_table.rowCount() == 0
+        assert pane.status_label.text() != ""
+
+    def test_a_real_remove_override_click_flows_through_the_app_layer(
+        self, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A simulated click on the remove button removes the override.
+
+        The click travels the full event path — button, ``clicked``
+        connection, pane slot, window handler, app layer, re-render —
+        so an unwired or miswired button fails here where a direct
+        slot call would pass (issue #202).
+        """
+        pane = window.scenarios_pane
+        patch_text_dialog(monkeypatch, SCENARIO)
+        pane.add_scenario_button.click()
+        patch_item_dialog(monkeypatch, RETIREMENT_LABEL)
+        patch_text_dialog(monkeypatch, "58")
+        pane.add_override_button.click()
+        assert pane.overrides_table.rowCount() == 1
+        shown_tab(window, pane)
+        pane.overrides_table.setCurrentCell(0, 0)
+        QTest.mouseClick(pane.remove_override_button, Qt.MouseButton.LeftButton)
+        # The table only empties through the window's refresh from the
+        # updated session state, never locally in the pane.
+        assert pane.overrides_table.rowCount() == 0
+        assert pane.scenario_list.count() == 1
+
+    def test_a_real_basis_click_re_presents_the_comparison(
+        self, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Clicking the nominal radio re-renders the comparison (issue #202)."""
+        pane = window.scenarios_pane
+        patch_text_dialog(monkeypatch, SCENARIO)
+        pane.add_scenario_button.click()
+        shown_tab(window, pane)
+        real_cells = comparison_cells(pane)
+        buttons = {button.text(): button for button in pane.findChildren(QRadioButton)}
+        QTest.mouseClick(buttons["Nominal"], Qt.MouseButton.LeftButton)
+        nominal_cells = comparison_cells(pane)
+        assert buttons["Nominal"].isChecked()
+        assert nominal_cells != real_cells
+
+    def test_a_real_metric_keystroke_re_presents_the_comparison(
+        self, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An arrow-key metric pick re-renders the comparison (issue #202).
+
+        The combo's ``activated`` signal must reach the shell handler;
+        the changed table proves the choice round-tripped through the
+        view model rather than staying local widget state.
+        """
+        pane = window.scenarios_pane
+        patch_text_dialog(monkeypatch, SCENARIO)
+        pane.add_scenario_button.click()
+        shown_tab(window, pane)
+        default_cells = comparison_cells(pane)
+        QTest.keyClick(pane.metric_combo, Qt.Key.Key_Down)
+        picked_cells = comparison_cells(pane)
+        assert pane.metric_combo.currentIndex() == 1
+        assert picked_cells != default_cells

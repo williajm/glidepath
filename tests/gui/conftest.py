@@ -1,7 +1,8 @@
 """Shared Qt fixtures for the GUI smoke tests (§4.7).
 
-The offscreen QPA platform is selected before the singleton
-QApplication is created, so the suite runs headless on both CI and
+The offscreen QPA platform is selected at import time — before
+pytest-qt's session-scoped ``qapp`` creates the singleton
+QApplication — so the suite runs headless on both CI and
 workstations.
 """
 
@@ -12,12 +13,23 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QEvent
-from PySide6.QtWidgets import QApplication
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from PySide6.QtWidgets import QApplication
+
 GUI_TESTS_DIR = Path(__file__).resolve().parent
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if sys.platform == "win32":
+    # The offscreen platform's freetype font database does not scan
+    # the Windows system fonts, so text renders as replacement-glyph
+    # boxes and the exported PDF embeds no extractable text at all;
+    # pointing it at the system directory restores real text.
+    _fonts = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    if _fonts.is_dir():
+        os.environ.setdefault("QT_QPA_FONTDIR", str(_fonts))
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -32,36 +44,20 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.gui)
 
 
-@pytest.fixture(autouse=True, scope="session")
-def qt_app() -> QApplication:
-    """The process-wide QApplication, created on the offscreen platform."""
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    if sys.platform == "win32":
-        # The offscreen platform's freetype font database does not scan
-        # the Windows system fonts, so text renders as replacement-glyph
-        # boxes and the exported PDF embeds no extractable text at all;
-        # pointing it at the system directory restores real text.
-        fonts = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
-        if fonts.is_dir():
-            os.environ.setdefault("QT_QPA_FONTDIR", str(fonts))
-    existing = QApplication.instance()
-    if existing is None:
-        return QApplication([])
-    assert isinstance(existing, QApplication)
-    return existing
-
-
 @pytest.fixture(autouse=True)
-def _reap_top_level_widgets(qt_app: QApplication) -> Iterator[None]:
+def _reap_top_level_widgets(qapp: QApplication) -> Iterator[None]:
     """Destroy the widgets each test leaves behind.
 
-    Tests never close their windows and dialogs, so they accumulate on
-    the session QApplication — and every app-wide restyle (each
+    Depending on pytest-qt's session ``qapp`` also guarantees the
+    QApplication exists for every GUI test, including the many that
+    construct widgets directly rather than through ``qtbot``. Tests
+    never close their windows and dialogs, so they accumulate on the
+    session QApplication — and every app-wide restyle (each
     ``apply_theme`` or ``MainWindow`` construction) repolishes all of
-    them, growing from milliseconds to many seconds per test by the end
-    of the suite.
+    them, growing from milliseconds to many seconds per test by the
+    end of the suite.
     """
     yield
-    for widget in qt_app.topLevelWidgets():
+    for widget in qapp.topLevelWidgets():
         widget.deleteLater()
-    qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)

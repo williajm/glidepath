@@ -5,6 +5,7 @@ region; the stated-vs-assumed tab re-renders from the result's
 provenance; an in-place override flows back through the app layer.
 """
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from glidepath.app import ENTITY_ID_KEY, build_shell_view_model
@@ -141,3 +142,30 @@ class TestFactsToInspectorFlow:
         assert updated.status == "Your override"
         assert updated.value == "0.03"
         assert pane.status_label.text() == ""
+
+    def test_a_rejected_override_lands_on_the_status_line(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unparseable override value surfaces the app-layer rejection.
+
+        The row keeps its previous value: a rejected override never
+        reaches the session state (§1).
+        """
+        window = MainWindow(build_shell_view_model())
+        pane = window.inspector_pane
+        target = next(
+            index
+            for index in range(pane.assumptions_table.rowCount())
+            if pane.assumption_row(index).key == "inflation.cpi"
+        )
+        before = pane.assumption_row(target)
+        monkeypatch.setattr(
+            inspector_module,
+            "QInputDialog",
+            SimpleNamespace(getText=lambda *_args, **_kwargs: ("not a rate", True)),
+        )
+        pane.assumptions_table.cellDoubleClicked.emit(target, 0)
+        after = pane.assumption_row(target)
+        assert pane.status_label.text() != ""
+        assert after.value == before.value
+        assert after.status == before.status

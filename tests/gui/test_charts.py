@@ -22,6 +22,7 @@ from PySide6.QtCharts import (
     QStackedBarSeries,
 )
 from PySide6.QtCore import QPointF, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QInputDialog,
@@ -95,6 +96,8 @@ from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from pytestqt.qtbot import QtBot
 
 TODAY = date(2026, 8, 2)
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -1376,6 +1379,89 @@ class TestMainWindowBacktestFlow:
         assert pane.backtest_button.isEnabled()
         assert pane.run_button.isEnabled()
         assert "Success rate" in pane.backtest_metrics_label.text()
+
+    def test_an_unchanged_year_entry_skips_the_rebuild(
+        self, window: MainWindow
+    ) -> None:
+        """Return in the untouched year picker re-renders nothing (9.18).
+
+        Qt fires ``editingFinished`` on every focus-out too, so an
+        unchanged text must not tear the charts down and rebuild them;
+        the surviving chart view proves no rebuild ran.
+        """
+        pane = window.charts_pane
+        view = chart_view_at(pane, 0)
+        QTest.keyClick(pane.backtest_year_edit, Qt.Key.Key_Return)
+        assert chart_view_at(pane, 0) is view
+
+
+class ProbingWindow(MainWindow):
+    """A window exposing its slow-run handlers for the guard tests."""
+
+    def probe_monte_carlo(self) -> None:
+        """Request a Monte Carlo run, in-flight guard included.
+
+        The path count differs from the live run's so a wrongly
+        started second run changes the running status and fails the
+        guard test's assertions instead of hiding behind identical
+        text.
+        """
+        self._handle_monte_carlo_run("7", "3")
+
+    def probe_retirement(self) -> None:
+        """Request a retirement-age search, in-flight guard included."""
+        self._handle_retirement_run("10", "90", "7", "2", "")
+
+    def probe_drawdown(self) -> None:
+        """Request a sustainable-income search, in-flight guard included."""
+        self._handle_drawdown_run("63", "90", "7", "2", "")
+
+    def probe_backtest(self) -> None:
+        """Request a historical backtest, in-flight guard included."""
+        self._handle_backtest_run()
+
+
+class TestSlowRunHandlerGuards:
+    """Each slow-run handler ignores requests while a run is in flight."""
+
+    def test_every_handler_ignores_a_request_mid_run(self, qtbot: QtBot) -> None:
+        """The shared guard drops all four requests during a live run.
+
+        The disabled buttons already swallow simulated clicks mid-run,
+        so the guard inside each handler is unreachable through the
+        widgets; probing the handlers directly pins the second line of
+        defence a miswired or re-enabled control would fall through to
+        (9.16, issue #202). The status line staying on the running run
+        proves no probe started a run of its own.
+        """
+        window = ProbingWindow(build_shell_view_model())
+        facts = window.facts_pane
+        facts.person_form.set_value("date_of_birth", "1991-02-01")
+        facts.person_form.set_value("tax_residency", str(RUK_RESIDENCY))
+        facts.person_form.set_value("target_retirement_age", "60")
+        facts.spending_form.set_value("annual_spending_real", "18000")
+        wrapper_form = facts.wrappers.add_entry()
+        wrapper_form.set_value("kind", str(ISA_KIND))
+        wrapper_form.set_value("balance", "25000")
+        facts.submit_button.click()
+        pane = window.charts_pane
+        buttons = {button.text(): button for button in pane.findChildren(QRadioButton)}
+        buttons["Monte Carlo"].click()
+        pane.seed_edit.setText("7")
+        pane.paths_edit.setText("2")
+        pane.run_button.click()
+        running = monte_carlo_running_status("2")
+        for probe in (
+            window.probe_monte_carlo,
+            window.probe_retirement,
+            window.probe_drawdown,
+            window.probe_backtest,
+        ):
+            probe()
+            assert window.statusBar().currentMessage() == running
+            assert pane.busy_label.text() == running
+        qtbot.waitUntil(pane.run_button.isEnabled, timeout=60_000)
+        assert "Success rate" in pane.metrics_label.text()
 
 
 def example_projected_state() -> PlanState:

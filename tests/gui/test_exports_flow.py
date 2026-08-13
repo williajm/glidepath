@@ -14,6 +14,7 @@ from PySide6.QtPdf import QPdfDocument
 from glidepath.app import (
     DISCLAIMER_BODY,
     NOTHING_TO_EXPORT_MESSAGE,
+    REPORT_EXPORT_FAILED_PREFIX,
     REPORT_NOT_WRITTEN_MESSAGE,
     build_shell_view_model,
 )
@@ -63,7 +64,11 @@ class TestExportCashFlowFlow:
     def test_export_writes_the_csv(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The exported file carries the header block and the table."""
+        """The menu action writes the header block and the table.
+
+        Triggering the QAction rather than calling the dialog slot
+        also pins the ``triggered`` connection itself (issue #202).
+        """
         target = tmp_path / "cash-flow.csv"
         window = _window_with_example()
         monkeypatch.setattr(
@@ -71,7 +76,7 @@ class TestExportCashFlowFlow:
             "QFileDialog",
             SimpleNamespace(getSaveFileName=lambda *_args: (str(target), "")),
         )
-        window.export_cash_flow_dialog()
+        window.export_cash_flow_action.trigger()
         assert target.exists()
         text = target.read_text(encoding="utf-8")
         assert DISCLAIMER_BODY in text
@@ -128,7 +133,11 @@ class TestExportReportFlow:
     def test_export_writes_the_pdf(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The exported file is a real PDF and the status names it."""
+        """The menu action writes a real PDF and the status names it.
+
+        Triggering the QAction rather than calling the dialog slot
+        also pins the ``triggered`` connection itself (issue #202).
+        """
         target = tmp_path / "report.pdf"
         window = _window_with_example()
         monkeypatch.setattr(
@@ -136,7 +145,7 @@ class TestExportReportFlow:
             "QFileDialog",
             SimpleNamespace(getSaveFileName=lambda *_args: (str(target), "")),
         )
-        window.export_report_dialog()
+        window.export_report_action.trigger()
         assert target.exists()
         assert target.read_bytes().startswith(b"%PDF")
         assert str(target) in window.statusBar().currentMessage()
@@ -194,6 +203,45 @@ class TestExportReportFlow:
         assert "Inputs and provenance" in text
         assert "Projection results" in text
         assert "Unsaved plan" in text
+
+    def test_cancelled_dialog_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cancelling the report dialog leaves the disk untouched."""
+        window = _window_with_example()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: ("", "")),
+        )
+        window.export_report_action.trigger()
+        assert list(tmp_path.iterdir()) == []
+
+    def test_unreplaceable_target_reports_the_export_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A target the finished file cannot replace reports the error.
+
+        The ``.part`` file prints fine; the final replace onto the
+        target fails — here because the target is a non-empty
+        directory — and the OSError folds into the status message
+        instead of surfacing as a crash or a false success.
+        """
+        target = tmp_path / "report.pdf"
+        target.mkdir()
+        (target / "occupied.txt").write_text("x", encoding="utf-8")
+        window = _window_with_example()
+        monkeypatch.setattr(
+            widgets,
+            "QFileDialog",
+            SimpleNamespace(getSaveFileName=lambda *_args: (str(target), "")),
+        )
+        window.export_report_action.trigger()
+        assert (
+            window.statusBar().currentMessage().startswith(REPORT_EXPORT_FAILED_PREFIX)
+        )
+        assert (target / "occupied.txt").exists()
+        assert not (tmp_path / "report.pdf.part").exists()
 
     def test_failed_device_keeps_the_stale_file_and_reports_failure(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
