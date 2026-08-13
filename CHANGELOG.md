@@ -25,6 +25,22 @@ in the release PR and becomes the GitHub Release notes verbatim.
   so a file downloaded from the release page verifies with
   `gh attestation verify <file> -R williajm/glidepath`.
 
+- Property-based testing widened beyond single-person, unique-kind
+  households (#201): a second Hypothesis composite generates
+  two-person households exercising the pooled withdrawal step —
+  repeated wrapper kinds, mixed rUK/Scottish residencies, and
+  optional DB pensions, state pension records, and annuity
+  purchases — with the engine invariants (non-negative balances,
+  wrapper ledger identity, retirement cash conservation, tax lines
+  summing to the tax due) asserted at household level. Alongside it,
+  targeted properties over the UK tax assessment (lines and band
+  widths accounting exactly for the assessment, monotonicity in
+  income through the taper's roundings, relief at source never
+  increasing tax, annual-allowance charge top-slicing) and the
+  withdrawal machinery (tax-aware ordering's group and stability
+  invariants, fixed-percent draw conservation, guardrails
+  one-step-adjustment bound).
+
 ### Changed
 
 - The "When can I retire?" card now says its target is enforced after
