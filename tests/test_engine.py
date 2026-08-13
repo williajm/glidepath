@@ -6031,12 +6031,16 @@ class TestAnnualAllowance:
         assert measurement.scheme_member is True
 
     def test_a_db_stream_in_payment_generates_no_arrangement(self) -> None:
-        """Benefits commencing by the period end stop the input amounts."""
+        """Benefits in payment at the period open stop the input amounts.
+
+        The stream crystallised in 2024, before the run: its accrual
+        belongs to the commencement year, so no arrangement reports.
+        """
         pension = db_pension_of(accrued="8000", npa=66)
         rules = RecordingContributionRules()
         person = person_of(
             (wrapper_of(FREE, "0"),),
-            date_of_birth=date(1960, 6, 1),
+            date_of_birth=date(1958, 6, 1),
             db_pensions=(pension,),
         )
         run(
@@ -6047,6 +6051,62 @@ class TestAnnualAllowance:
         )
         [measurement] = rules.measurements
         assert measurement.db_arrangements == ()
+
+    def test_a_commencing_stream_reports_accrual_to_the_start(self) -> None:
+        """The commencement year still measures its input (PTM054500).
+
+        Benefits start 1 July, mid-period: the active membership
+        credits 2% x 50,000 over the six whole months of service —
+        500 — so the arrangement values 8,000 opening against 8,500
+        closing instead of being discarded.
+        """
+        pension = db_pension_of(accrued="8000", npa=66, membership=membership_of())
+        rules = RecordingContributionRules()
+        person = person_of(
+            (wrapper_of(FREE, "0"),),
+            date_of_birth=date(1960, 7, 1),
+            retire_at=67,
+            db_pensions=(pension,),
+        )
+        run(
+            household_of(person),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [measurement] = rules.measurements
+        [arrangement] = measurement.db_arrangements
+        assert arrangement.opening_annual == Money(Decimal(8000))
+        assert arrangement.closing_annual == Money(Decimal(8500))
+
+    def test_a_commencing_stream_revalues_only_to_the_start(self) -> None:
+        """The closing value stops revaluing at the commencement date.
+
+        A deferred stream on a fixed 10% basis starting 1 July revalues
+        for the six pre-commencement months only: closing 8,000 x
+        (1 + 10% x 6/12) = 8,400, never the full-year 8,800.
+        """
+        basis = RevaluationBasis(
+            reference=RevaluationReference.FIXED, fixed_rate=Rate(Decimal("0.10"))
+        )
+        pension = db_pension_of(accrued="8000", npa=66, basis=basis)
+        rules = RecordingContributionRules()
+        person = person_of(
+            (wrapper_of(FREE, "0"),),
+            date_of_birth=date(1960, 7, 1),
+            retire_at=67,
+            db_pensions=(pension,),
+        )
+        run(
+            household_of(person),
+            assumptions_with(),
+            stub_region(rules),
+            one_period_config(),
+        )
+        [measurement] = rules.measurements
+        [arrangement] = measurement.db_arrangements
+        assert arrangement.opening_annual == Money(Decimal(8000))
+        assert arrangement.closing_annual == Money(Decimal("8400.00"))
 
 
 def zero_yield_assumptions() -> AssumptionSet:

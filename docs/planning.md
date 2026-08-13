@@ -908,9 +908,12 @@ revaluation never outruns CPI generates nil by construction, matching
 the deferred-member carve-out. The region function ships with 9.6 and
 the engine reads it each period through the annual-allowance
 measurement (#116, §5.2 step 5): every DB stream not yet in payment
-supplies its pre-credit opening entitlement and its
-credited-and-revalued closing entitlement, with benefits commencing by
-the period end ending the arrangement's input amounts.
+at the period open supplies its pre-credit opening entitlement and
+its credited-and-revalued closing entitlement. In the commencement
+year the closing entitlement revalues only to the benefits start —
+HMRC's closing-value adjustment (PTM054500, #188), so the final
+year's accrual is measured; a stream already in payment at the
+period open generates no further input amounts.
 
 State pension: the official DWP forecast **is the fact and the only
 route to an amount** (#97). It is authoritative, free, and instant to
@@ -1111,9 +1114,19 @@ pre-trigger (HS345's pre/post-trigger split at the model's own event
 order), while a pre-plan trigger fact governs every period; the
 carry-forward pool starts empty at the run start — pre-run years'
 unused allowance is unknown, so none is assumed (§4.1 conservative) —
-and rolls forward with each period's outcome; a DB stream whose
-benefits commence by the period end has crystallised and generates no
-input amount. The excess is priced by the region's tax system as
+and rolls forward with each period's outcome. A DB stream whose
+benefits commence *within* the period still generates an input amount
+per HMRC's closing-value adjustment (PTM054500, worked example
+PTM053710, #188): the closing entitlement is the credited value
+revalued only to the commencement date (§4.1 whole-month share), so
+the final year's accrual is measured rather than discarded; only a
+stream already in payment at the period's first day generates
+nothing, its accrual having been measured in the crystallisation
+year. Recorded simplification: the add-back values the uncommuted,
+unadjusted entitlement at commencement — an early-retirement
+actuarial reduction, which PTM054500 would reflect via the actual
+amounts crystallised, is not netted off the closing value. The
+excess is priced by the region's tax system as
 top-slice lines at the taxpayer's own schedule rates with the
 relief-extended limits (FA 2004 s227B, s192(4)) — a charge, not
 income, so it never feeds back through `assess` (the personal
