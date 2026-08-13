@@ -218,7 +218,10 @@ class UkTaxSystem:
         The recipient's result gains the ITA 2007 s55B tax reducer as
         a negative no-income line: the rUK basic-rate percentage of
         the transferable amount, capped at their income-tax liability,
-        never refundable, never a PA transfer in computation.
+        never refundable. The transferor is re-assessed with their
+        personal allowance reduced by the transferable amount
+        (s55B(6)), so the household result nets any cost of the
+        surrender.
         """
         results = tuple(entry.result for entry in assessments)
         if len(assessments) != _COUPLE:
@@ -229,9 +232,9 @@ class UkTaxSystem:
                 year, assessments[transferor], assessments[recipient]
             )
             if adjusted is not None:
+                pair = {transferor: adjusted[0], recipient: adjusted[1]}
                 return tuple(
-                    adjusted if index == recipient else result
-                    for index, result in enumerate(results)
+                    pair.get(index, result) for index, result in enumerate(results)
                 )
         return results
 
@@ -308,17 +311,22 @@ def _marriage_allowance_adjusted(
     year: TaxYearFile,
     transferor: HouseholdAssessment,
     recipient: HouseholdAssessment,
-) -> TaxResult | None:
-    """The recipient's result with the s55B reducer, or ``None``.
+) -> tuple[TaxResult, TaxResult] | None:
+    """Both partners' results under the s55 election, or ``None``.
 
     Eligibility (planning §6 "Couples"): the transferor's income sits
-    within their personal allowance (zero taxable income — the PA is
-    never actually transferred in computation, a recorded
-    simplification when their income falls inside the transferable
-    band), and the recipient is liable at no rate above the data
-    file's band gates. Annual-allowance-charge lines are ignored on
-    both sides of the test and the cap: the s55B reducer lands at step
-    6 of the ITA 2007 s23 calculation, before the step-7 charge.
+    within their personal allowance (zero taxable income), and the
+    recipient is liable at no rate above the data file's band gates.
+    The recipient gains the s55B tax reducer; the transferor is
+    re-assessed with their personal allowance reduced by the
+    transferable amount (ITA 2007 s55B(6)), so when their income sits
+    inside the transferable band the reported household benefit nets
+    their cost — GOV.UK's worked example: £252 off the recipient,
+    £38 due from a transferor on £11,500. Annual-allowance-charge
+    lines are ignored on both sides of the test and the cap — the
+    s55B reducer lands at step 6 of the ITA 2007 s23 calculation,
+    before the step-7 charge — and the transferor's charge lines are
+    carried over the re-assessment unchanged.
     """
     if transferor.result.taxable_income > _ZERO:
         return None
@@ -339,11 +347,42 @@ def _marriage_allowance_adjusted(
     reducer_line = TaxLine(
         band=MARRIAGE_ALLOWANCE_BAND, rate=rate, taxed=_ZERO, tax=-reduction
     )
-    return TaxResult(
+    adjusted_recipient = TaxResult(
         tax_due=result.tax_due - reduction,
         taxable_income=result.taxable_income,
         tax_free_allowance=result.tax_free_allowance,
         lines=(*lines, reducer_line),
+    )
+    return _transferor_reassessed(year, transferor), adjusted_recipient
+
+
+def _transferor_reassessed(
+    year: TaxYearFile, transferor: HouseholdAssessment
+) -> TaxResult:
+    """The transferor's assessment with the s55B(6) reduced allowance.
+
+    The re-assessment prices the income tax their surrendered
+    allowance exposes; any annual-allowance-charge lines from the
+    original result are appended unchanged — the engine prices that
+    freestanding charge separately, and the election never re-prices
+    it.
+    """
+    assessed = _assess_year(
+        year,
+        transferor.tax_input,
+        allowance_reduction=year.marriage_allowance.transferable_amount,
+    )
+    charge_lines = tuple(
+        line
+        for line in transferor.result.lines
+        if line.band.startswith(_AA_CHARGE_PREFIX)
+    )
+    charge_tax = sum((line.tax for line in charge_lines), start=_ZERO)
+    return TaxResult(
+        tax_due=assessed.tax_due + charge_tax,
+        taxable_income=assessed.taxable_income,
+        tax_free_allowance=assessed.tax_free_allowance,
+        lines=(*assessed.lines, *charge_lines),
     )
 
 
@@ -553,7 +592,9 @@ def _dividend_lines(
     return tuple(lines)
 
 
-def _assess_year(year: TaxYearFile, tax_input: TaxInput) -> TaxResult:
+def _assess_year(
+    year: TaxYearFile, tax_input: TaxInput, allowance_reduction: Money = _ZERO
+) -> TaxResult:
     """Assess one period's categorised income (module docstring).
 
     The personal allowance is set against income in the stacking order
@@ -561,7 +602,9 @@ def _assess_year(year: TaxYearFile, tax_input: TaxInput) -> TaxResult:
     each category's taxable remainder is charged through its layer.
     Savings and dividends always stack on the rUK ladder, above the
     non-savings taxable income, whatever schedule taxed that income
-    (planning §6).
+    (planning §6). ``allowance_reduction`` takes the marriage
+    allowance transferor's surrendered amount off the tapered
+    allowance (ITA 2007 s55B(6)), floored at zero.
     """
     schedule = _schedule_for(year, tax_input.residency)
     ras_gross = tax_input.relief_at_source_contributions
@@ -569,7 +612,9 @@ def _assess_year(year: TaxYearFile, tax_input: TaxInput) -> TaxResult:
     savings = tax_input.savings_income
     dividends = tax_input.dividend_income
     adjusted_net_income = max(non_savings + savings + dividends - ras_gross, _ZERO)
-    allowance = _tapered_allowance(schedule, adjusted_net_income)
+    allowance = max(
+        _tapered_allowance(schedule, adjusted_net_income) - allowance_reduction, _ZERO
+    )
     taxable_non_savings = max(non_savings - allowance, _ZERO)
     allowance_left = max(allowance - non_savings, _ZERO)
     taxable_savings = max(savings - allowance_left, _ZERO)

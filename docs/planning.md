@@ -591,8 +591,12 @@ personal allowance; recipient liable at no more than basic rate (rUK)
 or intermediate rate (Scotland) — picks the direction automatically,
 and applies it as ITA 2007 s55B specifies: a **tax reducer** of the
 basic-rate percentage of the transferable amount (£1,260 → up to
-£252/yr), capped at the recipient's liability, never a PA transfer in
-computation. `TaxSystem.assess` stays strictly per-person; the region
+£252/yr), capped at the recipient's liability, with the transferor
+re-assessed under a personal allowance reduced by the transferable
+amount (s55B(6)) so a donor whose income sits inside the transferable
+band bears their real cost (GOV.UK's example: £252 off the recipient,
+£38 due from a donor on £11,500 — £214 net).
+`TaxSystem.assess` stays strictly per-person; the region
 gains a small household adjustment step that runs after both
 assessments — the one deliberate crack in the person-isolated tax
 contract, kept at the region layer. Figures ship as data
@@ -2480,9 +2484,11 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   the engine's step-5½ between two-person assessments and close. The
   reducer is flat and capped so the gross-up/income-offset marginal
   pricing is untouched; the reduction lands in the reported
-  assessment, not the period's cash flows (recorded simplification,
-  as is the unmodelled transferor-side PA reduction when their income
-  sits inside the transferable band). The claim enters via the
+  assessment, not the period's cash flows (recorded simplification).
+  The transferor side is modelled per s55B(6) (#190): the donor is
+  re-assessed with their PA reduced by the transferable amount, so a
+  donor with income inside the transferable band bears their cost in
+  the reported household tax. The claim enters via the
   partner form section and is not scenario-addressable (the household
   has no EntityId) — both recorded limitations.*
 - [x] 9.33 Couples: survivor modelling (#174) — *optional per-person

@@ -5759,6 +5759,49 @@ class TestSurplusBanking:
         assert taxable_result.banked_in == Money(Decimal(1500))
         assert person_result.shortfall == ZERO
 
+    def test_net_pay_deduction_lowers_the_employment_only_baseline(self) -> None:
+        """The income offset's baseline is net-pay-reduced employment.
+
+        Working at 68 with the state pension in payment and a 4,000
+        net-pay contribution: the 10,000 gross state pension bears
+        2,500 marginal tax over the 26,000 net-pay-reduced employment
+        baseline, leaving 7,500 net against a 6,000 outflow, so 1,500
+        banks. A gross-employment baseline would net off only 1,500 of
+        marginal tax, leaking the contribution's 1,000 relief — which
+        belongs to out-of-model take-home pay — into banked cash.
+        """
+        schedule = ContributionSchedule(
+            employee_amount=Decision(value=Money(Decimal(4000)), recorded_on=RECORDED),
+            relief_mechanic=ReliefMechanic.NET_PAY,
+        )
+        pension = wrapper_of(PENSION, "0", schedule=schedule)
+        taxable_account = wrapper_of(TAXABLE, "0")
+        person = person_of(
+            (pension, taxable_account),
+            date_of_birth=date(1958, 1, 1),
+            retire_at=70,
+            employment="30000",
+            state_pension=sp_record(),
+        )
+        plan = Household(persons=(person,), planned_outflows=(outflow_at(68, "6000"),))
+        scheme = StubStatePension(annual=Money(Decimal(10000)), start_age=66)
+        region = stub_region(state_pension=scheme)
+        assumptions = assumptions_with(
+            {
+                "policy.state_pension.uprating": "cpi",
+                "returns.equity.real": Decimal(0),
+            }
+        )
+        result = run(plan, assumptions, region, one_period_config())
+        [person_result] = result.snapshots[0].persons
+        pension_result, taxable_result = person_result.wrappers
+        assert person_result.tax.tax_due == Money(Decimal(9000))
+        assert pension_result.employee_contribution == Money(Decimal(4000))
+        assert person_result.net_withdrawn == ZERO
+        assert person_result.banked == Money(Decimal(1500))
+        assert taxable_result.banked_in == Money(Decimal(1500))
+        assert person_result.shortfall == ZERO
+
     def test_outflow_beyond_the_offset_draws_only_the_remainder(self) -> None:
         """Wrappers fund only the outflow the income offset leaves.
 

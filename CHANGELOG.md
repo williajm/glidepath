@@ -17,6 +17,21 @@ in the release PR and becomes the GitHub Release notes verbatim.
   so a file downloaded from the release page verifies with
   `gh attestation verify <file> -R williajm/glidepath`.
 
+### Fixed
+
+- Working alongside retirement income with net-pay pension
+  contributions no longer overstates spendable income: the income
+  offset's employment-only tax baseline is now assessed on net-pay-
+  reduced pay, matching the full assessment, so the contribution's
+  tax relief stays in out-of-model take-home pay instead of leaking
+  into in-model cash (#191).
+- The marriage allowance now models the transferor's side of the
+  election (ITA 2007 s55B(6)): the donor is re-assessed with their
+  personal allowance reduced by the transferable amount, so a donor
+  with income inside the transferable band bears their real cost and
+  the reported household benefit is no longer up to £38/yr high
+  (#190).
+
 ## [0.4.0] - 2026-08-12
 
 Couples release: a plan gains an optional partner, modelled end to
