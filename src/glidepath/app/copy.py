@@ -113,8 +113,11 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "reproduce. "
             'The "When can I retire?" card answers with the earliest '
             "retirement age at which the plan sustains a target income — "
-            "a replacement rate you choose (66% of your employment income "
-            "by default) — on the selected run mode's basis: met with no "
+            "a replacement rate you choose (66% of your gross employment "
+            "income by default), enforced as after-tax spending money, so "
+            "the target is deliberately more demanding than the same "
+            "share of your take-home pay — on the selected run mode's "
+            "basis: met with no "
             "shortfall deterministically, or with at least your chosen "
             "Monte Carlo success rate. "
             'The "How much can I draw down?" card asks the same question '
@@ -122,6 +125,25 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "one by default) and it answers with the highest net annual "
             "income, in today's money, the plan sustains from that age — "
             "on the same selected basis."
+        ),
+    ),
+    (
+        "How spending is funded",
+        (
+            "In the projection, income already in payment — defined "
+            "benefit pension, state pension, annuity income — meets your "
+            "net spending need first, after the tax it bears. Whatever "
+            "remains is withdrawn from your wrappers in one fixed order: "
+            "general accounts and cash first (every pound left in them "
+            "keeps accruing income tax), then ISAs and LISAs, then "
+            "already-crystallised pension funds, and uncrystallised "
+            "pension funds last. This order is a deliberate "
+            "simplification — it is not configurable and the app never "
+            "searches for a personally optimal withdrawal sequence, "
+            "which would amount to tax advice. In some years a "
+            "different order could use an allowance this one leaves "
+            "idle, so treat the projection as a consistent baseline, "
+            "not the best achievable outcome."
         ),
     ),
     (
