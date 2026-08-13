@@ -61,6 +61,7 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cov",
+    "pytest-qt",
     "pytest-timeout",
     "ruff",
 ]
@@ -73,7 +74,7 @@ build-backend = "uv_build"
 [tool.uv]
 # Supply-chain cooldown: resolution ignores anything published to PyPI after
 # this timestamp (now minus 7 days). Updated ONLY by `make deps`.
-exclude-newer = "2026-08-01T17:09:10Z"
+exclude-newer = "2026-08-06T18:44:36Z"
 
 # PyPI is the ONLY permitted index (supply-chain policy; see CLAUDE.md).
 [[tool.uv.index]]
@@ -153,6 +154,9 @@ pythonpath = ["scripts", "tests"]
 # GUI suite waits on worker pools for up to 60s, so the ceiling sits
 # safely above that while still cutting a wedged run short.
 timeout = 120
+# pytest-qt would autodetect PySide6 anyway; pinning the binding keeps the
+# plugin from ever picking up a stray PyQt installed into the venv.
+qt_api = "pyside6"
 markers = [
     "gui: exercises the PySide6 shell on the offscreen Qt platform",
     "slow: long-running engine sweeps (Monte Carlo, backtest, solvers); deselect with -m 'not slow'",

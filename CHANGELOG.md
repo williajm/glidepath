@@ -41,6 +41,16 @@ in the release PR and becomes the GitHub Release notes verbatim.
   invariants, fixed-percent draw conservation, guardrails
   one-step-adjustment bound).
 
+- The GUI suite now simulates real user input through pytest-qt
+  (#202): the offscreen QApplication comes from the plugin's `qapp`
+  fixture, and a first slice of tests drives the shell with synthetic
+  mouse and keyboard events (`QTest.mouseClick`/`keyClick`) and menu
+  `QAction` triggers, pinning the signal connections themselves —
+  scenario override removal, comparison basis and metric selection,
+  the export actions, the backtest year picker's unchanged-text skip,
+  the slow-run handlers' shared in-flight guard, and the report
+  export's replace-failure path.
+
 ### Changed
 
 - The "When can I retire?" card now says its target is enforced after
