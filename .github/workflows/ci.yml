@@ -81,6 +81,44 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+  # A packaging bug must fail the PR that introduces it, not release day
+  # (issue #198): both artifacts are built, each installs into its own
+  # clean venv (installing the sdist builds a wheel from it, so both
+  # build paths are exercised), and the same smoke script release.yml
+  # runs verifies the import, the shipped UK region data files, and the
+  # GUI entry point — without importing Qt on the headless runner.
+  artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.32" # Newest uv release >= 7 days old when pinned.
+          enable-cache: true
+
+      # uv_build backend, no dependency sync — the lockfile is untouched.
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Smoke-test the wheel in a clean venv
+        run: |
+          uv venv smoke-wheel
+          uv pip install --python smoke-wheel dist/*.whl
+          VIRTUAL_ENV=smoke-wheel uv run --no-project \
+            python scripts/smoke_test_artifact.py
+
+      - name: Smoke-test the sdist in a clean venv
+        run: |
+          uv venv smoke-sdist
+          uv pip install --python smoke-sdist dist/*.tar.gz
+          VIRTUAL_ENV=smoke-sdist uv run --no-project \
+            python scripts/smoke_test_artifact.py
+
   # glidepath is a desktop app whose primary platform is Windows; the full
   # test suite (including the offscreen GUI tests and the Windows-specific
   # file-handling paths) must pass natively there, not just on Linux. Lint,
