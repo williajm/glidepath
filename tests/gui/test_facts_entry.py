@@ -340,14 +340,14 @@ class TestFactsEntryPane:
                 persons=(PersonFormData(person={"date_of_birth": "1991-06-15"}),),
                 spending={"annual_spending_real": "28000"},
                 wrappers=({"balance": "48000"}, {"balance": "16500"}),
-                annuity_purchases=({"at_age": "68", "fraction_of_pot": "0.5"},),
+                annuity_purchases=({"at_age": "68", "percent_of_pot": "50"},),
             )
         )
         data = pane.form_data()
         assert data.persons[0].person["date_of_birth"] == "1991-06-15"
         assert data.spending["annual_spending_real"] == "28000"
         assert [values["balance"] for values in data.wrappers] == ["48000", "16500"]
-        assert data.annuity_purchases[0]["fraction_of_pot"] == "0.5"
+        assert data.annuity_purchases[0]["percent_of_pot"] == "50"
 
     def test_set_form_data_replaces_previous_contents(self) -> None:
         """Setting new data never merges with what was on screen."""

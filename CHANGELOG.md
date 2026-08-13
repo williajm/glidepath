@@ -13,8 +13,10 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 - Retirement income choices on the Facts tab (roadmap 10.3): a
   drawdown-vs-annuity preference dropdown that reveals the annuity
-  purchase sections only when they apply (switching back confirms
-  before deleting the purchase rows), and a withdrawal-strategy
+  purchase sections — directly beneath it — only when they apply
+  (switching back confirms before deleting the purchase rows), with
+  the share of pot entered as a percentage (100 annuitises the whole
+  pot) rather than a 0–1 fraction, and a withdrawal-strategy
   choice surfacing the four shipped strategies — fixed real spending
   (the default), a fixed percentage of the pot (with its rate),
   guardrails, and natural yield. The choice is stored on the plan

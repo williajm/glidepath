@@ -436,10 +436,12 @@ class FactsEntryPane(QWidget):
         content_layout.addWidget(self.person_form)
         content_layout.addWidget(self.spending_form)
         content_layout.addWidget(self.retirement_income_form)
+        # The annuity sections sit directly under the preference that
+        # reveals them (roadmap 10.3) — disclosure next to its control.
+        content_layout.addWidget(self.annuity_purchases)
         content_layout.addWidget(self.state_pension_form)
         content_layout.addWidget(self.wrappers)
         content_layout.addWidget(self.db_pensions)
-        content_layout.addWidget(self.annuity_purchases)
         content_layout.addWidget(self.add_partner_button)
         content_layout.addWidget(self._partner_group)
         content_layout.addStretch()

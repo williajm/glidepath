@@ -676,9 +676,21 @@ sections are offered; the plan's stored annuity preference *is* its
 purchase records (wholly decisions, §5.1), so the dropdown re-derives
 from whether purchases exist on load and stores nothing itself.
 Switching back to drawdown-only with purchases on the form confirms
-and deletes them — the remove-partner rule. Rejected: persisting the
-preference as its own decision (redundant with the purchases, and a
-second source of truth to keep consistent).
+and deletes them — the remove-partner rule. The purchase sections
+render directly beneath the preference that reveals them — disclosure
+next to its control, not at the bottom of the form. Rejected:
+persisting the preference as its own decision (redundant with the
+purchases, and a second source of truth to keep consistent).
+
+**Decision: percentages at the form boundary, fractions in the
+domain.** Users think in percentages, so every pot-share entry on the
+form is a percent — the equity allocation, the fixed-percentage
+withdrawal rate, and the annuity purchase's share of pot
+(`percent_of_pot`, over 0 up to 100; 100 annuitises the whole pot) —
+converted at parse time to the domain's `Decimal` fractions, which
+persistence, scenarios, and the engine keep unchanged. The scenario
+editor and inspector edit/show the raw decision values (fractions), as
+they do for every decision.
 
 **Decision: the withdrawal strategy is a household-level decision.**
 `Household.withdrawal_strategy: Decision[WithdrawalRule] | None`
@@ -2672,9 +2684,12 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 - [x] 10.3 Retirement income: preference dropdown and withdrawal
   strategy — *a household Retirement income section with the
   drawdown-vs-annuity preference (a disclosure control — the annuity
-  purchase sections render only while it says annuity or rows exist;
+  purchase sections render directly beneath it, only while it says
+  annuity or rows exist;
   switching back confirms and deletes the rows; the stored preference
-  is the purchases themselves) and the withdrawal-strategy choice
+  is the purchases themselves; the pot share enters as a percent,
+  `percent_of_pot`, stored as the domain fraction) and the
+  withdrawal-strategy choice
   surfacing the §2 strategy set: `Household.withdrawal_strategy`
   (`Decision[WithdrawalRule]`, schema v9, `null` = fixed real), the
   fixed-percentage rate entered as a percent of the pot; wired

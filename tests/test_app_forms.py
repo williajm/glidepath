@@ -206,7 +206,7 @@ class TestFormSpec:
         keys = {spec.key for spec in form.annuity_purchase.fields}
         assert keys == {
             "at_age",
-            "fraction_of_pot",
+            "percent_of_pot",
             "annuity_type",
             "survivor_fraction",
         }
@@ -995,7 +995,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "level",
                     },
                 ),
@@ -1024,7 +1024,7 @@ class TestAnnuityPurchaseParsing:
             form_data(
                 person=person_values(),
                 annuity_purchases=(
-                    {"at_age": "68", "fraction_of_pot": "1", "annuity_type": key},
+                    {"at_age": "68", "percent_of_pot": "100", "annuity_type": key},
                 ),
             )
         )
@@ -1044,17 +1044,18 @@ class TestAnnuityPurchaseParsing:
             for error in result.errors
             if error.section == "annuity_purchase"
         }
-        assert missing == {"at_age", "fraction_of_pot", "annuity_type"}
+        assert missing == {"at_age", "percent_of_pot", "annuity_type"}
 
-    def test_out_of_range_fraction_surfaces_the_core_message(self) -> None:
-        """The (0, 1] fraction rule lands as a section-level error."""
+    @pytest.mark.parametrize("percent", ["150", "0", "-10"])
+    def test_an_out_of_range_percentage_is_refused(self, percent: str) -> None:
+        """The pot share is a percentage over 0 up to 100."""
         result = parse_facts_form(
             form_data(
                 person=person_values(),
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "1.5",
+                        "percent_of_pot": percent,
                         "annuity_type": "level",
                     },
                 ),
@@ -1065,8 +1066,8 @@ class TestAnnuityPurchaseParsing:
         assert result.household is None
         [error] = result.errors
         assert error.section == "annuity_purchase"
-        assert error.field_key == ""
-        assert "fraction_of_pot" in error.message
+        assert error.field_key == "percent_of_pot"
+        assert error.message == "enter a percentage over 0 up to 100, e.g. 50"
 
     def test_unknown_product_type_is_rejected(self) -> None:
         """A type value outside the option list is rejected on its field."""
@@ -1076,7 +1077,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "with_profits",
                     },
                 ),
@@ -1102,7 +1103,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "level",
                         "survivor_fraction": token,
                     },
@@ -1123,7 +1124,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "level",
                         "survivor_fraction": "75",
                     },
@@ -1145,7 +1146,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "level",
                         "survivor_fraction": "66",
                     },
@@ -1317,7 +1318,7 @@ class TestPartnerParsing:
             "partner_annuity_purchase"
         }
         missing = {error.field_key for error in result.errors}
-        assert missing == {"at_age", "fraction_of_pot", "annuity_type"}
+        assert missing == {"at_age", "percent_of_pot", "annuity_type"}
 
     @pytest.mark.parametrize("owner", ["1", "2", "x"])
     def test_row_owned_by_nobody_on_the_form_is_refused(self, owner: str) -> None:
@@ -1582,7 +1583,7 @@ class TestRetirementIncomeParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "level",
                     },
                 ),
@@ -1818,7 +1819,7 @@ class TestValidationMessages:
             for error in result.errors
             if error.section == "annuity_purchase"
         }
-        assert annuity_fields == {"at_age", "fraction_of_pot", "annuity_type"}
+        assert annuity_fields == {"at_age", "percent_of_pot", "annuity_type"}
 
     def test_negative_spending_surfaces_the_core_message(self) -> None:
         """The spending plan's own validation lands on its section."""
@@ -2084,10 +2085,10 @@ class TestEntityIdReuse:
                 person=person_values(),
                 wrappers=({"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},),
                 annuity_purchases=(
-                    {"at_age": "68", "fraction_of_pot": "0.5", "annuity_type": "level"},
+                    {"at_age": "68", "percent_of_pot": "50", "annuity_type": "level"},
                     {
                         "at_age": "70",
-                        "fraction_of_pot": "0.25",
+                        "percent_of_pot": "25",
                         "annuity_type": "level",
                     },
                 ),
@@ -2230,7 +2231,7 @@ def _maximal_submission() -> FactsFormData:
             },
         ),
         annuity_purchases=(
-            {"at_age": "68", "fraction_of_pot": "0.5", "annuity_type": "level"},
+            {"at_age": "68", "percent_of_pot": "50", "annuity_type": "level"},
         ),
     )
 
@@ -2267,7 +2268,7 @@ def _maximal_couple_submission() -> FactsFormData:
         {
             OWNER_KEY: "1",
             "at_age": "70",
-            "fraction_of_pot": "0.25",
+            "percent_of_pot": "25",
             "annuity_type": "inflation_linked",
             "survivor_fraction": "100",
         },

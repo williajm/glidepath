@@ -369,6 +369,9 @@ _WITHDRAWAL_STRATEGY_KEYS: Final[Mapping[WithdrawalRuleKind, str]] = {
 _WITHDRAWAL_RATE_REQUIRED = (
     "the fixed-percentage strategy needs its annual percentage of the pot"
 )
+PERCENT_OF_POT_KEY: Final = "percent_of_pot"
+"""The annuity purchase's pot-share field, entered in percent (10.3)."""
+_POT_PERCENT_MESSAGE = "enter a percentage over 0 up to 100, e.g. 50"
 _WITHDRAWAL_RATE_UNUSED = (
     "only the fixed-percentage strategy takes a rate — leave blank"
 )
@@ -900,29 +903,35 @@ def _annuity_purchase_from(
     """One planned annuity purchase from its section values.
 
     The record is wholly a decision (planning §5.1): the age, pot
-    fraction, product type, and survivor income are all choices,
-    priced from the annuity-rate assumptions at run time. The basis
+    share, product type, and survivor income are all choices, priced
+    from the annuity-rate assumptions at run time. The pot share
+    enters as a percentage — the form's percent convention (equity
+    allocation, the withdrawal rate) — and records as the domain's
+    (0, 1] fraction. The basis
     is implied by the survivor-income choice (roadmap 9.34): blank is
     a single-life purchase; a §6 fraction makes it joint-life — and
     needs a partner in the plan to receive the income, else the joint
     factor would price a benefit the model can never pay (§5).
     """
     at_age = reader.int_value("at_age", required=True)
-    fraction = reader.decimal_value("fraction_of_pot", required=True)
+    percent = reader.decimal_value(PERCENT_OF_POT_KEY, required=True)
+    if percent is not None and not Decimal(0) < percent <= _HUNDRED:
+        reader.error(PERCENT_OF_POT_KEY, _POT_PERCENT_MESSAGE)
+        percent = None
     annuity_type = reader.choice("annuity_type", _ANNUITY_TYPES)
     if annuity_type is None and not reader.raw("annuity_type"):
         reader.error("annuity_type", _REQUIRED_MESSAGE)
     survivor = reader.choice("survivor_fraction", _SURVIVOR_FRACTIONS)
     if survivor is not None and not joint_life_offered:
         reader.error("survivor_fraction", _JOINT_NEEDS_PARTNER_MESSAGE)
-    if at_age is None or fraction is None or annuity_type is None or not reader.ok:
+    if at_age is None or percent is None or annuity_type is None or not reader.ok:
         return None
     recorded = reader.recorded_on
     try:
         return AnnuityPurchase(
             id=entity_id,
             at_age=Decision(value=at_age, recorded_on=recorded),
-            fraction_of_pot=Decision(value=fraction, recorded_on=recorded),
+            fraction_of_pot=Decision(value=percent / _HUNDRED, recorded_on=recorded),
             annuity_type=annuity_type,
             basis=AnnuityBasis.SINGLE if survivor is None else AnnuityBasis.JOINT,
             survivor_fraction=(
@@ -1479,7 +1488,7 @@ def _annuity_purchase_values(purchase: AnnuityPurchase, owner: int) -> dict[str,
         ENTITY_ID_KEY: str(purchase.id),
         OWNER_KEY: str(owner),
         "at_age": str(purchase.at_age.value),
-        "fraction_of_pot": str(purchase.fraction_of_pot.value),
+        PERCENT_OF_POT_KEY: _percent_text(purchase.fraction_of_pot.value),
         "annuity_type": _ANNUITY_TYPE_KEYS[purchase.annuity_type],
         "survivor_fraction": (
             ""
@@ -2227,9 +2236,9 @@ def _annuity_purchase_section() -> SectionSpec:
                 required=True,
             ),
             FieldSpec(
-                key="fraction_of_pot",
-                label="Fraction of pension pot (your choice)",
-                hint="over 0 up to 1, e.g. 0.5; 1 annuitises the whole pot",
+                key=PERCENT_OF_POT_KEY,
+                label="Share of pension pot, % (your choice)",
+                hint="over 0 up to 100, e.g. 50; 100 annuitises the whole pot",
                 required=True,
             ),
             FieldSpec(
