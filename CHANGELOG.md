@@ -16,6 +16,13 @@ in the release PR and becomes the GitHub Release notes verbatim.
   published to scorecard.dev and surfaced in the code-scanning tab,
   with a Scorecard badge in the README.
 
+- GitHub Releases now attach the signed Sigstore provenance bundle
+  (`glidepath-X.Y.Z-provenance.intoto.jsonl`) alongside the sdist and
+  wheel — the same provenance already held by GitHub's attestation
+  store and PyPI, made visible on the release page, verifiable
+  offline (`gh attestation verify --bundle`), and recognised by the
+  OpenSSF Scorecard Signed-Releases check.
+
 ### Changed
 
 - README badges: added the PyPI version badge and replaced the

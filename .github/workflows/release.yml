@@ -120,9 +120,21 @@ jobs:
           name: release-assets
 
       - name: Attest build provenance for the release artifacts
+        id: attest
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: dist/*
+
+      # The signed Sigstore bundle lives in GitHub's attestation store,
+      # which is invisible on the release page (and to Scorecard's
+      # Signed-Releases check, which reads only asset filenames).
+      # Attaching the same bundle as a *.intoto.jsonl asset makes the
+      # provenance visible alongside the artifacts and verifiable
+      # offline (`gh attestation verify --bundle`).
+      - name: Stage the attestation bundle as a release asset
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE_PATH" "glidepath-${GITHUB_REF_NAME#v}-provenance.intoto.jsonl"
 
       - name: Create GitHub Release
         env:
@@ -132,4 +144,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "glidepath $GITHUB_REF_NAME" \
             --notes-file release-notes.md \
-            dist/*
+            dist/* \
+            glidepath-*-provenance.intoto.jsonl
