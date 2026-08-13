@@ -11,6 +11,7 @@ point lookup or the package location.
 import importlib.metadata
 from typing import TYPE_CHECKING
 
+import glidepath
 import smoke_test_artifact
 from smoke_test_artifact import entry_point_error, main, region_data_version
 
@@ -175,3 +176,18 @@ class TestRegionData:
         """The whole UK region builds and names its data version."""
         data_version = region_data_version()
         assert data_version.startswith("uk schema=")
+
+
+class TestVersionSource:
+    """One version source: pyproject metadata, read back everywhere."""
+
+    def test_dunder_version_reads_the_installed_metadata(self) -> None:
+        """``glidepath.__version__`` must never state its own figure.
+
+        It previously hardcoded 0.1.0 and silently went stale; pinning
+        it to the distribution metadata keeps ``make bump`` the only
+        place a version is ever written.
+        """
+        dunder = glidepath.__version__
+        installed = importlib.metadata.version("glidepath")
+        assert dunder == installed
