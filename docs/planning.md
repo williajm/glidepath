@@ -2410,11 +2410,16 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   find action off the GUI thread with the shared in-flight guard and
   staleness discard, and an answer naming the income (today's money,
   the highest net annual level the plan sustains), the age assumed,
-  the £1,000,000 search ceiling, and the basis. A Monte Carlo search
-  is bounded by the same 20,000 path-projection budget as 9.14,
-  multiplied over the search's probe bound rather than candidate
-  ages. Answers reproduce from the recorded inputs (and seed) per
-  §4.6.*
+  the £1,000,000 search ceiling, and the basis. The detail also
+  restates the income as a starting withdrawal rate of the
+  household's total wrapper balances recorded on the answer at solve
+  time — derived, never asserted: the product ships no "safe
+  withdrawal rate" figure, the line only lets users compare the
+  computed answer against rules of thumb they know. A Monte Carlo
+  search is bounded by the same 20,000 path-projection budget as
+  9.14, multiplied over the search's probe bound rather than
+  candidate ages. Answers reproduce from the recorded inputs (and
+  seed) per §4.6.*
 - [x] 9.26 Chart data as tables (#156) — *every chart sub-tab pairs
   the drawn chart with its numbers: a Chart | Table page pair inside
   the sub-tab, the table one row per period with one column per

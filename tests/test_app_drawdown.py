@@ -154,6 +154,7 @@ class TestStateWithDrawdown:
         assert answer.seed is None
         assert answer.paths is None
         assert answer.target_success_rate is None
+        assert answer.pot == Money(Decimal(300000))
 
     def test_agrees_with_the_core_solver(self, solved: PlanState) -> None:
         """Acceptance criterion: consistent with the core over the inputs.
@@ -467,6 +468,35 @@ class TestDrawdownPanel:
         assert DRAWDOWN_DETERMINISTIC_BASIS in panel.detail
         assert panel.message == ""
 
+    def test_an_answer_reads_out_as_a_rate_of_todays_pot(
+        self, solved: PlanState
+    ) -> None:
+        """The income restates as a starting withdrawal rate of the pot.
+
+        Derived from the answer, never asserted — the product ships no
+        "safe withdrawal rate" figure; the line lets users compare the
+        computed income against rules of thumb they know.
+        """
+        panel = build_drawdown_panel(solved, RunMode.DETERMINISTIC)
+        answer = solved.drawdown
+        assert answer is not None
+        assert answer.income is not None
+        assert answer.pot is not None
+        expected_rate = answer.income.amount / answer.pot.amount * Decimal(100)
+        assert (
+            f"A starting withdrawal rate of {expected_rate:.1f}% of"
+            " today's total pot (£300,000.00)." in panel.detail
+        )
+
+    def test_a_potless_plan_shows_no_withdrawal_rate(self, solved: PlanState) -> None:
+        """No wrapper balances leave nothing to take a rate of."""
+        assert solved.drawdown is not None
+        potless = replace(solved.drawdown, pot=Money(Decimal(0)))
+        state = replace(solved, drawdown=potless)
+        panel = build_drawdown_panel(state, RunMode.DETERMINISTIC)
+        assert "withdrawal rate" not in panel.detail
+        assert DRAWDOWN_DETERMINISTIC_BASIS in panel.detail
+
     def test_a_monte_carlo_answer_names_its_basis(self, projected: PlanState) -> None:
         """The basis line carries the success target, paths, and seed."""
         state = state_with_drawdown(projected, MONTE_CARLO_REQUEST, today=TODAY)
@@ -488,6 +518,7 @@ class TestDrawdownPanel:
             " the plan's outflows already exhaust it."
         )
         assert panel.message == ""
+        assert "withdrawal rate" not in panel.detail
 
     def test_a_failure_message_reaches_the_panel(self, projected: PlanState) -> None:
         """The stored error is the card's message."""
@@ -540,3 +571,4 @@ def test_the_answer_dataclass_defaults_are_deterministic() -> None:
     assert answer.seed is None
     assert answer.paths is None
     assert answer.target_success_rate is None
+    assert answer.pot is None
