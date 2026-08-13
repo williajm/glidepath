@@ -4,11 +4,15 @@ The engine-side execution of plans is covered in ``test_engine.py``;
 here the strategies and the plan/state value types are pinned in
 isolation: the tax-aware ordering, the net-defined fixed-real plan, the
 gross-defined fixed-percent plan, and the validation each type does.
+Property-based classes (issue #201) assert the ordering and
+conservation invariants over generated source lists.
 """
 
 from decimal import Decimal
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from glidepath.core import (
     EntityId,
@@ -460,3 +464,148 @@ class TestValidation:
         below = Rate(Decimal("-0.01"))
         with pytest.raises(ValueError, match="between 0 and 1"):
             FixedPercentWithdrawalStrategy(rate=below)
+
+
+def build_source(
+    *,
+    wrapper: int,
+    crystallised: bool,
+    available: Decimal,
+    tax_free_fraction: Decimal,
+    access_open: bool,
+    person: int,
+    growth_taxable: bool,
+) -> WithdrawalSource:
+    """One generated sub-balance view (the ``generated_sources`` target)."""
+    return WithdrawalSource(
+        id=WithdrawalSourceId(
+            wrapper_id=EntityId(f"wrapper-{wrapper}"), crystallised=crystallised
+        ),
+        kind=WrapperKindId("test.kind"),
+        available=Money(available),
+        tax_free_fraction=tax_free_fraction,
+        access_open=access_open,
+        person_id=EntityId(f"person-{person}"),
+        growth_taxable=growth_taxable,
+    )
+
+
+generated_sources = st.builds(
+    build_source,
+    wrapper=st.integers(min_value=0, max_value=3),
+    crystallised=st.booleans(),
+    available=st.decimals(
+        min_value=0,
+        max_value=1_000_000,
+        places=2,
+        allow_nan=False,
+        allow_infinity=False,
+    ),
+    tax_free_fraction=st.one_of(
+        st.sampled_from((Decimal(0), Decimal("0.25"), Decimal(1))),
+        st.decimals(
+            min_value=0, max_value=1, places=2, allow_nan=False, allow_infinity=False
+        ),
+    ),
+    access_open=st.booleans(),
+    person=st.integers(min_value=1, max_value=2),
+    growth_taxable=st.booleans(),
+)
+"""Arbitrary household sub-balance views, both persons mixed."""
+
+source_lists = st.lists(generated_sources, max_size=8)
+
+unit_fractions = st.decimals(
+    min_value=0, max_value=1, places=2, allow_nan=False, allow_infinity=False
+)
+need_amounts = st.decimals(
+    min_value=0, max_value=100_000, places=2, allow_nan=False, allow_infinity=False
+)
+
+
+def draw_group(source: WithdrawalSource) -> int:
+    """A source's position in the §5.2 default order's group ladder.
+
+    Taxable-growth accounts, then wholly tax-free sub-balances, then
+    funds already in drawdown, then uncrystallised pension funds.
+    """
+    if source.tax_free_fraction == ONE:
+        return 0 if source.growth_taxable else 1
+    return 2 if source.id.crystallised else 3
+
+
+class TestTaxAwareOrderProperties:
+    """Ordering invariants over generated source lists (issue #201)."""
+
+    @given(sources=source_lists)
+    @settings(max_examples=200, deadline=None)
+    def test_orders_the_open_sources_by_group_preserving_listing(
+        self, sources: list[WithdrawalSource]
+    ) -> None:
+        """Open sources only, groups in §5.2 order, stable within them.
+
+        Together the two checks pin the whole contract: the group index
+        never decreases along the ordering, and each group is exactly
+        the open sources of that group in their listed order — so
+        nothing gate-closed enters, nothing open is dropped, and the
+        listing order survives within every group.
+        """
+        ordered = tax_aware_order(sources)
+        groups = [draw_group(entry) for entry in ordered]
+        assert groups == sorted(groups)
+        for group in range(4):
+            ordered_group = [entry for entry in ordered if draw_group(entry) == group]
+            listed_group = [
+                entry
+                for entry in sources
+                if entry.access_open and draw_group(entry) == group
+            ]
+            assert ordered_group == listed_group
+
+
+class TestStrategyConservationProperties:
+    """What each strategy's plan must add up to (issue #201)."""
+
+    @given(sources=source_lists, rate=unit_fractions, fraction=unit_fractions)
+    @settings(max_examples=200, deadline=None)
+    def test_fixed_percent_draws_the_rate_of_the_accessible_pot(
+        self, sources: list[WithdrawalSource], rate: Decimal, fraction: Decimal
+    ) -> None:
+        """Gross draws total the rate's period share of the pot, capped.
+
+        The accessible pot is what the tax-aware order may touch; the
+        draws walk that order (a subsequence of it) and total exactly
+        ``pot x rate x year_fraction``, capped at the pot itself.
+        """
+        state = WithdrawalState(sources=tuple(sources), year_fraction=fraction)
+        plan = FixedPercentWithdrawalStrategy(rate=Rate(rate)).withdraw(state, ZERO)
+        assert isinstance(plan, GrossWithdrawalPlan)
+        accessible = tax_aware_order(sources)
+        pot = sum((entry.available for entry in accessible), start=ZERO)
+        drawn = sum((draw.amount for draw in plan.draws), start=ZERO)
+        assert drawn == min(pot * (rate * fraction), pot)
+        remaining_ids = iter(entry.id for entry in accessible)
+        assert all(draw.source in remaining_ids for draw in plan.draws)
+
+    @given(sources=source_lists, need=need_amounts, fraction=unit_fractions)
+    @settings(max_examples=200, deadline=None)
+    def test_guardrails_target_is_the_need_or_one_adjustment_of_it(
+        self, sources: list[WithdrawalSource], need: Decimal, fraction: Decimal
+    ) -> None:
+        """Net-defined over the §5.2 order; at most one guardrail move.
+
+        Whatever the generated pot and period fraction, the plan's
+        order is exactly the tax-aware order and its target is the
+        need itself, the capital-preservation cut, or the prosperity
+        rise — adjustments never compound within a period.
+        """
+        state = WithdrawalState(sources=tuple(sources), year_fraction=fraction)
+        plan = GuardrailsWithdrawalStrategy().withdraw(state, Money(need))
+        assert isinstance(plan, NetWithdrawalPlan)
+        assert plan.order == tuple(entry.id for entry in tax_aware_order(sources))
+        allowed = {
+            Money(need),
+            Money(need * Decimal("0.9")),
+            Money(need * Decimal("1.1")),
+        }
+        assert plan.target in allowed
