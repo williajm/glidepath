@@ -1399,8 +1399,14 @@ class ProbingWindow(MainWindow):
     """A window exposing its slow-run handlers for the guard tests."""
 
     def probe_monte_carlo(self) -> None:
-        """Request a Monte Carlo run, in-flight guard included."""
-        self._handle_monte_carlo_run("7", "2")
+        """Request a Monte Carlo run, in-flight guard included.
+
+        The path count differs from the live run's so a wrongly
+        started second run changes the running status and fails the
+        guard test's assertions instead of hiding behind identical
+        text.
+        """
+        self._handle_monte_carlo_run("7", "3")
 
     def probe_retirement(self) -> None:
         """Request a retirement-age search, in-flight guard included."""
