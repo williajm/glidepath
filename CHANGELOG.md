@@ -9,6 +9,18 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-13
+
+Correctness and hardening release: three UK tax fixes (the DB
+pension's commencement-year annual-allowance accrual, the net-pay
+income offset, and the marriage allowance transferor's cost), a
+savings-rate schedule in the tax-year data files so the April 2027
+savings rates can ship as data, the drawdown answer restated as a
+starting withdrawal rate, and a wider test net — broader
+property-based coverage and real GUI input simulation via pytest-qt.
+First release whose GitHub Release artifacts carry signed build
+provenance.
+
 ### Added
 
 - Tax-year data files now carry a savings rate schedule
