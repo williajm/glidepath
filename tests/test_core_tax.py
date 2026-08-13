@@ -125,6 +125,20 @@ def test_tax_result_rejects_negative_amounts() -> None:
         )
 
 
+def test_tax_result_rejects_negative_tax_due() -> None:
+    """A reducer may zero the liability but never turn it negative."""
+    negative = money("-1")
+    taxable = money("100")
+    allowance = money("0")
+    with pytest.raises(ValueError, match="tax_due must be non-negative"):
+        TaxResult(
+            tax_due=negative,
+            taxable_income=taxable,
+            tax_free_allowance=allowance,
+            lines=(),
+        )
+
+
 def test_empty_breakdown_means_zero_tax() -> None:
     """No lines is valid only with zero tax due."""
     result = TaxResult(

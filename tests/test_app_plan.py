@@ -206,6 +206,19 @@ class TestStateWithOverride:
         assert outcome.error is not None
         assert outcome.state is state
 
+    def test_future_years_table_override_is_vetted(self) -> None:
+        """The future-years policy arm vets its table like the others."""
+        state = initial_plan_state()
+        outcome = state_with_override(
+            state,
+            AssumptionKey.POLICY_TAX_FUTURE_YEARS.value,
+            "mode = perpetual_freeze",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is not None
+        assert outcome.state is state
+
     def test_table_override_missing_figure_is_named(self) -> None:
         """A missing required figure is named in the rejection."""
         state = initial_plan_state()

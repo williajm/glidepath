@@ -9,11 +9,13 @@ keep runs fast by shrinking the horizon, exactly as the Monte Carlo
 suite does.
 """
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from factories import money_fact
+import pytest
+
+from factories import FreeWrapperRules, money_fact, stub_region
 from glidepath.app import (
     NO_OUTLOOK_MESSAGE,
     OUTLOOK_HEADING,
@@ -26,16 +28,30 @@ from glidepath.app import (
     state_with_monte_carlo,
     state_with_override,
 )
+from glidepath.app.outlook import (
+    _CardContext,
+    _retirement_reading,
+    _snapshot_person,
+    _state_pension_quote,
+    _tax_free_cash,
+)
 from glidepath.core import (
+    ContributionTaxTreatment,
     Decision,
     EntityId,
     Fact,
+    GrowthTaxTreatment,
     Household,
+    Money,
+    Period,
     Person,
+    Rate,
     SpendingPlan,
     StatePensionRecord,
+    WithdrawalTaxTreatment,
     Wrapper,
     WrapperKindId,
+    WrapperTaxTreatment,
 )
 from glidepath.regions.uk import ISA_KIND, RUK_RESIDENCY, SIPP_KIND
 
@@ -428,3 +444,93 @@ class TestStaleness:
             replace(state, monte_carlo=replace(result, outcomes=shortened))
         )
         assert panel.message == NO_OUTLOOK_MESSAGE
+
+
+@dataclass(frozen=True)
+class UncappedPartialWrapperRules(FreeWrapperRules):
+    """A pension-style fraction with no lump-sum allowance anywhere."""
+
+    def tax_treatment(self, kind: WrapperKindId, period: Period) -> WrapperTaxTreatment:
+        """A quarter tax-free, the rest taxable income."""
+        del kind, period
+        return WrapperTaxTreatment(
+            contributions=ContributionTaxTreatment.FROM_TAXED_INCOME,
+            growth=GrowthTaxTreatment.TAX_FREE,
+            withdrawals=WithdrawalTaxTreatment.PARTIALLY_TAX_FREE,
+            tax_free_fraction=Rate(Decimal("0.25")),
+        )
+
+
+def card_context() -> _CardContext:
+    """The default household's card context, built as the panel builds it."""
+    state = state_with_household(short_horizon_state(), household(), today=TODAY)
+    result = state.result
+    assert result is not None
+    saved = state.household
+    assert saved is not None
+    reading = _retirement_reading(result, saved.persons)
+    assert reading is not None
+    return _CardContext(
+        assumptions=state.assumptions,
+        provenance=result.provenance,
+        persons=saved.persons,
+        snapshot=result.snapshots[reading.index],
+        reading=reading,
+    )
+
+
+class TestIncomeGuards:
+    """The income sentences' defensive guards, exercised directly (#199)."""
+
+    def test_a_person_missing_from_the_snapshot_is_an_error(self) -> None:
+        """The reading snapshot must carry every household person."""
+        context = card_context()
+        missing = EntityId("outlook-missing")
+        with pytest.raises(ValueError, match="missing from the reading snapshot"):
+            _snapshot_person(context, missing)
+
+    def test_a_kind_without_a_fraction_pays_no_tax_free_cash(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A region whose pension kind states no fraction quotes no cash."""
+        context = card_context()
+        monkeypatch.setattr(
+            "glidepath.app.outlook.region_for", lambda _assumptions: stub_region()
+        )
+        cash = _tax_free_cash(context, 0, Money(Decimal(10000)))
+        assert cash == Money(Decimal(0))
+
+    def test_an_uncapped_region_pays_the_whole_fraction(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without a lump-sum allowance the tax-free cash goes uncapped."""
+        context = card_context()
+        region = replace(stub_region(), wrappers=UncappedPartialWrapperRules())
+        monkeypatch.setattr(
+            "glidepath.app.outlook.region_for", lambda _assumptions: region
+        )
+        cash = _tax_free_cash(context, 0, Money(Decimal(10000)))
+        assert cash == Money(Decimal(2500))
+
+    def test_a_dob_outside_the_timetable_quotes_nothing(self) -> None:
+        """A birth date the SPA timetable predates yields no sentence."""
+        state = state_with_household(short_horizon_state(), household(), today=TODAY)
+        result = state.result
+        assert result is not None
+        isa = Wrapper(
+            id=EntityId("outlook-ancient-0"),
+            kind=ISA_KIND,
+            balance=money_fact("1000", as_of=AS_OF),
+        )
+        ancient = Person(
+            id=EntityId("outlook-ancient"),
+            date_of_birth=Fact(
+                value=date(1900, 1, 1), as_of=AS_OF, recorded_on=RECORDED
+            ),
+            target_retirement_age=Decision(value=65, recorded_on=RECORDED),
+            tax_residency=RUK_RESIDENCY,
+            wrappers=(isa,),
+            state_pension=state_pension_record(),
+        )
+        quote = _state_pension_quote(ancient, result.provenance)
+        assert quote is None
