@@ -49,28 +49,20 @@ jobs:
       - name: Build sdist and wheel
         run: uv build
 
-      # The wheel must install and import from a clean environment before
-      # anything reaches PyPI: metadata version matches the tag, and the
-      # UK region data files made it into the wheel. Qt itself is not
-      # imported — the headless runner has no GL stack, and the entry
-      # point is exercised by the CI GUI suite instead.
+      # The wheel must install and work from a clean environment before
+      # anything reaches PyPI: the same smoke script CI runs on every PR
+      # (scripts/smoke_test_artifact.py, issue #198) verifies the import,
+      # the shipped UK region data files, and the GUI entry point — Qt
+      # itself is not imported (the headless runner has no GL stack; the
+      # entry point's behaviour is exercised by the CI GUI suite) — plus
+      # the metadata version against the tag.
       - name: Smoke-test the wheel
         run: |
           uv venv smoke
           uv pip install --python smoke dist/*.whl
-          VIRTUAL_ENV=smoke uv run --no-project python - "$GITHUB_REF_NAME" <<'EOF'
-          import importlib.metadata
-          import sys
-
-          import glidepath
-          from glidepath.regions.uk import loader
-
-          tag = sys.argv[1].removeprefix("v")
-          version = importlib.metadata.version("glidepath")
-          if version != tag:
-              sys.exit(f"wheel version {version} does not match tag {tag}")
-          print(f"glidepath {version} imports cleanly; UK region data loads")
-          EOF
+          VIRTUAL_ENV=smoke uv run --no-project \
+            python scripts/smoke_test_artifact.py \
+            --expect-version "${GITHUB_REF_NAME#v}"
 
       - name: Upload release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
