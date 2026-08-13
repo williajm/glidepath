@@ -341,6 +341,7 @@ def test_rates_never_extrapolate(
     assert extended.isa.lisa_bonus_rate == base.isa.lisa_bonus_rate
     assert extended.isa.lisa_withdrawal_charge == base.isa.lisa_withdrawal_charge
     assert extended.dividend.rates == base.dividend.rates
+    assert extended.savings.rates == base.savings.rates
     marriage = extended.marriage_allowance
     base_marriage = base.marriage_allowance
     assert marriage.recipient_top_band_ruk == base_marriage.recipient_top_band_ruk

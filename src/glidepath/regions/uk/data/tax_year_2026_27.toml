@@ -5,7 +5,7 @@
 # all from the primary sources below; never edit a figure without
 # re-verifying and updating [meta].
 
-schema_version = 4
+schema_version = 5
 
 [meta]
 tax_year    = "2026/27"
@@ -84,12 +84,20 @@ lisa_bonus_rate  = "0.25"
 lisa_withdrawal_charge = "0.25"
 
 # Nil rates consume band width (§6); savings above them are taxed at the
-# rUK band rates until the separate savings rates land in the 2027/28 file.
+# rates below, aligned positionally with the rUK bands (savings income
+# stacks on the rUK ladder UK-wide). For 2026/27 they equal the main
+# rates; the separate 22/42/47 rates (Budget 2025 OOTLAR, from 6 April
+# 2027) land in the 2027/28 file.
 [savings]
 starting_rate_limit = "5000"  # reduced £1 per £1 of non-savings income above the PA
 psa_basic      = "1000"
 psa_higher     = "500"
 psa_additional = "0"
+rates = [
+  { name = "basic", rate = "0.20" },
+  { name = "higher", rate = "0.40" },
+  { name = "additional", rate = "0.45" },
+]
 
 # Rates align positionally with the rUK bands (dividends are UK-wide).
 # 2026/27 figures include the Budget 2025 +2ppt change, in force.

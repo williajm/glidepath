@@ -21,13 +21,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from decimal import Decimal
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 """The data-file schema version this code understands.
 
-v2 (#97): tax-year files lose the ``[state_pension]`` table and
-``age_rules.toml`` the ``[new_state_pension]`` table — the state
-pension amount is the user's stated DWP forecast, never a shipped
-rate.
+v5 (#189): tax-year files gain ``savings.rates`` — a savings rate
+schedule aligned positionally with the rUK bands, so the separate
+savings-income rates enacted from 2027/28 (22/42/47, Budget 2025
+OOTLAR) can ship as data in the 2027/28 file.
 
 v4 (roadmap 9.33): ``age_rules.toml`` gains the ``[death_benefits]``
 table — the age boundary below which a deceased member's pension
@@ -37,6 +37,11 @@ passes as income-tax-free beneficiary drawdown (planning §6
 v3 (#173): tax-year files gain the ``[marriage_allowance]`` table —
 the s55B transferable amount and the per-schedule recipient band
 gates (roadmap 9.32).
+
+v2 (#97): tax-year files lose the ``[state_pension]`` table and
+``age_rules.toml`` the ``[new_state_pension]`` table — the state
+pension amount is the user's stated DWP forecast, never a shipped
+rate.
 """
 
 _TAX_YEAR_FORMAT = re.compile(r"\d{4}/\d{2}")
@@ -232,29 +237,48 @@ class IsaRules:
 
 
 @dataclass(frozen=True, slots=True)
+class SavingsRate:
+    """One savings rate, aligned positionally with the rUK band ladder."""
+
+    name: str
+    rate: Rate
+
+    def __post_init__(self) -> None:
+        """Reject unnamed rates."""
+        if not self.name:
+            _fail("SavingsRate", "name must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
 class SavingsRules:
-    """Savings-income nil rates for one tax year (planning §6, roadmap 9.2).
+    """Savings-income rules for one tax year (planning §6, roadmap 9.2).
 
     ``starting_rate_limit`` is the 0% starting rate for savings band,
     reduced £1 per £1 of non-savings taxable income above the personal
     allowance. The ``psa_*`` fields are the personal savings allowance
     by the band the taxpayer's income reaches — nil *rates*, not
-    deductions: nil-rated income still consumes band width (§6). Savings
-    income above the nil rates is taxed at the rUK band rates until the
-    separate savings rates take effect (2027/28, shipped as data then).
+    deductions: nil-rated income still consumes band width (§6).
+    ``rates`` tax the savings income above the nil rates: they map
+    positionally onto the rUK income-tax bands (savings income stacks
+    on the rUK ladder UK-wide, §6) — one rate per band, enforced by
+    :class:`TaxYearFile`. Through 2026/27 they equal the main rates;
+    the separate 22/42/47 rates land in the 2027/28 file (#189).
     """
 
     starting_rate_limit: Money
     psa_basic: Money
     psa_higher: Money
     psa_additional: Money
+    rates: tuple[SavingsRate, ...]
 
     def __post_init__(self) -> None:
-        """Require descending PSA tiers — the statutory shape."""
+        """Require descending PSA tiers and at least one rate."""
         if not self.psa_basic >= self.psa_higher >= self.psa_additional:
             _fail(
                 "SavingsRules", "PSA tiers must satisfy basic >= higher >= additional"
             )
+        if not self.rates:
+            _fail("SavingsRules", "at least one savings rate is required")
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,6 +357,11 @@ class TaxYearFile:
             _fail(
                 "TaxYearFile",
                 "dividend.rates must align one-to-one with the rUK bands",
+            )
+        if len(self.savings.rates) != len(self.income_tax_ruk.bands):
+            _fail(
+                "TaxYearFile",
+                "savings.rates must align one-to-one with the rUK bands",
             )
         gates = (
             (self.marriage_allowance.recipient_top_band_ruk, self.income_tax_ruk),

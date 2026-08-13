@@ -39,6 +39,7 @@ from glidepath.regions.uk.schema import (
     NmpaStep,
     PensionRules,
     ReturnsHistoryFile,
+    SavingsRate,
     SavingsRules,
     SpaAgeBand,
     SpaBand,
@@ -349,9 +350,19 @@ def _parse_isa(raw: object, context: str) -> IsaRules:
     return rules
 
 
+def _parse_named_rate(raw: object, context: str) -> tuple[str, Rate]:
+    """Parse one ``{name, rate}`` entry of a layer's ``rates`` array."""
+    table = _Table(raw, context)
+    name = _string(table.take("name"), f"{context}.name")
+    rate = _fraction(table.take("rate"), f"{context}.rate")
+    table.finish()
+    return name, rate
+
+
 def _parse_savings(raw: object, context: str) -> SavingsRules:
     """Parse the ``[savings]`` table."""
     table = _Table(raw, context)
+    rates_raw = _array(table.take("rates"), f"{context}.rates")
     rules = SavingsRules(
         starting_rate_limit=_money(
             table.take("starting_rate_limit"), f"{context}.starting_rate_limit"
@@ -361,18 +372,13 @@ def _parse_savings(raw: object, context: str) -> SavingsRules:
         psa_additional=_money(
             table.take("psa_additional"), f"{context}.psa_additional"
         ),
+        rates=tuple(
+            SavingsRate(*_parse_named_rate(item, f"{context}.rates[{index}]"))
+            for index, item in enumerate(rates_raw)
+        ),
     )
     table.finish()
     return rules
-
-
-def _parse_dividend_rate(raw: object, context: str) -> DividendRate:
-    """Parse one entry of the ``dividend.rates`` array."""
-    table = _Table(raw, context)
-    name = _string(table.take("name"), f"{context}.name")
-    rate = _fraction(table.take("rate"), f"{context}.rate")
-    table.finish()
-    return DividendRate(name=name, rate=rate)
 
 
 def _parse_dividend(raw: object, context: str) -> DividendRules:
@@ -381,7 +387,7 @@ def _parse_dividend(raw: object, context: str) -> DividendRules:
     allowance = _money(table.take("allowance"), f"{context}.allowance")
     rates_raw = _array(table.take("rates"), f"{context}.rates")
     rates = tuple(
-        _parse_dividend_rate(item, f"{context}.rates[{index}]")
+        DividendRate(*_parse_named_rate(item, f"{context}.rates[{index}]"))
         for index, item in enumerate(rates_raw)
     )
     table.finish()

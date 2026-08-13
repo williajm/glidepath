@@ -300,7 +300,7 @@ def _permitted_recipient_bands(
             break
     ruk_gate = year.marriage_allowance.recipient_top_band_ruk
     for index, band in enumerate(year.income_tax_ruk.bands):
-        permitted.add(_savings_band_name(index, band))
+        permitted.add(f"savings_{year.savings.rates[index].name}")
         permitted.add(f"dividend_{year.dividend.rates[index].name}")
         if band.name == ruk_gate:
             break
@@ -479,11 +479,6 @@ def _band_own_rate(_index: int, band: TaxBand) -> Rate:
     return band.rate
 
 
-def _savings_band_name(_index: int, band: TaxBand) -> str:
-    """A savings line label: the band name under the layer prefix."""
-    return f"savings_{band.name}"
-
-
 def _aa_charge_band_name(_index: int, band: TaxBand) -> str:
     """An annual-allowance-charge line label under the layer prefix."""
     return f"{_AA_CHARGE_PREFIX}{band.name}"
@@ -521,15 +516,17 @@ def _savings_lines(
     taxable_non_savings: Money,
     total_taxable: Money,
 ) -> tuple[Money, tuple[TaxLine, ...]]:
-    """The savings layer: starting rate, PSA, then the band rates.
+    """The savings layer: starting rate, PSA, then the savings rates.
 
     The layer stacks directly above the non-savings taxable income on
     the rUK ladder. The starting rate for savings covers what remains
     of its limit after non-savings taxable income eats it £1 per £1
     (planning §6); the PSA nil rate follows; the remainder is charged
-    at the rUK band rates (savings rates separate from the main rates
-    ship as data from 2027/28, §6). Returns the ladder position after
-    the layer plus the layer's lines.
+    at the year's savings rates, aligned positionally with the rUK
+    bands (schema invariant) — equal to the main rates through
+    2026/27, the separate enacted rates from the 2027/28 file (§6,
+    #189). Returns the ladder position after the layer plus the
+    layer's lines.
     """
     lines: list[TaxLine] = []
     position = taxable_non_savings
@@ -551,8 +548,8 @@ def _savings_lines(
                 bands,
                 start=position,
                 amount=remaining,
-                line_name=_savings_band_name,
-                line_rate=_band_own_rate,
+                line_name=lambda index, _band: f"savings_{savings.rates[index].name}",
+                line_rate=lambda index, _band: savings.rates[index].rate,
             )
         )
         position = position + remaining

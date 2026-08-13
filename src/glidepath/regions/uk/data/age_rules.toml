@@ -3,7 +3,7 @@
 # re-verified against the live gov.uk timetable page on 2026-08-02; the
 # death-benefit age boundary against the live gov.uk page on 2026-08-12.
 
-schema_version = 4
+schema_version = 5
 
 [meta]
 verified_on = 2026-08-12
