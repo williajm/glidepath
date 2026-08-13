@@ -9,6 +9,19 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Added
+
+- OpenSSF Scorecard workflow (`scorecard.yml`): weekly and on-push
+  automated scoring of the repo's supply-chain security posture,
+  published to scorecard.dev and surfaced in the code-scanning tab,
+  with a Scorecard badge in the README.
+
+### Changed
+
+- README badges: added the PyPI version badge and replaced the
+  hand-maintained Python version badge with the dynamic
+  `pypi/pyversions` badge driven by the published package metadata.
+
 ## [0.5.0] - 2026-08-13
 
 Correctness and hardening release: three UK tax fixes (the DB
