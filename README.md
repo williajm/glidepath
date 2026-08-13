@@ -4,10 +4,12 @@
   <img src="https://raw.githubusercontent.com/williajm/glidepath/main/src/glidepath/gui/assets/wordmark.png" alt="glidepath" width="420">
 </p>
 
+[![PyPI](https://img.shields.io/pypi/v/glidepath)](https://pypi.org/project/glidepath/)
 [![CI](https://github.com/williajm/glidepath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/williajm/glidepath/actions/workflows/ci.yml)
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=williajm_glidepath&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=williajm_glidepath)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=williajm_glidepath&metric=coverage)](https://sonarcloud.io/summary/new_code?id=williajm_glidepath)
-[![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://github.com/williajm/glidepath/blob/main/.python-version)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/williajm/glidepath/badge)](https://scorecard.dev/viewer/?uri=github.com/williajm/glidepath)
+[![Python versions](https://img.shields.io/pypi/pyversions/glidepath)](https://pypi.org/project/glidepath/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
