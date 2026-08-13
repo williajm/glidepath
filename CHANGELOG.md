@@ -44,6 +44,16 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Fixed
 
+- The Annual Allowance no longer discards a DB pension's entire
+  commencement-year accrual: per HMRC's closing-value adjustment
+  (PTM054500), a stream whose benefits start mid-year now reports a
+  pension input amount with its closing entitlement revalued to the
+  commencement date, so the final year of accrual counts against the
+  allowance instead of vanishing. Streams already in payment at the
+  year's start still generate nothing. The add-back values the
+  uncommuted, unadjusted entitlement — the early-retirement reduction
+  nuance is recorded as a simplification in the planning document
+  (#188).
 - Working alongside retirement income with net-pay pension
   contributions no longer overstates spendable income: the income
   offset's employment-only tax baseline is now assessed on net-pay-

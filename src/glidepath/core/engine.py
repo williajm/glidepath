@@ -3253,8 +3253,14 @@ class _PersonProjection:
         captured at the period open) and its closing entitlement — the
         credited value carried to the period end at the same
         revaluation the next boundary's advance applies — for the
-        region to value (planning §5.2); a stream whose benefits start
-        by the period end has crystallised and generates no input.
+        region to value (planning §5.2). A stream whose benefits
+        commence *within* the period still generates an input per the
+        HMRC closing-value adjustment (PTM054500): its closing
+        entitlement is the credited value revalued only to the
+        commencement date, so the final year's accrual is measured
+        rather than discarded. Only a stream already in payment at the
+        period's first day generates nothing — its accrual was
+        measured in the year it crystallised.
         ``total_income`` is the period's full taxable picture before
         member pension deductions — net-pay amounts added back, the
         portfolio-income layers included — so the region's income
@@ -3282,10 +3288,17 @@ class _PersonProjection:
         cpi = returns.cpi.value
         arrangements: list[DbArrangementInput] = []
         for stream, opening in zip(self._db_streams, self._db_openings, strict=True):
-            if stream.start <= period.end:
+            if stream.start <= period.start:
                 continue
+            revalued_share = fraction
+            if stream.start <= period.end:
+                # Commencement year: revalue only to the start date —
+                # the §4.1 whole-month share of the period before it.
+                revalued_share = service_active_fraction(
+                    stream.start, period, self.config.today, self.run.horizon_end()
+                )
             closing = stream.accrued_annual * (
-                _ONE + stream.basis.annual_rate(cpi) * fraction
+                _ONE + stream.basis.annual_rate(cpi) * revalued_share
             )
             arrangements.append(
                 DbArrangementInput(opening_annual=opening, closing_annual=closing)
