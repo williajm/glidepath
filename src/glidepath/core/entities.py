@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from glidepath.core.pensions import DBPension
     from glidepath.core.provenance import Decision, Fact
     from glidepath.core.state_pension import StatePensionRecord
+    from glidepath.core.withdrawals import WithdrawalRule
     from glidepath.core.wrappers import Wrapper
 
 EntityId = NewType("EntityId", str)
@@ -237,6 +238,17 @@ class Household:
     marriage allowance), matching :attr:`Person.lsa_used` precedent —
     the engine never interprets it beyond gating the region's
     household adjustment step.
+    """
+    withdrawal_strategy: Decision[WithdrawalRule] | None = None
+    """How decumulation withdrawals are planned (planning §5.1, §5.2).
+
+    A household-level decision — the engine runs one pooled withdrawal
+    step per period (§4.11), so the strategy is one choice for the
+    whole plan. ``None`` means the default: fixed real spending. Like
+    :attr:`claim_marriage_allowance`, the household carries no entity
+    id, so this decision is not scenario-addressable (§4.3); run
+    layers read it into the run configuration through
+    :meth:`~glidepath.core.withdrawals.WithdrawalRule.strategy`.
     """
 
     def __post_init__(self) -> None:

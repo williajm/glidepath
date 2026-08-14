@@ -48,6 +48,9 @@ _HEADER_BG = "#eef3f0"
 _SCROLL_HANDLE = "#c2ccc6"
 _SCROLL_HANDLE_HOVER = "#9db1a8"
 _TOOLTIP_BG = "#253230"
+ERROR_TEXT = "#b3261e"
+"""Inline field-error text (roadmap 10.2) — a red that clears WCAG AA
+contrast on the white card surface."""
 
 CHART_SURFACE = "#ffffff"
 """The chart plot surface — white, matching the cards the charts sit
@@ -313,6 +316,20 @@ QLabel#answerLabel {{
     font-size: 13pt;
     font-weight: 600;
     color: {ACCENT_TEXT};
+}}
+QLabel#fieldErrorLabel {{
+    color: {ERROR_TEXT};
+}}
+QPushButton#advancedToggle {{
+    background: transparent;
+    border: none;
+    color: {ACCENT_TEXT};
+    padding: 2px 0;
+    text-align: left;
+}}
+QPushButton#advancedToggle:hover {{
+    color: {ACCENT};
+    text-decoration: underline;
 }}
 """
 

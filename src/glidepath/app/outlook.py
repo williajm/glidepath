@@ -76,6 +76,13 @@ NO_OUTLOOK_MESSAGE: Final = (
     " your pots at retirement, and the yearly income they could buy."
 )
 
+DETERMINISTIC_BASIS_SENTENCE: Final = (
+    "Based on the single deterministic projection at the assumed average"
+    " returns; all figures are in today's money. Run Monte Carlo to see"
+    " the likely range and the 1-in-20 tails."
+)
+"""The basis line of the pre-Monte-Carlo outlook (roadmap 10.4)."""
+
 _PERCENTILES: Final = (
     Decimal(5),
     Decimal(25),
@@ -136,46 +143,88 @@ class _CardContext:
 
 
 def build_outlook_panel(state: PlanState) -> OutlookPanelViewModel:
-    """The retirement outlook card for the charts screen (9.27).
+    """The retirement outlook card for the charts screen (9.27, 10.4).
 
-    Purely a view over held results: without a plan or a held Monte
-    Carlo run the card explains what to do, and a held run whose
-    periods no longer align with the base projection reads as no run
-    — exactly the fan chart's staleness rule (roadmap 9.24).
+    Purely a view over held results: without a plan the card explains
+    what to do; with a base projection but no held Monte Carlo run —
+    or a held run whose periods no longer align with the base
+    projection, the fan chart's staleness rule (roadmap 9.24) — it
+    summarises the single deterministic path and invites the Monte
+    Carlo run that adds the likely range.
     """
     household = state.household
     if household is None:
         return _message_panel(OUTLOOK_NO_PLAN_MESSAGE)
     result = state.result
-    monte_carlo = state.monte_carlo
-    if result is None or monte_carlo is None:
+    if result is None:
         return _message_panel(NO_OUTLOOK_MESSAGE)
     reading = _retirement_reading(result, household.persons)
-    try:
-        totals = monte_carlo.balance_percentiles(_PERCENTILES)
-        pensions = monte_carlo.pension_balance_percentiles(_PERCENTILES)
-    except ValueError:
+    if reading is None:
         return _message_panel(NO_OUTLOOK_MESSAGE)
-    periods = len(result.snapshots)
-    if reading is None or len(totals[0]) != periods or len(pensions[0]) != periods:
-        return _message_panel(NO_OUTLOOK_MESSAGE)
-    snapshot = result.snapshots[reading.index]
-    deflator = _balance_deflator(snapshot)
-    total_row = _deflated(totals, reading.index, deflator)
-    pension_row = _deflated(pensions, reading.index, deflator)
     context = _CardContext(
         assumptions=state.assumptions,
         provenance=result.provenance,
         persons=household.persons,
-        snapshot=snapshot,
+        snapshot=result.snapshots[reading.index],
         reading=reading,
     )
+    monte_carlo = state.monte_carlo
+    if monte_carlo is not None:
+        panel = _monte_carlo_panel(context, result, monte_carlo)
+        if panel is not None:
+            return panel
+    return _deterministic_panel(context)
+
+
+def _monte_carlo_panel(
+    context: _CardContext, result: ProjectionResult, monte_carlo: MonteCarloResult
+) -> OutlookPanelViewModel | None:
+    """The percentile-band outlook, or ``None`` for a stale held run."""
+    try:
+        totals = monte_carlo.balance_percentiles(_PERCENTILES)
+        pensions = monte_carlo.pension_balance_percentiles(_PERCENTILES)
+    except ValueError:
+        return None
+    periods = len(result.snapshots)
+    if len(totals[0]) != periods or len(pensions[0]) != periods:
+        return None
+    reading = context.reading
+    deflator = _balance_deflator(context.snapshot)
+    total_row = _deflated(totals, reading.index, deflator)
+    pension_row = _deflated(pensions, reading.index, deflator)
     lines = [_tails_sentence(total_row)]
     lines.extend(_income_sentences(context, pension_row))
     lines.append(_basis_sentence(monte_carlo))
     return OutlookPanelViewModel(
         heading=OUTLOOK_HEADING,
         answer=_pot_sentence(reading, total_row),
+        detail="\n".join(lines),
+        message="",
+    )
+
+
+def _deterministic_panel(context: _CardContext) -> OutlookPanelViewModel:
+    """The single-path outlook shown before Monte Carlo runs (10.4).
+
+    The same reading, deflator, annuity quote, and State Pension
+    machinery as the percentile card, fed the base projection's own
+    closing balances — so the figures agree exactly with the balance
+    chart, and the basis line says what a Monte Carlo run would add.
+    """
+    deflator = _balance_deflator(context.snapshot)
+    total = _ZERO_MONEY
+    pensions = _ZERO_MONEY
+    for person in context.snapshot.persons:
+        pensions = pensions + _pension_closing_balance(person)
+        for wrapper in person.wrappers:
+            total = total + wrapper.closing_balance
+    total_today = Money(total.amount / deflator)
+    pension_today = Money(pensions.amount / deflator)
+    lines = _deterministic_income_sentences(context, pension_today)
+    lines.append(DETERMINISTIC_BASIS_SENTENCE)
+    return OutlookPanelViewModel(
+        heading=OUTLOOK_HEADING,
+        answer=_deterministic_pot_sentence(context.reading, total_today),
         detail="\n".join(lines),
         message="",
     )
@@ -263,17 +312,28 @@ def _ages_phrase(ages: tuple[int, ...]) -> str:
     return f"ages {ages[0]} and {ages[1]}"
 
 
+def _anchor_phrase(reading: _Reading) -> str:
+    """The reading's opening phrase: the ages, or this tax year."""
+    if reading.ages is None:
+        return "By the end of this tax year"
+    return f"At {_ages_phrase(reading.ages)}"
+
+
 def _pot_sentence(reading: _Reading, totals: tuple[Money, ...]) -> str:
     """The headline: the median pot with its likely range."""
     _, p25, p50, p75, _ = totals
-    anchor = (
-        "By the end of this tax year"
-        if reading.ages is None
-        else f"At {_ages_phrase(reading.ages)}"
-    )
     return (
-        f"{anchor}, your pots could be worth around {_pounds(p50)} in"
-        f" today's money — likely between {_pounds(p25)} and {_pounds(p75)}."
+        f"{_anchor_phrase(reading)}, your pots could be worth around"
+        f" {_pounds(p50)} in today's money — likely between {_pounds(p25)}"
+        f" and {_pounds(p75)}."
+    )
+
+
+def _deterministic_pot_sentence(reading: _Reading, total: Money) -> str:
+    """The single-path headline: one figure, no range (10.4)."""
+    return (
+        f"{_anchor_phrase(reading)}, your pots are on course to be worth"
+        f" around {_pounds(total)} in today's money."
     )
 
 
@@ -315,7 +375,35 @@ def _income_sentences(context: _CardContext, pensions: tuple[Money, ...]) -> lis
             )
         quote = _annuity_quote(context, p50)
         if quote is not None:
-            lines.append(_annuity_sentence(quote))
+            lines.append(_annuity_sentence(quote, "the middle pension pot"))
+    annuity_income = None if quote is None else quote.income
+    lines.extend(_state_pension_lines(context, annuity_income))
+    return lines
+
+
+def _deterministic_income_sentences(context: _CardContext, pension: Money) -> list[str]:
+    """The single-path pension, annuity, and State Pension lines (10.4).
+
+    The same appearance rules as :func:`_income_sentences`, fed one
+    figure instead of a percentile row: the pension slice only when
+    other savings sit alongside it, the annuity quote only when there
+    is pension money the shipped rate table can price.
+    """
+    lines: list[str] = []
+    quote = None
+    if pension > _ZERO_MONEY:
+        if any(
+            not wrapper.pension
+            for person in context.snapshot.persons
+            for wrapper in person.wrappers
+        ):
+            lines.append(
+                "Pensions alone — the money an annuity could be bought with —"
+                f" are on course to hold around {_pounds(pension)}."
+            )
+        quote = _annuity_quote(context, pension)
+        if quote is not None:
+            lines.append(_annuity_sentence(quote, "the projected pension pot"))
     annuity_income = None if quote is None else quote.income
     lines.extend(_state_pension_lines(context, annuity_income))
     return lines
@@ -330,14 +418,20 @@ class _AnnuityQuote:
     ages: tuple[int, ...]
 
 
-def _annuity_sentence(quote: _AnnuityQuote) -> str:
-    """The annuity quote as copy, single or couple phrasing."""
+def _annuity_sentence(quote: _AnnuityQuote, pot_phrase: str) -> str:
+    """The annuity quote as copy, single or couple phrasing.
+
+    ``pot_phrase`` names the pot on the card's own basis: the Monte
+    Carlo card converts "the middle pension pot"; the deterministic
+    card has only one path — no median — so it converts "the
+    projected pension pot" (roadmap 10.4).
+    """
     if len(quote.ages) == 1:
         product = f"a level single-life annuity bought at {quote.ages[0]}"
     else:
         product = f"level single-life annuities bought at {_ages_phrase(quote.ages)}"
     sentence = (
-        f"As {product}, the middle pension pot would pay about"
+        f"As {product}, {pot_phrase} would pay about"
         f" {_pounds(quote.income)} a year before tax"
     )
     if quote.tax_free > _ZERO_MONEY:
@@ -587,6 +681,7 @@ def _basis_sentence(monte_carlo: MonteCarloResult) -> str:
 
 
 __all__ = [
+    "DETERMINISTIC_BASIS_SENTENCE",
     "NO_OUTLOOK_MESSAGE",
     "OUTLOOK_HEADING",
     "OUTLOOK_NO_PLAN_MESSAGE",

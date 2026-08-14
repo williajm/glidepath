@@ -43,7 +43,6 @@ from glidepath.app import (
     NO_BACKTEST_MESSAGE,
     NO_DRAWDOWN_MESSAGE,
     NO_MONTE_CARLO_MESSAGE,
-    NO_OUTLOOK_MESSAGE,
     NO_RETIREMENT_MESSAGE,
     RETIREMENT_RUNNING_MESSAGE,
     RETIREMENT_STALE_MESSAGE,
@@ -490,13 +489,15 @@ class TestMonteCarloControls:
 class TestOutlookCard:
     """The retirement outlook card bindings (9.27)."""
 
-    def test_no_run_shows_the_empty_state_copy(self) -> None:
-        """Before any run the card carries the no-run message."""
+    def test_no_run_shows_the_single_path_outlook(self) -> None:
+        """Before any Monte Carlo run the deterministic card shows (10.4)."""
         pane = ChartsPane(callbacks())
         pane.refresh(projected_view_model())
-        assert pane.outlook_answer_label.isHidden()
-        assert pane.outlook_detail_label.isHidden()
-        assert pane.outlook_message_label.text() == NO_OUTLOOK_MESSAGE
+        assert not pane.outlook_answer_label.isHidden()
+        assert "on course" in pane.outlook_answer_label.text()
+        assert not pane.outlook_detail_label.isHidden()
+        assert "Run Monte Carlo" in pane.outlook_detail_label.text()
+        assert pane.outlook_message_label.isHidden()
 
     def test_a_held_run_renders_the_headline_sentences(self) -> None:
         """The answer and detail show; the no-run message hides."""

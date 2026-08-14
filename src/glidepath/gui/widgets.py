@@ -56,6 +56,7 @@ from glidepath.app import (
     DisclaimerViewModel,
     DrawdownRequest,
     FactsFormData,
+    FactsSubmissionOutcome,
     HelpGuideViewModel,
     PlanReport,
     PlanState,
@@ -622,7 +623,7 @@ class MainWindow(QMainWindow):
         self._refresh_result_panes()
         return self._view_model.facts_form.cleared_note
 
-    def _handle_facts_submitted(self, data: FactsFormData) -> str:
+    def _handle_facts_submitted(self, data: FactsFormData) -> FactsSubmissionOutcome:
         """Parse a facts submission; on success, re-project and refresh."""
         now = datetime.now(tz=UTC)
         # Provenance timestamps stay UTC; "today" is the user's calendar
@@ -634,14 +635,17 @@ class MainWindow(QMainWindow):
             data, recorded_on=now, today=today, previous=self._state.household
         )
         if result.household is None:
-            return format_form_errors(self._view_model.facts_form, result.errors)
+            return FactsSubmissionOutcome(
+                status=format_form_errors(self._view_model.facts_form, result.errors),
+                errors=result.errors,
+            )
         self._state = state_with_household(self._state, result.household, today=today)
         # Rows typed fresh mint their entity ids at parse time; seeding
         # them back means the next resubmission edits the same entities
         # instead of minting again and orphaning overrides (§4.3).
         self.facts_pane.set_entity_ids(plan_entity_ids(result.household))
         self._refresh_result_panes()
-        return facts_saved_message(self._state)
+        return FactsSubmissionOutcome(status=facts_saved_message(self._state))
 
     def _handle_override(self, key: str, raw_value: str) -> str | None:
         """Apply an in-place assumption override; report a rejection."""

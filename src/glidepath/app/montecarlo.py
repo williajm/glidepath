@@ -23,8 +23,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from glidepath.app.display import format_money, format_percent
-from glidepath.app.plan import PlanState, region_for, replanned_state
-from glidepath.core import Money, PathParallelism, RunConfig, RunMode, run_paths
+from glidepath.app.plan import PlanState, plan_run_config, region_for, replanned_state
+from glidepath.core import Money, PathParallelism, RunMode, run_paths
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -305,7 +305,9 @@ def state_with_monte_carlo(
         today=today,
         modified=state.modified,
     )
-    config = RunConfig(today=today, mode=RunMode.MONTE_CARLO, seed=seed)
+    config = plan_run_config(
+        state.household, today=today, mode=RunMode.MONTE_CARLO, seed=seed
+    )
     try:
         with path_pool(paths) as parallelism:
             result = run_paths(

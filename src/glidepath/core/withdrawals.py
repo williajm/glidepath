@@ -323,6 +323,71 @@ def tax_aware_order(
     return (*taxable_growth, *free, *crystallised, *uncrystallised)
 
 
+class WithdrawalRuleKind(Enum):
+    """The shipped withdrawal strategies as a closed choice (§5.1).
+
+    The stable vocabulary behind :class:`WithdrawalRule`: one member
+    per shipped strategy, so the decision a plan records is a value
+    (persistable, comparable, displayable) rather than a strategy
+    instance. Adding a strategy means adding a member here and its
+    construction arm in :meth:`WithdrawalRule.strategy`.
+    """
+
+    FIXED_REAL = auto()
+    FIXED_PERCENT = auto()
+    GUARDRAILS = auto()
+    NATURAL_YIELD = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class WithdrawalRule:
+    """The withdrawal-strategy decision's value (planning §5.1, §5.2).
+
+    What a household *records* when choosing how decumulation
+    withdrawals are planned — the strategy kind plus the one parameter
+    the fixed-percentage strategy needs. The guardrails and natural-
+    yield strategies run on their shipped conventional parameters
+    (:class:`GuardrailsWithdrawalStrategy` defaults); a rule stating a
+    rate for any other kind is rejected rather than silently ignored.
+    """
+
+    kind: WithdrawalRuleKind
+    rate: Rate | None = None
+    """The fixed-percentage strategy's annual share of the pot.
+
+    Required for :attr:`WithdrawalRuleKind.FIXED_PERCENT`, forbidden
+    otherwise.
+    """
+
+    def __post_init__(self) -> None:
+        """Require the rate exactly when the kind consumes it."""
+        if self.kind is WithdrawalRuleKind.FIXED_PERCENT and self.rate is None:
+            msg = "WithdrawalRule.rate is required for FIXED_PERCENT"
+            raise ValueError(msg)
+        if self.kind is not WithdrawalRuleKind.FIXED_PERCENT and self.rate is not None:
+            msg = (
+                "WithdrawalRule.rate is only valid for FIXED_PERCENT,"
+                f" not {self.kind.name}"
+            )
+            raise ValueError(msg)
+        self.strategy()  # Validate the parameters the strategy enforces.
+
+    def strategy(self) -> WithdrawalStrategy:
+        """The strategy instance this rule configures (planning §5.2).
+
+        The rate is present exactly for a fixed-percentage rule (the
+        ``__post_init__`` invariant), so its presence alone selects
+        that strategy — no branch here can be half-configured.
+        """
+        if self.rate is not None:
+            return FixedPercentWithdrawalStrategy(rate=self.rate)
+        if self.kind is WithdrawalRuleKind.GUARDRAILS:
+            return GuardrailsWithdrawalStrategy()
+        if self.kind is WithdrawalRuleKind.NATURAL_YIELD:
+            return NaturalYieldWithdrawalStrategy()
+        return FixedRealWithdrawalStrategy()
+
+
 @dataclass(frozen=True, slots=True)
 class FixedRealWithdrawalStrategy:
     """Fixed real spending: meet the net need, exactly (planning §5.2).

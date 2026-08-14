@@ -58,15 +58,23 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "pension, SIPP, ISA, LISA, general account, or cash) with its "
             "balance, contributions, and optionally its own equity "
             "allocation percentage — blank follows the de-risking glide "
-            "path, 100 models an all-equity wrapper — any defined "
-            "benefit pension, and "
-            "any planned annuity purchase — converting part of your "
-            "pension pot into lifetime income at an age you choose. "
-            "Drawdown is the default: anything you do not annuitise "
-            "stays invested, a fraction of 1 annuitises the whole pot, "
-            "and several purchases at different ages annuitise in "
-            "stages. "
-            "Add one wrapper, DB, or annuity section per item. Dates can "
+            "path, 100 models an all-equity wrapper — and any defined "
+            "benefit pension. "
+            "The Retirement income section holds two choices: a "
+            "preference between drawdown only (the default — everything "
+            "stays invested and is withdrawn as needed) and an annuity "
+            "or a mix, which adds a section right below to plan annuity "
+            "purchases — converting a percentage of your pension pot "
+            "into lifetime income at an age you choose, 100% "
+            "annuitising the whole pot and several purchases at "
+            "different ages annuitising in stages — and a drawdown withdrawal "
+            "strategy: fixed real spending (the default), a fixed "
+            "percentage of the pot, guardrails, or natural yield. "
+            "Add one wrapper, DB, or annuity section per item. "
+            "Fields marked * are required, hovering any field repeats "
+            'its guidance, and each section\'s "More options" reveals '
+            "its rarely needed fields — anything already filled in, or "
+            "in error, is shown automatically. Dates can "
             "be typed or picked from the calendar assist, and the "
             '"as of" dates on balances and your state pension forecast '
             "default to today when left blank. Your state pension needs "
@@ -74,8 +82,8 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "the app never re-derives what DWP has already computed. "
             'Press "Save facts and project" to run the '
             "projection — if anything cannot be read, the message under "
-            "the buttons says which field to fix and nothing is saved "
-            "until it parses."
+            "the buttons and a note under each affected field say what "
+            "to fix, and nothing is saved until it parses."
         ),
     ),
     (
@@ -133,7 +141,10 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "In the projection, income already in payment — defined "
             "benefit pension, state pension, annuity income — meets your "
             "net spending need first, after the tax it bears. Whatever "
-            "remains is withdrawn from your wrappers in one fixed order: "
+            "remains is withdrawn from your wrappers. How *much* is "
+            "drawn each year follows the withdrawal strategy you chose "
+            "on the Facts tab (fixed real spending by default); which "
+            "wrapper it comes from follows one fixed order: "
             "general accounts and cash first (every pound left in them "
             "keeps accruing income tax), then ISAs and LISAs, then "
             "already-crystallised pension funds, and uncrystallised "
@@ -143,7 +154,10 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "which would amount to tax advice. In some years a "
             "different order could use an allowance this one leaves "
             "idle, so treat the projection as a consistent baseline, "
-            "not the best achievable outcome."
+            "not the best achievable outcome. The 'When can I retire?' "
+            "and 'How much can I draw down?' cards always answer their "
+            "questions in fixed real spending terms, whatever strategy "
+            "the plan itself runs."
         ),
     ),
     (

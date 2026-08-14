@@ -12,7 +12,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Final
 
-from glidepath.core import LifeStage, Money
+from glidepath.core import LifeStage, Money, WithdrawalRule, WithdrawalRuleKind
 
 _MAX_STRUCTURED_LENGTH = 120
 
@@ -23,6 +23,14 @@ _ENUM_LABELS: Final[Mapping[Enum, str]] = {
 }
 """Enum members whose copy the generic underscore rule would mangle
 ("Go go"); the retirement sub-stages read hyphenated (issue #114)."""
+
+WITHDRAWAL_RULE_NAMES: Final[Mapping[WithdrawalRuleKind, str]] = {
+    WithdrawalRuleKind.FIXED_REAL: "Fixed real spending",
+    WithdrawalRuleKind.FIXED_PERCENT: "Fixed percentage of pot",
+    WithdrawalRuleKind.GUARDRAILS: "Guardrails (cut or raise on crossings)",
+    WithdrawalRuleKind.NATURAL_YIELD: "Natural yield only",
+}
+"""Display names for the withdrawal-strategy decision (planning §5.1)."""
 
 WRAPPER_KIND_NAMES: Final[Mapping[str, str]] = {
     "uk.workplace_dc": "Workplace DC",
@@ -86,6 +94,14 @@ def format_assumption_key(key: object) -> str:
     return ASSUMPTION_NAMES.get(text, text)
 
 
+def _format_withdrawal_rule(rule: WithdrawalRule) -> str:
+    """The withdrawal-strategy decision's value as display text (10.3)."""
+    name = WITHDRAWAL_RULE_NAMES[rule.kind]
+    if rule.rate is None:
+        return name
+    return f"{name} ({format_share(rule.rate.value)} a year)"
+
+
 def _format_mapping(value: Mapping[object, object]) -> str:
     """A structured table as compact ``key=value`` pairs, truncated."""
     rendered = "; ".join(f"{key}={format_value(entry)}" for key, entry in value.items())
@@ -143,15 +159,25 @@ def format_value(value: object) -> str:
     numbers, enum choices, policy strings, and structured tables
     (rendered as compact ``key=value`` pairs, truncated when long).
     """
-    if isinstance(value, bool):  # before any numeric type: bool is an int
-        return "Yes" if value else "No"
-    if isinstance(value, Money):
-        return format_money(value)
-    if isinstance(value, date):
-        return _format_temporal(value)
+    special = _format_special(value)
+    if special is not None:
+        return special
     if isinstance(value, Enum):
         generic = str(value.name).replace("_", " ").capitalize()
         return _ENUM_LABELS.get(value, generic)
     if isinstance(value, Mapping):
         return _format_mapping(value)
     return str(value)
+
+
+def _format_special(value: object) -> str | None:
+    """The non-enum, non-table special cases; ``None`` to fall through."""
+    if isinstance(value, bool):  # before any numeric type: bool is an int
+        return "Yes" if value else "No"
+    if isinstance(value, WithdrawalRule):
+        return _format_withdrawal_rule(value)
+    if isinstance(value, Money):
+        return format_money(value)
+    if isinstance(value, date):
+        return _format_temporal(value)
+    return None

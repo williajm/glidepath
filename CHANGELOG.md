@@ -11,6 +11,35 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Added
 
+- Retirement income choices on the Facts tab (roadmap 10.3): a
+  drawdown-vs-annuity preference dropdown that reveals the annuity
+  purchase sections — directly beneath it — only when they apply
+  (switching back confirms before deleting the purchase rows), with
+  the share of pot entered as a percentage (100 annuitises the whole
+  pot) rather than a 0–1 fraction, and a withdrawal-strategy
+  choice surfacing the four shipped strategies — fixed real spending
+  (the default), a fixed percentage of the pot (with its rate),
+  guardrails, and natural yield. The choice is stored on the plan
+  (document schema v9), shown under "Your choices in effect", and
+  drives the projection, scenario runs, Monte Carlo, and the
+  backtest; the "When can I retire?" and "How much can I draw down?"
+  cards deliberately keep answering in fixed-real terms.
+
+- Facts form usability (roadmap 10.1/10.2): rarely needed fields now
+  sit behind a per-section "More options" disclosure (anything
+  already filled in, or in error, is revealed automatically);
+  required fields are marked `*`; submission errors render inline
+  under the fields they address, with the first scrolled into view;
+  and every field's hint doubles as its tooltip so guidance survives
+  typing (10.4).
+
+- The retirement outlook card now shows a single-path deterministic
+  summary as soon as a plan is projected — pots at retirement, the
+  annuity income they could buy, and State Pension stacking — with a
+  note inviting the Monte Carlo run that adds the likely range;
+  previously the card was empty until Monte Carlo had been run
+  (roadmap 10.4).
+
 - OpenSSF Scorecard workflow (`scorecard.yml`): weekly and on-push
   automated scoring of the repo's supply-chain security posture,
   published to scorecard.dev and surfaced in the code-scanning tab,

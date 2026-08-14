@@ -45,6 +45,7 @@ from glidepath.persistence.values import (
     RELIEF_MECHANIC_TOKENS,
     REVALUATION_REFERENCE_TOKENS,
     SEX_TOKENS,
+    WITHDRAWAL_RULE_KIND_TOKENS,
     encode_value,
 )
 
@@ -68,6 +69,7 @@ if TYPE_CHECKING:
         Override,
         RevaluationBasis,
         Sex,
+        WithdrawalRule,
     )
     from glidepath.persistence.document import AssumptionOverride
 
@@ -196,6 +198,18 @@ def _household(household: Household) -> dict[str, object]:
         "claim_marriage_allowance": _optional_decision(
             household.claim_marriage_allowance, _bool_value
         ),
+        "withdrawal_strategy": _optional_decision(
+            household.withdrawal_strategy, _withdrawal_rule_value
+        ),
+    }
+
+
+def _withdrawal_rule_value(rule: WithdrawalRule) -> dict[str, object]:
+    """The withdrawal-strategy decision's payload (schema v9)."""
+    rate = rule.rate
+    return {
+        "kind": WITHDRAWAL_RULE_KIND_TOKENS.token(rule.kind),
+        "rate": None if rate is None else str(rate.value),
     }
 
 

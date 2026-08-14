@@ -50,6 +50,8 @@ from glidepath.core import (
     Scenario,
     Sex,
     TaxResidencyId,
+    WithdrawalRule,
+    WithdrawalRuleKind,
     WrapperKindId,
     scenario_orphans,
 )
@@ -92,6 +94,7 @@ def form_data(
     state_pension: dict[str, str] | None = None,
     *,
     spending: dict[str, str] | None = None,
+    retirement_income: dict[str, str] | None = None,
     wrappers: tuple[dict[str, str], ...] = (),
     db_pensions: tuple[dict[str, str], ...] = (),
     annuity_purchases: tuple[dict[str, str], ...] = (),
@@ -105,6 +108,7 @@ def form_data(
             ),
         ),
         spending=spending if spending is not None else {},
+        retirement_income=(retirement_income if retirement_income is not None else {}),
         wrappers=wrappers,
         db_pensions=db_pensions,
         annuity_purchases=annuity_purchases,
@@ -202,7 +206,7 @@ class TestFormSpec:
         keys = {spec.key for spec in form.annuity_purchase.fields}
         assert keys == {
             "at_age",
-            "fraction_of_pot",
+            "percent_of_pot",
             "annuity_type",
             "survivor_fraction",
         }
@@ -215,6 +219,60 @@ class TestFormSpec:
             "protected_payment",
             "forecast_as_of",
             "deferral_years",
+        }
+
+    def test_retirement_income_section_covers_the_choices(self) -> None:
+        """The preference dropdown and the strategy choice are present."""
+        form = build_facts_form_view_model()
+        keys = {spec.key for spec in form.retirement_income.fields}
+        assert keys == {
+            "income_preference",
+            "withdrawal_strategy",
+            "withdrawal_rate",
+        }
+        assert not form.retirement_income.repeatable
+
+    def test_no_field_is_both_required_and_advanced(self) -> None:
+        """A required field hidden behind a disclosure would trap users."""
+        form = build_facts_form_view_model()
+        for section in form.sections:
+            for spec in section.fields:
+                assert not (spec.required and spec.advanced), spec.key
+
+    def test_every_section_tucks_only_optional_detail_away(self) -> None:
+        """The advanced sweep names exactly the rarely needed fields."""
+        form = build_facts_form_view_model()
+        advanced = {
+            (section.key, spec.key)
+            for section in form.sections
+            for spec in section.fields
+            if spec.advanced
+        }
+        assert {key for _section, key in advanced if _section == "person"} == {
+            "mpaa_triggered_on",
+            "lsa_used",
+            "death_age",
+        }
+        assert {key for _section, key in advanced if _section == "spending"} == {
+            "go_go_multiplier",
+            "slow_go_multiplier",
+            "no_go_multiplier",
+        }
+        assert {key for _section, key in advanced if _section == "db_pension"} == {
+            "revaluation_cap",
+            "revaluation_fixed_rate",
+            "early_late_factors",
+            "commutation_factor",
+            "taken_at_age",
+            "commuted_fraction",
+            "survivor_fraction",
+            "accrual_rate",
+            "pensionable_salary",
+            "active_until_age",
+        }
+        assert {key for _section, key in advanced if _section == "wrapper"} == {
+            "crystallised_balance",
+            "escalation",
         }
 
     def test_date_fields_are_marked_for_date_entry(self) -> None:
@@ -253,11 +311,12 @@ class TestFormSpec:
         assert not form.state_pension.repeatable
 
     def test_sections_appends_the_partner_specs(self) -> None:
-        """The sweep sees all 11 sections, partner specs last (9.31)."""
+        """The sweep sees all 12 sections, partner specs last (9.31)."""
         form = build_facts_form_view_model()
         assert [section.key for section in form.sections] == [
             "person",
             "spending",
+            "retirement_income",
             "state_pension",
             "wrapper",
             "db_pension",
@@ -936,7 +995,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "level",
                     },
                 ),
@@ -965,7 +1024,7 @@ class TestAnnuityPurchaseParsing:
             form_data(
                 person=person_values(),
                 annuity_purchases=(
-                    {"at_age": "68", "fraction_of_pot": "1", "annuity_type": key},
+                    {"at_age": "68", "percent_of_pot": "100", "annuity_type": key},
                 ),
             )
         )
@@ -985,17 +1044,18 @@ class TestAnnuityPurchaseParsing:
             for error in result.errors
             if error.section == "annuity_purchase"
         }
-        assert missing == {"at_age", "fraction_of_pot", "annuity_type"}
+        assert missing == {"at_age", "percent_of_pot", "annuity_type"}
 
-    def test_out_of_range_fraction_surfaces_the_core_message(self) -> None:
-        """The (0, 1] fraction rule lands as a section-level error."""
+    @pytest.mark.parametrize("percent", ["150", "0", "-10"])
+    def test_an_out_of_range_percentage_is_refused(self, percent: str) -> None:
+        """The pot share is a percentage over 0 up to 100."""
         result = parse_facts_form(
             form_data(
                 person=person_values(),
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "1.5",
+                        "percent_of_pot": percent,
                         "annuity_type": "level",
                     },
                 ),
@@ -1006,8 +1066,8 @@ class TestAnnuityPurchaseParsing:
         assert result.household is None
         [error] = result.errors
         assert error.section == "annuity_purchase"
-        assert error.field_key == ""
-        assert "fraction_of_pot" in error.message
+        assert error.field_key == "percent_of_pot"
+        assert error.message == "enter a percentage over 0 up to 100, e.g. 50"
 
     def test_unknown_product_type_is_rejected(self) -> None:
         """A type value outside the option list is rejected on its field."""
@@ -1017,7 +1077,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "with_profits",
                     },
                 ),
@@ -1043,7 +1103,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "level",
                         "survivor_fraction": token,
                     },
@@ -1064,7 +1124,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "level",
                         "survivor_fraction": "75",
                     },
@@ -1086,7 +1146,7 @@ class TestAnnuityPurchaseParsing:
                 annuity_purchases=(
                     {
                         "at_age": "68",
-                        "fraction_of_pot": "0.5",
+                        "percent_of_pot": "50",
                         "annuity_type": "level",
                         "survivor_fraction": "66",
                     },
@@ -1258,7 +1318,7 @@ class TestPartnerParsing:
             "partner_annuity_purchase"
         }
         missing = {error.field_key for error in result.errors}
-        assert missing == {"at_age", "fraction_of_pot", "annuity_type"}
+        assert missing == {"at_age", "percent_of_pot", "annuity_type"}
 
     @pytest.mark.parametrize("owner", ["1", "2", "x"])
     def test_row_owned_by_nobody_on_the_form_is_refused(self, owner: str) -> None:
@@ -1352,6 +1412,185 @@ class TestPartnerParsing:
         assert error.section == "person"
         assert error.field_key == ""
         assert "distinct EntityIds" in error.message
+
+
+class TestRetirementIncomeParsing:
+    """The withdrawal-strategy decision and income preference (10.3)."""
+
+    def test_a_blank_section_keeps_the_default(self) -> None:
+        """No choice recorded means fixed real spending by default."""
+        household = parse(form_data(person=person_values()))
+        assert household.withdrawal_strategy is None
+
+    @pytest.mark.parametrize(
+        ("token", "kind"),
+        [
+            ("fixed_real", WithdrawalRuleKind.FIXED_REAL),
+            ("guardrails", WithdrawalRuleKind.GUARDRAILS),
+            ("natural_yield", WithdrawalRuleKind.NATURAL_YIELD),
+        ],
+    )
+    def test_an_explicit_strategy_choice_is_recorded(
+        self, token: str, kind: WithdrawalRuleKind
+    ) -> None:
+        """Each parameterless strategy parses to its recorded decision."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                retirement_income={"withdrawal_strategy": token},
+            )
+        )
+        decision = household.withdrawal_strategy
+        assert decision is not None
+        assert decision.value == WithdrawalRule(kind=kind)
+        assert decision.recorded_on == RECORDED
+
+    def test_fixed_percent_parses_its_percentage(self) -> None:
+        """The rate enters as a percentage and records as a fraction."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                retirement_income={
+                    "withdrawal_strategy": "fixed_percent",
+                    "withdrawal_rate": "4.25",
+                },
+            )
+        )
+        decision = household.withdrawal_strategy
+        assert decision is not None
+        assert decision.value == WithdrawalRule(
+            kind=WithdrawalRuleKind.FIXED_PERCENT, rate=Rate(Decimal("0.0425"))
+        )
+
+    def test_fixed_percent_requires_the_rate(self) -> None:
+        """A rate-less fixed-percentage choice errors on the rate field."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                retirement_income={"withdrawal_strategy": "fixed_percent"},
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error == FormError(
+            "retirement_income",
+            None,
+            "withdrawal_rate",
+            "the fixed-percentage strategy needs its annual percentage of the pot",
+        )
+
+    @pytest.mark.parametrize("strategy", ["", "guardrails"])
+    def test_a_rate_under_another_strategy_is_refused(self, strategy: str) -> None:
+        """A rate the strategy cannot use is never silently ignored."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                retirement_income={
+                    "withdrawal_strategy": strategy,
+                    "withdrawal_rate": "4",
+                },
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error == FormError(
+            "retirement_income",
+            None,
+            "withdrawal_rate",
+            "only the fixed-percentage strategy takes a rate — leave blank",
+        )
+
+    def test_an_out_of_range_percentage_is_refused(self) -> None:
+        """The rate is a percentage of the pot: 0 to 100."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                retirement_income={
+                    "withdrawal_strategy": "fixed_percent",
+                    "withdrawal_rate": "150",
+                },
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error == FormError(
+            "retirement_income",
+            None,
+            "withdrawal_rate",
+            "Enter a percentage from 0 to 100.",
+        )
+
+    def test_an_unknown_preference_token_is_refused(self) -> None:
+        """The preference validates like any other choice field."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                retirement_income={"income_preference": "nonsense"},
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "retirement_income"
+        assert error.field_key == "income_preference"
+
+    def test_the_preference_alone_stores_nothing(self) -> None:
+        """The preference is a disclosure control, not a decision (10.3)."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                retirement_income={"income_preference": "annuity"},
+            )
+        )
+        assert household.withdrawal_strategy is None
+        assert household.persons[0].annuity_purchases == ()
+
+    def test_the_strategy_round_trips_through_form_values(self) -> None:
+        """A stored decision re-renders and reparses unchanged (§4.5)."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                retirement_income={
+                    "withdrawal_strategy": "fixed_percent",
+                    "withdrawal_rate": "4.25",
+                },
+            )
+        )
+        data = facts_form_data_from_household(household)
+        assert data.retirement_income == {
+            "income_preference": "",
+            "withdrawal_strategy": "fixed_percent",
+            "withdrawal_rate": "4.25",
+        }
+        result = parse_facts_form(
+            data, recorded_on=RECORDED, today=TODAY, previous=household
+        )
+        assert result.household is not None
+        assert result.household.withdrawal_strategy == household.withdrawal_strategy
+
+    def test_the_preference_re_derives_from_the_purchases(self) -> None:
+        """A plan holding purchases re-renders with the annuity token."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                annuity_purchases=(
+                    {
+                        "at_age": "68",
+                        "percent_of_pot": "50",
+                        "annuity_type": "level",
+                    },
+                ),
+            )
+        )
+        data = facts_form_data_from_household(household)
+        assert data.retirement_income["income_preference"] == "annuity"
 
 
 class TestSpendingParsing:
@@ -1580,7 +1819,7 @@ class TestValidationMessages:
             for error in result.errors
             if error.section == "annuity_purchase"
         }
-        assert annuity_fields == {"at_age", "fraction_of_pot", "annuity_type"}
+        assert annuity_fields == {"at_age", "percent_of_pot", "annuity_type"}
 
     def test_negative_spending_surfaces_the_core_message(self) -> None:
         """The spending plan's own validation lands on its section."""
@@ -1846,10 +2085,10 @@ class TestEntityIdReuse:
                 person=person_values(),
                 wrappers=({"kind": str(WORKPLACE_DC_KIND), "balance": "45000"},),
                 annuity_purchases=(
-                    {"at_age": "68", "fraction_of_pot": "0.5", "annuity_type": "level"},
+                    {"at_age": "68", "percent_of_pot": "50", "annuity_type": "level"},
                     {
                         "at_age": "70",
-                        "fraction_of_pot": "0.25",
+                        "percent_of_pot": "25",
                         "annuity_type": "level",
                     },
                 ),
@@ -1992,7 +2231,7 @@ def _maximal_submission() -> FactsFormData:
             },
         ),
         annuity_purchases=(
-            {"at_age": "68", "fraction_of_pot": "0.5", "annuity_type": "level"},
+            {"at_age": "68", "percent_of_pot": "50", "annuity_type": "level"},
         ),
     )
 
@@ -2029,7 +2268,7 @@ def _maximal_couple_submission() -> FactsFormData:
         {
             OWNER_KEY: "1",
             "at_age": "70",
-            "fraction_of_pot": "0.25",
+            "percent_of_pot": "25",
             "annuity_type": "inflation_linked",
             "survivor_fraction": "100",
         },

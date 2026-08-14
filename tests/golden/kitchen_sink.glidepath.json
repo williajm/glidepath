@@ -450,6 +450,14 @@
         "no_go": "0.85",
         "slow_go": "0.95"
       }
+    },
+    "withdrawal_strategy": {
+      "note": "the classic 4%",
+      "recorded_on": "2026-08-01T12:00:00+00:00",
+      "value": {
+        "kind": "fixed_percent",
+        "rate": "0.04"
+      }
     }
   },
   "region": "uk",
@@ -561,5 +569,5 @@
       "overrides": []
     }
   ],
-  "schema_version": 8
+  "schema_version": 9
 }

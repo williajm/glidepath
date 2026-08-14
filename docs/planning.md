@@ -647,6 +647,76 @@ employment income; the outlook/drawdown cards speak at household
 level. Per-person chart series stay optional future work — household
 aggregation remains the default presentation.
 
+### 4.12 Facts-form usability and the retirement-income choice (Phase 10)
+
+**Decision: progressive disclosure, not a "simple mode".** A
+simple/advanced mode toggle is a second surface to maintain — the §4.9
+objection to a demo mode applies unchanged — so the form simplifies by
+disclosure instead: each section's rarely needed fields
+(`FieldSpec.advanced`) render behind a per-section "More options"
+toggle, extending the pattern the optional partner established (9.31).
+Two invariants keep disclosure honest: a field holding a value is
+always revealed (hidden data would still submit), and a field carrying
+a submission error is always revealed (a hidden error reads as the app
+ignoring the save). No field may be both required and advanced — a
+guard test enforces it.
+
+**Decision: required markers and inline errors.** Required fields
+carry a `*` on their labels (`FieldSpec.required`, previously parsed
+but never rendered); submission errors render inline under their
+fields from the structured `FormError` list
+(`FactsSubmissionOutcome`), with the first error scrolled into view
+and focused. The status line keeps the full formatted list — the two
+presentations share one error source.
+
+**Decision: the income preference is a disclosure control; the
+purchases are the preference.** The Retirement income section's
+drawdown-vs-annuity dropdown decides only whether the annuity purchase
+sections are offered; the plan's stored annuity preference *is* its
+purchase records (wholly decisions, §5.1), so the dropdown re-derives
+from whether purchases exist on load and stores nothing itself.
+Switching back to drawdown-only with purchases on the form confirms
+and deletes them — the remove-partner rule. The purchase sections
+render directly beneath the preference that reveals them — disclosure
+next to its control, not at the bottom of the form. Rejected:
+persisting the preference as its own decision (redundant with the
+purchases, and a second source of truth to keep consistent).
+
+**Decision: percentages at the form boundary, fractions in the
+domain.** Users think in percentages, so every pot-share entry on the
+form is a percent — the equity allocation, the fixed-percentage
+withdrawal rate, and the annuity purchase's share of pot
+(`percent_of_pot`, over 0 up to 100; 100 annuitises the whole pot) —
+converted at parse time to the domain's `Decimal` fractions, which
+persistence, scenarios, and the engine keep unchanged. The scenario
+editor and inspector edit/show the raw decision values (fractions), as
+they do for every decision.
+
+**Decision: the withdrawal strategy is a household-level decision.**
+`Household.withdrawal_strategy: Decision[WithdrawalRule] | None`
+(schema v9; `None` = fixed real spending, the engine default) closes
+the §2 scope gap — the four shipped strategies existed in core but
+were never surfaced. `WithdrawalRule` is a closed value record (kind +
+the fixed-percentage rate) rather than a strategy instance, so it
+persists, compares, and displays; run layers construct the strategy
+via `WithdrawalRule.strategy()` (`plan_run_config`), and the choice
+rides the base run, scenario runs, Monte Carlo, and the backtest.
+Recorded limitations: like the marriage-allowance claim (9.32) the
+household has no `EntityId`, so the choice is not
+scenario-addressable; and the "When can I retire?" / "How much can I
+draw down?" cards deliberately stay on fixed real spending — each
+answers a fixed-real-income question by construction (9.14, 9.25),
+and gross-defined strategies (fixed %, natural yield) make their
+success criterion ill-defined.
+
+**Decision: the outlook card reads the deterministic path before
+Monte Carlo.** With a base projection held but no (or a stale) Monte
+Carlo run, the card summarises the single deterministic path — same
+reading, deflator, annuity quote, and State Pension machinery as the
+percentile card — with a basis line inviting the Monte Carlo run that
+adds the likely range. The card is populated from first launch
+instead of opening with an empty-state instruction.
+
 ## 5. Design
 
 ### 5.1 Domain model
@@ -703,10 +773,12 @@ Alongside facts and assumptions there is a third, deliberately named kind:
 **decision variables** — user *choices* rather than statements about the
 world, wrapped in `Decision[T]` (`target_retirement_age`, contribution
 amounts, planned outflow amounts, `DBPension.taken_at_age`,
-`commuted_fraction`, state pension deferral) or forming whole decision
-records (`AnnuityPurchase`, withdrawal strategy). They are exactly the
-scenario what-if whitelist (§4.3) and surface in the UI as "your choices"
-— a third column beside stated facts and assumptions.
+`commuted_fraction`, state pension deferral, the household's
+`withdrawal_strategy` — a `Decision[WithdrawalRule]`, §4.12) or forming
+whole decision records (`AnnuityPurchase`). They are exactly the
+scenario what-if whitelist (§4.3; the household-level decisions are the
+recorded exception — no `EntityId` to address) and surface in the UI as
+"your choices" — a third column beside stated facts and assumptions.
 
 Rules: `AssumptionKey` is a stable enum of dotted ids catalogued in §7.
 `AssumptionSet` is a typed registry — **the engine may not read a tunable
@@ -2590,6 +2662,48 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   is reachable one edit at a time; schema v8 adds `survivor_fraction`
   to every annuity purchase — `null` for single-life, the 50% the
   joint factor was always quoting for a v7 joint-life purchase.*
+
+### Phase 10 — Usability (design record §4.12)
+
+- [x] 10.1 Facts form: progressive disclosure — *rarely needed fields
+  (`FieldSpec.advanced`: MPAA/LSA/death age, spending stage
+  multipliers, protected payment and deferral, crystallised balance
+  and escalation, the DB scheme minutiae beyond the four core facts,
+  the survivor-income and marriage-allowance choices) render behind a
+  per-section "More options" toggle; a populated or errored advanced
+  field is always revealed, no field is both required and advanced
+  (guard test), and clearing a section tucks the disclosure away.*
+- [x] 10.2 Facts form: required markers and inline errors — *the
+  previously unrendered `FieldSpec.required` flags render as `*` on
+  labels (legend in the intro copy); submissions return a
+  `FactsSubmissionOutcome` whose structured `FormError` list renders
+  inline under each addressed field — repeatable rows routed by
+  index, section-wide errors on a section label — with the first
+  error scrolled into view and focused; the status line keeps the
+  full formatted list.*
+- [x] 10.3 Retirement income: preference dropdown and withdrawal
+  strategy — *a household Retirement income section with the
+  drawdown-vs-annuity preference (a disclosure control — the annuity
+  purchase sections render directly beneath it, only while it says
+  annuity or rows exist;
+  switching back confirms and deletes the rows; the stored preference
+  is the purchases themselves; the pot share enters as a percent,
+  `percent_of_pot`, stored as the domain fraction) and the
+  withdrawal-strategy choice
+  surfacing the §2 strategy set: `Household.withdrawal_strategy`
+  (`Decision[WithdrawalRule]`, schema v9, `null` = fixed real), the
+  fixed-percentage rate entered as a percent of the pot; wired
+  through `plan_run_config` into the base run, scenario runs, Monte
+  Carlo, and the backtest; shown in the inspector's choices; not
+  scenario-addressable and the retirement/drawdown cards stay
+  fixed-real (both recorded in §4.12).*
+- [x] 10.4 Guidance: field tooltips and the pre-Monte-Carlo outlook —
+  *every hinted field's guidance doubles as its tooltip so it
+  survives typing; the outlook card falls back to a single-path
+  deterministic summary (same reading/deflator/annuity/State Pension
+  machinery, `DETERMINISTIC_BASIS_SENTENCE` naming what Monte Carlo
+  would add) whenever a base projection is held without an aligned
+  Monte Carlo run, so the card is populated from first launch.*
 
 ## 9. Open questions
 

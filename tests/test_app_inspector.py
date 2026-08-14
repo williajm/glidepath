@@ -52,6 +52,8 @@ from glidepath.core import (
     RevaluationReference,
     SpendingPlan,
     TaxResidencyId,
+    WithdrawalRule,
+    WithdrawalRuleKind,
     Wrapper,
 )
 from glidepath.regions.uk import (
@@ -184,6 +186,23 @@ class TestProjectedSession:
         """Decisions render as the third column (§5.1)."""
         by_label = {row.label: row for row in view_model.decisions}
         assert by_label["You — target retirement age"].value == "60"
+
+    def test_the_withdrawal_strategy_choice_renders(self) -> None:
+        """The 10.3 household decision appears among the choices."""
+        base = household()
+        chosen = Household(
+            persons=base.persons,
+            spending=base.spending,
+            withdrawal_strategy=Decision(
+                value=WithdrawalRule(kind=WithdrawalRuleKind.GUARDRAILS),
+                recorded_on=RECORDED,
+            ),
+        )
+        state = state_with_household(initial_plan_state(), chosen, today=TODAY)
+        view_model = build_inspector_view_model(state)
+        by_label = {row.label: row for row in view_model.decisions}
+        row = by_label["Household / withdrawal strategy"]
+        assert row.value == "Guardrails (cut or raise on crossings)"
 
     def test_fresh_balances_render_no_roll_forwards(
         self, view_model: InspectorViewModel

@@ -50,6 +50,8 @@ from glidepath.core import (
     SpendingPlan,
     StatePensionRecord,
     TaxResidencyId,
+    WithdrawalRule,
+    WithdrawalRuleKind,
     Wrapper,
     WrapperKindId,
     new_entity_id,
@@ -93,13 +95,21 @@ class ChoiceOption:
 
 @dataclass(frozen=True)
 class FieldSpec:
-    """One form field a shell renders and returns raw text for."""
+    """One form field a shell renders and returns raw text for.
+
+    ``required`` marks the fields a submission cannot omit — shells
+    flag them visibly (roadmap 10.2). ``advanced`` marks the rarely
+    needed fields a shell tucks behind the section's "More options"
+    disclosure (roadmap 10.1); a field holding a value, or carrying a
+    submission error, must be revealed rather than stay hidden.
+    """
 
     key: str
     label: str
     kind: FieldKind = FieldKind.TEXT
     hint: str = ""
     required: bool = False
+    advanced: bool = False
     choices: tuple[ChoiceOption, ...] = ()
 
 
@@ -130,6 +140,9 @@ class FactsFormViewModel:
     intro: str
     person: SectionSpec
     spending: SectionSpec
+    retirement_income: SectionSpec
+    """The household's income-preference and withdrawal-strategy
+    section (roadmap 10.3)."""
     state_pension: SectionSpec
     wrapper: SectionSpec
     db_pension: SectionSpec
@@ -153,6 +166,10 @@ class FactsFormViewModel:
     remove_partner_confirm: str
     """The confirmation a shell must show before removing the partner —
     removal deletes every partner row (§4.11)."""
+    drawdown_only_confirm: str
+    """The confirmation a shell must show before switching the income
+    preference back to drawdown-only while annuity purchases exist —
+    the switch deletes every purchase row (roadmap 10.3)."""
 
     @property
     def sections(self) -> tuple[SectionSpec, ...]:
@@ -160,6 +177,7 @@ class FactsFormViewModel:
         return (
             self.person,
             self.spending,
+            self.retirement_income,
             self.state_pension,
             self.wrapper,
             self.db_pension,
@@ -193,6 +211,7 @@ class FactsFormData:
 
     persons: tuple[PersonFormData, ...] = (PersonFormData(),)
     spending: Mapping[str, str] = field(default_factory=dict)
+    retirement_income: Mapping[str, str] = field(default_factory=dict)
     wrappers: tuple[Mapping[str, str], ...] = ()
     db_pensions: tuple[Mapping[str, str], ...] = ()
     annuity_purchases: tuple[Mapping[str, str], ...] = ()
@@ -233,6 +252,20 @@ class FactsFormResult:
 
     household: Household | None
     errors: tuple[FormError, ...]
+
+
+@dataclass(frozen=True)
+class FactsSubmissionOutcome:
+    """What a shell renders after a facts submission (roadmap 10.2).
+
+    ``status`` is the status-line text (the saved message, or the
+    errors formatted by :func:`format_form_errors`); ``errors`` carries
+    the structured rejections so a shell can flag each field inline
+    and scroll the first one into view — empty on success.
+    """
+
+    status: str
+    errors: tuple[FormError, ...] = ()
 
 
 _REQUIRED_MESSAGE = "this field is required"
@@ -297,6 +330,60 @@ CLAIM_MARRIAGE_ALLOWANCE_KEY: Final = "claim_marriage_allowance"
 
 _CLAIM_OPTIONS: Final[Mapping[str, bool]] = {"yes": True, "no": False}
 """Domain values of the marriage-allowance claim choice; blank = default."""
+
+INCOME_PREFERENCE_KEY: Final = "income_preference"
+"""The retirement-income section's drawdown-vs-annuity preference (10.3).
+
+A disclosure control, not a stored decision: the plan's actual annuity
+preference *is* its annuity purchases (wholly decision records, §5.1),
+so this field only tells a shell whether to offer the purchase
+sections. Reloading a plan re-derives it from whether any purchases
+exist."""
+
+WITHDRAWAL_STRATEGY_KEY: Final = "withdrawal_strategy"
+"""The retirement-income section's strategy choice field (10.3)."""
+
+WITHDRAWAL_RATE_KEY: Final = "withdrawal_rate"
+"""The fixed-percentage strategy's annual rate field, in percent (10.3)."""
+
+INCOME_PREFERENCE_ANNUITY: Final = "annuity"
+"""The preference token that reveals the annuity purchase sections."""
+
+_INCOME_PREFERENCES: Final[Mapping[str, str]] = {
+    INCOME_PREFERENCE_ANNUITY: INCOME_PREFERENCE_ANNUITY,
+}
+"""Valid non-blank income-preference tokens; blank = drawdown only."""
+
+_WITHDRAWAL_STRATEGIES: Final[Mapping[str, WithdrawalRuleKind]] = {
+    "fixed_real": WithdrawalRuleKind.FIXED_REAL,
+    "fixed_percent": WithdrawalRuleKind.FIXED_PERCENT,
+    "guardrails": WithdrawalRuleKind.GUARDRAILS,
+    "natural_yield": WithdrawalRuleKind.NATURAL_YIELD,
+}
+"""Domain values of the withdrawal-strategy choice; blank = default."""
+
+_WITHDRAWAL_STRATEGY_KEYS: Final[Mapping[WithdrawalRuleKind, str]] = {
+    value: key for key, value in _WITHDRAWAL_STRATEGIES.items()
+}
+
+_WITHDRAWAL_RATE_REQUIRED = (
+    "the fixed-percentage strategy needs its annual percentage of the pot"
+)
+PERCENT_OF_POT_KEY: Final = "percent_of_pot"
+"""The annuity purchase's pot-share field, entered in percent (10.3)."""
+_POT_PERCENT_MESSAGE = "enter a percentage over 0 up to 100, e.g. 50"
+_WITHDRAWAL_RATE_UNUSED = (
+    "only the fixed-percentage strategy takes a rate — leave blank"
+)
+
+SHOW_ADVANCED_LABEL: Final = "More options"
+"""The disclosure that reveals a section's advanced fields (10.1)."""
+
+HIDE_ADVANCED_LABEL: Final = "Fewer options"
+"""The disclosure that tucks a section's advanced fields away (10.1)."""
+
+REQUIRED_MARKER: Final = "*"
+"""The marker a shell appends to a required field's label (10.2)."""
 
 _SEXES: Mapping[str, Sex] = {"female": Sex.FEMALE, "male": Sex.MALE}
 _RESIDENCIES: Mapping[str, TaxResidencyId] = {
@@ -565,6 +652,39 @@ def _spending_from(reader: _SectionReader) -> SpendingPlan | None:
         return None
 
 
+def _withdrawal_strategy_from(
+    reader: _SectionReader,
+) -> Decision[WithdrawalRule] | None:
+    """The withdrawal-strategy decision, or ``None`` for the default.
+
+    The strategy is a choice like any other (planning §5.1): blank
+    keeps the fixed-real default with nothing recorded, an explicit
+    pick records a decision. The fixed-percentage strategy needs its
+    annual percentage; a rate entered under any other strategy is
+    refused rather than silently ignored. The income-preference field
+    is validated but never stored — it is a disclosure control
+    (:data:`INCOME_PREFERENCE_KEY`).
+    """
+    reader.choice(INCOME_PREFERENCE_KEY, _INCOME_PREFERENCES)
+    kind = reader.choice(WITHDRAWAL_STRATEGY_KEY, _WITHDRAWAL_STRATEGIES)
+    rate_percent = reader.decimal_value(WITHDRAWAL_RATE_KEY)
+    if kind is not WithdrawalRuleKind.FIXED_PERCENT:
+        if rate_percent is not None:
+            reader.error(WITHDRAWAL_RATE_KEY, _WITHDRAWAL_RATE_UNUSED)
+            return None
+        return None if kind is None else reader.decision_of(WithdrawalRule(kind=kind))
+    if rate_percent is None:
+        if not reader.raw(WITHDRAWAL_RATE_KEY):
+            reader.error(WITHDRAWAL_RATE_KEY, _WITHDRAWAL_RATE_REQUIRED)
+        return None
+    if not Decimal(0) <= rate_percent <= _HUNDRED:
+        reader.error(WITHDRAWAL_RATE_KEY, _EQUITY_PERCENT_MESSAGE)
+        return None
+    return reader.decision_of(
+        WithdrawalRule(kind=kind, rate=Rate(rate_percent / _HUNDRED))
+    )
+
+
 def _state_pension_from(reader: _SectionReader) -> StatePensionRecord | None:
     """The state pension record, or ``None`` when wholly blank (§5.1)."""
     if not reader.any_entered():
@@ -783,29 +903,35 @@ def _annuity_purchase_from(
     """One planned annuity purchase from its section values.
 
     The record is wholly a decision (planning §5.1): the age, pot
-    fraction, product type, and survivor income are all choices,
-    priced from the annuity-rate assumptions at run time. The basis
+    share, product type, and survivor income are all choices, priced
+    from the annuity-rate assumptions at run time. The pot share
+    enters as a percentage — the form's percent convention (equity
+    allocation, the withdrawal rate) — and records as the domain's
+    (0, 1] fraction. The basis
     is implied by the survivor-income choice (roadmap 9.34): blank is
     a single-life purchase; a §6 fraction makes it joint-life — and
     needs a partner in the plan to receive the income, else the joint
     factor would price a benefit the model can never pay (§5).
     """
     at_age = reader.int_value("at_age", required=True)
-    fraction = reader.decimal_value("fraction_of_pot", required=True)
+    percent = reader.decimal_value(PERCENT_OF_POT_KEY, required=True)
+    if percent is not None and not Decimal(0) < percent <= _HUNDRED:
+        reader.error(PERCENT_OF_POT_KEY, _POT_PERCENT_MESSAGE)
+        percent = None
     annuity_type = reader.choice("annuity_type", _ANNUITY_TYPES)
     if annuity_type is None and not reader.raw("annuity_type"):
         reader.error("annuity_type", _REQUIRED_MESSAGE)
     survivor = reader.choice("survivor_fraction", _SURVIVOR_FRACTIONS)
     if survivor is not None and not joint_life_offered:
         reader.error("survivor_fraction", _JOINT_NEEDS_PARTNER_MESSAGE)
-    if at_age is None or fraction is None or annuity_type is None or not reader.ok:
+    if at_age is None or percent is None or annuity_type is None or not reader.ok:
         return None
     recorded = reader.recorded_on
     try:
         return AnnuityPurchase(
             id=entity_id,
             at_age=Decision(value=at_age, recorded_on=recorded),
-            fraction_of_pot=Decision(value=fraction, recorded_on=recorded),
+            fraction_of_pot=Decision(value=percent / _HUNDRED, recorded_on=recorded),
             annuity_type=annuity_type,
             basis=AnnuityBasis.SINGLE if survivor is None else AnnuityBasis.JOINT,
             survivor_fraction=(
@@ -1022,6 +1148,9 @@ def parse_facts_form(
             errors=(FormError("person", None, "", _PERSON_COUNT_MESSAGE),),
         )
     spending = _spending_from(_SectionReader(context, "spending", data.spending))
+    withdrawal_strategy = _withdrawal_strategy_from(
+        _SectionReader(context, "retirement_income", data.retirement_income)
+    )
     wrapper_rows = _owned_rows(context, data.wrappers, person_count, _WRAPPER_SECTIONS)
     db_pension_rows = _owned_rows(
         context, data.db_pensions, person_count, _DB_PENSION_SECTIONS
@@ -1077,6 +1206,7 @@ def parse_facts_form(
             persons=tuple(persons),
             spending=spending,
             claim_marriage_allowance=claim,
+            withdrawal_strategy=withdrawal_strategy,
         )
     except ValueError as exc:
         return FactsFormResult(
@@ -1225,6 +1355,32 @@ def _spending_values(spending: SpendingPlan | None) -> dict[str, str]:
     return values
 
 
+def _retirement_income_values(household: Household) -> dict[str, str]:
+    """The retirement-income section's raw text (roadmap 10.3).
+
+    The income preference re-derives from whether the plan actually
+    holds annuity purchases — they are the stored preference
+    (:data:`INCOME_PREFERENCE_KEY`); the strategy echoes the recorded
+    decision, blank for the fixed-real default.
+    """
+    values = {
+        INCOME_PREFERENCE_KEY: (
+            INCOME_PREFERENCE_ANNUITY
+            if any(person.annuity_purchases for person in household.persons)
+            else ""
+        ),
+        WITHDRAWAL_STRATEGY_KEY: "",
+        WITHDRAWAL_RATE_KEY: "",
+    }
+    decision = household.withdrawal_strategy
+    if decision is not None:
+        rule = decision.value
+        values[WITHDRAWAL_STRATEGY_KEY] = _WITHDRAWAL_STRATEGY_KEYS[rule.kind]
+        if rule.rate is not None:
+            values[WITHDRAWAL_RATE_KEY] = _percent_text(rule.rate.value)
+    return values
+
+
 def _state_pension_values(record: StatePensionRecord | None) -> dict[str, str]:
     """The state pension section's raw text, empty when skipped."""
     if record is None:
@@ -1332,7 +1488,7 @@ def _annuity_purchase_values(purchase: AnnuityPurchase, owner: int) -> dict[str,
         ENTITY_ID_KEY: str(purchase.id),
         OWNER_KEY: str(owner),
         "at_age": str(purchase.at_age.value),
-        "fraction_of_pot": str(purchase.fraction_of_pot.value),
+        PERCENT_OF_POT_KEY: _percent_text(purchase.fraction_of_pot.value),
         "annuity_type": _ANNUITY_TYPE_KEYS[purchase.annuity_type],
         "survivor_fraction": (
             ""
@@ -1352,7 +1508,12 @@ def _equity_percent_text(wrapper: Wrapper) -> str:
     allocation = wrapper.allocation
     if allocation is None or wrapper.kind == CASH_KIND:
         return ""
-    text = format(allocation.equity * _HUNDRED, "f")
+    return _percent_text(allocation.equity)
+
+
+def _percent_text(fraction: Decimal) -> str:
+    """A fraction as the percent text the form echoes, zeros trimmed."""
+    text = format(fraction * _HUNDRED, "f")
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text
@@ -1528,6 +1689,7 @@ def facts_form_data_from_household(household: Household) -> FactsFormData:
     return FactsFormData(
         persons=persons,
         spending=_spending_values(household.spending),
+        retirement_income=_retirement_income_values(household),
         wrappers=tuple(
             _wrapper_values(entry, owner)
             for owner, person in owned
@@ -1666,16 +1828,19 @@ def _person_section() -> SectionSpec:
                 label="MPAA triggered on",
                 kind=FieldKind.DATE,
                 hint="YYYY-MM-DD; blank if you have never flexibly accessed a pension",
+                advanced=True,
             ),
             FieldSpec(
                 key="lsa_used",
                 label="Lump sum allowance already used",
                 hint="blank if none",
+                advanced=True,
             ),
             FieldSpec(
                 key="death_age",
                 label="Model death at age (optional, your choice)",
                 hint="blank means alive to the horizon; e.g. 82",
+                advanced=True,
             ),
         ),
     )
@@ -1703,16 +1868,92 @@ def _spending_section() -> SectionSpec:
                 key="go_go_multiplier",
                 label="Go-go multiplier (first decade retired)",
                 hint="e.g. 1.2; blank means 1",
+                advanced=True,
             ),
             FieldSpec(
                 key="slow_go_multiplier",
                 label="Slow-go multiplier (second decade retired)",
                 hint="e.g. 0.9; blank means 1",
+                advanced=True,
             ),
             FieldSpec(
                 key="no_go_multiplier",
                 label="No-go multiplier (beyond two decades retired)",
                 hint="e.g. 0.8; blank means 1",
+                advanced=True,
+            ),
+        ),
+    )
+
+
+def _retirement_income_section() -> SectionSpec:
+    """The household retirement-income section (roadmap 10.3).
+
+    One preference dropdown decides whether the annuity purchase
+    sections are offered at all (a disclosure control — the purchases
+    themselves are the stored decisions, §5.1), and the withdrawal
+    strategy surfaces the §2 strategy set as an explicit choice.
+    """
+    return SectionSpec(
+        key="retirement_income",
+        title="Retirement income",
+        description=(
+            "How your savings become income once you retire — your "
+            "choices, changeable any time. Drawdown keeps your money "
+            "invested and withdraws as needed; an annuity converts "
+            "part of your pension into guaranteed lifetime income. "
+            "Anything not annuitised stays invested in drawdown."
+        ),
+        fields=(
+            FieldSpec(
+                key=INCOME_PREFERENCE_KEY,
+                label="Retirement income preference (your choice)",
+                kind=FieldKind.CHOICE,
+                hint=(
+                    "Choosing annuity adds a section below to plan "
+                    "purchases — the age, the share of the pot, and "
+                    "the product are then your choices."
+                ),
+                choices=(
+                    ChoiceOption(
+                        value="", label="Drawdown only — stay invested (default)"
+                    ),
+                    ChoiceOption(
+                        value=INCOME_PREFERENCE_ANNUITY,
+                        label="Annuity or a mix — plan purchases below",
+                    ),
+                ),
+            ),
+            FieldSpec(
+                key=WITHDRAWAL_STRATEGY_KEY,
+                label="Drawdown withdrawal strategy (your choice)",
+                kind=FieldKind.CHOICE,
+                hint=(
+                    "How retirement withdrawals are sized each year; "
+                    "the projection, Monte Carlo, and backtest all "
+                    "follow it."
+                ),
+                choices=(
+                    ChoiceOption(value="", label="Fixed real spending (default)"),
+                    ChoiceOption(value="fixed_real", label="Fixed real spending"),
+                    ChoiceOption(
+                        value="fixed_percent",
+                        label="Fixed percentage of the pot each year",
+                    ),
+                    ChoiceOption(
+                        value="guardrails",
+                        label="Guardrails — cut or raise spending on crossings",
+                    ),
+                    ChoiceOption(
+                        value="natural_yield",
+                        label="Natural yield — spend income, never capital",
+                    ),
+                ),
+            ),
+            FieldSpec(
+                key=WITHDRAWAL_RATE_KEY,
+                label="Fixed percentage, % of pot per year",
+                hint="fixed-percentage strategy only, e.g. 4",
             ),
         ),
     )
@@ -1741,12 +1982,14 @@ def _state_pension_section() -> SectionSpec:
                 key="protected_payment",
                 label="Protected payment (part of the forecast)",
                 hint="blank if none; uprates by CPI only",
+                advanced=True,
             ),
             _as_of_field("forecast_as_of", "Forecast as of"),
             FieldSpec(
                 key="deferral_years",
                 label="Years you plan to defer claiming (your choice)",
                 hint="whole months, e.g. 1.25; blank means none",
+                advanced=True,
             ),
         ),
     )
@@ -1803,6 +2046,7 @@ def _wrapper_section() -> SectionSpec:
                 key="crystallised_balance",
                 label="Crystallised balance (already in drawdown)",
                 hint="pensions only; blank if none",
+                advanced=True,
             ),
             _as_of_field("balances_as_of", "Balances as of"),
             FieldSpec(
@@ -1841,6 +2085,7 @@ def _wrapper_section() -> SectionSpec:
                 key="escalation",
                 label="Contribution escalation",
                 kind=FieldKind.CHOICE,
+                advanced=True,
                 choices=(
                     ChoiceOption(value="", label="Fixed amount"),
                     ChoiceOption(value="earnings", label="Grows with earnings"),
@@ -1901,51 +2146,61 @@ def _db_pension_section() -> SectionSpec:
                 key="revaluation_cap",
                 label="CPI cap (annual, as a fraction)",
                 hint="e.g. 0.05 for CPI capped at 5%; blank if uncapped",
+                advanced=True,
             ),
             FieldSpec(
                 key="revaluation_fixed_rate",
                 label="Fixed rate (annual, as a fraction)",
                 hint="fixed basis only, e.g. 0.03",
+                advanced=True,
             ),
             FieldSpec(
                 key="early_late_factors",
                 label="Early/late retirement factors",
                 hint=_FACTORS_MESSAGE.removeprefix("enter "),
+                advanced=True,
             ),
             FieldSpec(
                 key="commutation_factor",
                 label="Commutation factor (£ lump sum per £1 pension)",
                 hint="e.g. 12; blank if not commuting",
+                advanced=True,
             ),
             FieldSpec(
                 key="taken_at_age",
                 label="Take benefits at age (your choice)",
                 hint="blank means the normal pension age",
+                advanced=True,
             ),
             FieldSpec(
                 key="commuted_fraction",
                 label="Fraction commuted to lump sum (your choice)",
                 hint="0 to 1, e.g. 0.25; blank means none",
+                advanced=True,
             ),
             FieldSpec(
                 key="survivor_fraction",
                 label="Survivor pension fraction (scheme fact)",
                 hint="0 to 1, e.g. 0.5; blank means the shipped 50% assumption",
+                advanced=True,
             ),
             FieldSpec(
                 key="accrual_rate",
                 label="Accrual rate (fraction of salary per year of service)",
                 hint="e.g. 0.0166667 for a 1/60th scheme; blank if deferred",
+                advanced=True,
             ),
             FieldSpec(
                 key="pensionable_salary",
                 label="Pensionable salary (annual)",
                 hint="active members only; often below total pay",
+                advanced=True,
             ),
             FieldSpec(
                 key="active_until_age",
                 label="Active until age (your choice)",
                 hint="blank means until benefits start",
+                advanced=True,
             ),
         ),
     )
@@ -1981,9 +2236,9 @@ def _annuity_purchase_section() -> SectionSpec:
                 required=True,
             ),
             FieldSpec(
-                key="fraction_of_pot",
-                label="Fraction of pension pot (your choice)",
-                hint="over 0 up to 1, e.g. 0.5; 1 annuitises the whole pot",
+                key=PERCENT_OF_POT_KEY,
+                label="Share of pension pot, % (your choice)",
+                hint="over 0 up to 100, e.g. 50; 100 annuitises the whole pot",
                 required=True,
             ),
             FieldSpec(
@@ -2008,6 +2263,7 @@ def _annuity_purchase_section() -> SectionSpec:
                 key="survivor_fraction",
                 label="Survivor income (your choice)",
                 kind=FieldKind.CHOICE,
+                advanced=True,
                 hint=(
                     "A joint-life purchase continues income to the "
                     "surviving partner at this share after the buyer's "
@@ -2048,6 +2304,7 @@ def _partner_section() -> SectionSpec:
                 key=CLAIM_MARRIAGE_ALLOWANCE_KEY,
                 label="Claim marriage allowance when eligible (your choice)",
                 kind=FieldKind.CHOICE,
+                advanced=True,
                 hint=(
                     "Checked each tax year: whoever's income sits inside "
                     "their personal allowance transfers it to the other, "
@@ -2129,10 +2386,13 @@ def build_facts_form_view_model() -> FactsFormViewModel:
             "make — never a guess. Balances and your state pension "
             'forecast carry an "as of" date that defaults to today '
             "when blank; estimates and defaults live in the "
-            "assumptions inspector."
+            "assumptions inspector. Fields marked * are required; "
+            'each section\'s "More options" reveals its rarely '
+            "needed fields."
         ),
         person=_person_section(),
         spending=_spending_section(),
+        retirement_income=_retirement_income_section(),
         state_pension=_state_pension_section(),
         wrapper=_wrapper_section(),
         db_pension=_db_pension_section(),
@@ -2157,5 +2417,9 @@ def build_facts_form_view_model() -> FactsFormViewModel:
             "Remove your partner from the plan? Their details and every "
             "entry under them — wrappers, DB pensions, and annuity "
             "purchases — will be deleted from the form."
+        ),
+        drawdown_only_confirm=(
+            "Switch to drawdown only? The annuity purchases on the form "
+            "will be deleted."
         ),
     )
