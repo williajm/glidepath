@@ -189,6 +189,18 @@ class TestEmptyStates:
         assert DETERMINISTIC_BASIS_SENTENCE in panel.detail
         assert panel.message == ""
 
+    def test_the_single_path_annuity_names_the_projected_pot(self) -> None:
+        """One path holds no median — the quote must not claim one.
+
+        The Monte Carlo card converts "the middle pension pot"; before
+        a run there is only the deterministic path, so the quote says
+        "the projected pension pot" to match the basis line (10.4).
+        """
+        state = state_with_household(short_horizon_state(), household(), today=TODAY)
+        panel = build_outlook_panel(state)
+        assert "the projected pension pot would pay about" in panel.detail
+        assert "middle pension pot" not in panel.detail
+
     def test_the_charts_view_model_carries_the_panel(self) -> None:
         """The outlook rides the charts screen in either run mode."""
         state = outlook_state()
@@ -223,6 +235,7 @@ class TestHeldRun:
         panel = build_outlook_panel(outlook_state())
         assert "Pensions alone" in panel.detail
         assert "level single-life annuity bought at 63" in panel.detail
+        assert "the middle pension pot would pay about" in panel.detail
         assert "a year before tax" in panel.detail
         assert "of up-front tax-free cash" in panel.detail
 

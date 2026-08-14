@@ -375,7 +375,7 @@ def _income_sentences(context: _CardContext, pensions: tuple[Money, ...]) -> lis
             )
         quote = _annuity_quote(context, p50)
         if quote is not None:
-            lines.append(_annuity_sentence(quote))
+            lines.append(_annuity_sentence(quote, "the middle pension pot"))
     annuity_income = None if quote is None else quote.income
     lines.extend(_state_pension_lines(context, annuity_income))
     return lines
@@ -403,7 +403,7 @@ def _deterministic_income_sentences(context: _CardContext, pension: Money) -> li
             )
         quote = _annuity_quote(context, pension)
         if quote is not None:
-            lines.append(_annuity_sentence(quote))
+            lines.append(_annuity_sentence(quote, "the projected pension pot"))
     annuity_income = None if quote is None else quote.income
     lines.extend(_state_pension_lines(context, annuity_income))
     return lines
@@ -418,14 +418,20 @@ class _AnnuityQuote:
     ages: tuple[int, ...]
 
 
-def _annuity_sentence(quote: _AnnuityQuote) -> str:
-    """The annuity quote as copy, single or couple phrasing."""
+def _annuity_sentence(quote: _AnnuityQuote, pot_phrase: str) -> str:
+    """The annuity quote as copy, single or couple phrasing.
+
+    ``pot_phrase`` names the pot on the card's own basis: the Monte
+    Carlo card converts "the middle pension pot"; the deterministic
+    card has only one path — no median — so it converts "the
+    projected pension pot" (roadmap 10.4).
+    """
     if len(quote.ages) == 1:
         product = f"a level single-life annuity bought at {quote.ages[0]}"
     else:
         product = f"level single-life annuities bought at {_ages_phrase(quote.ages)}"
     sentence = (
-        f"As {product}, the middle pension pot would pay about"
+        f"As {product}, {pot_phrase} would pay about"
         f" {_pounds(quote.income)} a year before tax"
     )
     if quote.tax_free > _ZERO_MONEY:

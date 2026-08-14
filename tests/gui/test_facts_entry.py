@@ -724,6 +724,23 @@ class TestIncomePreference:
         )
         assert pane.annuity_purchases.isVisibleTo(pane)
 
+    def test_the_partner_section_also_needs_a_partner(self) -> None:
+        """The partner's purchases sit under the preference, couples only.
+
+        Both purchase sections live directly beneath the disclosure
+        control (roadmap 10.3); the partner's shows only while a
+        partner is on the form.
+        """
+        pane = _pane()
+        pane.retirement_income_form.set_value(
+            INCOME_PREFERENCE_KEY, INCOME_PREFERENCE_ANNUITY
+        )
+        assert not pane.partner_annuity_purchases.isVisibleTo(pane)
+        pane.add_partner()
+        assert pane.partner_annuity_purchases.isVisibleTo(pane)
+        pane.remove_partner()
+        assert not pane.partner_annuity_purchases.isVisibleTo(pane)
+
     def test_switching_back_confirms_then_deletes_the_rows(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

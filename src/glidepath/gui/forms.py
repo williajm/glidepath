@@ -380,10 +380,12 @@ class FactsEntryPane(QWidget):
     row under them. With no partner the pane renders and submits
     exactly as the single-person form always has.
 
-    The annuity purchase sections follow the retirement-income
-    preference the same way (roadmap 10.3): they render only while the
+    Both annuity purchase sections — the first person's and the
+    partner's — sit directly beneath the retirement-income preference
+    that reveals them (roadmap 10.3): they render only while the
     preference is annuity-or-mix — or rows already exist, so data is
-    never hidden — and switching back to drawdown-only confirms before
+    never hidden — the partner's additionally only while a partner is
+    on the form, and switching back to drawdown-only confirms before
     it deletes the purchase rows.
     """
 
@@ -436,9 +438,11 @@ class FactsEntryPane(QWidget):
         content_layout.addWidget(self.person_form)
         content_layout.addWidget(self.spending_form)
         content_layout.addWidget(self.retirement_income_form)
-        # The annuity sections sit directly under the preference that
+        # Both annuity sections sit directly under the preference that
         # reveals them (roadmap 10.3) — disclosure next to its control.
+        # The partner's shows only while a partner is on the form.
         content_layout.addWidget(self.annuity_purchases)
+        content_layout.addWidget(self.partner_annuity_purchases)
         content_layout.addWidget(self.state_pension_form)
         content_layout.addWidget(self.wrappers)
         content_layout.addWidget(self.db_pensions)
@@ -482,7 +486,6 @@ class FactsEntryPane(QWidget):
         partner_layout.addWidget(self.partner_state_pension_form)
         partner_layout.addWidget(self.partner_wrappers)
         partner_layout.addWidget(self.partner_db_pensions)
-        partner_layout.addWidget(self.partner_annuity_purchases)
         partner_layout.addWidget(self.remove_partner_button)
         self._partner_group.setVisible(False)
 
@@ -517,10 +520,16 @@ class FactsEntryPane(QWidget):
             self.remove_partner()
 
     def _set_partner_active(self, *, active: bool) -> None:
-        """Swap between the add-partner action and the partner sections."""
+        """Swap between the add-partner action and the partner sections.
+
+        The partner's annuity section lives under the household
+        preference, outside the partner group, so its visibility is
+        re-derived here rather than riding the group's.
+        """
         self._partner_active = active
         self._partner_group.setVisible(active)
         self.add_partner_button.setVisible(not active)
+        self._sync_annuity_sections()
 
     def _income_preference(self) -> str:
         """The income-preference token currently selected (10.3)."""
@@ -536,14 +545,15 @@ class FactsEntryPane(QWidget):
         """Show the purchase sections per the preference — rows always show.
 
         A row that exists is never hidden (hidden data would still
-        submit); with no rows, the preference alone decides.
+        submit); with no rows, the preference alone decides. The
+        partner's section additionally needs a partner on the form.
         """
         visible = (
             self._income_preference() == INCOME_PREFERENCE_ANNUITY
             or self._annuity_rows_exist()
         )
         self.annuity_purchases.setVisible(visible)
-        self.partner_annuity_purchases.setVisible(visible)
+        self.partner_annuity_purchases.setVisible(visible and self._partner_active)
 
     def _set_income_preference(self, value: str) -> None:
         """Set the preference combo without re-entering the handler."""
