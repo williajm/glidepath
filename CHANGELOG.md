@@ -7,7 +7,16 @@ recent release first. The format follows
 process in `docs/planning.md` §4.10). Each release's section is curated
 in the release PR and becomes the GitHub Release notes verbatim.
 
-## [Unreleased]
+## [0.6.0] - 2026-08-14
+
+Facts-form usability release (roadmap Phase 10): retirement income
+becomes a choice — a drawdown-vs-annuity preference with the annuity
+purchase sections disclosed beneath it, the pot share entered as a
+percentage, and a withdrawal-strategy dropdown driving every run mode —
+alongside per-section "More options" disclosure with inline submission
+errors, a deterministic retirement outlook shown before Monte Carlo is
+run, and supply-chain visibility additions (OpenSSF Scorecard workflow,
+the Sigstore provenance bundle attached to GitHub Releases).
 
 ### Added
 
