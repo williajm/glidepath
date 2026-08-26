@@ -7,6 +7,16 @@ recent release first. The format follows
 process in `docs/planning.md` §4.10). Each release's section is curated
 in the release PR and becomes the GitHub Release notes verbatim.
 
+## [1.0.1] - 2026-08-26
+
+### Fixed
+
+- Package metadata: the PyPI `Development Status` classifier still
+  said `4 - Beta` on the 1.0.0 release; it now reads
+  `5 - Production/Stable`, matching the 1.0 stability declaration
+  (uploaded file metadata is immutable on PyPI, so the fix needs a
+  new release to show). No code changes.
+
 ## [1.0.0] - 2026-08-26
 
 First stable release. Functionally this is the 0.6.0 product — roadmap

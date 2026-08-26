@@ -1,6 +1,6 @@
 [project]
 name = "glidepath"
-version = "1.0.0"
+version = "1.0.1"
 description = "Desktop retirement and investment planner (UK-first, region-extensible)."
 readme = "README.md"
 # MIT code plus one CC BY-NC-SA 4.0 data file (returns_history.toml —
@@ -22,7 +22,7 @@ keywords = [
 # No License :: classifier — PEP 639: the SPDX expression above is the
 # license metadata, and mixing it with license classifiers is deprecated.
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Win32 (MS Windows)",
     "Environment :: X11 Applications :: Qt",
     "Intended Audience :: End Users/Desktop",
