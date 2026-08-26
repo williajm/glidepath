@@ -38,6 +38,12 @@ releases). Rules:
 - All other commands (make targets, pre-commit hooks) use
   `uv run --locked`, so nothing outside `make deps` and `make bump` can
   rewrite the lockfile.
+- uv environment variables override `pyproject.toml`, so the Makefile
+  (`unexport`) and the pre-commit hook entries (`env -u`) strip any
+  ambient `UV_EXCLUDE_NEWER` before invoking uv: a user-wide relative
+  value would replace the absolute cutoff with an unverifiable span and
+  make every `uv run --locked` report the lockfile as stale. A guard test
+  in `tests/test_scripts_supply_chain.py` keeps both in place.
 - `scripts/check_dep_age.py` independently verifies the lockfile: the
   embedded cutoff must be ≥7 days old right now, every package must come
   from PyPI (root project excepted), and every locked wheel/sdist's PyPI

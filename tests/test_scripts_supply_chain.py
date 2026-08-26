@@ -17,16 +17,14 @@ import json
 import re
 import urllib.error
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 import check_dep_age
 import update_exclude_newer
 from check_dep_age import PolicyError, _cutoff, _locked_artifacts, _verify_package
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # A cutoff comfortably before every upload time used in these tests.
 CUTOFF = datetime(2026, 1, 8, tzinfo=UTC)
@@ -393,3 +391,30 @@ def test_update_fails_on_duplicate_cutoff_fields(
     exit_code = update_exclude_newer.main()
     assert exit_code == 1
     assert pyproject.read_text(encoding="utf-8") == original
+
+
+# --- ambient UV_EXCLUDE_NEWER guard -----------------------------------------
+#
+# uv environment variables take precedence over pyproject.toml. A user-wide
+# UV_EXCLUDE_NEWER (a relative span such as "7d") would silently replace
+# the repo's absolute cutoff — `uv lock` then records an unverifiable
+# placeholder and every `uv run --locked` reports the lockfile as stale —
+# so the Makefile and the pre-commit hook entries must strip it.
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_makefile_unexports_ambient_exclude_newer() -> None:
+    """Every make recipe must run without an inherited UV_EXCLUDE_NEWER."""
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    assert re.search(r"^unexport UV_EXCLUDE_NEWER$", makefile, flags=re.MULTILINE)
+
+
+def test_precommit_hooks_strip_ambient_exclude_newer() -> None:
+    """Every locked uv hook entry must drop UV_EXCLUDE_NEWER first."""
+    config = (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    entries = re.findall(r"^\s*entry: (.*)$", config, flags=re.MULTILINE)
+    locked = [entry for entry in entries if "uv run --locked" in entry]
+    assert locked, "expected local hooks to run via `uv run --locked`"
+    for entry in locked:
+        assert entry.startswith("env -u UV_EXCLUDE_NEWER uv run --locked "), entry

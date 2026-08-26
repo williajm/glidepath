@@ -14,6 +14,15 @@ else
 export UV_PROJECT_ENVIRONMENT := .venv-wsl
 endif
 
+# uv environment variables take precedence over pyproject.toml, so a
+# user-wide UV_EXCLUDE_NEWER (a sensible shell default for other projects)
+# would silently replace this repo's absolute exclude-newer cutoff with a
+# relative one: `uv lock` then records an unverifiable placeholder that
+# scripts/check_dep_age.py rejects, and every `uv run --locked` reports
+# the lockfile as stale. The repo enforces its own cooldown, so recipes
+# never see the ambient value. Mirrored in .pre-commit-config.yaml.
+unexport UV_EXCLUDE_NEWER
+
 help:
 	@echo "make sync   - install the locked dependencies into the platform venv"
 	@echo "make check  - run all merge gates (ruff, mypy, pytest+coverage, dep age)"
