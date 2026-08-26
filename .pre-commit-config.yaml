@@ -2,7 +2,9 @@
 #
 # ruff and mypy run as local hooks via `uv run` so they always use the exact
 # versions pinned in uv.lock (which satisfy the 7-day supply-chain cooldown),
-# rather than separate pre-commit-managed environments.
+# rather than separate pre-commit-managed environments. Each entry drops
+# any ambient UV_EXCLUDE_NEWER first (see the Makefile for why); `env`
+# comes from coreutils, or Git for Windows' usr/bin inside git hooks.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -22,19 +24,19 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check --fix
-        entry: uv run --locked ruff check --fix --force-exclude
+        entry: env -u UV_EXCLUDE_NEWER uv run --locked ruff check --fix --force-exclude
         language: system
         types_or: [python, pyi]
         require_serial: true
       - id: ruff-format
         name: ruff format
-        entry: uv run --locked ruff format --force-exclude
+        entry: env -u UV_EXCLUDE_NEWER uv run --locked ruff format --force-exclude
         language: system
         types_or: [python, pyi]
         require_serial: true
       - id: mypy
         name: mypy --strict
-        entry: uv run --locked mypy
+        entry: env -u UV_EXCLUDE_NEWER uv run --locked mypy
         language: system
         pass_filenames: false
         files: ^(src|tests|scripts)/.*\.pyi?$
