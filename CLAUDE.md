@@ -90,7 +90,7 @@ releases). Rules:
 
 ## Release process (details in planning §4.10)
 
-- SemVer 0.x; the version lives in `[project] version`, released as a
+- SemVer; the version lives in `[project] version`, released as a
   `vX.Y.Z` tag on `main`. Releases are tag + GitHub Release + PyPI
   (sdist/wheel via trusted publishing) — no binary artifacts yet
   (§4.10 records why).

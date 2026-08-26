@@ -1,6 +1,6 @@
 [project]
 name = "glidepath"
-version = "0.6.0"
+version = "1.0.0"
 description = "Desktop retirement and investment planner (UK-first, region-extensible)."
 readme = "README.md"
 # MIT code plus one CC BY-NC-SA 4.0 data file (returns_history.toml —
@@ -41,7 +41,7 @@ classifiers = [
 # the release was tested against (uv.lock does not apply to end users).
 # Bump the pin only via `make deps`.
 dependencies = [
-    "pyside6==6.11.1",
+    "pyside6==6.11.2",
 ]
 
 [project.urls]
@@ -74,7 +74,7 @@ build-backend = "uv_build"
 [tool.uv]
 # Supply-chain cooldown: resolution ignores anything published to PyPI after
 # this timestamp (now minus 7 days). Updated ONLY by `make deps`.
-exclude-newer = "2026-08-06T18:44:36Z"
+exclude-newer = "2026-08-19T15:28:17Z"
 
 # PyPI is the ONLY permitted index (supply-chain policy; see CLAUDE.md).
 [[tool.uv.index]]
