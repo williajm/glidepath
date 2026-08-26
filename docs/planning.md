@@ -401,14 +401,16 @@ mode (a second surface to maintain for no extra information).
 
 ### 4.10 Release process
 
-**Decision.** Releases are SemVer 0.x tags on `main` plus a GitHub
+**Decision.** Releases are SemVer tags on `main` plus a GitHub
 Release whose notes come verbatim from a curated `CHANGELOG.md` (Keep
 a Changelog format), plus an sdist/wheel published to PyPI — no other
 built artifacts. The version lives in
 `[project] version` in `pyproject.toml`; minor bumps carry features
 and behaviour changes (plan-file schema steps ride the §4.5 migration
-harness), patch bumps carry fixes only; 1.0.0 is deferred until the
-product is stable enough for outside users. Cut flow: on an
+harness), patch bumps carry fixes only. 1.0.0 was cut on 2026-08-26
+once roadmap Phases 1–10 had shipped, declaring the product stable
+enough for outside users; it changed no behaviour over 0.6.0. Cut
+flow: on an
 up-to-date `dev`, `make bump V=X.Y.Z` sets the version (uv.lock
 embeds the project version, so the target performs the one sanctioned
 bare `uv lock` — minimal, no `--upgrade`, the `exclude-newer` cutoff
@@ -465,8 +467,9 @@ claimed only by an actual upload) and giving technical users a real
 install channel — `uv tool install glidepath` /
 `pipx install glidepath` — without the signing costs of binary
 artifacts. It is an app distribution channel, not a library: nothing
-under `glidepath.*` becomes a public API, and the 0.x line still
-promises no import-level stability (this supersedes the earlier
+under `glidepath.*` becomes a public API, and the version number
+(1.0.0 included) promises no import-level stability (this supersedes
+the earlier
 rejection of PyPI on those grounds — publication implies no such
 promise as long as the README states the product is the CLI/GUI entry
 point).
@@ -476,7 +479,7 @@ Windows build — would ship unsigned: SmartScreen interposes a
 (reputation resets per binary) and PyInstaller output is a known
 antivirus false-positive trigger, while code signing costs a
 recurring OV-certificate fee (Azure Trusted Signing is currently
-org-only). At 0.x with a run-from-source audience, that cost buys
+org-only). With a run-from-source audience, that cost buys
 little; packaging (and signing) can be added to `release.yml` later
 without changing the tag/changelog process. **Rejected:** unsigned
 `.exe` zips now (SmartScreen/AV friction documented above); CalVer

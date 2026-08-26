@@ -3,9 +3,35 @@
 All notable changes to glidepath are documented in this file, most
 recent release first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
-[SemVer](https://semver.org/spec/v2.0.0.html) 0.x (see the release
+[SemVer](https://semver.org/spec/v2.0.0.html) (see the release
 process in `docs/planning.md` §4.10). Each release's section is curated
 in the release PR and becomes the GitHub Release notes verbatim.
+
+## [1.0.0] - 2026-08-26
+
+First stable release. Functionally this is the 0.6.0 product — roadmap
+Phases 1–10 complete — with every dependency refreshed under the
+7-day supply-chain cooldown; the version number declares the product
+stable enough for outside users (planning §4.10 had deferred 1.0.0
+until then) and changes no behaviour. Plan files saved by 0.6.0
+(document schema v9) open unchanged. glidepath remains an application,
+not a library: nothing under `glidepath.*` is a public API, and 1.0
+makes no import-level stability promise.
+
+### Changed
+
+- Version 1.0.0 (planning §4.10): minor releases keep carrying
+  features and behaviour changes (plan-file schema steps riding the
+  migration harness) and patch releases fixes only, as before.
+
+- Dependencies refreshed under the 7-day cooldown (resolution cutoff
+  2026-08-19): the exact PySide6 runtime pin moves 6.11.1 → 6.11.2
+  (with shiboken6 and the essentials/addons wheels); development
+  tooling — ruff 0.16.1 → 0.16.3, mypy 2.3.0 → 2.3.1, hypothesis
+  6.165.2 → 6.165.10, pre-commit 4.6.1 → 4.6.2, cyclonedx-python-lib
+  11.11.0 → 11.12.0, virtualenv 21.7.1 → 21.7.4 — plus transitive
+  updates (ast-serialize, charset-normalizer, filelock, idna, librt,
+  platformdirs, pygments, python-discovery).
 
 ## [0.6.0] - 2026-08-14
 
