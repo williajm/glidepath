@@ -472,11 +472,7 @@ under `glidepath.*` becomes a public API, and the version number
 the earlier
 rejection of PyPI on those grounds — publication implies no such
 promise as long as the README states the product is the CLI/GUI entry
-point). `docs/scripting.md` shows technical users how to drive the
-engine from a script under that same caveat — pin the release, the
-layout may move — and `tests/test_docs_scripting.py` executes its
-code blocks, so the guide is kept true by the merge gates rather than
-becoming an implied stability promise.
+point).
 **Why no binary artifacts.** The natural desktop artifact — a PyInstaller
 Windows build — would ship unsigned: SmartScreen interposes a
 "Windows protected your PC" warning on every new release's binary

@@ -138,7 +138,9 @@ needs — you do not need Python installed first.
 If the shell cannot find `glidepath` afterwards, run
 `uv tool update-shell` once and reopen the terminal. Upgrade to a new
 release later with `uv tool upgrade glidepath`. (`pipx install
-glidepath` works too.)
+glidepath` works too. Glidepath is a desktop app distributed through
+PyPI, not a library — importing `glidepath` modules is not a supported
+API.)
 
 Or run straight from a checkout:
 
@@ -160,17 +162,14 @@ use glidepath" walks through every tab. Save your plan from the File
 menu as a `.glidepath.json` file you own, stored wherever you choose;
 the next launch reopens your last plan automatically.
 
-## Scripting
+## User guide
 
-The engine has no Qt dependency and runs from a Python script: build
-a plan, project it deterministically or by Monte Carlo, and change the
-assumptions it uses — the growth rate, inflation, fees, the planning
-horizon — without opening the GUI.
-[`docs/scripting.md`](https://github.com/williajm/glidepath/blob/main/docs/scripting.md)
-walks through it step by step, from a machine with no uv to a worked
-projection. Glidepath is versioned as an application, not a library:
-the module layout is not a stable API, so pin the release your script
-was written against.
+[`docs/getting-started.md`](https://github.com/williajm/glidepath/blob/main/docs/getting-started.md)
+walks through the app step by step: installing on a machine with
+nothing on it, what to gather before you start, entering it on the
+Facts tab, reading the projection, and changing the assumptions behind
+it — the growth rate, inflation, fees, the planning horizon — on the
+Stated vs assumed tab.
 
 ## Developing
 
