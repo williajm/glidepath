@@ -7,7 +7,7 @@ recent release first. The format follows
 process in `docs/planning.md` §4.10). Each release's section is curated
 in the release PR and becomes the GitHub Release notes verbatim.
 
-## [Unreleased]
+## [1.0.2] - 2026-08-29
 
 ### Added
 
