@@ -102,19 +102,45 @@ It is not financial advice and is not regulated; its outputs depend on
 assumptions that will not match reality. Do not make financial decisions
 based solely on this tool.
 
-## Run
+## Install
 
-Requires only [uv](https://docs.astral.sh/uv/). Install the latest
-release [from PyPI](https://pypi.org/project/glidepath/) and launch it:
+Glidepath is installed from [PyPI](https://pypi.org/project/glidepath/)
+with [uv](https://docs.astral.sh/uv/), which also fetches the Python it
+needs — you do not need Python installed first.
 
-```sh
-uv tool install glidepath
-glidepath
-```
+1. **Install uv.** Windows (PowerShell):
 
-(`pipx install glidepath` works too. Glidepath is a desktop app
-distributed through PyPI, not a library — importing `glidepath`
-modules is not a supported API.)
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+   macOS or Linux:
+
+   ```sh
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+   Close and reopen the terminal, then check `uv --version` prints a
+   version.
+
+2. **Install glidepath:**
+
+   ```sh
+   uv tool install glidepath
+   ```
+
+3. **Launch it:**
+
+   ```sh
+   glidepath
+   ```
+
+If the shell cannot find `glidepath` afterwards, run
+`uv tool update-shell` once and reopen the terminal. Upgrade to a new
+release later with `uv tool upgrade glidepath`. (`pipx install
+glidepath` works too. Glidepath is a desktop app distributed through
+PyPI, not a library — importing `glidepath` modules is not a supported
+API.)
 
 Or run straight from a checkout:
 
@@ -135,6 +161,15 @@ your age and switch between today's money and nominal; Help → "How to
 use glidepath" walks through every tab. Save your plan from the File
 menu as a `.glidepath.json` file you own, stored wherever you choose;
 the next launch reopens your last plan automatically.
+
+## User guide
+
+[`docs/getting-started.md`](https://github.com/williajm/glidepath/blob/main/docs/getting-started.md)
+walks through the app step by step: installing on a machine with
+nothing on it, what to gather before you start, entering it on the
+Facts tab, reading the projection, and changing the assumptions behind
+it — the growth rate, inflation, fees, the planning horizon — on the
+Stated vs assumed tab.
 
 ## Developing
 

@@ -7,6 +7,24 @@ recent release first. The format follows
 process in `docs/planning.md` §4.10). Each release's section is curated
 in the release PR and becomes the GitHub Release notes verbatim.
 
+## [Unreleased]
+
+### Added
+
+- `docs/getting-started.md`: a step-by-step user guide — installing
+  on a machine with nothing on it, what to gather before you start,
+  entering it on the Facts tab, reading the Charts tab and its cards,
+  overriding assumptions (growth rate, inflation, fees, planning
+  horizon, glide path) on the Stated vs assumed tab, scenarios, and
+  saving/exporting.
+
+### Changed
+
+- README: the Run section is now a numbered Install walkthrough that
+  starts from a machine without uv, and a User guide section links the
+  new guide; the site's Get started section gains the uv install line
+  and the same link.
+
 ## [1.0.1] - 2026-08-26
 
 ### Fixed
