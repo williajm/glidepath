@@ -7,6 +7,27 @@ recent release first. The format follows
 process in `docs/planning.md` §4.10). Each release's section is curated
 in the release PR and becomes the GitHub Release notes verbatim.
 
+## [Unreleased]
+
+### Added
+
+- `docs/scripting.md`: a step-by-step guide to installing uv and
+  glidepath on a machine with neither, running a projection from a
+  Python script, and overriding the assumptions it uses (growth rate,
+  inflation, fees, planning horizon, glide-path shape), plus Monte
+  Carlo, the retirement-age solver, and saved-plan/CSV round-trips.
+  `tests/test_docs_scripting.py` executes the guide's code blocks so
+  it cannot drift from the package.
+
+### Changed
+
+- README: the Run section is now a numbered install walkthrough that
+  starts from a machine without uv, and a Scripting section links the
+  new guide. The "importing glidepath modules is not a supported API"
+  note becomes the guide's version-pinning caveat — the module layout
+  is still not a stable API (planning §4.10); the site's Get started
+  section gains the uv install line and the same links.
+
 ## [1.0.1] - 2026-08-26
 
 ### Fixed

@@ -358,9 +358,15 @@
       manages the Python toolchain for you.
     </p>
     <div class="steps">
-<pre><code><span class="p">$</span> uv tool install glidepath  <span class="c"># installs the latest release from PyPI</span>
+<pre><code><span class="p">$</span> curl -LsSf https://astral.sh/uv/install.sh | sh  <span class="c"># installs uv (macOS/Linux; Windows: see the README)</span>
+<span class="p">$</span> uv tool install glidepath  <span class="c"># installs the latest release from PyPI</span>
 <span class="p">$</span> glidepath</code></pre>
       <p>
+        The <a href="https://github.com/williajm/glidepath#install">README</a>
+        has the step-by-step version, including the Windows install command;
+        <a href="https://github.com/williajm/glidepath/blob/main/docs/scripting.md">docs/scripting.md</a>
+        shows how to run projections from a Python script and change the
+        assumptions behind them.
         <code class="inline">pipx install glidepath</code> works too. Or run
         straight from a <a href="https://github.com/williajm/glidepath">checkout</a>:
         <code class="inline">uv run glidepath</code> installs the locked
