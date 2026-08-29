@@ -1,6 +1,6 @@
 [project]
 name = "glidepath"
-version = "1.0.1"
+version = "1.0.2"
 description = "Desktop retirement and investment planner (UK-first, region-extensible)."
 readme = "README.md"
 # MIT code plus one CC BY-NC-SA 4.0 data file (returns_history.toml —
