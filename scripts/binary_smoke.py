@@ -31,7 +31,8 @@ from glidepath.gui.widgets import MainWindow
 from glidepath.regions.uk import load_returns_history
 
 
-def check(condition: bool, message: str) -> None:  # noqa: FBT001 — assertion helper, not a behaviour switch.
+# The boolean is an assertion result, not a behaviour switch.
+def check(condition: bool, message: str) -> None:  # noqa: FBT001
     """Keep checks active even if the binary is built with assertions disabled."""
     if not condition:
         raise RuntimeError(message)

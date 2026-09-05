@@ -72,8 +72,9 @@ def test_dependency_walker_verifies_fresh_download(
 
 
 @pytest.mark.parametrize("target", ["linux", "win32"])
+@pytest.mark.parametrize("mode", ["standalone", "onefile"])
 def test_build_propagates_failure_and_preserves_metadata_arguments(
-    target: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    target: str, mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Exercise the real subprocess boundary using an inert compiler stand-in.
 
@@ -115,9 +116,11 @@ def test_build_propagates_failure_and_preserves_metadata_arguments(
         encoding="utf-8",
     )
 
-    assert build_binary.main(["--mode", "onefile", "--jobs", "2"]) == 17
+    assert build_binary.main(["--mode", mode, "--jobs", "2"]) == 17
     invocation = json.loads((tmp_path / "invocation.json").read_text())
     assert invocation["stdin"] == ""
+    assert f"--mode={mode}" in invocation["args"]
+    assert "--jobs=2" in invocation["args"]
     assert "--file-version=9.8.7" in invocation["args"]
     assert "--product-version=9.8.7" in invocation["args"]
     assert "--company-name=Test & literal $(text)" in invocation["args"]
@@ -127,16 +130,35 @@ def test_build_propagates_failure_and_preserves_metadata_arguments(
         )
 
 
-@pytest.mark.parametrize("jobs", ["0", "-1"])
-def test_build_rejects_invalid_parallelism(
-    jobs: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--jobs", "0"],
+        ["--jobs", "-1"],
+        ["--jobs", "2; touch unexpected"],
+        ["--mode", "onefile; touch unexpected"],
+        ["--mode=--run"],
+    ],
+)
+def test_build_rejects_invalid_arguments(
+    arguments: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Invalid concurrency fails before fetching tools or creating build output."""
+    """Invalid input fails before fetching tools or creating build output."""
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as error:
-        build_binary.main(["--jobs", jobs])
+        build_binary.main(arguments)
     assert error.value.code != 0
     assert not (tmp_path / "build").exists()
+
+
+@pytest.mark.parametrize("mode", ["onefile; touch unexpected", "--run", ""])
+def test_build_command_rejects_invalid_mode_without_cli_validation(
+    mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Direct callers must also pass a supported mode before reading config."""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="Build mode must be standalone or onefile"):
+        build_binary.build_command(mode, 2)
 
 
 def test_windows_build_rejects_unsupported_architecture(

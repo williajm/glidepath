@@ -24,7 +24,8 @@ def prepare_dependency_walker(url: str, digest: str, cache: Path) -> None:
     if archive.exists():
         data = archive.read_bytes()
     else:
-        with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310 — repository-controlled HTTPS URL, digest checked below.
+        # Repository-controlled HTTPS URL; the digest is checked below.
+        with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310
             data = response.read()
     if hashlib.sha256(data).hexdigest() != digest:
         message = "Dependency Walker checksum mismatch; refusing to use the download"
@@ -56,6 +57,14 @@ def build_environment() -> dict[str, str]:
 
 def build_command(mode: str, jobs: int) -> list[str]:
     """Read shared packaging options and the canonical version from pyproject."""
+    match mode:
+        case "standalone":
+            mode_option = "--mode=standalone"
+        case "onefile":
+            mode_option = "--mode=onefile"
+        case _:
+            message = "Build mode must be standalone or onefile"
+            raise ValueError(message)
     with Path("pyproject.toml").open("rb") as stream:
         project = tomllib.load(stream)
     version = project["project"]["version"]
@@ -63,7 +72,7 @@ def build_command(mode: str, jobs: int) -> list[str]:
         sys.executable,
         "-m",
         "nuitka",
-        f"--mode={mode}",
+        mode_option,
         "--output-dir=build/nuitka",
         "--report=build/nuitka/compilation-report.xml",
         f"--jobs={jobs}",
@@ -100,7 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     Path("build/nuitka").mkdir(parents=True, exist_ok=True)
     # Closed stdin declines optional tool downloads; dependencies come from
     # the lockfile and the C compiler must already be installed.
-    return subprocess.run(  # noqa: S603 — fixed executable and argument list, no shell.
+    # Fixed executable and argument list, no shell.
+    return subprocess.run(  # noqa: S603
         build_command(args.mode, args.jobs),
         check=False,
         stdin=subprocess.DEVNULL,
