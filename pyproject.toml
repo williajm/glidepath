@@ -56,6 +56,8 @@ glidepath = "glidepath.gui.main:main"
 [dependency-groups]
 binary = [
     "nuitka>=4.2",
+    "setuptools>=84",
+    "wheel>=0.48",
     "zstandard",
 ]
 dev = [
@@ -89,6 +91,7 @@ nuitka-options = [
     "--include-distribution-metadata=glidepath",
     "--include-data-files=LICENSE=LICENSE",
     "--include-data-files=LICENSE-DATA=LICENSE-DATA",
+    "--include-data-dir=third-party-licences=third-party-licences",
     "--product-name=Glidepath",
     "--file-description=Glidepath retirement planner",
     "--company-name=James Williams",
@@ -98,7 +101,11 @@ nuitka-options = [
 [tool.uv]
 # Supply-chain cooldown: resolution ignores anything published to PyPI after
 # this timestamp (now minus 7 days). Updated ONLY by `make deps`.
-exclude-newer = "2026-08-29T14:41:13Z"
+exclude-newer = "2026-08-29T16:19:47Z"
+# Nuitka is source-only. uv installs its build requirements from the binary
+# group first, then builds it in that environment: the lockfile hashes, age
+# check and all-groups audit cover the exact setuptools/wheel versions used.
+no-build-isolation-package = ["nuitka"]
 
 # PyPI is the ONLY permitted index (supply-chain policy; see CLAUDE.md).
 [[tool.uv.index]]

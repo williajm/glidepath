@@ -1,8 +1,8 @@
 Data licence notice
 ===================
 
-Everything in this repository is MIT-licensed (see LICENSE) EXCEPT the
-following bundled data file:
+Glidepath's own code is MIT-licensed (see LICENSE). The following bundled
+data file has a separate licence:
 
     src/glidepath/regions/uk/data/returns_history.toml
 
@@ -26,3 +26,6 @@ The MIT licence grant does not extend to that file. To obtain a
 distribution free of CC BY-NC-SA material, delete the file and
 regenerate a replacement from a source of your choosing with
 scripts/build_returns_history.py as a starting point.
+
+Third-party runtime licences and notices in third-party-licences/ retain
+their original terms; Glidepath's MIT licence does not replace them.

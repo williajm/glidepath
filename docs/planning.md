@@ -490,10 +490,14 @@ after relocating the bundle and removing Python from PATH. The
 `build-windows` job in `release.yml` starts only after tag validation and
 the Python artifact build succeed. Its versioned executable travels in a
 separate Actions artifact, so PyPI only receives the sdist/wheel. The
-GitHub Release job downloads both artifact sets, attests all three files,
+GitHub Release job downloads both artifact sets, attests the release files,
 and attaches `glidepath-X.Y.Z-windows-x64.exe` alongside the Python packages.
-A Windows build or smoke-test failure blocks publication. There is no
-separate manual or PR binary workflow. The Windows build uses installed
+A Windows build or smoke-test failure blocks publication. Runtime notices in
+`third-party-licences/` accompany both bundle formats and a separate release
+ZIP, also covered by provenance. Refresh them with bundled runtime upgrades.
+Nuitka's setuptools/wheel build requirements live in the locked binary group;
+uv builds Nuitka in that environment so the all-groups audit covers them.
+There is no separate manual or PR binary workflow. The Windows build uses installed
 MSVC and a checksum-pinned Dependency Walker 2.2.6000 download, with other
 automatic tool downloads disabled. See `docs/packaging.md` for commands
 and the remaining manual clean-machine checks. Installers, Authenticode

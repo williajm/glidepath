@@ -114,8 +114,10 @@ releases). Rules:
   deployment is manually approved (GitHub → the run's review prompt),
   then creates the GitHub Release with the artifacts attached. The
   Windows build must also pass before PyPI publication; only Python
-  packages are uploaded to PyPI. All three release files carry build
-  provenance; the executable is not yet Authenticode-signed.
+  packages are uploaded to PyPI. The runtime licence ZIP is attached alongside
+  the executable; all release artifacts carry build provenance. The executable
+  is not yet Authenticode-signed. Refresh `third-party-licences/` when changing
+  the bundled Python, PySide6 or Nuitka versions.
 
 ## Coding conventions
 

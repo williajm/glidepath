@@ -123,6 +123,10 @@ that the file came from this repository's release before deciding whether
 to proceed. GitHub build provenance does not remove that warning.
 If the latest release has no `.exe` yet, use the uv installation below.
 
+Runtime licences and attribution notices are included in the executable
+and in the release's `glidepath-X.Y.Z-third-party-licences.zip` download.
+That archive also lists the corresponding upstream sources.
+
 ### Install with uv
 
 Alternatively, install Glidepath from [PyPI](https://pypi.org/project/glidepath/)

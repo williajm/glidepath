@@ -31,6 +31,9 @@ provenance is included; Windows publisher signing is separate follow-up work.
 
 ### Changed
 
+- Nuitka's source-build requirements are locked and included in the dependency
+  audit. Windows bundles carry the upstream runtime licences and attribution
+  notices, also attached to releases as a readable ZIP with build provenance.
 - README, getting-started guide and GitHub Pages now explain the Windows
   download, launching and upgrading it, and the unsigned-app warning,
   alongside the existing uv installation route.

@@ -24,6 +24,10 @@ supporting files. Keep that entire folder together. With GNU Make installed,
 `make binary` runs the same build (and includes the normal development tools).
 The `binary` dependency group is optional and never installed by end users
 installing Glidepath from PyPI. Add or update it only through `make deps`.
+It also includes Nuitka's source-build requirements, `setuptools` and `wheel`.
+uv builds only Nuitka without build isolation, after installing those locked
+requirements. This makes the existing age check and all-groups audit cover
+the build tools actually used, including their transitive dependencies.
 
 Test the folder bundle before producing a single file:
 
@@ -60,6 +64,14 @@ The executable embeds `src/glidepath/gui/assets/glidepath.ico`, containing
 the existing PNG artwork at 16, 24, 32, 48, 64, 128 and 256 pixels. Its path
 is configured by `windows-icon` in `pyproject.toml`.
 
+Both bundle formats include `third-party-licences/`, with upstream Python,
+Qt/PySide/Shiboken and Nuitka runtime licences and attribution notices.
+The release also attaches `glidepath-X.Y.Z-third-party-licences.zip` so these
+can be read without launching or extracting the executable. Its README
+records the component versions, original sources and update procedure.
+Refresh these notices when changing Python, PySide6 or Nuitka. Qt Charts
+is GPLv3; its terms are included alongside the other runtime licences.
+
 Executables are not yet Authenticode-signed. Windows may show a SmartScreen "unrecognised
 app" warning; dismissing it can be remembered locally for that file.
 Signing releases with a trusted publisher identity is separate from
@@ -84,8 +96,8 @@ version must match the tag. A failure blocks publication.
 
 After both builds pass and the existing PyPI environment approval is given,
 the workflow publishes only the wheel and sdist to PyPI. It then attaches
-those files and the executable to the GitHub Release, with build provenance
-covering all three. This provenance is separate from Windows code signing.
+those files, the executable and the licence ZIP to the GitHub Release, with
+build provenance covering each asset. This is separate from Windows code signing.
 Build diagnostics remain available as an Actions artifact.
 
 Ordinary pushes and PRs do not compile binaries. There is no separate manual
