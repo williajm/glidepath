@@ -403,15 +403,16 @@ mode (a second surface to maintain for no extra information).
 
 **Decision.** Releases are SemVer tags on `main` plus a GitHub
 Release whose notes come verbatim from a curated `CHANGELOG.md` (Keep
-a Changelog format), plus an sdist/wheel published to PyPI — no other
-built artifacts. The version lives in
+a Changelog format), plus an sdist/wheel published to PyPI and a Windows
+x64 Nuitka executable attached to the GitHub Release. Compilation runs
+only for release tags, never ordinary branch pushes or PRs. The version lives in
 `[project] version` in `pyproject.toml`; minor bumps carry features
 and behaviour changes (plan-file schema steps ride the §4.5 migration
 harness), patch bumps carry fixes only. 1.0.0 was cut on 2026-08-26
 once roadmap Phases 1–10 had shipped, declaring the product stable
 enough for outside users; it changed no behaviour over 0.6.0. Cut
 flow: on an
-up-to-date `dev`, `make bump V=X.Y.Z` sets the version (uv.lock
+release branch based on up-to-date `main`, `make bump V=X.Y.Z` sets the version (uv.lock
 embeds the project version, so the target performs the one sanctioned
 bare `uv lock` — minimal, no `--upgrade`, the `exclude-newer` cutoff
 still applying, `check_dep_age.py` re-verifying after); the release
@@ -424,8 +425,11 @@ commit is on `main`, the tag matches the pyproject version
 — a mistyped or misplaced tag fails loudly instead of shipping. After
 those gates pass, an unprivileged build job runs `uv build` and
 smoke-tests the wheel (clean-venv install; import; the metadata
-version must match the tag) so no artifact reaches PyPI untested. The
-artifacts then flow to a publish job that checks out nothing and runs
+version must match the tag) so no artifact reaches PyPI untested. A
+dependent Windows job builds and tests the folder bundle, then the
+single executable under its final versioned filename, checking its
+embedded version against the tag. Both jobs must succeed before the
+Python artifacts flow to a publish job that checks out nothing and runs
 no project code: `pypa/gh-action-pypi-publish` exchanges the job's
 OIDC token (repo `williajm/glidepath`, workflow `release.yml`,
 environment `pypi` — the trust contract registered on PyPI) for a
@@ -435,7 +439,7 @@ carries verifiable build provenance. The `pypi` environment requires
 manual approval and only `v*` tags may deploy to it (defence in depth
 behind the trusted-publishing contract). The GitHub Release is
 created last, only after PyPI publication succeeds, with the
-published sdist/wheel attached — a failed upload never leaves a
+published sdist/wheel and tested executable attached — a failed upload never leaves a
 public release advertising a package that is not on PyPI. Before
 attaching them, the release job (which likewise checks out nothing
 and runs no project code) attests signed build provenance for the
@@ -473,16 +477,29 @@ the earlier
 rejection of PyPI on those grounds — publication implies no such
 promise as long as the README states the product is the CLI/GUI entry
 point).
-**Why no binary artifacts.** The natural desktop artifact — a PyInstaller
-Windows build — would ship unsigned: SmartScreen interposes a
-"Windows protected your PC" warning on every new release's binary
-(reputation resets per binary) and PyInstaller output is a known
-antivirus false-positive trigger, while code signing costs a
-recurring OV-certificate fee (Azure Trusted Signing is currently
-org-only). With a run-from-source audience, that cost buys
-little; packaging (and signing) can be added to `release.yml` later
-without changing the tag/changelog process. **Rejected:** unsigned
-`.exe` zips now (SmartScreen/AV friction documented above); CalVer
+**Windows packaging (2026-09-05).** Nuitka packaging removes the
+uv/terminal requirement for desktop users, starting with v1.1.0. This
+supersedes the earlier decision to defer all binary builds. An optional
+locked `binary` dependency group supplies Nuitka and onefile compression;
+`make binary` builds a folder and `make binary BINARY_MODE=onefile` builds
+a single runnable executable. Both include the Qt resources, UK data,
+distribution metadata and project/data licences. Worker dispatch happens
+before Qt imports. The compiled self-test checks data and artwork,
+projection, save/load, spawned Monte Carlo equivalence and GUI rendering
+after relocating the bundle and removing Python from PATH. The
+`build-windows` job in `release.yml` starts only after tag validation and
+the Python artifact build succeed. Its versioned executable travels in a
+separate Actions artifact, so PyPI only receives the sdist/wheel. The
+GitHub Release job downloads both artifact sets, attests all three files,
+and attaches `glidepath-X.Y.Z-windows-x64.exe` alongside the Python packages.
+A Windows build or smoke-test failure blocks publication. There is no
+separate manual or PR binary workflow. The Windows build uses installed
+MSVC and a checksum-pinned Dependency Walker 2.2.6000 download, with other
+automatic tool downloads disabled. See `docs/packaging.md` for commands
+and the remaining manual clean-machine checks. Installers, Authenticode
+code signing and updates remain follow-up decisions. Build provenance
+does not replace Authenticode signing for Windows publisher trust.
+**Rejected:** CalVer
 (clashes with the existing 0.1.0 and with SemVer-style
 schema-migration discipline); long-lived PyPI API tokens in repo
 secrets (trusted publishing removes the stored credential entirely).

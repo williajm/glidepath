@@ -1,5 +1,6 @@
-# Publishes a release when a vX.Y.Z tag is pushed: the sdist/wheel are
-# built and smoke-tested in an unprivileged job, published to PyPI via
+# Publishes a release when a vX.Y.Z tag is pushed: the sdist/wheel and
+# Windows executable are built and smoke-tested in unprivileged jobs.
+# Python packages are published to PyPI via
 # trusted publishing (OIDC — no stored tokens) with PEP 740 attestations,
 # and only then announced as a GitHub Release with the artifacts
 # attached, per the release process in docs/planning.md §4.10. The
@@ -73,6 +74,74 @@ jobs:
             release-notes.md
           if-no-files-found: error
 
+  # Compilation only runs for a release tag, after build validates its
+  # ancestry, version and changelog. No publish permissions or secrets.
+  build-windows:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.32"
+          enable-cache: true
+
+      - name: Install locked build dependencies
+        run: uv sync --locked --no-dev --group binary
+
+      - name: Build folder bundle
+        run: uv run --locked --no-dev --group binary python scripts/build_binary.py
+
+      - name: Test relocated folder bundle without Python on PATH
+        run: >-
+          pwsh -NoProfile -File scripts/test_binary.ps1
+          -Executable build/nuitka/glidepath_binary.dist/glidepath.exe
+          -Report build/nuitka/smoke-standalone.json
+
+      - name: Build single executable
+        run: uv run --locked --no-dev --group binary python scripts/build_binary.py --mode onefile
+
+      - name: Stage the versioned executable
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          New-Item -ItemType Directory -Path windows-release | Out-Null
+          Copy-Item build/nuitka/glidepath.exe "windows-release/glidepath-$version-windows-x64.exe"
+
+      - name: Test the release executable and verify its version
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          pwsh -NoProfile -File scripts/test_binary.ps1 `
+            -Executable "windows-release/glidepath-$version-windows-x64.exe" `
+            -Report build/nuitka/smoke-onefile.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $report = Get-Content build/nuitka/smoke-onefile.json -Raw | ConvertFrom-Json
+          if ($report.version -ne $version) {
+            throw "Executable version $($report.version) does not match release $version"
+          }
+
+      - name: Upload tested Windows release asset
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-release-assets
+          path: windows-release/*.exe
+          if-no-files-found: error
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-build-diagnostics
+          path: |
+            build/nuitka/compilation-report.xml
+            build/nuitka/smoke-*.json
+          if-no-files-found: ignore
+
   # Publishes to PyPI via trusted publishing: the job's OIDC token is
   # exchanged for a short-lived upload token, so no PyPI credential is
   # stored in the repo. This job checks out nothing and runs no project
@@ -82,7 +151,7 @@ jobs:
   # contract registered on PyPI; its protection rules (required
   # reviewer, v* tags only) gate this job.
   publish-pypi:
-    needs: build
+    needs: [build, build-windows]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -100,8 +169,8 @@ jobs:
 
   # The GitHub Release is created only after PyPI publication succeeds,
   # so a failed upload never leaves a public release advertising a
-  # package that is not there. The sdist/wheel are attached so the
-  # release carries the exact published artifacts, and signed build
+  # package that is not there. The sdist/wheel and Windows exe are attached
+  # so the release carries the exact published artifacts, and signed build
   # provenance is attested for them first — the GitHub-side mirror of
   # the PEP 740 attestations PyPI holds, so a download from the release
   # page verifies with `gh attestation verify <file> -R <repo>`. Like
@@ -119,11 +188,19 @@ jobs:
         with:
           name: release-assets
 
+      - name: Download the tested Windows executable
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-release-assets
+          path: windows
+
       - name: Attest build provenance for the release artifacts
         id: attest
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: dist/*
+          subject-path: |
+            dist/*
+            windows/*.exe
 
       # The signed Sigstore bundle lives in GitHub's attestation store,
       # which is invisible on the release page (and to Scorecard's
@@ -145,4 +222,5 @@ jobs:
             --title "glidepath $GITHUB_REF_NAME" \
             --notes-file release-notes.md \
             dist/* \
+            windows/*.exe \
             glidepath-*-provenance.intoto.jsonl

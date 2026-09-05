@@ -7,6 +7,37 @@ recent release first. The format follows
 process in `docs/planning.md` §4.10). Each release's section is curated
 in the release PR and becomes the GitHub Release notes verbatim.
 
+## [1.1.0] - 2026-09-05
+
+The first Windows executable release: download one file and launch
+Glidepath without installing Python or uv. The executable is currently
+unsigned, so Windows may show an unrecognised-app warning. GitHub build
+provenance is included; Windows publisher signing is separate follow-up work.
+
+### Added
+
+- The Windows executable embeds the Glidepath icon at seven sizes, so
+  Explorer and shortcuts show the app's artwork instead of a generic icon.
+- Windows x64 Nuitka packaging: a locked optional build
+  dependency group, `make binary` for a folder bundle, and
+  `make binary BINARY_MODE=onefile` for a single executable. The
+  release workflow builds and checks the executable only for version
+  tags, then attaches `glidepath-X.Y.Z-windows-x64.exe` to the GitHub
+  Release with build provenance. A failed Windows build blocks
+  publication. Branch pushes and PRs do not compile binaries.
+- A compiled-app self-test covering packaged data/artwork, projection,
+  save/load, spawned Monte Carlo workers and GUI rendering, plus
+  `docs/packaging.md` with local build and validation instructions.
+
+### Changed
+
+- README, getting-started guide and GitHub Pages now explain the Windows
+  download, launching and upgrading it, and the unsigned-app warning,
+  alongside the existing uv installation route.
+- Dependency tooling refreshed through `make deps` under the seven-day
+  cooldown while adding Nuitka 4.2 and zstandard. The PySide6 runtime
+  pin remains 6.11.2.
+
 ## [1.0.2] - 2026-08-29
 
 ### Added

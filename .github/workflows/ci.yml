@@ -62,7 +62,7 @@ jobs:
         run: uv run python scripts/check_dep_age.py
 
       - name: Export lockfile for audit
-        run: uv export --frozen --no-emit-project --output-file requirements-audit.txt
+        run: uv export --frozen --all-groups --no-emit-project --output-file requirements-audit.txt
 
       - name: pip-audit (known CVEs)
         run: uv run pip-audit --disable-pip --requirement requirements-audit.txt
