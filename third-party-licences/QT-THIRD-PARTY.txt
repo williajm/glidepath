@@ -1,0 +1,3048 @@
+Qt/PySide/Shiboken 6.11.2: Windows runtime third-party notices
+See README.md for the binary inventory, scope and upstream sources.
+
+
+========================================================================
+qtbase/src/3rdparty/D3D12MemoryAllocator/qt_attribution.json
+[
+    {
+        "Id": "d3d12memoryallocator",
+        "Name": "D3D12 Memory Allocator",
+        "QDocModule": "qtgui",
+        "Description": "D3D12 Memory Allocator",
+        "QtUsage": "Memory management for the D3D12 backend of QRhi.",
+
+        "Homepage": "https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator",
+        "Version": "f128d39b7a95b4235bd228d231646278dc6c24b2",
+        "PURL": "pkg:github/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator@$<VERSION>",
+        "License": "MIT License",
+        "LicenseId": "MIT",
+        "LicenseFile": "LICENSE.txt",
+        "Copyright": "Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.",
+        "Comment": "no relevant CPE found"
+    }
+]
+
+
+--- qtbase/src/3rdparty/D3D12MemoryAllocator/LICENSE.txt ---
+
+Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+========================================================================
+qtbase/src/3rdparty/VulkanMemoryAllocator/qt_attribution.json
+[
+    {
+        "Id": "vulkanmemoryallocator",
+        "Name": "Vulkan Memory Allocator",
+        "QDocModule": "qtgui",
+        "Description": "Vulkan Memory Allocator",
+        "QtUsage": "Memory management for the Vulkan backend of QRhi.",
+
+        "Homepage": "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator",
+        "Version": "3.2.1",
+        "PURL": "pkg:github/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator@v$<VERSION>",
+        "License": "MIT License",
+        "LicenseId": "MIT",
+        "LicenseFile": "LICENSE.txt",
+        "Copyright": "Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.",
+        "Comment": "no relevant CPE found"
+    }
+]
+
+
+--- qtbase/src/3rdparty/VulkanMemoryAllocator/LICENSE.txt ---
+
+Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+========================================================================
+qtbase/src/3rdparty/blake2/qt_attribution.json
+{
+    "Id": "blake2",
+    "Name": "BLAKE2 (reference implementation)",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QCryptographicHash).",
+    "Files": "src/blake2b-ref.c src/blake2s-ref.c src/blake2.h src/blake2-impl.h",
+
+    "Description": "BLAKE2 is a cryptographic hash function faster than MD5, SHA-1, SHA-2, and SHA-3, yet is at least as secure as the latest standard SHA-3.",
+    "Homepage": "https://blake2.net/",
+    "Version": "ed1974ea83433eba7b2d95c5dcd9ac33cb847913",
+    "DownloadLocation": "https://github.com/BLAKE2/BLAKE2/tree/ed1974ea83433eba7b2d95c5dcd9ac33cb847913",
+    "PURL": "pkg:github/BLAKE2/BLAKE2@$<VERSION>",
+    "CPE": "cpe:2.3:a:blake2:blake2:*:*:*:*:*:*:*:*",
+    "License": "Creative Commons Zero v1.0 Universal or Apache License 2.0",
+    "LicenseId": "CC0-1.0 OR Apache-2.0",
+    "LicenseFile": "COPYING",
+    "Copyright": "Copyright 2012, Samuel Neves <sneves@dei.uc.pt>"
+}
+
+
+--- qtbase/src/3rdparty/blake2/COPYING ---
+
+The CC0-1.0 alternative is used for this distribution.
+See QT-LICENCES.txt, CC0-1.0, for the full terms.
+The component copyright is retained in the attribution record above.
+
+========================================================================
+qtbase/src/3rdparty/double-conversion/qt_attribution.json
+{
+    "Id": "doubleconversion",
+    "Name": "Efficient Binary-Decimal and Decimal-Binary Conversion Routines for IEEE Doubles",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core. Configure with -system-doubleconversion or -no-doubleconversion to avoid.",
+
+    "Homepage": "https://github.com/google/double-conversion",
+    "Version": "3.4.0",
+    "DownloadLocation": "https://github.com/google/double-conversion/releases/tag/v3.4.0",
+    "PURL": "pkg:github/google/double-conversion@v$<VERSION>",
+    "CPE": "cpe:2.3:a:google:double-conversion:$<VERSION>:*:*:*:*:*:*:*",
+    "License": "BSD 3-clause \"New\" or \"Revised\" License",
+    "LicenseId": "BSD-3-Clause",
+    "LicenseFile": "LICENSE",
+    "Copyright": "Copyright 2006-2012, the V8 project authors"
+}
+
+
+--- qtbase/src/3rdparty/double-conversion/LICENSE ---
+
+Copyright 2006-2011, the V8 project authors. All rights reserved.
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above
+      copyright notice, this list of conditions and the following
+      disclaimer in the documentation and/or other materials provided
+      with the distribution.
+    * Neither the name of Google Inc. nor the names of its
+      contributors may be used to endorse or promote products derived
+      from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+========================================================================
+qtbase/src/3rdparty/easing/qt_attribution.json
+{
+    "Id": "easing",
+    "Name": "Easing Equations by Robert Penner",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QEasingCurve).",
+    "Files": "easing.cpp",
+
+    "Comment": "treat as final, no relevant PURL or CPE found",
+    "Homepage": "http://robertpenner.com/easing/",
+    "License": "BSD 3-clause \"New\" or \"Revised\" License",
+    "LicenseId": "BSD-3-Clause",
+    "LicenseFile": "LICENSE",
+    "Copyright": "Copyright (c) 2001 Robert Penner"
+}
+
+
+--- qtbase/src/3rdparty/easing/LICENSE ---
+
+Copyright (c) 2001 Robert Penner
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice,
+      this list of conditions and the following disclaimer in the documentation
+      and/or other materials provided with the distribution.
+    * Neither the name of the author nor the names of contributors may be used
+      to endorse or promote products derived from this software without specific
+      prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+========================================================================
+qtbase/src/3rdparty/emoji-segmenter/qt_attribution.json
+{
+    "Id": "emoji-segmenter",
+    "Name": "Emoji Segmenter",
+    "QDocModule": "qtgui",
+    "QtUsage": "Used in QtGui for parsing complex emoji sequences. Can be configured using the -emojisegmenter option.",
+    "SecurityCritical": true,
+
+    "Description": "A parser for emoji sequences.",
+    "Homepage": "https://github.com/google/emoji-segmenter",
+    "Version": "0.4.0",
+    "DownloadLocation": "https://github.com/google/emoji-segmenter/releases/tag/0.4.0",
+    "PURL": "pkg:github/google/emoji-segmenter@$<VERSION>",
+    "Comment": "no relevant CPE found",
+
+    "License": "Apache License 2.0",
+    "LicenseId": "Apache-2.0",
+    "Copyright": "Copyright 2019 Google LLC"
+}
+
+
+========================================================================
+qtbase/src/3rdparty/freetype/qt_attribution.json
+[
+    {
+        "Id": "freetype",
+        "Name": "Freetype 2",
+        "QDocModule": "qtgui",
+        "QtUsage": "Optionally used in Qt GUI and platform plugins. Configure with -no-freetype, or -system-freetype to avoid.",
+        "SecurityCritical": true,
+
+        "Description": "FreeType is a freely available software library to render fonts.",
+        "Homepage": "http://www.freetype.org",
+        "Version": "2.14.3",
+        "DownloadLocation": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.gz",
+        "PURL": [
+            "pkg:github/freetype/freetype@VER-$<VERSION_DASHED>"
+        ],
+        "CPE": [
+            "cpe:2.3:a:freetype:freetype:$<VERSION>:*:*:*:*:*:*:*"
+        ],
+
+        "License": "Freetype Project License or GNU General Public License v2.0 only",
+        "LicenseId": "FTL OR GPL-2.0-only",
+        "LicenseFile": "LICENSE.txt",
+        "Copyright": ["Copyright (c) 2007-2014 Adobe Systems Incorporated",
+        "Copyright (c) 2004-2026 Albert Chin-A-Young",
+        "Copyright (c) 2018-2026 Armin Hasitzka, David Turner, Robert Wilhelm, and Werner Lemberg",
+        "Copyright (c) 2000 Computing Research Labs, New Mexico State University",
+        "Copyright (c) 1996-2026 David Turner, Robert Wilhelm, Dominik Röttsches, and Werner Lemberg",
+        "Copyright (c) 2004-2026 David Turner, Robert Wilhelm, Werner Lemberg and George Williams",
+        "Copyright (c) 2022-2026 David Turner, Robert Wilhelm, Werner Lemberg, and Moazin Khatti",
+        "Copyright (c) 2008-2026 David Turner, Robert Wilhelm, Werner Lemberg, and suzuki toshiya",
+        "Copyright (c) 2003-2026 David Turner, Robert Wilhelm, and Werner Lemberg",
+        "Copyright (c) 2005-2026 David Turner",
+        "Copyright (c) 2007-2026 Derek Clegg and Michael Toftdal",
+        "Copyright (c) 2007 Dmitry Timoshkov for Codeweavers",
+        "Copyright (c) 2001-2015 Francesco Zappa Nardelli",
+        "Copyright (c) 2005, 2007, 2008, 2013 George Williams",
+        "Copyright (c) 2013-2026 Google, Inc. Google Author(s) Behdad Esfahbod and Stuart Gill",
+        "Copyright (c) 2013-2022 Google, Inc.",
+        "Copyright (c) 2003 Huw D M Davies for Codeweavers",
+        "Copyright (c) 2010-2026 Joel Klinghed",
+        "Copyright (c) 1996-2026 Just van Rossum, David Turner, Robert Wilhelm, and Werner Lemberg",
+        "Copyright (c) 2003-2026 Masatake YAMATO and Redhat K.K.",
+        "Copyright (c) 2004-2026 Masatake YAMATO, Redhat K.K, David Turner, Robert Wilhelm, and Werner Lemberg",
+        "Copyright (c) 2019-2026 Nikhil Ramakrishnan, David Turner, Robert Wilhelm, and Werner Lemberg",
+        "Copyright (c) 2009-2026 Oran Agra and Mickey Gabel",
+        "Copyright (c) 2007-2026 Rahul Bhalerao <rahul.bhalerao@redhat.com>",
+        "Copyright (c) 2002-2026 Roberto Alameda",
+        "Copyright (c) 2015-2026 Werner Lemberg",
+        "Copyright (c) 2004-2026 suzuki toshiya, Masatake YAMATO, Red Hat K.K., David Turner, Robert Wilhelm, and Werner Lemberg",
+        "Copyright (c) 2019 nyorain",
+        "Copyright (c) 2022-2026 David Turner, Robert Wilhelm, Werner Lemberg, George Williams, and Dominik Röttsches",
+        "Copyright (C) 2009, 2023  Red Hat, Inc."]
+    },
+    {
+        "Id": "freetype-zlib",
+        "Name": "Freetype 2 - zlib",
+        "QDocModule": "qtgui",
+        "QtUsage": "Optionally used in Qt GUI and platform plugins. Configure with -no-freetype, or -system-freetype to avoid.",
+        "Path": "src/gzip",
+
+        "Description": "FreeType is a freely available software library to render fonts.",
+        "Homepage": "http://www.freetype.org",
+        "License": "zlib License",
+        "LicenseId": "Zlib",
+        "LicenseFile": "ZLIB-LICENSE.txt",
+        "Copyright": "Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler"
+    },
+    {
+        "Id": "freetype-bdf",
+        "Name": "Freetype 2 - Bitmap Distribution Format (BDF) support",
+        "QDocModule": "qtgui",
+        "QtUsage": "Optionally used in Qt GUI and platform plugins. Configure with -no-freetype, or -system-freetype to avoid.",
+        "Path": "src/bdf",
+
+        "Description": "FreeType is a freely available software library to render fonts.",
+        "Homepage": "http://www.freetype.org",
+        "License": "MIT License",
+        "LicenseId": "MIT",
+        "LicenseFile": "BDF-LICENSE.txt",
+        "Copyright": ["Copyright (c) 2000 Computing Research Labs, New Mexico State University",
+        "Copyright (c) 2001-2014 Francesco Zappa Nardelli"]
+    },
+    {
+        "Id": "freetype-pcf",
+        "Name": "Freetype 2 - Portable Compiled Format (PCF) support",
+        "QDocModule": "qtgui",
+        "QtUsage": "Optionally used in Qt GUI and platform plugins. Configure with -no-freetype, or -system-freetype to avoid.",
+        "Path": "src/pcf",
+
+        "Description": "FreeType is a freely available software library to render fonts.",
+        "Homepage": "http://www.freetype.org",
+        "License": "MIT License and MIT Open Group variant",
+        "LicenseId": "MIT AND MIT-open-group",
+        "LicenseFile": "PCF-LICENSE.txt",
+        "Copyright": ["Copyright (c) 2001, 2012 David Turner, Robert Wilhelm, and Werner Lemberg",
+        "Copyright (c) 2000-2014 Francesco Zappa Nardelli",
+        "Copyright (c) 1990, 1994, 1998 The Open Group"]
+    }
+]
+
+
+--- qtbase/src/3rdparty/freetype/BDF-LICENSE.txt ---
+
+Copyright (C) 2001-2002 by Francesco Zappa Nardelli
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+*** Portions of the driver (that is, bdflib.c and bdf.h):
+
+Copyright 2000 Computing Research Labs, New Mexico State University
+Copyright 2001-2002, 2011 Francesco Zappa Nardelli
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+THE COMPUTING RESEARCH LAB OR NEW MEXICO STATE UNIVERSITY BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT
+OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--- qtbase/src/3rdparty/freetype/LICENSE.txt ---
+
+The FTL alternative is used for this distribution.
+
+                    The FreeType Project LICENSE
+                    ----------------------------
+
+                            2006-Jan-27
+
+                    Copyright 1996-2002, 2006 by
+          David Turner, Robert Wilhelm, and Werner Lemberg
+
+
+
+Introduction
+============
+
+  The FreeType  Project is distributed in  several archive packages;
+  some of them may contain, in addition to the FreeType font engine,
+  various tools and  contributions which rely on, or  relate to, the
+  FreeType Project.
+
+  This  license applies  to all  files found  in such  packages, and
+  which do not  fall under their own explicit  license.  The license
+  affects  thus  the  FreeType   font  engine,  the  test  programs,
+  documentation and makefiles, at the very least.
+
+  This  license   was  inspired  by  the  BSD,   Artistic,  and  IJG
+  (Independent JPEG  Group) licenses, which  all encourage inclusion
+  and  use of  free  software in  commercial  and freeware  products
+  alike.  As a consequence, its main points are that:
+
+    o We don't promise that this software works. However, we will be
+      interested in any kind of bug reports. (`as is' distribution)
+
+    o You can  use this software for whatever you  want, in parts or
+      full form, without having to pay us. (`royalty-free' usage)
+
+    o You may not pretend that  you wrote this software.  If you use
+      it, or  only parts of it,  in a program,  you must acknowledge
+      somewhere  in  your  documentation  that  you  have  used  the
+      FreeType code. (`credits')
+
+  We  specifically  permit  and  encourage  the  inclusion  of  this
+  software, with  or without modifications,  in commercial products.
+  We  disclaim  all warranties  covering  The  FreeType Project  and
+  assume no liability related to The FreeType Project.
+
+
+  Finally,  many  people  asked  us  for  a  preferred  form  for  a
+  credit/disclaimer to use in compliance with this license.  We thus
+  encourage you to use the following text:
+
+   """
+    Portions of this software are copyright © <year> The FreeType
+    Project (https://freetype.org).  All rights reserved.
+   """
+
+  Please replace <year> with the value from the FreeType version you
+  actually use.
+
+
+Legal Terms
+===========
+
+0. Definitions
+--------------
+
+  Throughout this license,  the terms `package', `FreeType Project',
+  and  `FreeType  archive' refer  to  the  set  of files  originally
+  distributed  by the  authors  (David Turner,  Robert Wilhelm,  and
+  Werner Lemberg) as the `FreeType Project', be they named as alpha,
+  beta or final release.
+
+  `You' refers to  the licensee, or person using  the project, where
+  `using' is a generic term including compiling the project's source
+  code as  well as linking it  to form a  `program' or `executable'.
+  This  program is  referred to  as  `a program  using the  FreeType
+  engine'.
+
+  This  license applies  to all  files distributed  in  the original
+  FreeType  Project,   including  all  source   code,  binaries  and
+  documentation,  unless  otherwise  stated   in  the  file  in  its
+  original, unmodified form as  distributed in the original archive.
+  If you are  unsure whether or not a particular  file is covered by
+  this license, you must contact us to verify this.
+
+  The FreeType  Project is copyright (C) 1996-2000  by David Turner,
+  Robert Wilhelm, and Werner Lemberg.  All rights reserved except as
+  specified below.
+
+1. No Warranty
+--------------
+
+  THE FREETYPE PROJECT  IS PROVIDED `AS IS' WITHOUT  WARRANTY OF ANY
+  KIND, EITHER  EXPRESS OR IMPLIED,  INCLUDING, BUT NOT  LIMITED TO,
+  WARRANTIES  OF  MERCHANTABILITY   AND  FITNESS  FOR  A  PARTICULAR
+  PURPOSE.  IN NO EVENT WILL ANY OF THE AUTHORS OR COPYRIGHT HOLDERS
+  BE LIABLE  FOR ANY DAMAGES CAUSED  BY THE USE OR  THE INABILITY TO
+  USE, OF THE FREETYPE PROJECT.
+
+2. Redistribution
+-----------------
+
+  This  license  grants  a  worldwide, royalty-free,  perpetual  and
+  irrevocable right  and license to use,  execute, perform, compile,
+  display,  copy,   create  derivative  works   of,  distribute  and
+  sublicense the  FreeType Project (in  both source and  object code
+  forms)  and  derivative works  thereof  for  any  purpose; and  to
+  authorize others  to exercise  some or all  of the  rights granted
+  herein, subject to the following conditions:
+
+    o Redistribution of  source code  must retain this  license file
+      (`FTL.TXT') unaltered; any  additions, deletions or changes to
+      the original  files must be clearly  indicated in accompanying
+      documentation.   The  copyright   notices  of  the  unaltered,
+      original  files must  be  preserved in  all  copies of  source
+      files.
+
+    o Redistribution in binary form must provide a  disclaimer  that
+      states  that  the software is based in part of the work of the
+      FreeType Team,  in  the  distribution  documentation.  We also
+      encourage you to put an URL to the FreeType web page  in  your
+      documentation, though this isn't mandatory.
+
+  These conditions  apply to any  software derived from or  based on
+  the FreeType Project,  not just the unmodified files.   If you use
+  our work, you  must acknowledge us.  However, no  fee need be paid
+  to us.
+
+3. Advertising
+--------------
+
+  Neither the  FreeType authors and  contributors nor you  shall use
+  the name of the  other for commercial, advertising, or promotional
+  purposes without specific prior written permission.
+
+  We suggest,  but do not require, that  you use one or  more of the
+  following phrases to refer  to this software in your documentation
+  or advertising  materials: `FreeType Project',  `FreeType Engine',
+  `FreeType library', or `FreeType Distribution'.
+
+  As  you have  not signed  this license,  you are  not  required to
+  accept  it.   However,  as  the FreeType  Project  is  copyrighted
+  material, only  this license, or  another one contracted  with the
+  authors, grants you  the right to use, distribute,  and modify it.
+  Therefore,  by  using,  distributing,  or modifying  the  FreeType
+  Project, you indicate that you understand and accept all the terms
+  of this license.
+
+4. Contacts
+-----------
+
+  There are two mailing lists related to FreeType:
+
+    o freetype@nongnu.org
+
+      Discusses general use and applications of FreeType, as well as
+      future and  wanted additions to the  library and distribution.
+      If  you are looking  for support,  start in  this list  if you
+      haven't found anything to help you in the documentation.
+
+    o freetype-devel@nongnu.org
+
+      Discusses bugs,  as well  as engine internals,  design issues,
+      specific licenses, porting, etc.
+
+  Our home page can be found at
+
+    https://freetype.org
+
+
+--- end of FTL.TXT ---
+
+--- qtbase/src/3rdparty/freetype/PCF-LICENSE.txt ---
+
+Copyright (C) 2000 by Francesco Zappa Nardelli
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--
+
+Copyright 1990, 1994, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+--- qtbase/src/3rdparty/freetype/ZLIB-LICENSE.txt ---
+
+Copyright (C) 1995-2002 Jean-loup Gailly and Mark Adler
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+Jean-loup Gailly        Mark Adler
+jloup@gzip.org          madler@alumni.caltech.edu
+
+========================================================================
+qtbase/src/3rdparty/harfbuzz-ng/qt_attribution.json
+{
+    "Id": "harfbuzz-ng",
+    "Name": "HarfBuzz-NG",
+    "QDocModule": "qtgui",
+    "QtUsage": "Optionally used in Qt GUI. Configure with -system-harfbuzz to force the use of the system library, or -qt-harfbuzz to link statically to the library that is bundled with your Qt version.",
+    "SecurityCritical": true,
+
+    "Description": "HarfBuzz is an OpenType text shaping engine.",
+    "Homepage": "http://harfbuzz.org",
+    "Version": "14.3.0",
+    "DownloadLocation": "https://github.com/harfbuzz/harfbuzz/releases/tag/14.3.0",
+    "PURL": "pkg:github/harfbuzz/harfbuzz@$<VERSION>",
+    "CPE": "cpe:2.3:a:harfbuzz_project:harfbuzz:$<VERSION>:*:*:*:*:*:*:*",
+    "License": "MIT License",
+    "LicenseId": "MIT",
+    "LicenseFile": "COPYING",
+    "Copyright": ["Copyright © 2010-2022  Google, Inc.",
+    "Copyright © 2015-2020  Ebrahim Byagowi",
+    "Copyright © 2019,2020  Facebook, Inc.",
+    "Copyright © 2012,2015  Mozilla Foundation",
+    "Copyright © 2011  Codethink Limited",
+    "Copyright © 2008,2010  Nokia Corporation and/or its subsidiary(-ies)",
+    "Copyright © 2009  Keith Stribley",
+    "Copyright © 2011  Martin Hosken and SIL International",
+    "Copyright © 2007  Chris Wilson",
+    "Copyright © 2005,2006,2020,2021,2022,2023  Behdad Esfahbod",
+    "Copyright © 2004,2007,2008,2009,2010,2013,2021,2022,2023  Red Hat, Inc.",
+    "Copyright © 1998-2005  David Turner and Werner Lemberg",
+    "Copyright © 2016  Igalia S.L.",
+    "Copyright © 2022  Matthias Clasen",
+    "Copyright © 2018,2021  Khaled Hosny",
+    "Copyright © 2018,2019,2020  Adobe, Inc",
+    "Copyright © 2013-2015  Alexei Podtelezhnikov"]
+}
+
+
+--- qtbase/src/3rdparty/harfbuzz-ng/COPYING ---
+
+HarfBuzz is licensed under the so-called "Old MIT" license.  Details follow.
+For parts of HarfBuzz that are licensed under different licenses see individual
+files names COPYING in subdirectories where applicable.
+
+Copyright © 2010-2022  Google, Inc.
+Copyright © 2015-2020  Ebrahim Byagowi
+Copyright © 2019,2020  Facebook, Inc.
+Copyright © 2012,2015  Mozilla Foundation
+Copyright © 2011  Codethink Limited
+Copyright © 2008,2010  Nokia Corporation and/or its subsidiary(-ies)
+Copyright © 2009  Keith Stribley
+Copyright © 2011  Martin Hosken and SIL International
+Copyright © 2007  Chris Wilson
+Copyright © 2005,2006,2020,2021,2022,2023  Behdad Esfahbod
+Copyright © 2004,2007,2008,2009,2010,2013,2021,2022,2023  Red Hat, Inc.
+Copyright © 1998-2005  David Turner and Werner Lemberg
+Copyright © 2016  Igalia S.L.
+Copyright © 2022  Matthias Clasen
+Copyright © 2018,2021  Khaled Hosny
+Copyright © 2018,2019,2020  Adobe, Inc
+Copyright © 2013-2015  Alexei Podtelezhnikov
+
+For full copyright notices consult the individual files in the package.
+
+
+Permission is hereby granted, without written agreement and without
+license or royalty fees, to use, copy, modify, and distribute this
+software and its documentation for any purpose, provided that the
+above copyright notice and the following two paragraphs appear in
+all copies of this software.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE TO ANY PARTY FOR
+DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES
+ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION, EVEN
+IF THE COPYRIGHT HOLDER HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH
+DAMAGE.
+
+THE COPYRIGHT HOLDER SPECIFICALLY DISCLAIMS ANY WARRANTIES, INCLUDING,
+BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ON AN "AS IS" BASIS, AND THE COPYRIGHT HOLDER HAS NO OBLIGATION TO
+PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+
+========================================================================
+qtbase/src/3rdparty/icc/qt_attribution.json
+[
+    {
+        "Id": "icc-srgb-color-profile",
+        "Name": "sRGB color profile icc file",
+        "QDocModule": "qtgui",
+        "QtUsage": "Used in Qt Gui (Embedded into PDF/A-1b files generated by QPrinter/QPdfWriter).",
+        "Files": "sRGB2014.icc",
+
+        "Comment": "No upstream: treat as final, no relevant CPE found",
+        "Description": "An ICC color profile for PDF/A-1b compatible PDF files.",
+        "Homepage": "http://www.color.org/",
+        "PURL": "pkg:generic/icc-sRGB-color-profile?download_url=http://www.color.org/",
+        "LicenseId": "LicenseRef-ICC-License",
+        "License": "International Color Consortium License",
+        "LicenseFile": "LICENSE.txt",
+        "Copyright": "Copyright International Color Consortium, 2015"
+    }
+]
+
+
+--- qtbase/src/3rdparty/icc/LICENSE.txt ---
+
+For the file sRGB2014.icc:
+
+Copyright International Color Consortium, 2015
+
+This profile is made available by the International Color Consortium, and may be copied,
+distributed, embedded, made, used, and sold without restriction. Altered versions of this
+profile shall have the original identification and copyright information removed and
+shall not be misrepresented as the original profile.
+
+(original source location: http://www.color.org/srgbprofiles.xalter)
+
+========================================================================
+qtbase/src/3rdparty/libjpeg/qt_attribution.json
+{
+    "Id": "libjpeg",
+    "Name": "LibJPEG-turbo",
+    "QDocModule": "qtgui",
+    "QtUsage": "Used in the qjpeg image plugin. Configure with -system-libjpeg or -no-libjpeg to avoid.",
+    "SecurityCritical": true,
+
+    "Description": "The Independent JPEG Group's JPEG software",
+    "Homepage": "http://libjpeg-turbo.virtualgl.org/",
+    "Version": "3.2.0",
+    "DownloadLocation": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz",
+    "PURL": "pkg:github/libjpeg-turbo/libjpeg-turbo@$<VERSION>",
+    "CPE": "cpe:2.3:a:libjpeg-turbo:libjpeg-turbo:$<VERSION>:*:*:*:*:*:*:*",
+
+    "License": "Independent JPEG Group License and BSD 3-Clause \"New\" or \"Revised\" License",
+    "LicenseId": "IJG AND BSD-3-Clause",
+    "LicenseFiles": [ "LICENSE", "ijg-license.txt" ],
+    "CopyrightFile": "COPYRIGHT.txt"
+}
+
+
+--- qtbase/src/3rdparty/libjpeg/COPYRIGHT.txt ---
+
+Copyright (C) 2009-2026 D. R. Commander
+Copyright (C) 1991-1998 Thomas G. Lane
+Copyright (C) 2009 Pierre Ossman for Cendio AB
+Copyright (C) 1999-2006 MIYASAKA Masaru
+Copyright (C) 1999 Ken Murchison
+Copyright (C) 2015-2016, 2018, 2022 Matthieu Darbois
+Copyright (C) 2018 Matthias Räncker
+Copyright (C) 2019-2020 Arm Limited
+Copyright (C) 2022 Felix Hanau
+Copyright (C) 1997-1998 Thomas G. Lane, Todd Newman
+Copyright (C) 2021 Alex Richardson
+Copyright (C) 2015, 2020 Google, Inc.
+Copyright (C) 2013 Linaro Limited
+Copyright (C) 2014 Olle Liljenzin
+Copyright (C) 1991-2020 Thomas G. Lane, Guido Vollbeding
+
+--- qtbase/src/3rdparty/libjpeg/LICENSE ---
+
+libjpeg-turbo Licenses
+======================
+
+libjpeg-turbo is covered by two compatible BSD-style open source licenses:
+
+- The IJG (Independent JPEG Group) License, which is listed in
+  [README.ijg](README.ijg)
+
+  This license applies to the libjpeg API library and associated programs,
+  including any code inherited from libjpeg and any modifications to that
+  code.
+
+- The Modified (3-clause) BSD License, which is listed below
+
+  This license applies to the TurboJPEG API library and associated programs,
+  [libspng](https://libspng.org) (which is used by cjpeg and djpeg), and the
+  build/test system.
+
+  * The TurboJPEG API library wraps the libjpeg API library, so in the context
+    of the overall TurboJPEG API library, both the terms of the IJG License and
+    the terms of the Modified (3-clause) BSD License apply.
+  * cjpeg and djpeg use libspng, so in the context of those programs, both the
+    terms of the IJG License and the terms of the Modified (3-clause) BSD
+    License apply.
+
+
+Component Licenses
+==================
+
+Some of libjpeg-turbo's modules and internal dependencies are covered by less
+restrictive licenses, but in the context of libjpeg-turbo as a whole, the terms
+of the less restrictive licenses are subsumed by either the IJG License or the
+Modified BSD License.  (In other words, the terms of the less restrictive
+licenses are satisfied if the terms of the IJG and Modified BSD Licenses are
+satisfied.)
+
+- The libjpeg-turbo SIMD source code and zlib are covered by the
+  [zlib License](https://spdx.org/licenses/Zlib.html), which is subsumed by the
+  IJG License in the context of the cjpeg and djpeg programs and the libjpeg
+  API library.
+
+- Some of the libspng source code is covered by the
+  [PNG Reference Library License v2](https://spdx.org/licenses/libpng-2.0.html),
+  which is subsumed by the IJG License in the context of the cjpeg and djpeg
+  programs and the TurboJPEG API library.
+
+- Most of the libspng source code is covered by the
+  [Simplified (2-clause) BSD License](https://spdx.org/licenses/BSD-2-Clause.html),
+  which is subsumed by the Modified BSD License in the context of the cjpeg and
+  djpeg programs and the TurboJPEG API library.
+
+
+Complying with the libjpeg-turbo Licenses
+=========================================
+
+This section provides a roll-up of the libjpeg-turbo licensing terms, to the
+best of our understanding.  This is not a license in and of itself.  It is
+intended solely for clarification.
+
+1.  If you are distributing a modified version of the libjpeg-turbo source,
+    then:
+
+    1.  You cannot alter or remove any existing copyright or license notices
+        from the source.
+
+        **Origin**
+        - Clause 1 of the IJG License
+        - Clause 1 of the Modified BSD License
+
+    2.  You must add your own copyright notice to the header of each source
+        file you modified, so others can tell that you modified that file.  (If
+        there is not an existing copyright header in that file, then you can
+        simply add a notice stating that you modified the file.)
+
+        **Origin**
+        - Clause 1 of the IJG License
+
+    3.  You must include the IJG README file, and you must not alter any of the
+        copyright or license text in that file.
+
+        **Origin**
+        - Clause 1 of the IJG License
+
+2.  If you are distributing only libjpeg-turbo binaries without the source, or
+    if you are distributing an application that statically links with
+    libjpeg-turbo, then:
+
+    1.  Your product documentation must include a message stating:
+
+        This software is based in part on the work of the Independent JPEG
+        Group.
+
+        **Origin**
+        - Clause 2 of the IJG license
+
+    2.  If your binary distribution includes or uses the TurboJPEG API or
+        associated programs, cjpeg, or djpeg, then your product documentation
+        must include the text of the Modified BSD License (see below.)
+
+        **Origin**
+        - Clause 2 of the Modified BSD License
+
+3.  You cannot use the name of the IJG or The libjpeg-turbo Project or the
+    contributors thereof in advertising, publicity, etc.
+
+    **Origin**
+    - IJG License
+    - Clause 3 of the Modified BSD License
+
+4.  The authors and distributors do not warrant libjpeg-turbo to be free of
+    defects, nor do we accept any liability for undesirable consequences
+    resulting from your use of the software.
+
+    **Origin**
+    - IJG License
+    - Modified BSD License
+
+
+The Modified (3-clause) BSD License
+===================================
+
+Copyright (C) 2009-2026 D. R. Commander<br>
+Copyright (C) 2018-2023 Randy <randy408@protonmail.com>
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+- Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+- Neither the name of the libjpeg-turbo Project nor the names of its
+  contributors may be used to endorse or promote products derived from this
+  software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS",
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+--- qtbase/src/3rdparty/libjpeg/ijg-license.txt ---
+
+The authors make NO WARRANTY or representation, either express or implied,
+with respect to this software, its quality, accuracy, merchantability, or
+fitness for a particular purpose.  This software is provided "AS IS", and you,
+its user, assume the entire risk as to its quality and accuracy.
+
+This software is copyright (C) 1991-2020, Thomas G. Lane, Guido Vollbeding.
+All Rights Reserved except as specified below.
+
+Permission is hereby granted to use, copy, modify, and distribute this
+software (or portions thereof) for any purpose, without fee, subject to these
+conditions:
+(1) If any part of the source code for this software is distributed, then this
+README file must be included, with this copyright and no-warranty notice
+unaltered; and any additions, deletions, or changes to the original files
+must be clearly indicated in accompanying documentation.
+(2) If only executable code is distributed, then the accompanying
+documentation must state that "this software is based in part on the work of
+the Independent JPEG Group".
+(3) Permission for use of this software is granted only if the user accepts
+full responsibility for any undesirable consequences; the authors accept
+NO LIABILITY for damages of any kind.
+
+These conditions apply to any software derived from or based on the IJG code,
+not just to the unmodified library.  If you use our work, you ought to
+acknowledge us.
+
+Permission is NOT granted for the use of any IJG author's name or company name
+in advertising or publicity relating to this software or products derived from
+it.  This software may be referred to only as "the Independent JPEG Group's
+software".
+
+We specifically permit and encourage the use of this software as the basis of
+commercial products, provided that all warranty or liability claims are
+assumed by the product vendor.
+
+========================================================================
+qtbase/src/3rdparty/libpng/qt_attribution.json
+{
+    "Id": "libpng",
+    "Name": "LibPNG",
+    "QDocModule": "qtgui",
+    "QtUsage": "Used in the qpng image plugin. Configure with -system-libpng or -no-libpng to avoid.",
+    "SecurityCritical": true,
+
+    "Description": "libpng is the official PNG reference library.",
+    "Homepage": "http://www.libpng.org/pub/png/libpng.html",
+    "Version": "1.6.58",
+    "DownloadLocation": "https://download.sourceforge.net/libpng/libpng-1.6.58.tar.xz",
+    "PURL": "pkg:github/pnggroup/libpng@v$<VERSION>",
+    "CPE": "cpe:2.3:a:libpng:libpng:$<VERSION>:*:*:*:*:*:*:*",
+
+    "License": "libpng License and PNG Reference Library version 2",
+    "LicenseId": "Libpng AND libpng-2.0",
+    "LicenseFile": "LICENSE",
+    "Copyright": ["Copyright (c) 1995-2026 The PNG Reference Library Authors",
+    "Copyright (c) 2000-2026 Cosmin Truta",
+    "Copyright (c) 1998-2018 Glenn Randers-Pehrson",
+    "Copyright (c) 1996-1997 Andreas Dilger",
+    "Copyright (c) 1995-1996 Guy Eric Schalnat, Group 42, Inc.",
+    "Copyright (c) 2000-2017 Simon-Pierre Cadieux",
+    "Copyright (c) 2000-2017 Eric S. Raymond",
+    "Copyright (c) 2000-2017 Mans Rullgard",
+    "Copyright (c) 2000-2017 Gilles Vollant",
+    "Copyright (c) 2000-2017 James Yu",
+    "Copyright (c) 2000-2017 Mandar Sahastrabuddhe",
+    "Copyright (c) 1998-2000 Tom Lane",
+    "Copyright (c) 1998-2000 Willem van Schaik",
+    "Copyright (c) 1996-1997 John Bowler",
+    "Copyright (c) 1996-1997 Kevin Bracey",
+    "Copyright (c) 1996-1997 Sam Bushell",
+    "Copyright (c) 1996-1997 Magnus Holmgren",
+    "Copyright (c) 1996-1997 Greg Roelofs",
+    "Copyright (c) 1996-1997 Tom Tanner",
+    "Copyright (c) 1995-1996 Dave Martindale",
+    "Copyright (c) 1995-1996 Paul Schmidt",
+    "Copyright (c) 1995-1996 Tim Wegner"]
+}
+
+
+--- qtbase/src/3rdparty/libpng/LICENSE ---
+
+COPYRIGHT NOTICE, DISCLAIMER, and LICENSE
+=========================================
+
+PNG Reference Library License version 2
+---------------------------------------
+
+ * Copyright (c) 1995-2026 The PNG Reference Library Authors.
+ * Copyright (c) 2018-2026 Cosmin Truta.
+ * Copyright (c) 2000-2002, 2004, 2006-2018 Glenn Randers-Pehrson.
+ * Copyright (c) 1996-1997 Andreas Dilger.
+ * Copyright (c) 1995-1996 Guy Eric Schalnat, Group 42, Inc.
+
+The software is supplied "as is", without warranty of any kind,
+express or implied, including, without limitation, the warranties
+of merchantability, fitness for a particular purpose, title, and
+non-infringement.  In no event shall the Copyright owners, or
+anyone distributing the software, be liable for any damages or
+other liability, whether in contract, tort or otherwise, arising
+from, out of, or in connection with the software, or the use or
+other dealings in the software, even if advised of the possibility
+of such damage.
+
+Permission is hereby granted to use, copy, modify, and distribute
+this software, or portions hereof, for any purpose, without fee,
+subject to the following restrictions:
+
+ 1. The origin of this software must not be misrepresented; you
+    must not claim that you wrote the original software.  If you
+    use this software in a product, an acknowledgment in the product
+    documentation would be appreciated, but is not required.
+
+ 2. Altered source versions must be plainly marked as such, and must
+    not be misrepresented as being the original software.
+
+ 3. This Copyright notice may not be removed or altered from any
+    source or altered source distribution.
+
+
+PNG Reference Library License version 1 (for libpng 0.5 through 1.6.35)
+-----------------------------------------------------------------------
+
+libpng versions 1.0.7, July 1, 2000, through 1.6.35, July 15, 2018 are
+Copyright (c) 2000-2002, 2004, 2006-2018 Glenn Randers-Pehrson, are
+derived from libpng-1.0.6, and are distributed according to the same
+disclaimer and license as libpng-1.0.6 with the following individuals
+added to the list of Contributing Authors:
+
+    Simon-Pierre Cadieux
+    Eric S. Raymond
+    Mans Rullgard
+    Cosmin Truta
+    Gilles Vollant
+    James Yu
+    Mandar Sahastrabuddhe
+    Google Inc.
+    Vadim Barkov
+
+and with the following additions to the disclaimer:
+
+    There is no warranty against interference with your enjoyment of
+    the library or against infringement.  There is no warranty that our
+    efforts or the library will fulfill any of your particular purposes
+    or needs.  This library is provided with all faults, and the entire
+    risk of satisfactory quality, performance, accuracy, and effort is
+    with the user.
+
+Some files in the "contrib" directory and some configure-generated
+files that are distributed with libpng have other copyright owners, and
+are released under other open source licenses.
+
+libpng versions 0.97, January 1998, through 1.0.6, March 20, 2000, are
+Copyright (c) 1998-2000 Glenn Randers-Pehrson, are derived from
+libpng-0.96, and are distributed according to the same disclaimer and
+license as libpng-0.96, with the following individuals added to the
+list of Contributing Authors:
+
+    Tom Lane
+    Glenn Randers-Pehrson
+    Willem van Schaik
+
+libpng versions 0.89, June 1996, through 0.96, May 1997, are
+Copyright (c) 1996-1997 Andreas Dilger, are derived from libpng-0.88,
+and are distributed according to the same disclaimer and license as
+libpng-0.88, with the following individuals added to the list of
+Contributing Authors:
+
+    John Bowler
+    Kevin Bracey
+    Sam Bushell
+    Magnus Holmgren
+    Greg Roelofs
+    Tom Tanner
+
+Some files in the "scripts" directory have other copyright owners,
+but are released under this license.
+
+libpng versions 0.5, May 1995, through 0.88, January 1996, are
+Copyright (c) 1995-1996 Guy Eric Schalnat, Group 42, Inc.
+
+For the purposes of this copyright and license, "Contributing Authors"
+is defined as the following set of individuals:
+
+    Andreas Dilger
+    Dave Martindale
+    Guy Eric Schalnat
+    Paul Schmidt
+    Tim Wegner
+
+The PNG Reference Library is supplied "AS IS".  The Contributing
+Authors and Group 42, Inc. disclaim all warranties, expressed or
+implied, including, without limitation, the warranties of
+merchantability and of fitness for any purpose.  The Contributing
+Authors and Group 42, Inc. assume no liability for direct, indirect,
+incidental, special, exemplary, or consequential damages, which may
+result from the use of the PNG Reference Library, even if advised of
+the possibility of such damage.
+
+Permission is hereby granted to use, copy, modify, and distribute this
+source code, or portions hereof, for any purpose, without fee, subject
+to the following restrictions:
+
+ 1. The origin of this source code must not be misrepresented.
+
+ 2. Altered versions must be plainly marked as such and must not
+    be misrepresented as being the original source.
+
+ 3. This Copyright notice may not be removed or altered from any
+    source or altered source distribution.
+
+The Contributing Authors and Group 42, Inc. specifically permit,
+without fee, and encourage the use of this source code as a component
+to supporting the PNG file format in commercial products.  If you use
+this source code in a product, acknowledgment is not required but would
+be appreciated.
+
+========================================================================
+qtbase/src/3rdparty/libpsl/qt_attribution.json
+[
+{
+    "Id": "psl-data",
+    "Name": "The Public Suffix List",
+    "QDocModule": "qtnetwork",
+    "Description": "The Public Suffix List is an initiative of Mozilla,
+but is maintained as a community resource. It is available for use in any software,
+but was originally created to meet the needs of browser manufacturers.
+It allows browsers to, for example:
+
+- Avoid privacy-damaging \"supercookies\" being set for high-level domain name suffixes
+
+- Highlight the most important part of a domain name in the user interface
+
+- Accurately sort history entries by site",
+    "Files": "psl_data.cpp",
+    "QtUsage": "Used in Qt Network to avoid setting \"supercookies\" in the cookie jar
+supported by Qt (by the QNetworkCookieJar class).",
+
+    "Comment": "Consult https://github.com/publicsuffix/list for the sha1 but download from ...",
+    "Homepage": "http://publicsuffix.org/",
+    "Comment": "Suggested update schedule: twice per year (before a 6.x.0 release), no relevant CPE found",
+    "Comment": "Updated by util/update_public_suffix_list.sh; if you add fields here, update the script, too!",
+    "Version": "2026-05-14_08-35-31_UTC",
+    "DownloadLocation": "https://publicsuffix.org/list/public_suffix_list.dat",
+    "PURL": "pkg:generic/psl-data@e452c7058d6946bd76952b128c12f5ce87a5acb8?download_url=https://publicsuffix.org/list/public_suffix_list.dat",
+
+    "License": "Mozilla Public License 2.0",
+    "LicenseFile": "PSL-LICENSE.txt",
+    "LicenseId": "MPL-2.0",
+    "Copyright": "The list was originally provided by Jo Hermans <jo.hermans@gmail.com>.\nIt is now maintained on github (https://github.com/publicsuffix/list)."
+},
+{
+    "Id": "libpsl",
+    "Name": "libpsl - C library to handle the Public Suffix List",
+    "QDocModule": "qtnetwork",
+    "Description": "Libpsl allows checking domains against the Public Suffix List.",
+    "Files": [ "src/lookup_string_in_fixed_set.c", "src/psl-make-dafsa" ],
+    "QtUsage": "Used to compress the embedded copy of publicsuffix list and
+to lookup entries in it.",
+    "Homepage": "https://github.com/rockdaboot/libpsl",
+    "Version": "664f3dc85259ec65e30248a61fa1c45b7b0e4c3f",
+    "PURL": "pkg:github/rockdaboot/libpsl@$<VERSION>",
+    "License": "BSD 3-clause \"New\" or \"Revised\" License",
+    "LicenseFile": "src/LICENSE.chromium",
+    "LicenseId": "BSD-3-Clause",
+    "Copyright": "Copyright 2014-2016 The Chromium Authors. All rights reserved.",
+    "Comment": "no relevant CPE found"
+}
+]
+
+
+--- qtbase/src/3rdparty/libpsl/PSL-LICENSE.txt ---
+
+Mozilla Public License Version 2.0
+==================================
+
+1. Definitions
+--------------
+
+1.1. "Contributor"
+    means each individual or legal entity that creates, contributes to
+    the creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+    means the combination of the Contributions of others (if any) used
+    by a Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+    means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+    means Source Code Form to which the initial Contributor has attached
+    the notice in Exhibit A, the Executable Form of such Source Code
+    Form, and Modifications of such Source Code Form, in each case
+    including portions thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+    means
+
+    (a) that the initial Contributor has attached the notice described
+        in Exhibit B to the Covered Software; or
+
+    (b) that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the
+        terms of a Secondary License.
+
+1.6. "Executable Form"
+    means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+    means a work that combines Covered Software with other material, in
+    a separate file or files, that is not Covered Software.
+
+1.8. "License"
+    means this document.
+
+1.9. "Licensable"
+    means having the right to grant, to the maximum extent possible,
+    whether at the time of the initial grant or subsequently, any and
+    all of the rights conveyed by this License.
+
+1.10. "Modifications"
+    means any of the following:
+
+    (a) any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered
+        Software; or
+
+    (b) any new file in Source Code Form that contains any Covered
+        Software.
+
+1.11. "Patent Claims" of a Contributor
+    means any patent claim(s), including without limitation, method,
+    process, and apparatus claims, in any patent Licensable by such
+    Contributor that would be infringed, but for the grant of the
+    License, by the making, using, selling, offering for sale, having
+    made, import, or transfer of either its Contributions or its
+    Contributor Version.
+
+1.12. "Secondary License"
+    means either the GNU General Public License, Version 2.0, the GNU
+    Lesser General Public License, Version 2.1, the GNU Affero General
+    Public License, Version 3.0, or any later versions of those
+    licenses.
+
+1.13. "Source Code Form"
+    means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+    means an individual or a legal entity exercising rights under this
+    License. For legal entities, "You" includes any entity that
+    controls, is controlled by, or is under common control with You. For
+    purposes of this definition, "control" means (a) the power, direct
+    or indirect, to cause the direction or management of such entity,
+    whether by contract or otherwise, or (b) ownership of more than
+    fifty percent (50%) of the outstanding shares or beneficial
+    ownership of such entity.
+
+2. License Grants and Conditions
+--------------------------------
+
+2.1. Grants
+
+Each Contributor hereby grants You a world-wide, royalty-free,
+non-exclusive license:
+
+(a) under intellectual property rights (other than patent or trademark)
+    Licensable by such Contributor to use, reproduce, make available,
+    modify, display, perform, distribute, and otherwise exploit its
+    Contributions, either on an unmodified basis, with Modifications, or
+    as part of a Larger Work; and
+
+(b) under Patent Claims of such Contributor to make, use, sell, offer
+    for sale, have made, import, and otherwise transfer either its
+    Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+The licenses granted in Section 2.1 with respect to any Contribution
+become effective for each Contribution on the date the Contributor first
+distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+The licenses granted in this Section 2 are the only rights granted under
+this License. No additional rights or licenses will be implied from the
+distribution or licensing of Covered Software under this License.
+Notwithstanding Section 2.1(b) above, no patent license is granted by a
+Contributor:
+
+(a) for any code that a Contributor has removed from Covered Software;
+    or
+
+(b) for infringements caused by: (i) Your and any other third party's
+    modifications of Covered Software, or (ii) the combination of its
+    Contributions with other software (except as part of its Contributor
+    Version); or
+
+(c) under Patent Claims infringed by Covered Software in the absence of
+    its Contributions.
+
+This License does not grant any rights in the trademarks, service marks,
+or logos of any Contributor (except as may be necessary to comply with
+the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+No Contributor makes additional grants as a result of Your choice to
+distribute the Covered Software under a subsequent version of this
+License (see Section 10.2) or under the terms of a Secondary License (if
+permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+Each Contributor represents that the Contributor believes its
+Contributions are its original creation(s) or it has sufficient rights
+to grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+This License is not intended to limit any rights You have under
+applicable copyright doctrines of fair use, fair dealing, or other
+equivalents.
+
+2.7. Conditions
+
+Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted
+in Section 2.1.
+
+3. Responsibilities
+-------------------
+
+3.1. Distribution of Source Form
+
+All distribution of Covered Software in Source Code Form, including any
+Modifications that You create or to which You contribute, must be under
+the terms of this License. You must inform recipients that the Source
+Code Form of the Covered Software is governed by the terms of this
+License, and how they can obtain a copy of this License. You may not
+attempt to alter or restrict the recipients' rights in the Source Code
+Form.
+
+3.2. Distribution of Executable Form
+
+If You distribute Covered Software in Executable Form then:
+
+(a) such Covered Software must also be made available in Source Code
+    Form, as described in Section 3.1, and You must inform recipients of
+    the Executable Form how they can obtain a copy of such Source Code
+    Form by reasonable means in a timely manner, at a charge no more
+    than the cost of distribution to the recipient; and
+
+(b) You may distribute such Executable Form under the terms of this
+    License, or sublicense it under different terms, provided that the
+    license for the Executable Form does not attempt to limit or alter
+    the recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+You may create and distribute a Larger Work under terms of Your choice,
+provided that You also comply with the requirements of this License for
+the Covered Software. If the Larger Work is a combination of Covered
+Software with a work governed by one or more Secondary Licenses, and the
+Covered Software is not Incompatible With Secondary Licenses, this
+License permits You to additionally distribute such Covered Software
+under the terms of such Secondary License(s), so that the recipient of
+the Larger Work may, at their option, further distribute the Covered
+Software under the terms of either this License or such Secondary
+License(s).
+
+3.4. Notices
+
+You may not remove or alter the substance of any license notices
+(including copyright notices, patent notices, disclaimers of warranty,
+or limitations of liability) contained within the Source Code Form of
+the Covered Software, except that You may alter any license notices to
+the extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+You may choose to offer, and to charge a fee for, warranty, support,
+indemnity or liability obligations to one or more recipients of Covered
+Software. However, You may do so only on Your own behalf, and not on
+behalf of any Contributor. You must make it absolutely clear that any
+such warranty, support, indemnity, or liability obligation is offered by
+You alone, and You hereby agree to indemnify every Contributor for any
+liability incurred by such Contributor as a result of warranty, support,
+indemnity or liability terms You offer. You may include additional
+disclaimers of warranty and limitations of liability specific to any
+jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+---------------------------------------------------
+
+If it is impossible for You to comply with any of the terms of this
+License with respect to some or all of the Covered Software due to
+statute, judicial order, or regulation then You must: (a) comply with
+the terms of this License to the maximum extent possible; and (b)
+describe the limitations and the code they affect. Such description must
+be placed in a text file included with all distributions of the Covered
+Software under this License. Except to the extent prohibited by statute
+or regulation, such description must be sufficiently detailed for a
+recipient of ordinary skill to be able to understand it.
+
+5. Termination
+--------------
+
+5.1. The rights granted under this License will terminate automatically
+if You fail to comply with any of its terms. However, if You become
+compliant, then the rights granted under this License from a particular
+Contributor are reinstated (a) provisionally, unless and until such
+Contributor explicitly and finally terminates Your grants, and (b) on an
+ongoing basis, if such Contributor fails to notify You of the
+non-compliance by some reasonable means prior to 60 days after You have
+come back into compliance. Moreover, Your grants from a particular
+Contributor are reinstated on an ongoing basis if such Contributor
+notifies You of the non-compliance by some reasonable means, this is the
+first time You have received notice of non-compliance with this License
+from such Contributor, and You become compliant prior to 30 days after
+Your receipt of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+infringement claim (excluding declaratory judgment actions,
+counter-claims, and cross-claims) alleging that a Contributor Version
+directly or indirectly infringes any patent, then the rights granted to
+You by any and all Contributors for the Covered Software under Section
+2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all
+end user license agreements (excluding distributors and resellers) which
+have been validly granted by You or Your distributors under this License
+prior to termination shall survive termination.
+
+************************************************************************
+*                                                                      *
+*  6. Disclaimer of Warranty                                           *
+*  -------------------------                                           *
+*                                                                      *
+*  Covered Software is provided under this License on an "as is"       *
+*  basis, without warranty of any kind, either expressed, implied, or  *
+*  statutory, including, without limitation, warranties that the       *
+*  Covered Software is free of defects, merchantable, fit for a        *
+*  particular purpose or non-infringing. The entire risk as to the     *
+*  quality and performance of the Covered Software is with You.        *
+*  Should any Covered Software prove defective in any respect, You     *
+*  (not any Contributor) assume the cost of any necessary servicing,   *
+*  repair, or correction. This disclaimer of warranty constitutes an   *
+*  essential part of this License. No use of any Covered Software is   *
+*  authorized under this License except under this disclaimer.         *
+*                                                                      *
+************************************************************************
+
+************************************************************************
+*                                                                      *
+*  7. Limitation of Liability                                          *
+*  --------------------------                                          *
+*                                                                      *
+*  Under no circumstances and under no legal theory, whether tort      *
+*  (including negligence), contract, or otherwise, shall any           *
+*  Contributor, or anyone who distributes Covered Software as          *
+*  permitted above, be liable to You for any direct, indirect,         *
+*  special, incidental, or consequential damages of any character      *
+*  including, without limitation, damages for lost profits, loss of    *
+*  goodwill, work stoppage, computer failure or malfunction, or any    *
+*  and all other commercial damages or losses, even if such party      *
+*  shall have been informed of the possibility of such damages. This   *
+*  limitation of liability shall not apply to liability for death or   *
+*  personal injury resulting from such party's negligence to the       *
+*  extent applicable law prohibits such limitation. Some               *
+*  jurisdictions do not allow the exclusion or limitation of           *
+*  incidental or consequential damages, so this exclusion and          *
+*  limitation may not apply to You.                                    *
+*                                                                      *
+************************************************************************
+
+8. Litigation
+-------------
+
+Any litigation relating to this License may be brought only in the
+courts of a jurisdiction where the defendant maintains its principal
+place of business and such litigation shall be governed by laws of that
+jurisdiction, without reference to its conflict-of-law provisions.
+Nothing in this Section shall prevent a party's ability to bring
+cross-claims or counter-claims.
+
+9. Miscellaneous
+----------------
+
+This License represents the complete agreement concerning the subject
+matter hereof. If any provision of this License is held to be
+unenforceable, such provision shall be reformed only to the extent
+necessary to make it enforceable. Any law or regulation which provides
+that the language of a contract shall be construed against the drafter
+shall not be used to construe this License against a Contributor.
+
+10. Versions of the License
+---------------------------
+
+10.1. New Versions
+
+Mozilla Foundation is the license steward. Except as provided in Section
+10.3, no one other than the license steward has the right to modify or
+publish new versions of this License. Each version will be given a
+distinguishing version number.
+
+10.2. Effect of New Versions
+
+You may distribute the Covered Software under the terms of the version
+of the License under which You originally received the Covered Software,
+or under the terms of any subsequent version published by the license
+steward.
+
+10.3. Modified Versions
+
+If you create software not governed by this License, and you want to
+create a new license for such software, you may create and use a
+modified version of this License if you rename the license and remove
+any references to the name of the license steward (except to note that
+such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+Licenses
+
+If You choose to distribute Source Code Form that is Incompatible With
+Secondary Licenses under the terms of this version of the License, the
+notice described in Exhibit B of this License must be attached.
+
+Exhibit A - Source Code Form License Notice
+-------------------------------------------
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular
+file, then You may include the notice in a location (such as a LICENSE
+file in a relevant directory) where a recipient would be likely to look
+for such a notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+---------------------------------------------------------
+
+  This Source Code Form is "Incompatible With Secondary Licenses", as
+  defined by the Mozilla Public License, v. 2.0.
+
+--- qtbase/src/3rdparty/libpsl/src/LICENSE.chromium ---
+
+* The following License is for the source code files
+  psl-make-dafsa and lookup_string_in_fixed_set.c.
+
+// Copyright 2015 The Chromium Authors. All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//    * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//    * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+========================================================================
+qtbase/src/3rdparty/md4/qt_attribution.json
+{
+    "Id": "md4",
+    "Name": "MD4",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QCryptographicHash).",
+
+    "Comment": "Treat as final version; no upstream known, no relevant CPE or PURL found",
+    "Description": "An OpenSSL-compatible implementation of the RSA Data Security, Inc. MD4 Message-Digest Algorithm.",
+    "License": "Public Domain",
+    "LicenseId": "CC0-1.0",
+    "Copyright": "Written by Alexander Peslyak - better known as Solar Designer <solar@openwall.com> - in 2001, and placed in the public domain. There's absolutely no warranty."
+}
+
+
+========================================================================
+qtbase/src/3rdparty/md4c/qt_attribution.json
+{
+    "Id": "md4c",
+    "Name": "MD4C",
+    "QDocModule": "qtgui",
+    "QtUsage": "Optionally used in QTextDocument if configured with textmarkdownreader.",
+    "SecurityCritical": true,
+
+    "Description": "A CommonMark-compliant Markdown parser.",
+    "Homepage": "https://github.com/mity/md4c",
+    "License": "MIT License",
+    "LicenseId": "MIT",
+    "LicenseFile": "LICENSE.md",
+    "Version": "0.5.3",
+    "DownloadLocation": "https://github.com/mity/md4c/releases/tag/release-0.5.3",
+    "PURL": "pkg:github/mity/md4c@release-$<VERSION>",
+    "CPE": "cpe:2.3:a:md4c_project:md4c:$<VERSION>:*:*:*:*:*:*:*",
+    "Copyright": "Copyright © 2016-2024 Martin Mitáš"
+}
+
+
+--- qtbase/src/3rdparty/md4c/LICENSE.md ---
+
+# The MIT License (MIT)
+
+Copyright © 2016-2024 Martin Mitáš
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the “Software”),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+========================================================================
+qtbase/src/3rdparty/md5/qt_attribution.json
+{
+    "Id": "md5",
+    "Name": "MD5",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QCryptographicHash).",
+
+    "Comment": "Treat as final version; no upstream known, no relevant CPE or PURL found",
+    "Description": "MD5 message-digest algorithm.",
+    "License": "Public Domain",
+    "LicenseId": "CC0-1.0",
+    "Copyright": "Written by Colin Plumb in 1993, no copyright is claimed. Ian Jackson <ian@chiark.greenend.org.uk>."
+}
+
+
+========================================================================
+qtbase/src/3rdparty/pcre2/qt_attribution.json
+[
+{
+    "Id": "pcre2",
+    "Name": "PCRE2",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QRegularExpression).",
+    "SecurityCritical": true,
+
+    "Description": "The PCRE library is a set of functions that implement regular expression pattern matching using the same syntax and semantics as Perl 5.",
+    "Homepage": "http://www.pcre.org/",
+    "Version": "10.47",
+    "DownloadLocation": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.bz2",
+    "PURL": "pkg:github/PCRE2Project/pcre2@pcre2-$<VERSION>",
+    "CPE": "cpe:2.3:a:pcre:pcre2:$<VERSION>:*:*:*:*:*:*:*",
+    "License": "BSD 3-clause \"New\" or \"Revised\" License with PCRE2 binary-like Packages Exception",
+    "LicenseId": "LicenseRef-BSD-3-Clause-with-PCRE2-Binary-Like-Packages-Exception",
+    "LicenseFile": "LICENCE.md",
+    "Copyright": ["Copyright (c) 1997-2007 University of Cambridge",
+    "Copyright (c) 2007-2024 Philip Hazel",
+    "Copyright (c) 2010-2024 Zoltan Herczeg"]
+},
+{
+    "Id": "pcre2-sljit",
+    "Name": "PCRE2 - Stack-less Just-In-Time Compiler",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QRegularExpression).",
+
+    "Path": "deps/sljit",
+    "Description": "The PCRE library is a set of functions that implement regular expression pattern matching using the same syntax and semantics as Perl 5.",
+    "Homepage": "http://www.pcre.org/",
+    "Version": "10.47",
+    "DownloadLocation": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.bz2",
+    "PURL": "pkg:github/PCRE2Project/pcre2@pcre2-$<VERSION>",
+    "CPE": "cpe:2.3:a:pcre:pcre2:$<VERSION>:*:*:*:*:*:*:*",
+    "License": "BSD 2-clause \"Simplified\" License",
+    "LicenseId": "BSD-2-Clause",
+    "LicenseFile": "LICENSE-SLJIT",
+    "Copyright": "Copyright Zoltan Herczeg"
+}
+]
+
+
+--- qtbase/src/3rdparty/pcre2/LICENCE.md ---
+
+PCRE2 Licence
+=============
+
+| SPDX-License-Identifier: | BSD-3-Clause WITH PCRE2-exception |
+|---------|-------|
+
+PCRE2 is a library of functions to support regular expressions whose syntax
+and semantics are as close as possible to those of the Perl 5 language.
+
+Releases 10.00 and above of PCRE2 are distributed under the terms of the "BSD"
+licence, as specified below, with one exemption for certain binary
+redistributions. The documentation for PCRE2, supplied in the "doc" directory,
+is distributed under the same terms as the software itself. The data in the
+testdata directory is not copyrighted and is in the public domain.
+
+The basic library functions are written in C and are freestanding. Also
+included in the distribution is a just-in-time compiler that can be used to
+optimize pattern matching. This is an optional feature that can be omitted when
+the library is built. The just-in-time compiler is separately licensed under the
+"2-clause BSD" licence.
+
+
+COPYRIGHT
+---------
+
+### The basic library functions
+
+    Written by:       Philip Hazel
+    Email local part: Philip.Hazel
+    Email domain:     gmail.com
+
+    Retired from University of Cambridge Computing Service,
+    Cambridge, England.
+
+    Copyright (c) 1997-2007 University of Cambridge
+    Copyright (c) 2007-2024 Philip Hazel
+    All rights reserved.
+
+### PCRE2 Just-In-Time compilation support
+
+    Written by:       Zoltan Herczeg
+    Email local part: hzmester
+    Email domain:     freemail.hu
+
+    Copyright (c) 2010-2024 Zoltan Herczeg
+    All rights reserved.
+
+### Stack-less Just-In-Time compiler
+
+    Written by:       Zoltan Herczeg
+    Email local part: hzmester
+    Email domain:     freemail.hu
+
+    Copyright (c) 2009-2024 Zoltan Herczeg
+    All rights reserved.
+
+The code in the `deps/sljit` directory has its own LICENSE file.
+
+### All other contributions
+
+Many other contributors have participated in the authorship of PCRE2. As PCRE2
+has never required a Contributor Licensing Agreement, or other copyright
+assignment agreement, all contributions have copyright retained by each
+original contributor or their employer.
+
+
+THE "BSD" LICENCE
+-----------------
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notices,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright
+  notices, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+
+* Neither the name of the University of Cambridge nor the names of any
+  contributors may be used to endorse or promote products derived from this
+  software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+
+EXEMPTION FOR BINARY LIBRARY-LIKE PACKAGES
+------------------------------------------
+
+The second condition in the BSD licence (covering binary redistributions) does
+not apply all the way down a chain of software. If binary package A includes
+PCRE2, it must respect the condition, but if package B is software that
+includes package A, the condition is not imposed on package B unless it uses
+PCRE2 independently.
+
+--- qtbase/src/3rdparty/pcre2/LICENSE-SLJIT ---
+
+/*
+ *    Stack-less Just-In-Time compiler
+ *
+ *    Copyright Zoltan Herczeg (hzmester@freemail.hu). All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification, are
+ * permitted provided that the following conditions are met:
+ *
+ *   1. Redistributions of source code must retain the above copyright notice, this list of
+ *      conditions and the following disclaimer.
+ *
+ *   2. Redistributions in binary form must reproduce the above copyright notice, this list
+ *      of conditions and the following disclaimer in the documentation and/or other materials
+ *      provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER(S) AND CONTRIBUTORS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+ * SHALL THE COPYRIGHT HOLDER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+========================================================================
+qtbase/src/3rdparty/rfc6234/qt_attribution.json
+{
+    "Id": "rfc6234",
+    "Name": "Secure Hash Algorithms SHA-384 and SHA-512",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QCryptographicHash and QMessageAuthenticationCode)",
+
+    "Comment": "The RFC actually contains the code, embedded in RFC-boilerplate; presumably we extracted it; treat as final, no relevant CPE or PURL found",
+    "Description": "Implements the Secure Hash Algorithms SHA 384 and SHA-521",
+    "License": "BSD 3-clause \"New\" or \"Revised\" License",
+    "LicenseFile": "LICENSE",
+    "LicenseId": "BSD-3-Clause",
+    "Copyright": "Copyright (c) 2011 IETF Trust and the persons identified as authors of the code."
+}
+
+
+--- qtbase/src/3rdparty/rfc6234/LICENSE ---
+
+Copyright (c) 2011 IETF Trust and the persons identified as
+authors of the code.  All rights reserved.
+
+Redistribution and use in source and binary forms, with or
+without modification, are permitted provided that the following
+conditions are met:
+
+- Redistributions of source code must retain the above
+  copyright notice, this list of conditions and
+  the following disclaimer.
+
+- Redistributions in binary form must reproduce the above
+  copyright notice, this list of conditions and the following
+  disclaimer in the documentation and/or other materials provided
+  with the distribution.
+
+- Neither the name of Internet Society, IETF or IETF Trust, nor
+  the names of specific contributors, may be used to endorse or
+  promote products derived from this software without specific
+  prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+========================================================================
+qtbase/src/3rdparty/sha1/qt_attribution.json
+{
+    "Id": "sha1",
+    "Name": "Secure Hash Algorithm SHA-1",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QCryptographicHash).",
+
+    "Description": "Implements the Secure Hash Algorithms SHA 1",
+    "PURL": "pkg:generic/csha1?download_url=https://www.dominik-reichl.de/projects/csha1/",
+    "Homepage": "http://www.dominik-reichl.de/projects/csha1/",
+    "License": "Public Domain",
+    "LicenseId": "LicenseRef-SHA1-Public-Domain",
+    "Copyright": ["Copyright (C) Dominik Reichl <dominik.reichl@t-online.de>",
+    "Copyright (C) 2016 The Qt Company Ltd"],
+    "Comment": "no relevant CPE found"
+}
+
+
+========================================================================
+qtbase/src/3rdparty/sha3/qt_attribution.json
+[
+    {
+        "Id": "sha3_endian",
+        "Name": "Secure Hash Algorithm SHA-3 - brg_endian",
+        "QDocModule": "qtcore",
+        "QtUsage": "Used in Qt Core (QCryptographicHash).",
+        "Comment": "apply brg_endian.h.patch to upstream from https://github.com/BrianGladman/sha/",
+        "Files": "brg_endian.h",
+
+        "Description": "SHA-3, originally known as Keccak, is a cryptographic hash function.",
+        "Version": "1.0.0",
+        "PURL": "pkg:github/BrianGladman/sha@$<VERSION>",
+        "License": "BSD 2-clause \"Simplified\" License",
+        "LicenseFile": "BRG_ENDIAN_LICENSE",
+        "LicenseId": "BSD-2-Clause",
+        "Copyright": "Copyright (c) 1998-2013, Brian Gladman, Worcester, UK. All rights reserved.",
+        "Comment": "no relevant CPE found"
+    },
+    {
+        "Id": "sha3_keccak",
+        "Name": "Secure Hash Algorithm SHA-3 - Keccak",
+        "QDocModule": "qtcore",
+        "QtUsage": "Used in Qt Core (QCryptographicHash).",
+        "Comment": { "ObsoleteSource":
+                     "https://keccak.team/obsolete/KeccakReferenceAndOptimized-3.2.zip",
+                     "PatchApplied": "overflow.patch" },
+        "Files": [ "KeccakF-1600-32-rvk.macros",
+                   "KeccakF-1600-32.macros",
+                   "KeccakF-1600-64.macros",
+                   "KeccakF-1600-interface.h",
+                   "KeccakF-1600-opt32.c",
+                   "KeccakF-1600-opt64.c",
+                   "KeccakF-1600-unrolling.macros",
+                   "KeccakNISTInterface.c",
+                   "KeccakNISTInterface.h",
+                   "KeccakSponge.c",
+                   "KeccakSponge.h" ],
+
+        "Description": "SHA-3, originally known as Keccak, is a cryptographic hash function.",
+        "Version": "3.2",
+        "PURL": "pkg:generic/sha3_keccak@$<VERSION>?download_url=https://keccak.team/obsolete/KeccakReferenceAndOptimized-3.2.zip",
+        "License": "Creative Commons Zero v1.0 Universal",
+        "LicenseId": "CC0-1.0",
+        "LicenseFile": "CC0_LICENSE",
+        "Copyright": "Guido Bertoni, Joan Daemen, Michaël Peeters and Gilles Van Assche.\nTo the extent possible under law, the implementers have waived all copyright
+and related or neighboring rights to the source code in this file.",
+        "Comment": "no relevant CPE found"
+    }
+]
+
+
+--- qtbase/src/3rdparty/sha3/BRG_ENDIAN_LICENSE ---
+
+Copyright (c) 1998-2013, Brian Gladman, Worcester, UK. All rights reserved.
+
+The redistribution and use of this software (with or without changes)
+is allowed without the payment of fees or royalties provided that:
+
+  source code distributions include the above copyright notice, this
+  list of conditions and the following disclaimer;
+
+  binary distributions include the above copyright notice, this list
+  of conditions and the following disclaimer in their documentation.
+
+This software is provided 'as is' with no explicit or implied warranties
+in respect of its operation, including, but not limited to, correctness
+and fitness for purpose.
+
+--- qtbase/src/3rdparty/sha3/CC0_LICENSE ---
+
+See QT-LICENCES.txt, CC0-1.0, for the full terms.
+The component copyright is retained in the attribution record above.
+
+========================================================================
+qtbase/src/3rdparty/siphash/qt_attribution.json
+{
+    "Id": "siphash",
+    "Name": "SipHash Algorithm",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QHash)",
+    "Files": "siphash.cpp",
+
+    "Description": "Implements the SipHash algorithm.",
+    "Homepage": "https://131002.net/siphash/",
+    "DownloadLocation": "https://raw.githubusercontent.com/veorq/SipHash/adcbf09b1684a718f594faa650ffc56bacdb0777/siphash24.c",
+    "PURL": "pkg:github/veorq/SipHash@adcbf09b1684a718f594faa650ffc56bacdb0777",
+
+    "License": "Creative Commons Zero v1.0 Universal",
+    "LicenseId": "CC0-1.0",
+    "Copyright": [
+        "Copyright (C) 2012-2014 Jean-Philippe Aumasson",
+        "Copyright (C) 2012-2014 Daniel J. Bernstein <djb@cr.yp.to>",
+        "Copyright (C) 2016 Intel Corporation"
+    ],
+    "Comment": "no relevant CPE found"
+}
+
+
+========================================================================
+qtbase/src/3rdparty/tinycbor/qt_attribution.json
+{
+    "Id": "tinycbor",
+    "Name": "TinyCBOR",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used for QCborStreamReader and QCborStreamWriter.",
+    "SecurityCritical": true,
+
+    "Description": "Concise Binary Object Representation (CBOR) Library",
+    "Homepage": "https://github.com/intel/tinycbor",
+    "License": "MIT License",
+    "LicenseId": "MIT",
+    "LicenseFile": "LICENSE",
+    "DownloadLocation": "https://github.com/intel/tinycbor/archive/v7.0/tinycbor-7.0.tar.gz",
+    "PURL": "pkg:github/intel/tinycbor@v$<VERSION>",
+    "CPE": "cpe:2.3:a:tinycbor:tinycbor:$<VERSION>:*:*:*:*:*:*:*",
+    "Version": "7.0",
+    "Copyright": "Copyright (C) 2015-2025 Intel Corporation"
+}
+
+
+--- qtbase/src/3rdparty/tinycbor/LICENSE ---
+
+MIT License
+
+Copyright (c) 2017 Intel Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+qtbase/src/3rdparty/wintab/qt_attribution.json
+{
+    "Id": "wintab",
+    "Name": "Wintab API",
+    "QDocModule": "qtgui",
+    "QtUsage": "Used in the Qt platform plugin for Windows. Configure with -no-feature-tabletevent to avoid.",
+    "Files": ["pktdef.h", "wintab.h"],
+
+    "Description": "Wintab is a de facto API for pointing devices on Windows.",
+    "PackageComment": "Upstream http://www.pointing.com/Wintab.html no longer offers updates; treat as final, no relevant CPE and PURL found",
+    "License": "LCS-Telegraphics License",
+    "LicenseId": "LicenseRef-Lcs-Telegraphics",
+    "Copyright": "Copyright 1991-1998 by LCS/Telegraphics."
+}
+
+
+========================================================================
+qtbase/src/3rdparty/zlib/qt_attribution.json
+{
+    "Id": "zlib",
+    "Name": "Data Compression Library (zlib)",
+    "QDocModule": "qtcore",
+    "QtUsage": "Optionally used in Qt Core and development tools. Configure with -system-zlib to avoid.",
+    "SecurityCritical": true,
+
+    "Description": "zlib is a general purpose data compression library.",
+    "Homepage": "https://zlib.net/",
+    "Version": "1.3.2",
+    "DownloadLocation": "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz",
+    "PURL": "pkg:github/madler/zlib@v$<VERSION>",
+    "CPE": "cpe:2.3:a:zlib:zlib:$<VERSION>:*:*:*:*:*:*:*",
+
+    "License": "zlib License",
+    "LicenseId": "Zlib",
+    "LicenseFile": "LICENSE",
+    "Copyright": "(C) 1995-2026 Jean-loup Gailly and Mark Adler"
+}
+
+
+--- qtbase/src/3rdparty/zlib/LICENSE ---
+
+This software is provided 'as-is', without any express or implied
+  warranty.  In no event will the authors be held liable for any damages
+  arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose,
+  including commercial applications, and to alter it and redistribute it
+  freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+     claim that you wrote the original software. If you use this software
+     in a product, an acknowledgment in the product documentation would be
+     appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be
+     misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+
+  Jean-loup Gailly        Mark Adler
+  jloup@gzip.org          madler@alumni.caltech.edu
+
+If you use the zlib library in a product, we would appreciate *not* receiving
+lengthy legal documents to sign.  The sources are provided for free but without
+warranty of any kind.  The library has been entirely written by Jean-loup
+Gailly and Mark Adler; it does not include third-party code.
+
+If you redistribute modified sources, we would appreciate that you include in
+the file ChangeLog history information documenting your changes.  Please read
+the FAQ for more information on the distribution of modified source versions.
+
+========================================================================
+qtbase/src/corelib/global/qt_attribution.json
+{
+    "Id": "tlexpected",
+    "Name": "tl::expected",
+    "QDocModule": "qtcore",
+    "QtUsage": "Available as a private type in all Qt modules",
+    "Description": "Single header implementation of std::expected with functional-style extensions.",
+    "Files": [ "qexpected_p.h" ],
+    "Homepage": "https://github.com/TartanLlama/expected/",
+    "Version": "41d3e1f48d682992a2230b2a715bca38b848b269",
+    "DownloadLocation": "https://github.com/TartanLlama/expected/blob/41d3e1f48d682992a2230b2a715bca38b848b269/include/tl/expected.hpp",
+    "License": "Creative Commons Zero v1.0 Universal",
+    "LicenseId": "CC0-1.0",
+    "Copyright": "To the extent possible under law, Sy Brand has waived all copyright and related or neighboring rights to the expected library. This work is published from: United Kingdom."
+}
+
+
+========================================================================
+qtbase/src/corelib/mimetypes/3rdparty/qt_attribution.json
+[
+    {
+        "Id": "tika-mimetypes",
+        "Name": "Apache Tika MimeType Definitions",
+        "QDocModule": "qtcore",
+        "QtUsage":
+                "Qt Core uses a copy of the Apache Tika MimeType Definitions if shared-mime-info isn't installed on the system.",
+        "Comment": {
+            "Files":
+                    "For update, see qtbase/src/corelib/mimetypes/3rdparty/process_tika_mimetypes.py"
+        },
+        "Files": [
+            "tika-mimetypes.xml"
+        ],
+        "Description":
+                "The Apache Tika MimeTypes list many known MIME types and how to match files (using globs and/or 'magic' rules for the file contents)",
+        "Homepage":
+                "https://github.com/apache/tika/tree/main/tika-core/src/main/resources/org/apache/tika/mime",
+        "Version": "c29724782854bb5a319f4a1940d0828a58ace3f9",
+        "DownloadLocation":
+                "https://github.com/apache/tika/blob/c29724782854bb5a319f4a1940d0828a58ace3f9/tika-core/src/main/resources/org/apache/tika/mime/tika-mimetypes.xml",
+        "PURL": "pkg:github/apache/tika@$<VERSION>#tika-core/src/main/resources/org/apache/tika/mime/tika-mimetypes.xml",
+        "CPE": "cpe:2.3:a:apache:tika:*:*:*:*:*:*:*:*",
+        "License": "Apache License 2.0",
+        "LicenseId": "Apache-2.0",
+        "Copyright": "Copyright 2026 The Apache Software Foundation"
+    }
+]
+
+
+========================================================================
+qtbase/src/corelib/text/qt_attribution.json
+[
+{
+    "Id": "unicode-character-database",
+    "Name": "Unicode Character Database (UCD)",
+    "QDocModule": "qtcore",
+    "QtUsage": "Qt Core uses data obtained from UCD files for working with characters and strings.",
+    "SecurityCritical": false,
+    "Comment": {
+        "Files": "For update, see qtbase/util/unicode/README",
+        "General": "no relevant CPE and PURL found"
+    },
+    "Files": [ "qunicodetables_p.h", "qunicodetables.cpp" ],
+
+    "Description": "The Unicode Character Database (UCD) is a set of files that
+ define the Unicode character properties and internal mappings.",
+    "Homepage": "https://www.unicode.org/ucd/",
+    "Comment": {
+        "Version": [ "Don't use the Unicode standard version;",
+                     "UCD has its own 'Revision' numbers",
+                     "see the 'UAX #44, UCD' page (https://www.unicode.org/reports/tr44/)" ]},
+    "Version": "36",
+    "License": "Unicode License Agreement - Data Files and Software (2016)",
+    "LicenseId": "Unicode-3.0",
+    "Copyright": "Copyright (C) 1991-2025 Unicode, Inc."
+},
+{
+    "Id": "unicode-cldr",
+    "Name": "Unicode Common Locale Data Repository (CLDR)",
+    "QDocModule": "qtcore",
+    "QtUsage": "Used in Qt Core (QTimeZone, QLocale).",
+    "SecurityCritical": false,
+    "Comment": {
+        "Files": "For update, see qtbase/util/locale_database/cldr2qlocalexml.py",
+        "General": "no relevant CPE and PURL found"
+    },
+    "Files": [ "qlocale_data_p.h",
+               "../time/qtimezoneprivate_data_p.h", "../time/qtimezonelocale_data_p.h",
+               "../time/qhijricalendar_data_p.h", "../time/qjalalicalendar_data_p.h",
+               "../time/qromancalendar_data_p.h",
+               "../../../util/locale_database/testlocales/localemodel.cpp" ],
+
+    "Description": "The Unicode CLDR provides key building blocks for software to support the
+ world's languages, with the largest and most extensive standard repository of locale data
+ available.",
+    "Homepage": "https://cldr.unicode.org/",
+    "Version": "v48.2",
+    "License": "Unicode License v3",
+    "LicenseId": "Unicode-3.0",
+    "Copyright": "Copyright (C) 2004-2025 Unicode, Inc."
+}
+]
+
+
+========================================================================
+qtbase/src/gui/opengl/qt_attribution.json
+[
+    {
+        "Id": "opengl-headers",
+        "Name": "OpenGL Headers",
+        "QDocModule": "qtgui",
+        "Description": "OpenGL header generated from the Khronos OpenGL / OpenGL ES XML API Registry.",
+        "QtUsage": "Used on Windows and Linux in the OpenGL related headers of Qt GUI.",
+        "Files": "qopenglext.h",
+
+        "Homepage": "https://www.khronos.org/",
+        "Version": "Revision 27684",
+        "PURL": "pkg:generic/khronos-opengl-headers?download_url=https://www.khronos.org/?revision=27684",
+        "License": "MIT License",
+        "LicenseId": "MIT",
+        "LicenseFile": "LICENSE.KHRONOS.txt",
+        "Copyright": "Copyright (c) 2013-2014 The Khronos Group Inc.",
+        "Comment": "no relevant CPE found"
+    },
+    {
+        "Id": "opengl-es2-headers",
+        "Name": "OpenGL ES 2 Headers",
+        "QDocModule": "qtgui",
+        "Description": "OpenGL ES 2 header generated from the Khronos OpenGL / OpenGL ES XML API Registry.",
+        "QtUsage": "Used on Windows and Linux in the OpenGL related headers of Qt GUI.",
+        "Files": "qopengles2ext.h",
+
+        "Homepage": "https://www.khronos.org/",
+        "Version": "Revision 27673",
+        "PURL": "pkg:generic/khronos-opengl-es2-headers?download_url=https://www.khronos.org/?revision=27673",
+        "License": "MIT License",
+        "LicenseId": "MIT",
+        "LicenseFile": "LICENSE.KHRONOS.txt",
+        "Copyright": "Copyright (c) 2013-2014 The Khronos Group Inc.",
+        "Comment": "no relevant CPE found"
+    }
+]
+
+
+--- qtbase/src/gui/opengl/LICENSE.KHRONOS.txt ---
+
+Copyright (c) 2013-2014 The Khronos Group Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and/or associated documentation files (the
+"Materials"), to deal in the Materials without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Materials, and to
+permit persons to whom the Materials are furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Materials.
+
+THE MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+MATERIALS OR THE USE OR OTHER DEALINGS IN THE MATERIALS.
+
+========================================================================
+qtbase/src/gui/painting/qt_attribution.json
+[
+    {
+        "Id": "grayraster",
+        "Name": "Anti-aliasing rasterizer from FreeType 2",
+        "QDocModule": "qtgui",
+        "QtUsage": "Used in Qt GUI.",
+        "Files": "qgrayraster.c",
+
+        "Description": "FreeType is a freely available software library to render fonts.",
+        "Homepage": "http://www.freetype.org",
+        "PURL": "pkg:generic/freetype-grayraster?download_url=https://www.freetype.org/",
+        "License": "Freetype Project License or GNU General Public License v2.0 only",
+        "LicenseId": "FTL OR GPL-2.0-only",
+        "LicenseFile": "../../3rdparty/freetype/LICENSE.txt",
+        "Copyright": "Copyright 2000-2016 by David Turner, Robert Wilhelm, and Werner Lemberg.",
+        "Comment": "no relevant CPE found"
+    },
+    {
+        "Id": "smooth-scaling-algorithm",
+        "Name": "Smooth Scaling Algorithm",
+        "QDocModule": "qtgui",
+        "QtUsage": "Used in Qt Gui (QImage::transformed() functions).",
+        "Files": "qimagescale.cpp",
+
+        "Description": "Normal smoothscale method, based on Imlib2's smoothscale.",
+        "LicenseId": "BSD-2-Clause AND Imlib2",
+        "License": "BSD 2-clause \"Simplified\" License and Imlib2 License",
+        "LicenseFile": "LICENSE.QIMAGETRANSFORM.txt",
+        "Copyright": ["Copyright (C) 2004, 2005 Daniel M. Duley.",
+        "(C) Carsten Haitzler and various contributors.",
+        "(C) Willem Monsuwe <willem@stack.nl>"],
+        "Comment": "no relevant CPE or PURL found"
+    },
+    {
+        "Id": "xserverhelper",
+        "Name": "X Server helper",
+        "QDocModule": "qtgui",
+        "QtUsage": "Used in Qt GUI (QRegion).",
+        "Files": "qregion.cpp",
+
+        "Description": "Code from X11's region.h, Region.c, poly.h, and PolyReg.c",
+        "Homepage": "https://www.x.org/",
+        "PURL": "pkg:generic/xserverhelper?download_url=https://www.x.org/",
+        "License": "X11 License and Historical Permission Notice and Disclaimer",
+        "LicenseId": "X11 AND HPND",
+        "LicenseFile": "LICENSE.XCONSORTIUM.txt",
+        "Copyright": ["Copyright (c) 1987, 1988 X Consortium",
+        "Copyright 1987, 1988 by Digital Equipment Corporation, Maynard, Massachusetts."],
+        "Comment": "no relevant CPE found"
+    }
+]
+
+
+../../3rdparty/freetype/LICENSE.txt: identical text reproduced at qtbase/src/3rdparty/freetype/LICENSE.txt above.
+
+
+--- qtbase/src/gui/painting/LICENSE.QIMAGETRANSFORM.txt ---
+
+qimagetransform.cpp was contributed by Daniel M. Duley based on code from Imlib2.
+
+Copyright (C) 2004, 2005 Daniel M. Duley
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+
+Imlib2 License
+
+Copyright (C) 2000 Carsten Haitzler and various contributors (see
+AUTHORS)
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies of the Software and its Copyright notices. In addition
+publicly documented acknowledgment must be given that this software has
+been used if no source code of this software is made available publicly.
+This includes acknowledgments in either Copyright notices, Manuals,
+Publicity and Marketing documents or any documentation provided with any
+product containing this software. This License does not apply to any
+software that links to the libraries provided by this software
+(statically or dynamically), but only to the software provided.
+
+Please see the COPYING.PLAIN for a plain-english explanation of this
+notice and it's intent.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--- qtbase/src/gui/painting/LICENSE.XCONSORTIUM.txt ---
+
+Copyright (c) 1987, 1988  X Consortium
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+X CONSORTIUM BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of the X Consortium shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from the X Consortium.
+
+
+Copyright 1987, 1988 by Digital Equipment Corporation, Maynard, Massachusetts.
+
+                        All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose and without fee is hereby granted,
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in
+supporting documentation, and that the name of Digital not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+========================================================================
+qtbase/src/gui/rhi/qt_attribution.json
+[
+    {
+        "Id": "rhi-miniengine-d3d12-mipmap",
+        "Name": "Mipmap generator for D3D12",
+        "QDocModule": "qtgui",
+        "Description": "Compute shader for mipmap generation from MiniEngine in DirectX-Graphics-Samples",
+        "QtUsage": "Compute shader for mipmap generation with Direct 3D 12",
+        "Files": [ "mipmap.hlsl" ],
+
+        "Homepage": "https://github.com/microsoft/DirectX-Graphics-Samples",
+        "Version": "0aa79bad78992da0b6a8279ddb9002c1753cb849",
+        "PURL": "pkg:github/microsoft/DirectX-Graphics-Samples@$<VERSION>",
+        "License": "MIT License",
+        "LicenseId": "MIT",
+        "LicenseFile": "LICENSE.MiniEngine.txt",
+        "Copyright": "Copyright (c) 2015 Microsoft",
+        "Comment": "no relevant CPE found"
+    }
+]
+
+
+--- qtbase/src/gui/rhi/LICENSE.MiniEngine.txt ---
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Microsoft
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+qtbase/src/gui/text/qt_attribution.json
+[
+    {
+        "Id": "aglfn",
+        "Name": "Adobe Glyph List For New Fonts",
+        "QDocModule": "qtgui",
+        "Description": "Provides standardized names for glyphs.",
+        "QtUsage": "Used by PDF generator to make it easier for reader applications to resolve  the original contents of rendered text.",
+        "Files": "qfontsubset_agl.cpp",
+
+        "Homepage": "https://github.com/adobe-type-tools/agl-aglfn",
+        "Version": "1.7",
+        "PURL": "pkg:github/adobe-type-tools/agl-aglfn@$<VERSION>",
+        "License": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "LicenseId": "BSD-3-Clause",
+        "LicenseFile": "LICENSE.AGLFN.txt",
+        "Copyright": "Copyright 2002, 2003, 2005, 2006, 2008, 2010, 2015 Adobe Systems",
+        "Comment": "no relevant CPE found"
+    }
+]
+
+
+--- qtbase/src/gui/text/LICENSE.AGLFN.txt ---
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+Neither the name of Adobe Systems Incorporated nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+========================================================================
+qtbase/src/gui/vulkan/qt_attribution.json
+[
+    {
+        "Id": "vulkan-xml-spec",
+        "Name": "Vulkan API Registry",
+        "QDocModule": "qtgui",
+        "Description": "Vulkan XML API Registry.",
+        "QtUsage": "Used to dynamically generate the sources for the QVulkan(Device)Functions classes.",
+        "Files": "vk.xml",
+
+        "Homepage": "https://www.khronos.org/",
+        "PURL": "pkg:github/KhronosGroup/Vulkan-Docs@v$<VERSION>?download_url=https://github.com/KhronosGroup/Vulkan-Docs/blob/v1.4.308/xml/vk.xml",
+        "CPE": "cpe:2.3:a:khronos:vulkan:1.4.308:*:*:*:*:*:*:*",
+        "Version": "1.4.308",
+        "License": "Apache License 2.0 or MIT License",
+        "LicenseId": "Apache-2.0 OR MIT",
+        "LicenseFile": "LICENSE.txt",
+        "Copyright": "Copyright (c) 2015-2025 The Khronos Group Inc."
+    }
+]
+
+
+--- qtbase/src/gui/vulkan/LICENSE.txt ---
+
+Copyright (c) 2015-2020 The Khronos Group Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+
+
+The Apache-2.0 alternative terms are reproduced in QT-LICENCES.txt.
+
+========================================================================
+qtsvg/src/svg/qt_attribution.json
+{
+    "Id": "xsvg",
+    "Name": "XSVG",
+    "QDocModule": "qtsvg",
+    "QtUsage": "Used in the Qt SVG library.",
+    "Files": "qsvghandler.cpp",
+
+    "Description": "Some code for arc handling is derived from code from the XSVG project.",
+    "License": "Historical Permission Notice and Disclaimer - sell variant",
+    "LicenseId": "HPND-sell-variant",
+    "Comment": "No relevant PURL or CPE set, because the dependency is a single file",
+    "LicenseFile": "LICENSE.XSVG.txt",
+    "Copyright": "Copyright 2002 USC/Information Sciences Institute"
+}
+
+
+--- qtsvg/src/svg/LICENSE.XSVG.txt ---
+
+Copyright  2002 USC/Information Sciences Institute
+
+Permission to use, copy, modify, distribute, and sell this software
+and its documentation for any purpose is hereby granted without
+fee, provided that the above copyright notice appear in all copies
+and that both that copyright notice and this permission notice
+appear in supporting documentation, and that the name of
+Information Sciences Institute not be used in advertising or
+publicity pertaining to distribution of the software without
+specific, written prior permission.  Information Sciences Institute
+makes no representations about the suitability of this software for
+any purpose.  It is provided "as is" without express or implied
+warranty.
+
+INFORMATION SCIENCES INSTITUTE DISCLAIMS ALL WARRANTIES WITH REGARD
+TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL INFORMATION SCIENCES
+INSTITUTE BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL
+DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA
+OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+========================================================================
+qtimageformats/src/3rdparty/libtiff/qt_attribution.json
+{
+    "Id": "libtiff",
+    "Name": "TIFF Software Distribution (libtiff)",
+    "QDocModule": "qtimageformats",
+    "QtUsage": "Used in the qtiff image plugin if no system libtiff is found.",
+    "SecurityCritical": true,
+
+    "Description": "",
+    "Homepage": "http://www.simplesystems.org/libtiff/",
+    "Version": "4.7.2",
+    "DownloadLocation": "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz",
+    "PURL": [
+        "pkg:gitlab/libtiff/libtiff@v$<VERSION>"
+    ],
+    "CPE": [
+        "cpe:2.3:a:libtiff:libtiff:$<VERSION>:*:*:*:*:*:*:*"
+    ],
+
+    "License": "libtiff License",
+    "LicenseId": "libtiff",
+    "LicenseFile": "COPYRIGHT",
+    "Copyright": "Copyright (c) 1988-1997 Sam Leffler\nCopyright (c) 1991-1997 Silicon Graphics, Inc."
+}
+
+
+
+--- qtimageformats/src/3rdparty/libtiff/COPYRIGHT ---
+
+Copyright (c) 1988-1997 Sam Leffler
+Copyright (c) 1991-1997 Silicon Graphics, Inc.
+
+Permission to use, copy, modify, distribute, and sell this software and 
+its documentation for any purpose is hereby granted without fee, provided
+that (i) the above copyright notices and this permission notice appear in
+all copies of the software and related documentation, and (ii) the names of
+Sam Leffler and Silicon Graphics may not be used in any advertising or
+publicity relating to the software without the specific, prior written
+permission of Sam Leffler and Silicon Graphics.
+
+THE SOFTWARE IS PROVIDED "AS-IS" AND WITHOUT WARRANTY OF ANY KIND, 
+EXPRESS, IMPLIED OR OTHERWISE, INCLUDING WITHOUT LIMITATION, ANY 
+WARRANTY OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.  
+
+IN NO EVENT SHALL SAM LEFFLER OR SILICON GRAPHICS BE LIABLE FOR
+ANY SPECIAL, INCIDENTAL, INDIRECT OR CONSEQUENTIAL DAMAGES OF ANY KIND,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER OR NOT ADVISED OF THE POSSIBILITY OF DAMAGE, AND ON ANY THEORY OF 
+LIABILITY, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE 
+OF THIS SOFTWARE.
+
+========================================================================
+qtimageformats/src/3rdparty/libwebp/qt_attribution.json
+{
+    "Id": "libwebp",
+    "Name": "WebP (libwebp)",
+    "QDocModule": "qtimageformats",
+    "QtUsage": "Used in the qwebp image plugin if no system libwebp is found.",
+    "SecurityCritical": true,
+
+    "Description": "WebP is a new image format that provides lossless and lossy compression for images on the web.",
+    "Homepage": "https://developers.google.com/speed/webp/",
+
+    "Version": "1.6.0",
+    "DownloadLocation": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
+    "PURL": [
+        "pkg:github/webmproject/libwebp@$v<VERSION>"
+    ],
+    "CPE": [
+        "cpe:2.3:a:webmproject:libwebp:$<VERSION>:*:*:*:*:*:*:*"
+    ],
+    "License": "BSD 3-clause \"New\" or \"Revised\" License",
+    "LicenseId": "BSD-3-Clause",
+    "LicenseFile": "COPYING",
+    "Copyright": "Copyright (c) 2010, Google Inc. All rights reserved."
+}
+
+
+--- qtimageformats/src/3rdparty/libwebp/COPYING ---
+
+Copyright (c) 2010, Google Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+  * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in
+    the documentation and/or other materials provided with the
+    distribution.
+
+  * Neither the name of Google nor the names of its contributors may
+    be used to endorse or promote products derived from this software
+    without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+========================================================================
+pyside-setup/sources/shiboken6/libshiboken/qt_attribution.json
+{
+    "Id": "python",
+    "Name": "Python",
+    "QDocModule": "QtForPython",
+    "QtUsage": "Used for Qt for Python in the signature extension.",
+    "Description": "Qt for Python is an add-on for Python. The libshiboken packages of PySide uses certain parts of the source files (bufferprocs_py37.cpp, bufferprocs_py37.h). See the folder sources/shiboken6/libshiboken .",
+    "Homepage": "https://www.python.org/",
+    "Version": "3.7.0",
+    "License": "PSF LICENSE AGREEMENT FOR PYTHON 3.7.0",
+    "LicenseFile": "bufferprocs_py37.h",
+    "Copyright": "© Copyright 2001-2018, Python Software Foundation."
+}
+
+
+--- pyside-setup/sources/shiboken6/libshiboken/bufferprocs_py37.h ---
+
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
+
+/*
+PSF LICENSE AGREEMENT FOR PYTHON 3.7.0
+
+1. This LICENSE AGREEMENT is between the Python Software Foundation ("PSF"), and
+   the Individual or Organization ("Licensee") accessing and otherwise using Python
+   3.7.0 software in source or binary form and its associated documentation.
+
+2. Subject to the terms and conditions of this License Agreement, PSF hereby
+   grants Licensee a nonexclusive, royalty-free, world-wide license to reproduce,
+   analyze, test, perform and/or display publicly, prepare derivative works,
+   distribute, and otherwise use Python 3.7.0 alone or in any derivative
+   version, provided, however, that PSF's License Agreement and PSF's notice of
+   copyright, i.e., "Copyright © 2001-2018 Python Software Foundation; All Rights
+   Reserved" are retained in Python 3.7.0 alone or in any derivative version
+   prepared by Licensee.
+
+3. In the event Licensee prepares a derivative work that is based on or
+   incorporates Python 3.7.0 or any part thereof, and wants to make the
+   derivative work available to others as provided herein, then Licensee hereby
+   agrees to include in any such work a brief summary of the changes made to Python
+   3.7.0.
+
+4. PSF is making Python 3.7.0 available to Licensee on an "AS IS" basis.
+   PSF MAKES NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED.  BY WAY OF
+   EXAMPLE, BUT NOT LIMITATION, PSF MAKES NO AND DISCLAIMS ANY REPRESENTATION OR
+   WARRANTY OF MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE
+   USE OF PYTHON 3.7.0 WILL NOT INFRINGE ANY THIRD PARTY RIGHTS.
+
+5. PSF SHALL NOT BE LIABLE TO LICENSEE OR ANY OTHER USERS OF PYTHON 3.7.0
+   FOR ANY INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES OR LOSS AS A RESULT OF
+   MODIFYING, DISTRIBUTING, OR OTHERWISE USING PYTHON 3.7.0, OR ANY DERIVATIVE
+   THEREOF, EVEN IF ADVISED OF THE POSSIBILITY THEREOF.
+
+6. This License Agreement will automatically terminate upon a material breach of
+   its terms and conditions.
+
+7. Nothing in this License Agreement shall be deemed to create any relationship
+   of agency, partnership, or joint venture between PSF and Licensee.  This License
+   Agreement does not grant permission to use PSF trademarks or trade name in a
+   trademark sense to endorse or promote products or services of Licensee, or any
+   third party.
+
+8. By copying, installing or otherwise using Python 3.7.0, Licensee agrees
+   to be bound by the terms and conditions of this License Agreement.
+*/
+
+#ifndef BUFFER_REENABLE_H
+#define BUFFER_REENABLE_H
+
+#include "sbkpython.h"
+#include "shibokenmacros.h"
+
+#ifdef Py_LIMITED_API
+
+// The buffer interface has been added to limited API in 3.11, (abstract.h, PYSIDE-1960,
+// except some internal structs).
+
+#  if Py_LIMITED_API < 0x030B0000
+
+struct Pep_buffer
+{
+    void *buf;
+    PyObject *obj;        /* owned reference */
+    Py_ssize_t len;
+    Py_ssize_t itemsize;  /* This is Py_ssize_t so it can be
+                             pointed to by strides in simple case.*/
+    int readonly;
+    int ndim;
+    char *format;
+    Py_ssize_t *shape;
+    Py_ssize_t *strides;
+    Py_ssize_t *suboffsets;
+    void *internal;
+};
+
+using getbufferproc =int (*)(PyObject *, Pep_buffer *, int);
+using releasebufferproc = void (*)(PyObject *, Pep_buffer *);
+using Py_buffer = Pep_buffer;
+
+#  else //  < 3.11
+
+using Pep_buffer = Py_buffer;
+
+#  endif // >= 3.11
+
+// The structs below are not part of the limited API.
+struct PepBufferProcs
+{
+    getbufferproc bf_getbuffer;
+    releasebufferproc bf_releasebuffer;
+};
+
+struct PepBufferType
+{
+    PyVarObject ob_base;
+    void *skip[17];
+    PepBufferProcs *tp_as_buffer;
+};
+
+#  if Py_LIMITED_API < 0x030B0000
+
+/* Maximum number of dimensions */
+#define PyBUF_MAX_NDIM 64
+
+/* Flags for getting buffers */
+#define PyBUF_SIMPLE 0
+#define PyBUF_WRITABLE 0x0001
+/*  we used to include an E, backwards compatible alias  */
+#define PyBUF_WRITEABLE PyBUF_WRITABLE
+#define PyBUF_FORMAT 0x0004
+#define PyBUF_ND 0x0008
+#define PyBUF_STRIDES (0x0010 | PyBUF_ND)
+#define PyBUF_C_CONTIGUOUS (0x0020 | PyBUF_STRIDES)
+#define PyBUF_F_CONTIGUOUS (0x0040 | PyBUF_STRIDES)
+#define PyBUF_ANY_CONTIGUOUS (0x0080 | PyBUF_STRIDES)
+#define PyBUF_INDIRECT (0x0100 | PyBUF_STRIDES)
+
+#define PyBUF_CONTIG (PyBUF_ND | PyBUF_WRITABLE)
+#define PyBUF_CONTIG_RO (PyBUF_ND)
+
+#define PyBUF_STRIDED (PyBUF_STRIDES | PyBUF_WRITABLE)
+#define PyBUF_STRIDED_RO (PyBUF_STRIDES)
+
+#define PyBUF_RECORDS (PyBUF_STRIDES | PyBUF_WRITABLE | PyBUF_FORMAT)
+#define PyBUF_RECORDS_RO (PyBUF_STRIDES | PyBUF_FORMAT)
+
+#define PyBUF_FULL (PyBUF_INDIRECT | PyBUF_WRITABLE | PyBUF_FORMAT)
+#define PyBUF_FULL_RO (PyBUF_INDIRECT | PyBUF_FORMAT)
+
+
+#define PyBUF_READ  0x100
+#define PyBUF_WRITE 0x200
+
+/* End buffer interface */
+LIBSHIBOKEN_API PyObject *PyMemoryView_FromBuffer(Pep_buffer *info);
+#define Py_buffer Pep_buffer
+
+#define PyObject_CheckBuffer(obj) \
+    ((PepType_AS_BUFFER(Py_TYPE(obj)) != NULL) &&  \
+     (PepType_AS_BUFFER(Py_TYPE(obj))->bf_getbuffer != NULL))
+
+LIBSHIBOKEN_API int PyObject_GetBuffer(PyObject *ob, Pep_buffer *view, int flags);
+LIBSHIBOKEN_API void PyBuffer_Release(Pep_buffer *view);
+
+#  endif // << 3.11
+
+#  define PepType_AS_BUFFER(type)   \
+reinterpret_cast<PepBufferType *>(type)->tp_as_buffer
+
+using PyBufferProcs = PepBufferProcs;
+
+#else // Py_LIMITED_API
+
+using PepBufferProcs = PyBufferProcs;
+
+#  define PepType_AS_BUFFER(type)             ((type)->tp_as_buffer)
+
+#endif // !Py_LIMITED_API
+
+#endif // BUFFER_REENABLE_H
+
+========================================================================
+pyside-setup/sources/shiboken6/shibokenmodule/files.dir/shibokensupport/signature/qt_attribution.json
+{
+    "Id": "python",
+    "Name": "Python",
+    "QDocModule": "QtForPython",
+    "QtUsage": "Used for Qt for Python in the signature extension.",
+    "Description": "Qt for Python is an add-on for Python. The signature packages of PySide uses certain copied and adapted source files. See the folder sources/shiboken6/files.dir/shibokensupport .",
+    "Homepage": "https://www.python.org/",
+    "Version": "3.7.0",
+    "LicenseId": "Python-2.0",
+    "License": "Python License 2.0",
+    "LicenseFile": "PSF-3.7.0.txt",
+    "Copyright": "© Copyright 2001-2018, Python Software Foundation."
+}
+
+
+--- pyside-setup/sources/shiboken6/shibokenmodule/files.dir/shibokensupport/signature/PSF-3.7.0.txt ---
+
+PSF LICENSE AGREEMENT FOR PYTHON 3.7.0
+
+1. This LICENSE AGREEMENT is between the Python Software Foundation ("PSF"), and
+   the Individual or Organization ("Licensee") accessing and otherwise using Python
+   3.7.0 software in source or binary form and its associated documentation.
+
+2. Subject to the terms and conditions of this License Agreement, PSF hereby
+   grants Licensee a nonexclusive, royalty-free, world-wide license to reproduce,
+   analyze, test, perform and/or display publicly, prepare derivative works,
+   distribute, and otherwise use Python 3.7.0 alone or in any derivative
+   version, provided, however, that PSF's License Agreement and PSF's notice of
+   copyright, i.e., "Copyright © 2001-2018 Python Software Foundation; All Rights
+   Reserved" are retained in Python 3.7.0 alone or in any derivative version
+   prepared by Licensee.
+
+3. In the event Licensee prepares a derivative work that is based on or
+   incorporates Python 3.7.0 or any part thereof, and wants to make the
+   derivative work available to others as provided herein, then Licensee hereby
+   agrees to include in any such work a brief summary of the changes made to Python
+   3.7.0.
+
+4. PSF is making Python 3.7.0 available to Licensee on an "AS IS" basis.
+   PSF MAKES NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED.  BY WAY OF
+   EXAMPLE, BUT NOT LIMITATION, PSF MAKES NO AND DISCLAIMS ANY REPRESENTATION OR
+   WARRANTY OF MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE
+   USE OF PYTHON 3.7.0 WILL NOT INFRINGE ANY THIRD PARTY RIGHTS.
+
+5. PSF SHALL NOT BE LIABLE TO LICENSEE OR ANY OTHER USERS OF PYTHON 3.7.0
+   FOR ANY INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES OR LOSS AS A RESULT OF
+   MODIFYING, DISTRIBUTING, OR OTHERWISE USING PYTHON 3.7.0, OR ANY DERIVATIVE
+   THEREOF, EVEN IF ADVISED OF THE POSSIBILITY THEREOF.
+
+6. This License Agreement will automatically terminate upon a material breach of
+   its terms and conditions.
+
+7. Nothing in this License Agreement shall be deemed to create any relationship
+   of agency, partnership, or joint venture between PSF and Licensee.  This License
+   Agreement does not grant permission to use PSF trademarks or trade name in a
+   trademark sense to endorse or promote products or services of Licensee, or any
+   third party.
+
+8. By copying, installing or otherwise using Python 3.7.0, Licensee agrees
+   to be bound by the terms and conditions of this License Agreement.

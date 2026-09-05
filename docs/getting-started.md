@@ -12,7 +12,30 @@ glidepath".
 
 ## Step 1 — Install
 
-Glidepath is installed with [uv](https://docs.astral.sh/uv/), which also
+### Windows: download and run
+
+From **v1.1.0**, a single executable is available for Windows x64.
+You do not need Python, uv or a terminal.
+
+1. Open the [latest GitHub Release](https://github.com/williajm/glidepath/releases/latest).
+2. Expand **Assets** if needed and download `glidepath-X.Y.Z-windows-x64.exe`.
+3. Move it to a folder where you want to keep the app, then double-click it.
+
+This is the app itself, so there is no installation wizard. You can create
+a shortcut yourself. When a new version is released, close the app and
+download the newer executable; keep your saved `.glidepath.json` plans.
+
+The executable is not yet signed with a Windows publisher certificate.
+Windows may show **“Windows protected your PC”** or **“unrecognised app”**.
+Check that you downloaded it from this repository's release before deciding
+whether to proceed. Windows may remember that choice for the same file.
+
+If the latest release does not list an `.exe` yet, use the uv route below.
+Otherwise, continue to **Step 2 — First launch**.
+
+### Install with uv
+
+You can also install Glidepath with [uv](https://docs.astral.sh/uv/), which
 fetches the Python it needs — you do not need Python installed first.
 
 1. **Install uv.** Open a terminal (Windows: PowerShell) and run one

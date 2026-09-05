@@ -104,7 +104,32 @@ based solely on this tool.
 
 ## Install
 
-Glidepath is installed from [PyPI](https://pypi.org/project/glidepath/)
+### Windows download
+
+From **v1.1.0**, Windows x64 users can run Glidepath without Python, uv
+or terminal commands:
+
+1. Open the [latest GitHub Release](https://github.com/williajm/glidepath/releases/latest).
+2. Under **Assets**, download `glidepath-X.Y.Z-windows-x64.exe`.
+3. Keep it in a folder of your choice and double-click it to launch.
+
+This is a runnable app, not an installer; it does not add shortcuts or
+update itself. For a newer version, close Glidepath and download the new
+executable. Your saved `.glidepath.json` plans stay where you put them.
+
+The executable is **not yet signed with a Windows publisher certificate**.
+Windows may show “Windows protected your PC” or “unrecognised app”. Check
+that the file came from this repository's release before deciding whether
+to proceed. GitHub build provenance does not remove that warning.
+If the latest release has no `.exe` yet, use the uv installation below.
+
+Runtime licences and attribution notices are included in the executable
+and in the release's `glidepath-X.Y.Z-third-party-licences.zip` download.
+That archive also lists the corresponding upstream sources.
+
+### Install with uv
+
+Alternatively, install Glidepath from [PyPI](https://pypi.org/project/glidepath/)
 with [uv](https://docs.astral.sh/uv/), which also fetches the Python it
 needs — you do not need Python installed first.
 
@@ -210,14 +235,24 @@ Releases are `vX.Y.Z` tags on `main`. Each one is published to
 trusted publishing with PEP 740 attestations, and as a GitHub Release
 carrying its notes from
 [`CHANGELOG.md`](https://github.com/williajm/glidepath/blob/main/CHANGELOG.md)
-with the same artifacts attached, each carrying signed build
+with the same Python artifacts and a tested Windows x64 executable attached,
+each carrying signed build
 provenance — verify a downloaded file with
 `gh attestation verify <file> -R williajm/glidepath`. The signed
 provenance bundle is attached to each release too
 (`glidepath-X.Y.Z-provenance.intoto.jsonl`), so verification also
-works offline with `--bundle`. There are no
-packaged binary builds (installer/exe) yet — install from PyPI as
-above.
+works offline with `--bundle`.
+
+From v1.1.0, the tag-triggered workflow also builds
+`glidepath-X.Y.Z-windows-x64.exe` with Nuitka. Download it from the
+GitHub Release and double-click to run; Python and uv are not required.
+The Windows build runs only for release tags, after tag validation, and
+must pass its compiled-app checks before publication. Ordinary branch
+pushes and PRs run the normal CI checks without compiling an executable.
+The executable is not yet Authenticode-signed, so Windows may show a
+SmartScreen warning; the build provenance above is a separate mechanism.
+See [`docs/packaging.md`](https://github.com/williajm/glidepath/blob/main/docs/packaging.md)
+for local builds and the release workflow.
 
 ## Data licences
 

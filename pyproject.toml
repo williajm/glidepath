@@ -1,6 +1,6 @@
 [project]
 name = "glidepath"
-version = "1.0.2"
+version = "1.1.0"
 description = "Desktop retirement and investment planner (UK-first, region-extensible)."
 readme = "README.md"
 # MIT code plus one CC BY-NC-SA 4.0 data file (returns_history.toml —
@@ -54,6 +54,12 @@ Issues = "https://github.com/williajm/glidepath/issues"
 glidepath = "glidepath.gui.main:main"
 
 [dependency-groups]
+binary = [
+    "nuitka>=4.2",
+    "setuptools>=84",
+    "wheel>=0.48",
+    "zstandard",
+]
 dev = [
     "hypothesis",
     "mypy",
@@ -70,11 +76,36 @@ dev = [
 requires = ["uv_build>=0.11,<0.13"]
 build-backend = "uv_build"
 
+# Shared by the local build command and the tagged release workflow.
+[tool.glidepath.binary]
+windows-icon = "src/glidepath/gui/assets/glidepath.ico"
+# Dependency Walker 2.2.6000 (2006), required by Nuitka on Windows x64.
+# Build tool only: never included in the distributed application.
+dependency-walker-url = "https://dependencywalker.com/depends22_x64.zip"
+dependency-walker-sha256 = "35db68a613874a2e8c1422eb0ea7861f825fc71717d46dabf1f249ce9634b4f1"
+nuitka-options = [
+    "--update-check=never",
+    "--enable-plugin=pyside6",
+    "--include-qt-plugins=platforms,imageformats",
+    "--include-package-data=glidepath",
+    "--include-distribution-metadata=glidepath",
+    "--include-data-files=LICENSE=LICENSE",
+    "--include-data-files=LICENSE-DATA=LICENSE-DATA",
+    "--include-data-dir=third-party-licences=third-party-licences",
+    "--product-name=Glidepath",
+    "--file-description=Glidepath retirement planner",
+    "--company-name=James Williams",
+]
+
 # --- uv ---------------------------------------------------------------------
 [tool.uv]
 # Supply-chain cooldown: resolution ignores anything published to PyPI after
 # this timestamp (now minus 7 days). Updated ONLY by `make deps`.
-exclude-newer = "2026-08-19T15:28:17Z"
+exclude-newer = "2026-08-29T16:19:47Z"
+# Nuitka is source-only. uv installs its build requirements from the binary
+# group first, then builds it in that environment: the lockfile hashes, age
+# check and all-groups audit cover the exact setuptools/wheel versions used.
+no-build-isolation-package = ["nuitka"]
 
 # PyPI is the ONLY permitted index (supply-chain policy; see CLAUDE.md).
 [[tool.uv.index]]

@@ -20,6 +20,7 @@ PySide6 shell (`glidepath/gui/`) over the UI-agnostic app layer
 - `make audit` — pip-audit the lockfile for known CVEs.
 - `make sonar` — tests + local SonarQube scan.
 - `make hooks` — install pre-commit hooks.
+- `make binary` — Nuitka folder build; `BINARY_MODE=onefile` for one executable.
 
 ## Supply-chain policy (permanent, all sessions)
 
@@ -98,18 +99,25 @@ releases). Rules:
 
 - SemVer; the version lives in `[project] version`, released as a
   `vX.Y.Z` tag on `main`. Releases are tag + GitHub Release + PyPI
-  (sdist/wheel via trusted publishing) — no binary artifacts yet
-  (§4.10 records why).
+  (sdist/wheel via trusted publishing). Only release tags trigger the
+  Windows Nuitka build in `release.yml`; its tested single executable is
+  attached to the GitHub Release (planning §4.10, `docs/packaging.md`).
 - `CHANGELOG.md` (Keep a Changelog format) is curated in the release PR;
   the tagged version's section becomes the GitHub Release notes.
-- To cut a release, on an up-to-date `dev`: `make bump V=X.Y.Z`, move the
+- To cut a release, on a release branch based on up-to-date `main`:
+  `make bump V=X.Y.Z`, move the
   Unreleased items into a dated `## [X.Y.Z]` section, `make check`, PR to
   `main`. After the merge, tag the merge commit `vX.Y.Z` and push the
   tag; `release.yml` validates it (tag on main, version match, changelog
   section present), builds and smoke-tests the sdist/wheel, publishes
   them to PyPI with PEP 740 attestations once the `pypi` environment
   deployment is manually approved (GitHub → the run's review prompt),
-  then creates the GitHub Release with the artifacts attached.
+  then creates the GitHub Release with the artifacts attached. The
+  Windows build must also pass before PyPI publication; only Python
+  packages are uploaded to PyPI. The runtime licence ZIP is attached alongside
+  the executable; all release artifacts carry build provenance. The executable
+  is not yet Authenticode-signed. Refresh `third-party-licences/` when changing
+  the bundled Python, PySide6 or Nuitka versions.
 
 ## Coding conventions
 

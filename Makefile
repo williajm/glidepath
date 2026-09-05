@@ -1,7 +1,9 @@
 # Canonical developer commands for glidepath. See CLAUDE.md.
 
 .DEFAULT_GOAL := help
-.PHONY: help check fix test deps bump audit sonar hooks
+.PHONY: help check fix test deps bump audit sonar hooks binary
+
+BINARY_MODE ?= standalone
 
 # Per-machine venv naming: Windows and WSL share this checkout, so each
 # platform gets its own environment (see CLAUDE.md).
@@ -33,11 +35,15 @@ help:
 	@echo "make audit  - pip-audit the lockfile for known CVEs"
 	@echo "make sonar  - run tests then a local SonarQube scan (needs sonar-scanner)"
 	@echo "make hooks  - install pre-commit hooks"
+	@echo "make binary - compile with Nuitka (BINARY_MODE=standalone or onefile)"
 
 # All non-dependency commands use `uv run --locked` so they can never
 # silently re-resolve the lockfile — only `make deps` may change it.
 sync:
 	uv sync --locked
+
+binary:
+	uv run --locked --group binary python scripts/build_binary.py --mode $(BINARY_MODE)
 
 check:
 	uv run --locked ruff check .
@@ -75,7 +81,7 @@ bump:
 	uv run --locked python scripts/check_dep_age.py
 
 audit:
-	uv export --frozen --no-emit-project --output-file requirements-audit.txt
+	uv export --frozen --all-groups --no-emit-project --output-file requirements-audit.txt
 	uv run --locked pip-audit --disable-pip --requirement requirements-audit.txt
 
 sonar:
