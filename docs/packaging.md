@@ -69,6 +69,10 @@ Qt/PySide/Shiboken and Nuitka runtime licences and attribution notices.
 The release also attaches `glidepath-X.Y.Z-third-party-licences.zip` so these
 can be read without launching or extracting the executable. Its README
 records the component versions, original sources and update procedure.
+The notices are scoped to the Windows bundle. They omit other platforms,
+Qt test/build tools and unused licence templates; common terms are retained
+once with the relevant component copyrights. Recheck this selection if the
+bundled modules or plugins change.
 Refresh these notices when changing Python, PySide6 or Nuitka. Qt Charts
 is GPLv3; its terms are included alongside the other runtime licences.
 

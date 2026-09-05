@@ -15,16 +15,17 @@ under their respective licences; nothing in Glidepath's notices restricts
 those rights or reverse engineering for debugging changes to LGPL libraries.
 
 Python's original licence and incorporated-software acknowledgements are in
-`PYTHON-LICENSE.txt` and `PYTHON-LICENSE-DOC.rst` (readable plain text).
+`PYTHON-LICENSE.txt` and `PYTHON-THIRD-PARTY.rst` (readable plain text).
 The Python interpreter has not been modified by this project. Nuitka's runtime
-licence, additional permission and bundled zstd/HACL notices are in `NUITKA-*`.
+licence, additional permission and bundled zstd notice are in `NUITKA-NOTICES.txt`.
 Nuitka is copyright Kay Hayen and contributors; its runtime exception permits
 compiled application distribution without imposing AGPL on independent code.
 
-The `*-ATTRIBUTIONS.txt` files retain Qt's original third-party component
-records, copyrights and referenced licence texts. They include notices for
-other platforms and optional components in these source modules; inclusion
-of a notice does not mean that component is used by the Windows executable.
+`QT-THIRD-PARTY.txt` retains the original component records, copyrights and
+referenced licence texts for the included Windows Qt libraries and plugins.
+Shared library code retains its notices even if Glidepath does not call that
+feature directly. Identical referenced texts are included once; each
+component's own copyright is retained.
 This software is based in part on the work of the Independent JPEG Group.
 
 ## Corresponding sources and build instructions
@@ -50,20 +51,43 @@ beside the application, so replacements can be used when rebuilding/debugging.
 
 ## Updating these notices
 
-Refresh this folder when changing `.python-version`, the PySide6 pin, or the
-locked Nuitka version. Use the matching upstream release sources, not the
-latest documentation. The files here were collected as follows:
+Refresh this folder when changing `.python-version`, the PySide6 pin, the
+locked Nuitka version, or the bundled Qt modules/plugins. Use the matching
+upstream release sources and inspect the bundle's contents. This Windows-only
+collection is not a notice set for Linux or macOS distributions.
 
-- Python: copy `LICENSE` and `Doc/license.rst` from CPython tag `v3.14.6`.
-- Qt/PySide: retain the licence texts under each source module's `LICENSES/`.
-  `QT-LICENCES.txt` combines these, retaining distinct texts when modules use
-  different wording for the same licence identifier.
+- Python: retain `LICENSE` from CPython tag `v3.14.6`. From `Doc/license.rst`,
+  retain the incorporated-software section, excluding `test_epoll` and
+  `Select kqueue`. The history and duplicate Python licence text are omitted.
+  Retain the MIT copyright header from `Modules/_hacl/Hacl_Hash_SHA2.c` for
+  the interpreter's HACL code, rather than Nuitka's unused older HACL copy.
+- Qt/PySide: `QT-LICENCES.txt` contains GPLv3/LGPLv3 and the common terms
+  referenced by retained attribution records without their own licence file.
+  Other component-specific licence texts live with their attribution record;
+  unused commercial, documentation, example and platform licence templates
+  are omitted. Shared Apache/CC0 terms are referenced from the component
+  notices, including Python's OpenSSL notice. FreeType uses its FTL alternative
+  and BLAKE2 uses its CC0 alternative, so their unused alternative texts are
+  omitted; the upstream records still show the available licence choices.
 - Qt/PySide attributions: collect `qt_attribution.json` under `src/` and
   `sources/`, followed by each record's `LicenseFile`, `LicenseFiles` and
-  `CopyrightFile` contents. Retain the paths and original records. Qt Charts
-  has no such attribution records in this release; its GPLv3 text is included.
+  `CopyrightFile` contents. Retain the paths and original records. Omit
+  Android/Gradle, Wayland, WebAssembly, Cocoa/Core Foundation, XCB, Unix
+  forkfd, ARM-only pixman, Qt DBus, the SQLite plugin and Qt tests/internal
+  test tools. Those components are absent from this Windows x64 bundle.
+  Qt Charts has no such attribution records; its GPLv3 text is included.
 - Nuitka: copy `LICENSE.txt`, `LICENSE-RUNTIME.txt`, and
-  `nuitka/build/inline_copy/{zstd,python_hacl}/LICENSE.txt` from the locked sdist.
+  `nuitka/build/inline_copy/zstd/LICENSE.txt` from the locked sdist into
+  `NUITKA-NOTICES.txt`. Nuitka's older inline HACL copy is not linked with
+  Python 3.14 (`SconsPythonBuild.py:addPythonHaclLib`).
+
+The selection was checked statically against the existing 1.1.0 Windows x64
+onefile payload, SHA-256
+`51bcd03ca416c4b14ed0b5addd1731c86841f6700838fab4f608cea3665fc541`.
+Its compressed file list was read without executing the application. It
+includes Qt Core, Gui, Widgets, Charts, Network, OpenGL/OpenGLWidgets, SVG
+and PDF, plus Windows platform, image-format, icon, style and TLS plugins.
+Recheck the selection against the final build when packaging changes.
 
 Both Nuitka build modes include this directory. The release workflow also
 attaches the same directory as `glidepath-X.Y.Z-third-party-licences.zip`,
