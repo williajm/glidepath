@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="https://williajm.github.io/glidepath/"><b>williajm.github.io/glidepath</b></a>
+  · <a href="https://pyrank.org/package/glidepath/">PyPI and GitHub stats on PyRank</a>
 </p>
 
 A desktop retirement and investment planner. UK-first, built so other

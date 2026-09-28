@@ -11,6 +11,7 @@ import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+import pytest
 from PySide6.QtCore import QStandardPaths
 from PySide6.QtWidgets import QMessageBox
 
@@ -19,13 +20,13 @@ from glidepath.app import (
     example_facts_form_data,
     load_state,
 )
+from glidepath.app.files import SaveOutcome
 from glidepath.gui import widgets
 from glidepath.gui.widgets import MainWindow
+from glidepath.persistence import load_plan
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def _window_with_example(settings_path: Path | None = None) -> MainWindow:
@@ -304,6 +305,127 @@ class TestOpenFlow:
         plan.unlink()
         window.save_plan()
         assert plan.exists()
+
+
+def _edited_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, saved: bool = True
+) -> tuple[MainWindow, Path, Path]:
+    """A salary edit, with another file ready to replace the session."""
+    current = tmp_path / "current.glidepath.json"
+    other = tmp_path / "other.glidepath.json"
+    original = _window_with_example()
+    monkeypatch.setattr(
+        widgets,
+        "QFileDialog",
+        SimpleNamespace(getSaveFileName=lambda *_args: (str(other), "")),
+    )
+    original.save_plan_as_dialog()
+    window = _window_with_example()
+    monkeypatch.setattr(
+        widgets,
+        "QFileDialog",
+        SimpleNamespace(getSaveFileName=lambda *_args: (str(current), "")),
+    )
+    if saved:
+        window.save_plan_as_dialog()
+    window.facts_pane.person_form.set_value("employment_income", "61000")
+    window.facts_pane.submit_button.click()
+    return window, current, other
+
+
+def _replace_plan(window: MainWindow, path: Path, action: str) -> None:
+    """Request either of the actions that replaces the current plan."""
+    if action == "open":
+        window.open_plan(path)
+    else:
+        window.facts_pane.clear_button.click()
+
+
+@pytest.mark.parametrize("action", ["open", "clear"])
+class TestPlanReplacement:
+    """Opening and clearing honour the close flow's unsaved-edit protection."""
+
+    @pytest.mark.parametrize("rejection", ["cancel", "cancel_save", "failed_save"])
+    def test_abandoned_replacement_preserves_form_and_session(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        action: str,
+        rejection: str,
+    ) -> None:
+        """Cancel or an unsuccessful save preserves edits and the save path."""
+        window, current, other = _edited_window(
+            tmp_path, monkeypatch, saved=rejection != "cancel_save"
+        )
+        before = window.facts_pane.form_data()
+        status = window.facts_pane.status_label.text()
+        with monkeypatch.context() as rejecting:
+            choice = (
+                QMessageBox.StandardButton.Cancel
+                if rejection == "cancel"
+                else QMessageBox.StandardButton.Save
+            )
+            rejecting.setattr(widgets, "QMessageBox", _message_box_answering(choice))
+            if rejection == "cancel_save":
+                rejecting.setattr(
+                    widgets,
+                    "QFileDialog",
+                    SimpleNamespace(getSaveFileName=lambda *_args: ("", "")),
+                )
+            elif rejection == "failed_save":
+                rejecting.setattr(
+                    widgets,
+                    "save_plan_state",
+                    lambda *_args: SaveOutcome(saved=False, message="Disk full"),
+                )
+            _replace_plan(window, other, action)
+        assert window.facts_pane.form_data() == before
+        assert window.facts_pane.status_label.text() == status
+        assert window.inspector_pane.facts_table.rowCount() > 0
+        window.save_plan()
+        income = load_plan(current).household.persons[0].employment_income
+        assert income is not None
+        assert income.value.amount == 61000
+
+    @pytest.mark.parametrize(
+        "choice", [QMessageBox.StandardButton.Save, QMessageBox.StandardButton.Discard]
+    )
+    def test_confirmed_replacement_saves_only_when_requested(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        action: str,
+        choice: QMessageBox.StandardButton,
+    ) -> None:
+        """Save writes the old plan before replacing it; Discard leaves it alone."""
+        window, current, other = _edited_window(tmp_path, monkeypatch)
+        original = current.read_bytes()
+        monkeypatch.setattr(widgets, "QMessageBox", _message_box_answering(choice))
+        _replace_plan(window, other, action)
+        if choice == QMessageBox.StandardButton.Save:
+            income = load_plan(current).household.persons[0].employment_income
+            assert income is not None
+            assert income.value.amount == 61000
+        else:
+            assert current.read_bytes() == original
+        if action == "open":
+            values = window.facts_pane.person_form.values()
+            assert values["employment_income"] == "52000"
+        else:
+            assert window.facts_pane.wrappers.values_list() == ()
+            assert window.inspector_pane.facts_table.rowCount() == 0
+
+
+def test_saving_before_reopening_the_same_file_loads_the_saved_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Open must read the file after Save, otherwise it restores stale facts."""
+    window, current, _other = _edited_window(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        widgets, "QMessageBox", _message_box_answering(QMessageBox.StandardButton.Save)
+    )
+    assert window.open_plan(current)
+    assert window.facts_pane.person_form.values()["employment_income"] == "61000"
 
 
 class TestCloseFlow:

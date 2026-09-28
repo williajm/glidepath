@@ -393,7 +393,7 @@ class FactsEntryPane(QWidget):
         self,
         view_model: FactsFormViewModel,
         on_submit: Callable[[FactsFormData], FactsSubmissionOutcome],
-        on_clear: Callable[[], str],
+        on_clear: Callable[[], str | None],
         parent: QWidget | None = None,
     ) -> None:
         """Render the form and wire the submit and clear callbacks."""
@@ -754,10 +754,13 @@ class FactsEntryPane(QWidget):
         self._show_errors(outcome.errors)
 
     def clear(self) -> None:
-        """Empty every section, then show the clear callback's status."""
+        """Empty every section only when the callback allows the clear."""
+        status = self._on_clear()
+        if status is None:
+            return
         self._clear_all_errors()
         self.set_form_data(FactsFormData())
-        self.status_label.setText(self._on_clear())
+        self.status_label.setText(status)
 
 
 __all__ = [

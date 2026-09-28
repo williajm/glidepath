@@ -2304,9 +2304,13 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   re-anchoring rules, and reports the earliest age — or that none in
   range meets — with the target income and the basis it was computed
   on. A candidate with no retired period inside the projected horizon
-  never tests the income and fails rather than succeeding vacuously; a
-  Monte Carlo search is additionally bounded to 20,000
-  path-projections across its candidate ages (the per-run path cap
+  never tests the income and fails rather than succeeding vacuously.
+  Both retirement solvers apply the engine's period-start death gate:
+  exposure requires at least one living person, with every living
+  person retired. A deceased partner's retirement age cannot block
+  the survivor's exposure, and periods after the final death cannot
+  make an income succeed. A Monte Carlo search is additionally bounded
+  to 20,000 path-projections across its candidate ages (the per-run path cap
   alone would let an unsuccessful search multiply to hundreds of
   thousands); and the Monte Carlo run and the search share one
   in-flight guard, since a second slow run launched mid-flight could

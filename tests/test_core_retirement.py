@@ -11,6 +11,7 @@ re-running the plan at that age, and the solvers are deterministic.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from functools import partial
@@ -90,6 +91,7 @@ def flat_assumptions() -> AssumptionSet:
         AssumptionKey.FEES_FUND: Decimal(0),
         AssumptionKey.HORIZON_PLANNING_AGE: 95,
         AssumptionKey.GLIDEPATH_DEFAULT_SHAPE: DEFAULT_SHAPE,
+        AssumptionKey.SPENDING_SURVIVOR_MULTIPLIER: Decimal(1),
     }
     return AssumptionSet(
         Assumption(
@@ -435,6 +437,126 @@ class TestRetirementExposure:
             search_of(target=affordable, minimum_age=96, maximum_age=96),
         )
         assert age == 96
+
+
+@pytest.mark.parametrize("mode", [RunMode.DETERMINISTIC, RunMode.MONTE_CARLO])
+class TestSurvivorExposure:
+    """Both solvers require retirement spending while someone is alive."""
+
+    def test_death_cannot_make_an_unaffordable_retirement_succeed(
+        self, mode: RunMode
+    ) -> None:
+        """A £100,000 pot cannot fund £1m/year by postponing until death."""
+        plan = household_of()
+        person = replace(
+            plan.persons[0], death_age=Decision(value=60, recorded_on=RECORDED)
+        )
+        plan = replace(plan, persons=(person,))
+        config = replace(deterministic_config(), mode=mode, seed=SEED)
+        age = earliest_retirement_age(
+            plan,
+            flat_assumptions(),
+            stub_region(),
+            config,
+            search_of(target=Money(Decimal(1000000))),
+        )
+        income = sustainable_income_at_age(
+            plan,
+            flat_assumptions(),
+            stub_region(),
+            config,
+            age=60,
+            search=income_search_of(maximum="1000000"),
+        )
+        assert age is None
+        assert income is None
+
+    def test_a_living_retired_survivor_counts_as_exposure(self, mode: RunMode) -> None:
+        """A partner who dies before retiring must not block the survivor."""
+        plan = couple_of(partner_retirement_age=65)
+        partner = replace(
+            plan.persons[1], death_age=Decision(value=56, recorded_on=RECORDED)
+        )
+        plan = replace(plan, persons=(plan.persons[0], partner))
+        config = replace(deterministic_config(), mode=mode, seed=SEED)
+        target = Money(Decimal(10000))
+        age = earliest_retirement_age(
+            plan,
+            flat_assumptions(),
+            stub_region(),
+            config,
+            search_of(target=target),
+        )
+        income = sustainable_income_at_age(
+            plan,
+            flat_assumptions(),
+            stub_region(),
+            config,
+            age=56,
+            search=income_search_of(maximum="10000"),
+        )
+        assert age == 56
+        assert income == target
+
+    def test_both_deaths_end_household_exposure(self, mode: RunMode) -> None:
+        """A couple with both death gates fired has no retirement to fund."""
+        plan = couple_of()
+        persons = tuple(
+            replace(person, death_age=Decision(value=58, recorded_on=RECORDED))
+            for person in plan.persons
+        )
+        plan = replace(plan, persons=persons)
+        config = replace(deterministic_config(), mode=mode, seed=SEED)
+        age = earliest_retirement_age(
+            plan,
+            flat_assumptions(),
+            stub_region(),
+            config,
+            search_of(minimum_age=60),
+        )
+        income = sustainable_income_at_age(
+            plan,
+            flat_assumptions(),
+            stub_region(),
+            config,
+            age=60,
+            search=income_search_of(),
+        )
+        assert age is None
+        assert income is None
+
+    def test_mid_period_death_keeps_the_current_retired_period(
+        self, mode: RunMode
+    ) -> None:
+        """Death on 2 January takes effect next year, as in the engine."""
+        plan = household_of()
+        person = replace(
+            plan.persons[0],
+            date_of_birth=replace(
+                plan.persons[0].date_of_birth, value=date(1970, 1, 2)
+            ),
+            death_age=Decision(value=60, recorded_on=RECORDED),
+        )
+        plan = replace(plan, persons=(person,))
+        config = replace(deterministic_config(), mode=mode, seed=SEED)
+        target = Money(Decimal(100000))
+        age = earliest_retirement_age(
+            plan,
+            flat_assumptions(),
+            stub_region(),
+            config,
+            search_of(target=target),
+        )
+        income = sustainable_income_at_age(
+            plan,
+            flat_assumptions(),
+            stub_region(),
+            config,
+            age=59,
+            search=income_search_of(maximum="100000"),
+        )
+        assert age == 59
+        assert income == target
 
 
 class TestCoupleSelection:

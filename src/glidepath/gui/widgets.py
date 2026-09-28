@@ -381,6 +381,8 @@ class MainWindow(QMainWindow):
         starts from what the file says. On failure the session is left
         untouched and the status bar explains.
         """
+        if not self._confirm_plan_replacement():
+            return False
         outcome = load_plan_state(path, today=_today())
         self.statusBar().showMessage(outcome.message)
         if outcome.state is None:
@@ -545,17 +547,21 @@ class MainWindow(QMainWindow):
             self._remember_plan_path(path)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
-        """Ask before a close discards unsaved plan edits (issue #136).
+        """Close only after unsaved plan edits have been dealt with."""
+        if self._confirm_plan_replacement():
+            event.accept()
+        else:
+            event.ignore()
+
+    def _confirm_plan_replacement(self) -> bool:
+        """Ask before closing, opening, or clearing discards plan edits.
 
         Save runs the normal save flow — asking for a path when the
-        session has none — and the window closes only once the changes
-        are actually saved: a failed or cancelled save keeps it open
-        rather than silently discarding the edits it just promised to
-        keep.
+        session has none. A failed or cancelled save abandons the
+        pending action and preserves the session and form.
         """
         if not has_unsaved_changes(self._state):
-            event.accept()
-            return
+            return True
         choice = QMessageBox.question(
             self,
             UNSAVED_CHANGES_TITLE,
@@ -567,15 +573,8 @@ class MainWindow(QMainWindow):
         )
         if choice == QMessageBox.StandardButton.Save:
             self.save_plan()
-            if has_unsaved_changes(self._state):
-                event.ignore()
-                return
-            event.accept()
-            return
-        if choice == QMessageBox.StandardButton.Discard:
-            event.accept()
-            return
-        event.ignore()
+            return not has_unsaved_changes(self._state)
+        return choice == QMessageBox.StandardButton.Discard
 
     def _remember_plan_path(self, path: Path) -> None:
         """Record the plan path for the next launch, best-effort.
@@ -611,13 +610,15 @@ class MainWindow(QMainWindow):
         self._state = state_marked_saved(self._state)
         self.facts_pane.status_label.setText(self._view_model.facts_form.example_note)
 
-    def _handle_cleared(self) -> str:
+    def _handle_cleared(self) -> str | None:
         """Reset the session to no plan and re-render the result panes.
 
         The session's plan file detaches too: after a clear, the next
         Save asks where to write rather than overwriting the file the
         cleared plan came from.
         """
+        if not self._confirm_plan_replacement():
+            return None
         self._state = initial_plan_state()
         self._plan_path = None
         self._refresh_result_panes()
