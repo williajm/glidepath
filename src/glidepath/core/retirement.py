@@ -11,11 +11,14 @@ candidate: the returned age is exactly the earliest succeeding one
 even when success is not monotone in age (a DB scheme's early-payment
 factors or a dated outflow can make it dip), and every answer was
 actually probed, never interpolated. Household spending begins once
-*every* person has retired (planning §4.11), so a candidate has a
+every living person has retired (planning §4.11), so a candidate has a
 retired period to test the income in only when the whole household —
 the candidate age for the selected person, the partner's stated
 decision held fixed — is retired inside the run's horizon; a
-candidate without one fails rather than succeeding vacuously.
+candidate without one fails rather than succeeding vacuously. Death
+uses the engine's period-start gate: at least one person must remain
+alive, and a deceased partner's retirement age no longer constrains
+the survivor's spending.
 
 Each probe replaces the *selected* person's retirement-age decision
 with the candidate — a partner's decision is held fixed (planning
@@ -142,11 +145,9 @@ def earliest_retirement_age(  # noqa: PLR0913
     returns the first that succeeds — exactly the earliest, whatever
     the success shape over ages (module docstring) — or ``None`` when
     no age in the bracket does. A candidate with no *retirement
-    exposure* — no projected period opening the whole household
-    retired under the §4.1 gate convention (household spending starts
-    once every person has retired, §4.11), because the candidate's or
-    a partner's fixed retirement date falls at or past the run's
-    horizon — never tests the target income at all, so it fails
+    exposure* — no projected period opening with at least one living
+    person and all living persons retired under the §4.1 gate
+    convention — never tests the target income at all, so it fails
     rather than succeeding vacuously; such candidates are never
     probed. The plan's stated retirement age and spending level are
     irrelevant to the search: each probe carries the candidate age and
@@ -168,7 +169,7 @@ def earliest_retirement_age(  # noqa: PLR0913
     periods = _projected_periods(plan, assumptions, region, config)
 
     def has_retired_period(age: int) -> bool:
-        """Whether any period opens the whole household retired (§4.1)."""
+        """Whether any period opens a living household retired (§4.1)."""
         return any(
             _household_retired_by(period, plan.persons, selected.id, age)
             for period in periods
@@ -227,12 +228,11 @@ def sustainable_income_at_age(  # noqa: PLR0913
     age and the candidate spending instead, everything else unchanged.
 
     An ``age`` with no *retirement exposure* — no projected period
-    opening the whole household retired under the §4.1 gate convention
-    (household spending starts once every person has retired, §4.11),
-    because the chosen or a partner's fixed retirement date falls at
-    or past the run's horizon — has no retired period to test any
-    income in: spending is modelled only in retirement, so every level
-    would succeed vacuously. It answers ``None`` without probing,
+    opening with at least one living person and all living persons
+    retired under the §4.1 gate convention — has no retired period to
+    test any income in: spending is modelled only in a living
+    household's retirement, so every level would succeed vacuously.
+    It answers ``None`` without probing,
     exactly as such candidates fail in the age search. ``None``
     otherwise means what the income search means by it: not even zero
     spending survives the plan's outflows.
@@ -303,21 +303,31 @@ def _household_retired_by(
     selected_id: EntityId,
     age: int,
 ) -> bool:
-    """Whether every person opens ``period`` retired (§4.1, §4.11).
+    """Whether a living household opens ``period`` retired (§4.1, §4.11).
 
     The exposure predicate of both solvers: the selected person
     retires at the probed ``age`` while a partner's stated
-    retirement-age decision is held fixed — matching the engine, where
-    household spending begins once every person has retired, so only
-    such a period can test a retirement income at all.
+    retirement-age decision is held fixed. Match the engine's death
+    gate: a person is no longer living once their death age has been
+    attained by the period start. Spending begins once all living
+    persons retire and stops when none remain, so only such a period
+    can test retirement income.
     """
-    return all(
+    living = tuple(
+        person
+        for person in persons
+        if person.death_age is None
+        or not is_age_attained_by_period_start(
+            person.date_of_birth.value, person.death_age.value, period
+        )
+    )
+    return bool(living) and all(
         is_age_attained_by_period_start(
             person.date_of_birth.value,
             age if person.id == selected_id else person.target_retirement_age.value,
             period,
         )
-        for person in persons
+        for person in living
     )
 
 

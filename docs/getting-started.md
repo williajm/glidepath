@@ -284,7 +284,10 @@ can be overridden, which is the point of separating them.
 - **File → Save plan** writes everything — facts, choices, overrides,
   scenarios — to a `.glidepath.json` file wherever you choose
   (**Save plan as…** picks a new file); **Open plan…** loads one back,
-  and the last plan you used reopens on the next launch.
+  and the last plan you used reopens on the next launch. Opening a
+  plan, clearing the form or closing the app offers **Save**, **Discard**
+  or **Cancel** if the current plan has unsaved changes. Cancelling or
+  a failed save leaves your plan in place.
 - **File → Export cash flow (CSV)** writes the per-year table exactly as
   charted, for a spreadsheet.
 - **File → Export report (PDF)** prints the whole plan: your inputs

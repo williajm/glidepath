@@ -1,6 +1,6 @@
 [project]
 name = "glidepath"
-version = "1.1.0"
+version = "1.1.1"
 description = "Desktop retirement and investment planner (UK-first, region-extensible)."
 readme = "README.md"
 # MIT code plus one CC BY-NC-SA 4.0 data file (returns_history.toml —
@@ -49,6 +49,7 @@ Homepage = "https://williajm.github.io/glidepath/"
 Repository = "https://github.com/williajm/glidepath"
 Changelog = "https://github.com/williajm/glidepath/blob/main/CHANGELOG.md"
 Issues = "https://github.com/williajm/glidepath/issues"
+Statistics = "https://pyrank.org/package/glidepath/"
 
 [project.gui-scripts]
 glidepath = "glidepath.gui.main:main"

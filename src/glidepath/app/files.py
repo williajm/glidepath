@@ -60,7 +60,7 @@ SAVE_DIALOG_TITLE: Final = "Save plan"
 UNSAVED_CHANGES_TITLE: Final = "Unsaved changes"
 
 UNSAVED_CHANGES_PROMPT: Final = (
-    "This plan has unsaved changes. Save them before closing?"
+    "This plan has unsaved changes. Save them before continuing?"
 )
 
 NOTHING_TO_SAVE_MESSAGE: Final = (

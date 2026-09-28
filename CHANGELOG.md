@@ -7,6 +7,23 @@ recent release first. The format follows
 process in `docs/planning.md` §4.10). Each release's section is curated
 in the release PR and becomes the GitHub Release notes verbatim.
 
+## [1.1.1] - 2026-09-28
+
+### Fixed
+
+- Opening another plan or clearing the form now offers Save, Discard,
+  or Cancel when the current plan has unsaved changes. A cancelled or
+  failed save keeps the current plan and form intact.
+- Retirement-age and sustainable-income searches now require a retired
+  period with someone still alive. Modelled deaths no longer produce
+  successful answers without testing any spending, and a deceased
+  partner's retirement age no longer blocks a living retiree's search.
+
+### Added
+
+- PyRank package statistics links in the README, project website and
+  PyPI project metadata.
+
 ## [1.1.0] - 2026-09-05
 
 The first Windows executable release: download one file and launch
