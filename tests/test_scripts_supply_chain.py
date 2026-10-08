@@ -418,3 +418,36 @@ def test_precommit_hooks_strip_ambient_exclude_newer() -> None:
     assert locked, "expected local hooks to run via `uv run --locked`"
     for entry in locked:
         assert entry.startswith("env -u UV_EXCLUDE_NEWER uv run --locked "), entry
+
+
+# --- re-lock build-requirements guard ---------------------------------------
+#
+# Nuitka is a source-only, no-build-isolation package: whenever `uv lock`
+# lacks cached Nuitka metadata (a new release, or a cold cache) it builds it
+# in the project venv, which needs setuptools from the binary group.
+# `make sync` installs only the default groups, so both re-locking targets
+# must install the binary group themselves first — `--frozen`, because
+# pyproject.toml is already ahead of the lockfile when adding a dependency
+# (`make deps`) or after the version rewrite (`make bump`), and `--locked`
+# would refuse.
+
+BINARY_SYNC = "uv sync --frozen --group binary"
+
+
+def _make_recipe(target: str) -> list[str]:
+    """Return the command lines of one Makefile target's recipe."""
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    match = re.search(rf"^{target}:\n((?:\t.*\n)+)", makefile, flags=re.MULTILINE)
+    assert match, f"no `{target}` recipe in the Makefile"
+    return [line.strip() for line in match.group(1).splitlines()]
+
+
+@pytest.mark.parametrize(
+    ("target", "lock_command"),
+    [("deps", "uv lock --upgrade"), ("bump", "uv lock")],
+)
+def test_relock_installs_binary_group_first(target: str, lock_command: str) -> None:
+    """Re-locking targets must provide Nuitka's build requirements to uv."""
+    recipe = _make_recipe(target)
+    assert BINARY_SYNC in recipe
+    assert recipe.index(BINARY_SYNC) < recipe.index(lock_command)

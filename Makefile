@@ -63,7 +63,12 @@ test:
 # Bumps the exclude-newer cooldown cutoff in pyproject.toml, re-resolves
 # everything against it (--upgrade, or existing pins are kept forever),
 # syncs, then independently verifies artifact upload ages via the PyPI API.
+# Nuitka is a no-build-isolation sdist, so re-locking a new release builds
+# its metadata in this venv: install the binary group (setuptools) from the
+# current lockfile first. --frozen, not --locked: when adding a dependency,
+# pyproject.toml is already ahead of the lockfile. It never writes the lock.
 deps:
+	uv sync --frozen --group binary
 	uv run --no-project python scripts/update_exclude_newer.py
 	uv lock --upgrade
 	uv sync --locked
@@ -73,8 +78,10 @@ deps:
 # project version, so a bump needs a re-lock — but a MINIMAL one: no
 # --upgrade, so every existing pin is kept, the exclude-newer cooldown
 # cutoff still applies to anything newly resolved, and the age check
-# re-verifies the whole lockfile afterwards.
+# re-verifies the whole lockfile afterwards. Without cached Nuitka metadata
+# the re-lock rebuilds it, so the binary group is installed first, as in deps.
 bump:
+	uv sync --frozen --group binary
 	uv run --no-project python scripts/bump_version.py $(V)
 	uv lock
 	uv sync --locked
