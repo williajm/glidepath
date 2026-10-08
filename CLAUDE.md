@@ -28,7 +28,9 @@ No dependency — direct or transitive — may be locked to a version published
 to PyPI within the last 7 days (cooldown against freshly compromised
 releases). Rules:
 
-- Add/upgrade dependencies ONLY via `make deps`, which bumps the
+- Add/upgrade dependencies ONLY via `make deps`, which installs the
+  `binary` group from the current lockfile (`uv sync --frozen`: Nuitka's
+  no-build-isolation metadata build needs its setuptools), bumps the
   `exclude-newer` cutoff in `pyproject.toml` to UTC now minus 7 days, runs
   `uv lock --upgrade`, syncs, and then runs `scripts/check_dep_age.py` to
   verify. Never run bare `uv add`, `uv lock`, or `uv lock --upgrade`.
@@ -36,6 +38,8 @@ releases). Rules:
   `uv lock` because uv.lock embeds the project version. It is a minimal
   re-lock — no `--upgrade`, existing pins kept, the `exclude-newer` cutoff
   still applies — and it re-runs `scripts/check_dep_age.py` afterwards.
+  Like `make deps`, it installs the `binary` group (`uv sync --frozen`)
+  before re-locking.
 - All other commands (make targets, pre-commit hooks) use
   `uv run --locked`, so nothing outside `make deps` and `make bump` can
   rewrite the lockfile.

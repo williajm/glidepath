@@ -102,7 +102,7 @@ nuitka-options = [
 [tool.uv]
 # Supply-chain cooldown: resolution ignores anything published to PyPI after
 # this timestamp (now minus 7 days). Updated ONLY by `make deps`.
-exclude-newer = "2026-08-29T16:19:47Z"
+exclude-newer = "2026-10-01T19:49:59Z"
 # Nuitka is source-only. uv installs its build requirements from the binary
 # group first, then builds it in that environment: the lockfile hashes, age
 # check and all-groups audit cover the exact setuptools/wheel versions used.

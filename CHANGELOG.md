@@ -7,6 +7,23 @@ recent release first. The format follows
 process in `docs/planning.md` §4.10). Each release's section is curated
 in the release PR and becomes the GitHub Release notes verbatim.
 
+## [Unreleased]
+
+### Security
+
+- Dependencies refreshed under the 7-day cooldown (resolution cutoff
+  2026-10-01) to clear open advisories in development tooling only;
+  the PySide6 runtime pin is unchanged. urllib3 2.7.0 → 2.8.0
+  (GHSA-gh4c-6fx4-qh6g, GHSA-8988-9cw3-xx77, GHSA-vxq7-64xx-v4gw) and
+  virtualenv 21.7.7 → 21.14.2 (GHSA-94p9-xgh2-xp45,
+  GHSA-9h9j-4vrj-gf7g, GHSA-p58f-9548-mpm2, GHSA-x78j-v8h9-3j2q).
+  The Windows build tool Nuitka moves 4.2 → 4.2.2; its
+  licence texts are unchanged. Plus routine updates: ruff 0.16.5 →
+  0.16.10, hypothesis 6.165.10 → 6.168.3, coverage 7.16.0 → 7.16.2,
+  filelock 3.32.4 → 4.0.8, and transitive updates (ast-serialize,
+  charset-normalizer, identify, idna, librt, msgpack, nodeenv,
+  pip-api, platformdirs, pyparsing, python-discovery).
+
 ## [1.1.1] - 2026-09-28
 
 ### Fixed

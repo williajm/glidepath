@@ -1,7 +1,7 @@
 # Glidepath bundled runtime notices
 
 These notices accompany the Glidepath Windows executable. The executable
-contains Python 3.14.6, Qt/PySide6/Shiboken6 6.11.2, and the Nuitka 4.2 runtime.
+contains Python 3.14.6, Qt/PySide6/Shiboken6 6.11.2, and the Nuitka 4.2.2 runtime.
 Copyright and licence terms for these components are retained in this folder.
 Glidepath's own MIT licence and the separate data licence are in `LICENSE`
 and `LICENSE-DATA` at the root of the bundle and source repository.
@@ -42,7 +42,7 @@ Source downloads are available without charge:
 - [Qt Image Formats 6.11.2](https://github.com/qt/qtimageformats/archive/refs/tags/v6.11.2.tar.gz).
 - [Qt Charts 6.11.2](https://github.com/qt/qtcharts/archive/refs/tags/v6.11.2.tar.gz).
 - [PySide/Shiboken 6.11.2](https://github.com/pyside/pyside-setup/archive/refs/tags/v6.11.2.tar.gz).
-- [Nuitka 4.2](https://github.com/Nuitka/Nuitka/archive/refs/tags/4.2.tar.gz).
+- [Nuitka 4.2.2](https://github.com/Nuitka/Nuitka/archive/refs/tags/4.2.2.tar.gz).
 
 The upstream source archives include their build instructions and third-party
 sources. Glidepath bundles the Qt libraries from the pinned PySide6 wheels
