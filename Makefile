@@ -31,6 +31,7 @@ help:
 	@echo "make fix    - auto-fix lint issues and format"
 	@echo "make test   - run tests with coverage"
 	@echo "make deps   - upgrade/lock dependencies with the 7-day cooldown, sync, verify"
+	@echo "              SECURITY_FIX=\"pkg ...\" lets named packages in after 1 day"
 	@echo "make bump   - set the release version (V=X.Y.Z), minimally re-lock, verify"
 	@echo "make audit  - pip-audit the lockfile for known CVEs"
 	@echo "make sonar  - run tests then a local SonarQube scan (needs sonar-scanner)"
@@ -67,9 +68,11 @@ test:
 # its metadata in this venv: install the binary group (setuptools) from the
 # current lockfile first. --frozen, not --locked: when adding a dependency,
 # pyproject.toml is already ahead of the lockfile. It never writes the lock.
+# SECURITY_FIX="pkg ..." gives those packages a 1-day cutoff
+# (exclude-newer-package) for a fix to a published advisory.
 deps:
 	uv sync --frozen --group binary
-	uv run --no-project python scripts/update_exclude_newer.py
+	uv run --no-project python scripts/update_exclude_newer.py $(SECURITY_FIX)
 	uv lock --upgrade
 	uv sync --locked
 	uv run --locked python scripts/check_dep_age.py

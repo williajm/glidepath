@@ -52,7 +52,8 @@ releases). Rules:
 - `scripts/check_dep_age.py` independently verifies the lockfile: the
   embedded cutoff must be ≥7 days old right now, every package must come
   from PyPI (root project excepted), and every locked wheel/sdist's PyPI
-  upload time must predate the cutoff. It runs in CI — a violating
+  upload time must predate the cutoff (or the package's security-fix
+  cutoff, which must be ≥1 day old). It runs in CI — a violating
   lockfile cannot merge.
 - PyPI is the only permitted package index; uv hash verification stays on.
 - The uv binary itself follows the same cooldown: install/update it only to
@@ -62,12 +63,14 @@ releases). Rules:
   action security advisories but proposes no routine version updates —
   pins are refreshed by hand, honouring the 7-day cooldown.
 - Security-fix exception: when the version in use has a published advisory
-  (GHSA/PYSEC/CVE), the uv binary or an Action pin may move to the fixed
-  release once it is at least 1 day old (less only with the owner's
-  explicit approval). Name the advisory in the PR, the CHANGELOG and the
-  pin's comment. TODO: locked packages cannot use this yet, because
-  `scripts/check_dep_age.py` enforces 7 days for the whole lockfile; it
-  would need per-package overrides (uv's `exclude-newer-package`).
+  (GHSA/PYSEC/CVE), its fix may be adopted once it is at least 1 day old
+  (less only with the owner's explicit approval). Name the advisory in the
+  PR and the CHANGELOG, and in the pin's comment for the uv binary or an
+  Action pin. For locked packages, `make deps SECURITY_FIX="pkg ..."` gives
+  each named package a now-minus-1-day `exclude-newer-package` cutoff,
+  which `scripts/check_dep_age.py` verifies in place of the 7-day one.
+  Later `make deps` runs keep an override until the 7-day cutoff passes
+  it, then drop it.
 - The runtime dependency in `[project] dependencies` is pinned exactly
   (`pyside6==X.Y.Z`, moved only by `make deps`): end users installing
   from PyPI resolve fresh, so a `>=` range would bypass the lockfile

@@ -5,16 +5,19 @@
 failure — a check that passes when it should not, or one that trusts a
 weakened cutoff — has outsized impact. These tests pin the fail-closed
 behaviour: malformed lockfiles, non-PyPI sources, artifacts newer than
-the cutoff, and network failures must all fail the check.
+the cutoff, and network failures must all fail the check. Security-fix
+overrides (``exclude-newer-package``) only move named packages' cutoffs,
+and only to timestamps at least a day old.
 
 ``scripts/update_exclude_newer.py`` is the `make deps` half of the same
 policy: it must rewrite exactly the ``exclude-newer`` timestamp to now
-minus the cooldown and touch nothing else.
+minus the cooldown, maintain the override line, and touch nothing else.
 """
 
 import io
 import json
 import re
+import tomllib
 import urllib.error
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,7 +27,13 @@ import pytest
 
 import check_dep_age
 import update_exclude_newer
-from check_dep_age import PolicyError, _cutoff, _locked_artifacts, _verify_package
+from check_dep_age import (
+    PolicyError,
+    _cutoff,
+    _locked_artifacts,
+    _package_cutoffs,
+    _verify_package,
+)
 
 # A cutoff comfortably before every upload time used in these tests.
 CUTOFF = datetime(2026, 1, 8, tzinfo=UTC)
@@ -92,6 +101,42 @@ def test_cutoff_parses_string_form() -> None:
     raw = stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
     cutoff = _cutoff({"options": {"exclude-newer": raw}})
     assert cutoff == stamp.replace(microsecond=0)
+
+
+# --- check_dep_age: security-fix overrides ----------------------------------
+
+
+def _days_ago(days: int) -> str:
+    """A uv.lock timestamp string ``days`` before now."""
+    return (datetime.now(tz=UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_package_cutoffs_absent_is_empty() -> None:
+    """A lockfile without overrides gives every package the global cutoff."""
+    assert _package_cutoffs({"options": {}}) == {}
+
+
+def test_package_cutoffs_parses_old_enough_override() -> None:
+    """An override at least a day old is returned, timezone-aware."""
+    raw = _days_ago(2)
+    lock = {"options": {"exclude-newer-package": {"alpha": raw}}}
+    assert _package_cutoffs(lock) == {"alpha": datetime.fromisoformat(raw)}
+
+
+def test_package_cutoffs_too_recent_fails() -> None:
+    """A security-fix override still needs a day's cooldown."""
+    raw = (datetime.now(tz=UTC) - timedelta(hours=23)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    lock = {"options": {"exclude-newer-package": {"alpha": raw}}}
+    with pytest.raises(PolicyError, match="less than 1 day ago"):
+        _package_cutoffs(lock)
+
+
+@pytest.mark.parametrize("raw", [False, "7 days", "2026-01-01T00:00:00"])
+def test_package_cutoffs_rejects_unverifiable_values(raw: object) -> None:
+    """``false``, relative spans and naive timestamps cannot be verified."""
+    lock = {"options": {"exclude-newer-package": {"alpha": raw}}}
+    with pytest.raises(PolicyError, match="is not a timestamp"):
+        _package_cutoffs(lock)
 
 
 # --- check_dep_age: locked package extraction -------------------------------
@@ -237,9 +282,14 @@ def test_verify_package_fails_closed_on_network_error(
 # --- check_dep_age: end to end ----------------------------------------------
 
 
-def _write_lockfile(directory: Path, *, cutoff: str | None) -> None:
+def _write_lockfile(
+    directory: Path, *, cutoff: str | None, overrides: dict[str, str] | None = None
+) -> None:
     """Write a minimal uv.lock with one editable root and one PyPI package."""
     options = f'[options]\nexclude-newer = "{cutoff}"\n\n' if cutoff else ""
+    if overrides:
+        lines = "".join(f'{name} = "{value}"\n' for name, value in overrides.items())
+        options += f"[options.exclude-newer-package]\n{lines}\n"
     directory.joinpath("uv.lock").write_text(
         f"""\
 version = 1
@@ -265,7 +315,7 @@ wheels = [
 
 def _old_cutoff_string(days: int = 30) -> str:
     """An exclude-newer string safely older than the cooldown."""
-    return (datetime.now(tz=UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _days_ago(days)
 
 
 def test_main_passes_clean_lockfile(
@@ -317,6 +367,68 @@ def test_main_fails_on_missing_cutoff(
     _serve_payload(monkeypatch, _payload_bytes([]), requested)
     exit_code = check_dep_age.main()
     assert exit_code == 1
+    assert "POLICY VIOLATION" in capsys.readouterr().out
+    assert requested == []
+
+
+def _serve_alpha_uploaded(monkeypatch: pytest.MonkeyPatch, uploaded: str) -> None:
+    """Answer PyPI queries with both alpha artifacts uploaded at ``uploaded``."""
+    payload = _payload_bytes(
+        [
+            ("alpha-1.0.0.tar.gz", uploaded),
+            ("alpha-1.0.0-py3-none-any.whl", uploaded),
+        ]
+    )
+    _serve_payload(monkeypatch, payload, [])
+
+
+def test_main_applies_security_fix_cutoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An overridden package passes against its own, later cutoff."""
+    monkeypatch.chdir(tmp_path)
+    _write_lockfile(
+        tmp_path, cutoff=_old_cutoff_string(), overrides={"alpha": _days_ago(2)}
+    )
+    _serve_alpha_uploaded(monkeypatch, _days_ago(5))
+    exit_code = check_dep_age.main()
+    assert exit_code == 0
+    assert "Security-fix cutoff for alpha" in capsys.readouterr().out
+
+
+def test_main_fails_after_security_fix_cutoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An override is still a cutoff: later uploads fail."""
+    monkeypatch.chdir(tmp_path)
+    _write_lockfile(
+        tmp_path, cutoff=_old_cutoff_string(), overrides={"alpha": _days_ago(3)}
+    )
+    _serve_alpha_uploaded(monkeypatch, _days_ago(2))
+    assert check_dep_age.main() == 1
+
+
+def test_main_override_does_not_cover_other_packages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Packages without an override keep the global cutoff."""
+    monkeypatch.chdir(tmp_path)
+    _write_lockfile(
+        tmp_path, cutoff=_old_cutoff_string(), overrides={"beta": _days_ago(2)}
+    )
+    _serve_alpha_uploaded(monkeypatch, _days_ago(5))
+    assert check_dep_age.main() == 1
+
+
+def test_main_fails_on_unverifiable_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A bad override fails the policy before any network request."""
+    monkeypatch.chdir(tmp_path)
+    _write_lockfile(tmp_path, cutoff=_old_cutoff_string(), overrides={"alpha": "1d"})
+    requested: list[str] = []
+    _serve_payload(monkeypatch, _payload_bytes([]), requested)
+    assert check_dep_age.main() == 1
     assert "POLICY VIOLATION" in capsys.readouterr().out
     assert requested == []
 
@@ -393,6 +505,104 @@ def test_update_fails_on_duplicate_cutoff_fields(
     assert pyproject.read_text(encoding="utf-8") == original
 
 
+def _with_overrides(table: str) -> str:
+    """The template with an exclude-newer-package line after the cutoff."""
+    cutoff_line = 'exclude-newer = "2026-01-01T00:00:00Z"\n'
+    return PYPROJECT_TEMPLATE.replace(
+        cutoff_line, f"{cutoff_line}exclude-newer-package = {table}\n"
+    )
+
+
+def _written_overrides(pyproject: Path) -> dict[str, str]:
+    """The exclude-newer-package table as written, parsed as TOML."""
+    uv = tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["uv"]
+    overrides: dict[str, str] = uv.get("exclude-newer-package", {})
+    return overrides
+
+
+def test_update_adds_security_fix_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A named package gets a now-minus-one-day cutoff after exclude-newer."""
+    monkeypatch.chdir(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(PYPROJECT_TEMPLATE, encoding="utf-8")
+    before = datetime.now(tz=UTC)
+    exit_code = update_exclude_newer.main(["Virtual_Env"])
+    after = datetime.now(tz=UTC)
+    assert exit_code == 0
+    lines = pyproject.read_text(encoding="utf-8").splitlines()
+    cutoff_index = next(
+        index for index, line in enumerate(lines) if line.startswith("exclude-newer =")
+    )
+    assert lines[cutoff_index + 1].startswith("exclude-newer-package = { virtual-env")
+    overrides = _written_overrides(pyproject)
+    assert list(overrides) == ["virtual-env"]
+    written = datetime.fromisoformat(overrides["virtual-env"])
+    one_day = timedelta(days=1)
+    assert written >= before - one_day - timedelta(seconds=5)
+    assert written <= after - one_day
+    assert 'setting = "untouched"' in lines
+    assert "exclude-newer-package virtual-env = " in capsys.readouterr().out
+
+
+def test_update_keeps_live_overrides_and_drops_stale_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overrides ahead of the new cutoff survive; caught-up ones are dropped."""
+    monkeypatch.chdir(tmp_path)
+    live, stale = _days_ago(3), _days_ago(30)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        _with_overrides(f'{{ alpha = "{live}", beta = "{stale}" }}'), encoding="utf-8"
+    )
+    assert update_exclude_newer.main() == 0
+    assert _written_overrides(pyproject) == {"alpha": live}
+
+
+def test_update_removes_table_when_every_override_is_stale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With nothing left to keep, the exclude-newer-package line goes."""
+    monkeypatch.chdir(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        _with_overrides(f'{{ beta = "{_days_ago(30)}" }}'), encoding="utf-8"
+    )
+    assert update_exclude_newer.main() == 0
+    assert "exclude-newer-package" not in pyproject.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("packages", "original", "message"),
+    [
+        (["not a name"], PYPROJECT_TEMPLATE, "invalid package name"),
+        ([], _with_overrides("{ alpha = false }"), "cannot read the cutoffs"),
+        (
+            [],
+            PYPROJECT_TEMPLATE + '\n[tool.uv.exclude-newer-package]\nalpha = "x"\n',
+            "single inline-table line",
+        ),
+    ],
+)
+def test_update_refuses_unexpected_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    packages: list[str],
+    original: str,
+    message: str,
+) -> None:
+    """Bad names, unparsable values or a hand-written table change nothing."""
+    monkeypatch.chdir(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(original, encoding="utf-8")
+    assert update_exclude_newer.main(packages) == 1
+    assert pyproject.read_text(encoding="utf-8") == original
+    assert message in capsys.readouterr().out
+
+
 # --- ambient UV_EXCLUDE_NEWER guard -----------------------------------------
 #
 # uv environment variables take precedence over pyproject.toml. A user-wide
@@ -451,3 +661,10 @@ def test_relock_installs_binary_group_first(target: str, lock_command: str) -> N
     recipe = _make_recipe(target)
     assert BINARY_SYNC in recipe
     assert recipe.index(BINARY_SYNC) < recipe.index(lock_command)
+
+
+def test_deps_passes_security_fix_packages() -> None:
+    """`make deps SECURITY_FIX="pkg ..."` must reach the cutoff updater."""
+    recipe = _make_recipe("deps")
+    updater = "uv run --no-project python scripts/update_exclude_newer.py"
+    assert f"{updater} $(SECURITY_FIX)" in recipe
