@@ -30,6 +30,8 @@ in the release PR and becomes the GitHub Release notes verbatim.
   is unchanged.
 - CI and release builds use uv 0.13.4, whose bundled CA store drops the
   compromised emSign root (GHSA-hq85-5cpj-mr62).
+- virtualenv 21.14.11 → 21.14.13 for GHSA-cx6f-vjhg-g3cc, a regression
+  in 21.14.9, adopted under the 1-day security-fix cutoff.
 
 ## [1.1.1] - 2026-09-28
 

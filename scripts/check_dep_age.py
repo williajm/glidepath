@@ -5,6 +5,8 @@ cutoff (``exclude-newer``) embedded in ``uv.lock`` and requires it to be
 at least ``COOLDOWN`` old right now, requires every locked package to come
 from PyPI, and checks the PyPI upload time of every individual artifact
 (each wheel and sdist) recorded in the lockfile against the cutoff.
+Security-fix overrides (``exclude-newer-package``) give named packages
+their own cutoff, which must be at least ``SECURITY_COOLDOWN`` old.
 Anything that cannot be verified fails the check. See CLAUDE.md for the
 policy.
 """
@@ -15,11 +17,11 @@ import tomllib
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from pathlib import Path
 from typing import Any
 
 COOLDOWN = timedelta(days=7)
+SECURITY_COOLDOWN = timedelta(days=1)
 LOCKFILE = Path("uv.lock")
 PYPI_REGISTRY = "https://pypi.org/simple"
 _ROOT_SOURCES = ({"virtual": "."}, {"editable": "."})
@@ -53,6 +55,34 @@ def _cutoff(lock: dict[str, Any]) -> datetime:
         msg = f"exclude-newer cutoff {raw} is less than {COOLDOWN.days} days ago"
         raise PolicyError(msg)
     return cutoff
+
+
+def _package_cutoffs(lock: dict[str, Any]) -> dict[str, datetime]:
+    """Return the per-package security-fix cutoffs recorded in uv.lock.
+
+    Each must be an absolute, timezone-aware timestamp at least
+    ``SECURITY_COOLDOWN`` in the past. ``false`` (no cutoff at all) and
+    relative spans cannot be verified, so they fail. uv records the
+    names normalised, matching the locked package names.
+    """
+    overrides = lock.get("options", {}).get("exclude-newer-package", {})
+    cutoffs: dict[str, datetime] = {}
+    for name, raw in overrides.items():
+        invalid = f"exclude-newer-package {name} = {raw!r} is not a timestamp"
+        try:
+            cutoff = raw if isinstance(raw, datetime) else datetime.fromisoformat(raw)
+        except (TypeError, ValueError) as exc:
+            raise PolicyError(invalid) from exc
+        if cutoff.tzinfo is None:
+            raise PolicyError(invalid)
+        if cutoff > datetime.now(tz=UTC) - SECURITY_COOLDOWN:
+            msg = (
+                f"exclude-newer-package {name} = {raw} is less than "
+                f"{SECURITY_COOLDOWN.days} day ago"
+            )
+            raise PolicyError(msg)
+        cutoffs[name] = cutoff
+    return cutoffs
 
 
 def _locked_artifacts(lock: dict[str, Any]) -> list[tuple[str, str, list[str]]]:
@@ -110,10 +140,11 @@ def _verify_package(cutoff: datetime, item: tuple[str, str, list[str]]) -> list[
 
 
 def main() -> int:
-    """Verify every locked artifact against the cooldown cutoff."""
+    """Verify every locked artifact against its cooldown cutoff."""
     try:
         lock = _load_lock()
         cutoff = _cutoff(lock)
+        overrides = _package_cutoffs(lock)
         packages = _locked_artifacts(lock)
     except PolicyError as exc:
         print(f"POLICY VIOLATION: {exc}")
@@ -122,15 +153,18 @@ def main() -> int:
         f"Verifying {len(packages)} locked packages against "
         f"cutoff {cutoff:%Y-%m-%d %H:%M} UTC"
     )
+    for name, override in sorted(overrides.items()):
+        print(f"Security-fix cutoff for {name}: {override:%Y-%m-%d %H:%M} UTC")
+    cutoffs = [overrides.get(name, cutoff) for name, _, _ in packages]
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
-        results = pool.map(partial(_verify_package, cutoff), packages)
+        results = pool.map(_verify_package, cutoffs, packages)
     violations = [violation for package in results for violation in package]
     if violations:
         print("COOLDOWN VIOLATIONS:")
         for line in violations:
             print(f"  - {line}")
         return 1
-    print(f"OK: every locked artifact satisfies the {COOLDOWN.days}-day cooldown.")
+    print("OK: every locked artifact satisfies its cooldown cutoff.")
     return 0
 
 
