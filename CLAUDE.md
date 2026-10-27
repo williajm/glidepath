@@ -61,6 +61,13 @@ releases). Rules:
   Dependabot (`.github/dependabot.yml`) is security-only: it alerts on
   action security advisories but proposes no routine version updates —
   pins are refreshed by hand, honouring the 7-day cooldown.
+- Security-fix exception: when the version in use has a published advisory
+  (GHSA/PYSEC/CVE), the uv binary or an Action pin may move to the fixed
+  release once it is at least 1 day old (less only with the owner's
+  explicit approval). Name the advisory in the PR, the CHANGELOG and the
+  pin's comment. TODO: locked packages cannot use this yet, because
+  `scripts/check_dep_age.py` enforces 7 days for the whole lockfile; it
+  would need per-package overrides (uv's `exclude-newer-package`).
 - The runtime dependency in `[project] dependencies` is pinned exactly
   (`pyside6==X.Y.Z`, moved only by `make deps`): end users installing
   from PyPI resolve fresh, so a `>=` range would bypass the lockfile

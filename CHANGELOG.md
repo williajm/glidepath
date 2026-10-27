@@ -23,6 +23,13 @@ in the release PR and becomes the GitHub Release notes verbatim.
   filelock 3.32.4 → 4.0.8, and transitive updates (ast-serialize,
   charset-normalizer, identify, idna, librt, msgpack, nodeenv,
   pip-api, platformdirs, pyparsing, python-discovery).
+- Development tooling refreshed (cutoff 2026-10-20) for 18 advisories:
+  virtualenv 21.14.2 → 21.14.11, filelock 4.0.8 → 4.2.4, certifi
+  2026.7.22 → 2026.10.19 and setuptools 84.0.0 → 84.2.0. Nuitka moves
+  4.2.2 → 4.3.1 with unchanged licence texts. The PySide6 runtime pin
+  is unchanged.
+- CI and release builds use uv 0.13.4, whose bundled CA store drops the
+  compromised emSign root (GHSA-hq85-5cpj-mr62).
 
 ## [1.1.1] - 2026-09-28
 
