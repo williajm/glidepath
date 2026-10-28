@@ -9,6 +9,16 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Changed
+
+- Planning notes and the state pension uprating default's basis now
+  reflect Budget 2026 (28 October 2026): savings income rates from
+  6 April 2027 are 24% / 44% / 49% (Budget 2025's 22/42/47 raised a
+  further 2ppt), the planned £12,000 cash ISA cap is reversed, and an
+  adjusted triple lock is announced from April 2030. No calculation
+  changes; the 2027/28 tax-year file follows the draft Scottish Budget
+  on 3 December 2026 (#44).
+
 ### Security
 
 - Dependencies refreshed under the 7-day cooldown (resolution cutoff

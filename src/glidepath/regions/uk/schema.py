@@ -262,7 +262,7 @@ class SavingsRules:
     positionally onto the rUK income-tax bands (savings income stacks
     on the rUK ladder UK-wide, §6) — one rate per band, enforced by
     :class:`TaxYearFile`. Through 2026/27 they equal the main rates;
-    the separate 22/42/47 rates land in the 2027/28 file (#189).
+    the separate 24/44/49 rates land in the 2027/28 file (#189).
     """
 
     starting_rate_limit: Money

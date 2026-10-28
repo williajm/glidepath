@@ -7,9 +7,10 @@
 schema_version = 5
 
 [meta]
-verified_on = 2026-08-12
+verified_on = 2026-10-28
 sources = [
   "https://obr.uk/efo/economic-and-fiscal-outlook-march-2026/",
+  "https://www.gov.uk/government/publications/budget-2026-document/budget-2026-html",
   "https://www.gov.scot/publications/scottish-budget-2026-2027/pages/4/",
   "https://www.handbook.fca.org.uk/handbook/COBS/13/Annex2.html",
   "https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07",
@@ -112,7 +113,7 @@ basis = "Typical UK target-date/lifestyling shape; a starting point only - per-p
 [[assumption]]
 key = "policy.state_pension.uprating"
 value = { rule = "triple_lock", floor = "0.025", deterministic_cpi_margin = "0.005" }
-basis = "Triple lock = max(earnings, CPI, floor 2.5%), proxied as max(CPI + 0.5%, floor) - the margin stands in for the long-run earnings premium; alternative scenario: cpi. The proxy applies in every run mode: CPI is deterministic across Monte Carlo paths and no earnings series is modelled. Triple lock committed only to ~2029 (planning §6)"
+basis = "Triple lock = max(earnings, CPI, floor 2.5%), proxied as max(CPI + 0.5%, floor) - the margin stands in for the long-run earnings premium; alternative scenario: cpi. The proxy applies in every run mode: CPI is deterministic across Monte Carlo paths and no earnings series is modelled. Full triple lock committed to April 2029; the adjusted lock announced from April 2030 (planning §6) removes a ratchet above earnings that the proxy, having no earnings series, never models"
 
 [[assumption]]
 key = "policy.tax.future_years"

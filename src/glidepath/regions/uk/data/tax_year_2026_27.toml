@@ -86,7 +86,7 @@ lisa_withdrawal_charge = "0.25"
 # Nil rates consume band width (§6); savings above them are taxed at the
 # rates below, aligned positionally with the rUK bands (savings income
 # stacks on the rUK ladder UK-wide). For 2026/27 they equal the main
-# rates; the separate 22/42/47 rates (Budget 2025 OOTLAR, from 6 April
+# rates; the separate 24/44/49 rates (Budget 2026 OOTLAR, from 6 April
 # 2027) land in the 2027/28 file.
 [savings]
 starting_rate_limit = "5000"  # reduced £1 per £1 of non-savings income above the PA
