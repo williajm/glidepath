@@ -1671,7 +1671,7 @@ lisa_withdrawal_charge = "0.25"
 
 # Nil rates consume band width (§6); savings above them are taxed at the
 # rates below, aligned positionally with the rUK bands (#189). Equal to
-# the main rates in 2026/27; the separate 22/42/47 rates (from 6 April
+# the main rates in 2026/27; the separate 24/44/49 rates (from 6 April
 # 2027) land in the 2027/28 file.
 [savings]
 starting_rate_limit = "5000"
@@ -1861,10 +1861,13 @@ separately (§5.3, §7).
 | Change | Effective | Source |
 | --- | --- | --- |
 | Dividend rates +2ppt: ordinary 10.75%, upper 35.75% (additional 39.35% unchanged) | **2026/27 (in force)** | [Budget 2025 OOTLAR](https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar) |
-| Savings income rates 22% / 42% / 47% | 6 April 2027 | same |
-| Separate property income rates 22% / 42% / 47% | 6 April 2027 | same |
-| Cash ISA limit £12,000 for under-65s (overall £20,000 unchanged) | 6 April 2027 | [ISA reform factsheet](https://www.gov.uk/government/publications/fiscal-events-2026-factsheets/isa-reform-2027-anti-circumvention-rules-factsheet) |
+| Savings income rates 24% / 44% / 49% (Budget 2025 set 22/42/47; Budget 2026 adds a further 2ppt) | 6 April 2027 | [Budget 2026 OOTLAR](https://www.gov.uk/government/publications/budget-2026-overview-of-tax-legislation-and-rates-ootlar/budget-2026-overview-of-tax-legislation-and-rates-ootlar) |
+| Separate property income rates 24% / 44% / 49% (England, Wales and NI; Scotland and Wales may set their own) | 6 April 2027 | same |
+| ~~Cash ISA limit £12,000 for under-65s~~ — reversed at Budget 2026: the cash ISA limit stays £20,000 | withdrawn | [ISA reform factsheet](https://www.gov.uk/government/publications/fiscal-events-2026-factsheets/isa-reform-2027-anti-circumvention-rules-factsheet) (original); [Budget 2026](https://www.gov.uk/government/publications/budget-2026-document/budget-2026-html) (reversal) |
+| Pension Tax Allowance: a tax reduction of 20% × (full new State Pension − PA) for those at or reaching State Pension age in the year, withdrawn £1 per £3 of total income above £13,037 and nil from £13,319 (2027/28 figures); not yet modelled (#224) | 6 April 2027 – 5 April 2030 | [Budget 2026 OOTLAR](https://www.gov.uk/government/publications/budget-2026-overview-of-tax-legislation-and-rates-ootlar/budget-2026-overview-of-tax-legislation-and-rates-ootlar); [PTA explainer](https://www.gov.uk/government/publications/pension-tax-allowance-explainer/pension-tax-allowance-explainer) |
 | NICs on salary-sacrificed pension contributions above £2,000/yr | April 2029 | [Employer Bulletin Dec 2025](https://www.gov.uk/government/publications/employer-bulletin-december-2025/december-2025-issue-of-the-employer-bulletin) |
+| Lifetime ISA closes to new savers, replaced by the First Time Buyer ISA; existing holders keep contributing under the current rules; not yet modelled (#225) | 6 April 2029 | [Budget 2026](https://www.gov.uk/government/publications/budget-2026-document/budget-2026-html) |
+| Adjusted triple lock (State pension, below) | April 2030 | same |
 
 ### Savings and dividend taxation (2026/27)
 
@@ -1877,7 +1880,7 @@ the GIA/cash wrappers bring these into the model).
 | Dividend rates | ordinary 10.75% (basic band), upper 35.75% (higher), additional 39.35% — the Budget 2025 +2ppt change, in force 2026/27 (see announced changes above) | [gov.uk/tax-on-dividends](https://www.gov.uk/tax-on-dividends) |
 | Personal savings allowance | £1,000 basic / £500 higher / £0 additional rate — likewise a nil rate consuming band width; the tier follows the band the taxpayer's income reaches | [gov.uk/apply-tax-free-interest-on-savings](https://www.gov.uk/apply-tax-free-interest-on-savings); HMRC tax logic guide |
 | Starting rate for savings | 0% on up to £5,000 of savings income; reduced £1 per £1 of non-savings income above the personal allowance (nil from £17,570); limit legislated 2026/27–2030/31 (§ income tax rUK above) | [gov.uk/apply-tax-free-interest-on-savings](https://www.gov.uk/apply-tax-free-interest-on-savings); [Budget 2025 OOTLAR](https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar) |
-| Savings rates 2026/27 | savings income above the nil rates is taxed at the file's `savings.rates` schedule, aligned positionally with the rUK bands (#189) — equal to the main rates (20/40/45) in 2026/27; the separate 22/42/47 rates take effect 6 April 2027 and ship as data in the 2027/28 file | [Budget 2025 OOTLAR](https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar) |
+| Savings rates 2026/27 | savings income above the nil rates is taxed at the file's `savings.rates` schedule, aligned positionally with the rUK bands (#189) — equal to the main rates (20/40/45) in 2026/27; the separate 24/44/49 rates (Budget 2026, superseding Budget 2025's 22/42/47) take effect 6 April 2027 and ship as data in the 2027/28 file | [Budget 2026 OOTLAR](https://www.gov.uk/government/publications/budget-2026-overview-of-tax-legislation-and-rates-ootlar/budget-2026-overview-of-tax-legislation-and-rates-ootlar) |
 | Income layer ordering | non-savings → savings → dividends up one ladder; savings and dividend income of Scottish taxpayers uses the rUK bands (Scottish rates cover non-savings/non-dividend income only) | HMRC tax logic guide; [gov.uk/scottish-income-tax](https://www.gov.uk/scottish-income-tax) |
 
 ### Pensions
@@ -1921,7 +1924,7 @@ the GIA/cash wrappers bring these into the model).
 | SPA 66→67 | phased Apr 2026–Mar 2028: DOB 1960-04-06–1960-05-05 → 66y 1m, +1 month per DOB month to 1961-02-06–1961-03-05 → 66y 11m; DOB 1961-03-06–1977-04-05 → **67** | [SPA timetable](https://www.gov.uk/government/publications/state-pension-age-timetable/state-pension-age-timetable) |
 | SPA 67→68 | legislated 2044–2046: DOB 1977-04-06–1978-04-05 phased; DOB ≥ 1978-04-06 → 68 | same |
 | SPA review | third review launched July 2025, ongoing; no change legislated as of 2026-08-01 | [third SPA review](https://www.gov.uk/government/collections/third-state-pension-age-review) |
-| Triple lock | committed "for this parliament" (~2029); nothing legislated beyond | [Budget 2025 fact sheet](https://www.gov.uk/government/news/budget-2025-fact-sheet-cutting-the-cost-of-living) |
+| Triple lock | committed "for this parliament": the highest of 2.5%, inflation or earnings growth each year to April 2029. From April 2030 an adjusted lock raises the State Pension by the highest of 2.5%, inflation, or the amount needed to hold its value relative to earnings as reached in April 2029 — announced at Budget 2026, not legislated | [Budget 2025 fact sheet](https://www.gov.uk/government/news/budget-2025-fact-sheet-cutting-the-cost-of-living); [Budget 2026](https://www.gov.uk/government/publications/budget-2026-document/budget-2026-html) |
 
 ### Couples
 
@@ -1977,7 +1980,7 @@ Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 | --- | --- | --- |
 | `horizon.planning_age` | 95 | ~1-in-4 longevity risk at 65 per ONS cohort life expectancy ([ONS calculator](https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07); exact values from 2024-based cohort tables at implementation) |
 | `glidepath.default_shape` | 80/20 equity/bonds until 15 years to retirement, then linear de-risk to 40/60 at retirement, held through drawdown | Typical UK target-date/lifestyling shape; a starting point only — per-person glide paths override it |
-| `policy.state_pension.uprating` | `triple_lock` (proxied as max(CPI + 0.5%, floor); the margin stands in for the long-run earnings premium) | Alternative scenario: `cpi`. The proxy applies in every run mode — CPI is deterministic across Monte Carlo paths by design and no earnings series is modelled, so each path uprates identically; protected payments always uprate by CPI only (§5.1). Triple lock committed only to ~2029 (§6) |
+| `policy.state_pension.uprating` | `triple_lock` (proxied as max(CPI + 0.5%, floor); the margin stands in for the long-run earnings premium) | Alternative scenario: `cpi`. The proxy applies in every run mode — CPI is deterministic across Monte Carlo paths by design and no earnings series is modelled, so each path uprates identically; protected payments always uprate by CPI only (§5.1). Full triple lock committed to April 2029; the adjusted lock announced from April 2030 (§6) removes a ratchet above earnings that the proxy, having no earnings series, never models |
 | `policy.tax.future_years` | rUK + reserved figures (PA/taper both regimes, pension/ISA allowances) frozen to 2030/31 (legislated), then CPI-indexed; Scottish lower-band uppers CPI-indexed past the shipped year (set annually — uprating proxy), Higher/Advanced/Top uppers frozen to 2028/29 (announced), then CPI-indexed | rUK/reserved freeze is fact (§6); Scottish freeze horizons are announced policy, not legislation (§6); post-freeze indexation is assumption. Alternative: frozen indefinitely |
 | `annuity.level.single.65` | 7.75%/yr per £ purchase | Which? market table, snapshot 2026-07-27, retrieved 2026-08-01 ([which.co.uk](https://www.which.co.uk/money/pensions-and-retirement/accessing-your-pensions/annuities/annuity-rates-aQGfH6W5n2rm)); best rate 7.946% — volatile market snapshot, refresh before relying on |
 | `annuity.escalating3.single.65` | 5.47%/yr | same snapshot |

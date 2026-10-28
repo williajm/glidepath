@@ -112,7 +112,7 @@ basis = "Typical UK target-date/lifestyling shape; a starting point only - per-p
 [[assumption]]
 key = "policy.state_pension.uprating"
 value = { rule = "triple_lock", floor = "0.025", deterministic_cpi_margin = "0.005" }
-basis = "Triple lock = max(earnings, CPI, floor 2.5%), proxied as max(CPI + 0.5%, floor) - the margin stands in for the long-run earnings premium; alternative scenario: cpi. The proxy applies in every run mode: CPI is deterministic across Monte Carlo paths and no earnings series is modelled. Triple lock committed only to ~2029 (planning §6)"
+basis = "Triple lock = max(earnings, CPI, floor 2.5%), proxied as max(CPI + 0.5%, floor) - the margin stands in for the long-run earnings premium; alternative scenario: cpi. The proxy applies in every run mode: CPI is deterministic across Monte Carlo paths and no earnings series is modelled. Full triple lock committed to April 2029; the adjusted lock announced from April 2030 (planning §6) removes a ratchet above earnings that the proxy, having no earnings series, never models"
 
 [[assumption]]
 key = "policy.tax.future_years"
