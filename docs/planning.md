@@ -43,7 +43,7 @@ decumulation — under explicit, inspectable inputs.
 | | Contents |
 | --- | --- |
 | **v1** | Single person, UK (rUK + Scottish tax). Wrappers: workplace DC, SIPP, S&S ISA; LISA, GIA and cash with dividend/savings taxation (9.2). DB pensions: deferred/accrued entitlements, plus active membership with CARE-style accrual (accrual rate, pensionable salary, service projection — 9.6). State pension incl. deferral. Deterministic and Monte Carlo annual projection (one step function, two return models — §5.2). Withdrawal strategies: fixed real, fixed %, guardrails, natural yield. Annuity purchases incl. partial annuitisation. "When can I retire?" solver: earliest retirement age meeting a replacement-rate target, deterministic or Monte Carlo (§5.2, 9.14). Scenarios + comparison. JSON persistence. |
-| **Deferred (phased)** | Couples activation in increments per the §4.11 decision record (spike run 2026-08-11; roadmap 9.29–9.34 — optional partner, pooled decumulation, marriage allowance, deterministic survivor modelling, joint-life annuities); announced future rules shipping as data in their year's files (2027 cash-ISA reform and savings rates, 2029 salary-sacrifice NICs); final-salary linkage and split deferment/in-payment revaluation bases for DB schemes (9.6 ships CARE-style accrual on the single basis). |
+| **Deferred (phased)** | Couples activation in increments per the §4.11 decision record (spike run 2026-08-11; roadmap 9.29–9.34 — optional partner, pooled decumulation, marriage allowance, deterministic survivor modelling, joint-life annuities); announced future rules shipping as data in their year's files (2027 savings rates, 2029 salary-sacrifice NICs), plus the 2027–2030 Pension Tax Allowance (#224) and the 2029 Lifetime ISA closure to new savers (#225); final-salary linkage and split deferment/in-payment revaluation bases for DB schemes (9.6 ships CARE-style accrual on the single basis). |
 | **Out of scope** | Advice or recommendations; live market data; non-UK regions (architecture allows later); web UI (v1 is desktop; the app layer keeps one possible later, §4.7); protected pension ages (noted in UI copy); capital gains tax — the GIA models dividend and savings *income* only (9.2), never disposals. |
 
 ## 3. Architecture
@@ -1949,7 +1949,8 @@ these figures back the §4.11 decision record and become data keys as the
 Every row is a shipped default the user can override; each carries its
 basis. Recorded 2026-08-01 (the `yield.*` rows and the annuity
 age-adjustment table 2026-08-03; the couples survivor rows
-2026-08-12). This table is the human-readable
+2026-08-12; the state pension uprating basis 2026-10-28). This table
+is the human-readable
 mirror of `regions/uk/data/assumptions_default.toml` (doc-sync test in
 Phase 2). Announced-policy items in §6 are *facts*; these are estimates.
 

@@ -7,9 +7,10 @@
 schema_version = 5
 
 [meta]
-verified_on = 2026-08-12
+verified_on = 2026-10-28
 sources = [
   "https://obr.uk/efo/economic-and-fiscal-outlook-march-2026/",
+  "https://www.gov.uk/government/publications/budget-2026-document/budget-2026-html",
   "https://www.gov.scot/publications/scottish-budget-2026-2027/pages/4/",
   "https://www.handbook.fca.org.uk/handbook/COBS/13/Annex2.html",
   "https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare/healthandlifeexpectancies/articles/lifeexpectancycalculator/2019-06-07",
