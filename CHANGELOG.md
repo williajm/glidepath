@@ -18,6 +18,17 @@ in the release PR and becomes the GitHub Release notes verbatim.
   adjusted triple lock is announced from April 2030. No calculation
   changes; the 2027/28 tax-year file follows the draft Scottish Budget
   on 3 December 2026 (#44).
+- Routine development-tooling refresh under the 7-day cooldown (cutoff
+  2026-11-08); no advisories were open. The 7-day cutoff now passes
+  virtualenv's 1-day security-fix override, so it is dropped. ruff
+  0.17.1 → 0.17.4, mypy 2.4.0 → 2.4.1, pytest 9.1.1 → 9.2.0, coverage
+  7.16.2 → 7.17.2, hypothesis 6.170.5 → 6.170.15, virtualenv 21.14.13
+  → 21.15.6, filelock 4.2.4 → 4.2.9, certifi 2026.10.19 →
+  2026.10.23, setuptools 84.2.0 → 84.2.1, pip 26.2.1 → 26.3, plus
+  transitive updates (mypy-extensions, msgpack, nodeenv, platformdirs,
+  py-serializable, python-discovery). The Windows build tool Nuitka
+  moves 4.3.1 → 4.3.4; its licence texts are unchanged. The PySide6
+  runtime pin is unchanged.
 
 ### Security
 
