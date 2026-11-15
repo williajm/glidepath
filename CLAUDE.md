@@ -59,9 +59,12 @@ releases). Rules:
 - The uv binary itself follows the same cooldown: install/update it only to
   releases at least 7 days old (CI pins the exact version in `ci.yml`).
 - GitHub Actions are pinned to full commit SHAs, never floating tags.
-  Dependabot raises security alerts only (no Dependabot YAML, no automatic
-  PRs): it alerts on action security advisories, and pins are refreshed
-  by hand, honouring the 7-day cooldown.
+  Dependabot raises security alerts only, with no automatic PRs: it alerts
+  on action security advisories, and pins are refreshed by hand, honouring
+  the 7-day cooldown. `.github/dependabot.yml` sets
+  `open-pull-requests-limit: 0` and security-update PRs are off in the
+  repository settings. Keep the file: Scorecard's Dependency-Update-Tool
+  check only detects Dependabot through it.
 - Security-fix exception: when the version in use has a published advisory
   (GHSA/PYSEC/CVE), its fix may be adopted once it is at least 1 day old
   (less only with the owner's explicit approval). Name the advisory in the
