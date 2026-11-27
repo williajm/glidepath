@@ -440,7 +440,7 @@ class TestPlanReplacement:
             assert current.read_bytes() == original
         if action == "open":
             values = window.facts_pane.person_form.values()
-            assert values["employment_income"] == "52000"
+            assert values["employment_income"] == "52,000"
         else:
             assert window.facts_pane.wrappers.values_list() == ()
             assert window.inspector_pane.facts_table.rowCount() == 0
@@ -455,7 +455,7 @@ def test_saving_before_reopening_the_same_file_loads_the_saved_edits(
         widgets, "QMessageBox", _message_box_answering(QMessageBox.StandardButton.Save)
     )
     assert window.open_plan(current)
-    assert window.facts_pane.person_form.values()["employment_income"] == "61000"
+    assert window.facts_pane.person_form.values()["employment_income"] == "61,000"
 
 
 class TestCloseFlow:

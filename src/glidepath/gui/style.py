@@ -332,16 +332,28 @@ QLabel#answerLabel {{
 QLabel#fieldErrorLabel {{
     color: {ERROR_TEXT};
 }}
-QPushButton#advancedToggle {{
+QPushButton#advancedToggle, QPushButton#detailsToggle {{
     background: transparent;
     border: none;
     color: {ACCENT_TEXT};
     padding: 2px 0;
     text-align: left;
 }}
-QPushButton#advancedToggle:hover {{
+QPushButton#advancedToggle:hover, QPushButton#detailsToggle:hover {{
     color: {ACCENT};
     text-decoration: underline;
+}}
+QPushButton#viewSwitchButton {{
+    padding: 5px 18px;
+}}
+QPushButton#viewSwitchButton:checked {{
+    background: {_TINT_PRESSED};
+    border-color: {ACCENT};
+    color: {ACCENT_TEXT};
+}}
+QLabel#sectionSummary, QLabel#simpleViewNote, QLabel#moneyPrefix,
+QLabel#fieldHint {{
+    color: {_MUTED};
 }}
 """
 
@@ -359,6 +371,13 @@ def app_icon() -> QIcon:
         pixmap.loadFromData(_asset_bytes(f"icon_{size}.png"))
         icon.addPixmap(pixmap)
     return icon
+
+
+def chevron_icon() -> QIcon:
+    """The muted down-chevron the choice fields use, for other openers."""
+    pixmap = QPixmap()
+    pixmap.loadFromData(_asset_bytes("chevron_down.png"))
+    return QIcon(pixmap)
 
 
 def wordmark_pixmap() -> QPixmap:
@@ -401,5 +420,6 @@ __all__ = [
     "STYLESHEET",
     "app_icon",
     "apply_theme",
+    "chevron_icon",
     "wordmark_pixmap",
 ]

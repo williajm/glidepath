@@ -23,11 +23,13 @@ from PySide6.QtWidgets import (
 from glidepath.app import (
     ENTITY_ID_KEY,
     HIDE_ADVANCED_LABEL,
+    HIDE_DETAILS_LABEL,
     INCOME_PREFERENCE_ANNUITY,
     INCOME_PREFERENCE_KEY,
     OWNER_KEY,
     REQUIRED_MARKER,
     SHOW_ADVANCED_LABEL,
+    SHOW_DETAILS_LABEL,
     FactsFormData,
     FactsSubmissionOutcome,
     FieldKind,
@@ -41,6 +43,7 @@ from glidepath.gui import forms as forms_module
 from glidepath.gui.forms import (
     DateEntry,
     FactsEntryPane,
+    MoneyEntry,
     RepeatableSection,
     ScrollSafeComboBox,
     SectionForm,
@@ -70,7 +73,7 @@ class TestSectionForm:
     """One section renders one editor per field spec."""
 
     def test_every_field_gets_the_right_editor(self) -> None:
-        """Choices become combos, dates date entries, the rest line edits."""
+        """Choices become combos, dates date entries, amounts money entries."""
         spec = build_facts_form_view_model().person
         form = SectionForm(spec)
         for field in spec.fields:
@@ -80,7 +83,66 @@ class TestSectionForm:
             else:
                 assert isinstance(editor, QLineEdit)
                 assert isinstance(editor, DateEntry) == (field.kind is FieldKind.DATE)
+                assert isinstance(editor, MoneyEntry) == (field.kind is FieldKind.MONEY)
+
+    def test_short_entries_show_their_hint_beside_them(self) -> None:
+        """Amounts, numbers and dates carry the hint as text, not placeholder.
+
+        A short entry would clip a long placeholder (roadmap 11.3); the
+        free-text entries keep theirs.
+        """
+        spec = build_facts_form_view_model().wrapper
+        form = SectionForm(spec)
+        hints = {
+            label.text()
+            for label in form.findChildren(QLabel)
+            if label.objectName() == "fieldHint"
+        }
+        for field in spec.fields:
+            editor = form.editor(field.key)
+            if not isinstance(editor, QLineEdit) or not field.hint:
+                continue
+            if field.kind is FieldKind.TEXT:
                 assert editor.placeholderText() == field.hint
+            else:
+                assert editor.placeholderText() == ""
+                assert field.hint in hints
+            assert editor.toolTip() == field.hint
+
+    def test_short_entries_are_narrower_than_free_text(self) -> None:
+        """Amounts are sized to what they hold, not the window."""
+        form = SectionForm(build_facts_form_view_model().wrapper)
+        assert form.editor("balance").maximumWidth() < (
+            form.editor("label").maximumWidth()
+        )
+
+    def test_money_entries_show_separators_and_parse_back(self) -> None:
+        """An amount shows as 48,000 with a £ prefix; leaving re-formats."""
+        form = SectionForm(build_facts_form_view_model().wrapper)
+        balance = form.editor("balance")
+        assert isinstance(balance, MoneyEntry)
+        assert balance.prefix.text() == "£"
+        form.set_value("balance", "48000")
+        assert form.values()["balance"] == "48,000"
+        balance.setText("1234.5")
+        balance.editingFinished.emit()
+        assert balance.text() == "1,234.5"
+        balance.setText("not money")
+        balance.editingFinished.emit()
+        assert balance.text() == "not money"
+
+    def test_the_summary_hides_the_full_description(self) -> None:
+        """One line shows; the toggle reveals the rest (roadmap 11.3)."""
+        spec = build_facts_form_view_model().wrapper
+        form = SectionForm(spec)
+        assert spec.summary
+        assert not form.description_label.isVisibleTo(form)
+        form.toggle_details()
+        assert form.description_label.isVisibleTo(form)
+        assert form.details_toggle.text() == HIDE_DETAILS_LABEL
+        form.toggle_details()
+        assert not form.description_label.isVisibleTo(form)
+        assert form.details_toggle.text() == SHOW_DETAILS_LABEL
 
     def test_values_default_to_blank_text_and_first_choice(self) -> None:
         """An untouched form returns blank text and each first option."""
@@ -223,7 +285,7 @@ class TestRepeatableSection:
         assert len(remove_buttons) == 2
         remove_buttons[0].click()
         [(remaining)] = section.values_list()
-        assert remaining["balance"] == "2222"
+        assert remaining["balance"] == "2,222"
 
     def test_rows_carry_their_entity_ids_opaquely(self) -> None:
         """Seeded ids collect back per row without becoming editors."""
@@ -251,7 +313,7 @@ class TestRepeatableSection:
         section.set_values_list(({OWNER_KEY: "1", "balance": "1111"},))
         [values] = section.values_list()
         assert values.get(OWNER_KEY) is None
-        assert values["balance"] == "1111"
+        assert values["balance"] == "1,111"
         [form] = section.forms
         with pytest.raises(KeyError):
             form.editor(OWNER_KEY)
@@ -274,7 +336,7 @@ class TestRepeatableSection:
         remove_buttons[0].click()
         [remaining] = section.values_list()
         assert remaining[ENTITY_ID_KEY] == "id-b"
-        assert remaining["balance"] == "2222"
+        assert remaining["balance"] == "2,222"
 
     def test_added_rows_start_blank_until_reseeded(self) -> None:
         """A user-added row is a new entity until a save mints its id."""
@@ -326,7 +388,7 @@ class TestFactsEntryPane:
         [data] = received
         [person] = data.persons
         assert person.person["date_of_birth"] == "1984-05-20"
-        assert data.wrappers[0]["balance"] == "25000"
+        assert data.wrappers[0]["balance"] == "25,000"
         assert data.wrappers[0][OWNER_KEY] == "0"
         assert data.db_pensions == ()
         assert data.annuity_purchases[0]["at_age"] == "68"
@@ -346,8 +408,8 @@ class TestFactsEntryPane:
         )
         data = pane.form_data()
         assert data.persons[0].person["date_of_birth"] == "1991-06-15"
-        assert data.spending["annual_spending_real"] == "28000"
-        assert [values["balance"] for values in data.wrappers] == ["48000", "16500"]
+        assert data.spending["annual_spending_real"] == "28,000"
+        assert [values["balance"] for values in data.wrappers] == ["48,000", "16,500"]
         assert data.annuity_purchases[0]["percent_of_pot"] == "50"
 
     def test_set_form_data_replaces_previous_contents(self) -> None:
@@ -440,7 +502,7 @@ class TestFactsEntryPanePartner:
         assert data.persons[1].person["date_of_birth"] == "1986-03-02"
         assert data.persons[1].state_pension["forecast_weekly_amount"] == "230.25"
         owners = [(row[OWNER_KEY], row["balance"]) for row in data.wrappers]
-        assert owners == [("0", "1111"), ("1", "2222")]
+        assert owners == [("0", "1,111"), ("1", "2,222")]
 
     def test_set_form_data_routes_rows_by_owner(self) -> None:
         """A two-person payload activates the partner and splits rows."""
@@ -465,9 +527,9 @@ class TestFactsEntryPanePartner:
         partner_pension = pane.partner_state_pension_form.values()
         assert partner_pension["forecast_weekly_amount"] == "230.25"
         [mine] = pane.wrappers.values_list()
-        assert mine["balance"] == "1111"
+        assert mine["balance"] == "1,111"
         [theirs] = pane.partner_wrappers.values_list()
-        assert theirs["balance"] == "2222"
+        assert theirs["balance"] == "2,222"
 
     def test_set_form_data_with_one_person_deactivates_the_partner(self) -> None:
         """A single-person payload takes the partner off the form."""
@@ -500,7 +562,7 @@ class TestFactsEntryPanePartner:
         assert pane.partner_wrappers.values_list() == ()
         data = pane.form_data()
         assert len(data.persons) == 1
-        assert [row["balance"] for row in data.wrappers] == ["1111"]
+        assert [row["balance"] for row in data.wrappers] == ["1,111"]
 
     def test_remove_button_confirms_before_deleting(
         self, monkeypatch: pytest.MonkeyPatch
@@ -530,7 +592,7 @@ class TestFactsEntryPanePartner:
         assert pane.has_partner
         assert pane.partner_form.values()["date_of_birth"] == "1986-03-02"
         [row] = pane.partner_wrappers.values_list()
-        assert row["balance"] == "2222"
+        assert row["balance"] == "2,222"
 
     def test_set_entity_ids_splits_the_combined_ids_by_row_count(self) -> None:
         """Ids arrive mine-first and land on the owning sections."""

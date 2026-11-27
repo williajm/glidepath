@@ -37,6 +37,13 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ### Changed
 
+- The facts form reads less like a spreadsheet: amounts, ages and
+  dates use short fields sized to what they hold, amounts show a £
+  sign and thousands separators (typing them was always accepted),
+  short fields show their guidance beside them, each section opens
+  with a one-line summary with the full text behind "More about this",
+  "Savings wrapper" is now "Account" on the form, and the add and
+  remove buttons no longer span the window (#234).
 - Planning notes and the state pension uprating default's basis now
   reflect Budget 2026 (28 October 2026): savings income rates from
   6 April 2027 are 24% / 44% / 49% (Budget 2025's 22/42/47 raised a

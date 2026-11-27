@@ -28,6 +28,7 @@ from glidepath.app import (
     facts_form_data_from_household,
     form_cannot_represent,
     format_form_errors,
+    money_display_text,
     parse_facts_form,
     plan_entity_ids,
     simple_view_shows,
@@ -357,7 +358,7 @@ class TestFormSpec:
                 form.state_pension,
                 "Partner's state pension",
             ),
-            (form.partner_wrapper, form.wrapper, "Partner's savings wrapper"),
+            (form.partner_wrapper, form.wrapper, "Partner's account"),
             (
                 form.partner_db_pension,
                 form.db_pension,
@@ -549,7 +550,7 @@ class TestWrapperParsing:
         assert error.section == "wrapper"
         assert error.index == 1
         assert error.field_key == "label"
-        assert error.message == "another wrapper already carries this name"
+        assert error.message == "another account already has this name"
 
     def test_a_stated_equity_percent_becomes_the_allocation(self) -> None:
         """Entering 100 states full equity; the remainder convention gives 0 bonds."""
@@ -1252,6 +1253,64 @@ class TestSimpleView:
         assert "Detailed" in form.simple_view_note
 
 
+class TestFormPresentation:
+    """Kinds, summaries and amount display (roadmap 11.3)."""
+
+    def test_every_section_has_a_one_line_summary(self) -> None:
+        """Each section opens with one short line, details behind a toggle."""
+        for section in build_facts_form_view_model().sections:
+            assert section.summary, section.key
+            assert "\n" not in section.summary
+
+    def test_amounts_are_money_fields(self) -> None:
+        """Balances, contributions, income and spending are amounts."""
+        form = build_facts_form_view_model()
+        money = {
+            spec.key
+            for section in form.sections
+            for spec in section.fields
+            if spec.kind is FieldKind.MONEY
+        }
+        assert {
+            "employment_income",
+            "annual_spending_real",
+            "forecast_weekly_amount",
+            "balance",
+            "employee_contribution",
+            "employer_contribution",
+            "accrued_annual_pension",
+        } <= money
+        assert "target_retirement_age" not in money
+
+    @pytest.mark.parametrize(
+        ("typed", "shown"),
+        [
+            ("48000", "48,000"),
+            ("1234.5", "1,234.5"),
+            ("230.25", "230.25"),
+            ("£52,000", "52,000"),
+            ("", ""),
+            ("abc", "abc"),
+            ("1e3", "1e3"),
+            ("NaN", "NaN"),
+        ],
+    )
+    def test_money_display_adds_separators_only(self, typed: str, shown: str) -> None:
+        """Digits stay as typed; unreadable text is left for the parser."""
+        assert money_display_text(typed) == shown
+
+    def test_displayed_amounts_parse_back(self) -> None:
+        """The separators the form adds are ones the parser accepts."""
+        household = parse(
+            form_data(
+                person_values(employment_income=money_display_text("52000")),
+            )
+        )
+        income = household.persons[0].employment_income
+        assert income is not None
+        assert income.value == Money(Decimal(52000))
+
+
 class TestReliefResolution:
     """A blank relief choice takes the only legal mechanic, or errors (§4.13)."""
 
@@ -1587,7 +1646,7 @@ class TestPartnerParsing:
         assert error.section == "partner_wrapper"
         assert error.index == 0
         assert error.field_key == "label"
-        assert error.message == "another wrapper already carries this name"
+        assert error.message == "another account already has this name"
 
     def test_duplicate_entity_ids_across_persons_fold_into_an_error(self) -> None:
         """The household-level id rule surfaces as a person-section error."""
@@ -2173,7 +2232,7 @@ class TestValidationMessages:
             today=TODAY,
         )
         text = format_form_errors(form, result.errors)
-        assert "Savings wrapper 2" in text
+        assert "Account 2" in text
         assert "Balance" in text
         assert "amount of money" in text
 

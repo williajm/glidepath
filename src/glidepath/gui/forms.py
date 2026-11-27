@@ -28,7 +28,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStyle,
+    QStyleOptionFrame,
     QVBoxLayout,
     QWidget,
 )
@@ -37,11 +39,13 @@ from glidepath.app import (
     DATE_PICKER_TOOLTIP,
     ENTITY_ID_KEY,
     HIDE_ADVANCED_LABEL,
+    HIDE_DETAILS_LABEL,
     INCOME_PREFERENCE_ANNUITY,
     INCOME_PREFERENCE_KEY,
     OWNER_KEY,
     REQUIRED_MARKER,
     SHOW_ADVANCED_LABEL,
+    SHOW_DETAILS_LABEL,
     FactsFormData,
     FactsFormViewModel,
     FieldKind,
@@ -50,13 +54,15 @@ from glidepath.app import (
     PersonFormData,
     PlanEntityIds,
     SectionSpec,
+    money_display_text,
     simple_view_shows,
 )
+from glidepath.gui.style import chevron_icon
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtGui import QResizeEvent, QWheelEvent
 
     from glidepath.app import FactsSubmissionOutcome, FieldSpec, FormError
 
@@ -84,6 +90,79 @@ class ScrollSafeComboBox(QComboBox):
             event.ignore()
 
 
+_WIDTH_CHARS: dict[FieldKind, int] = {
+    FieldKind.MONEY: 13,
+    FieldKind.NUMBER: 8,
+    FieldKind.DATE: 13,
+    FieldKind.TEXT: 40,
+}
+"""Entry widths per field kind, in digit widths (roadmap 11.3).
+
+Measured in the widget's own font, so the widths follow the user's
+font and scaling rather than fixed pixels; amounts and short numbers
+are sized to what they hold instead of spanning the window. Choices
+size to their longest option instead, so no option is ever clipped."""
+_WIDTH_ALLOWANCE_CHARS = 5
+"""Room for the padding, the border, and a prefix or picker icon."""
+_SIDE_HINT_KINDS = frozenset({FieldKind.MONEY, FieldKind.NUMBER, FieldKind.DATE})
+"""Short entries whose hint reads beside them, not as a placeholder."""
+
+
+def _fit_width(editor: QLineEdit | QComboBox, kind: FieldKind) -> None:
+    """Size ``editor`` to what its kind of value needs (constant docstring)."""
+    if isinstance(editor, QComboBox):
+        editor.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        editor.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        return
+    digits = _WIDTH_CHARS[kind] + _WIDTH_ALLOWANCE_CHARS
+    editor.setMaximumWidth(editor.fontMetrics().horizontalAdvance("0" * digits))
+
+
+class MoneyEntry(QLineEdit):
+    """An amount field: a £ prefix, thousands separators when typed.
+
+    The prefix is a label drawn inside the field's left text margin, so
+    the text itself stays exactly what the app layer parses; leaving
+    the field re-shows the amount with separators
+    (:func:`~glidepath.app.money_display_text`).
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the line edit with its prefix label."""
+        super().__init__(parent)
+        self.prefix = QLabel("£", self)
+        self.prefix.setObjectName("moneyPrefix")
+        self.prefix.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        margins = self.textMargins()
+        self.setTextMargins(
+            self.fontMetrics().horizontalAdvance("£ "),
+            margins.top(),
+            margins.right(),
+            margins.bottom(),
+        )
+        self.editingFinished.connect(self._show_separators)
+
+    def set_amount_text(self, text: str) -> None:
+        """Set the text as the form shows amounts (with separators)."""
+        self.setText(money_display_text(text))
+
+    def _show_separators(self) -> None:
+        """Re-show the typed amount with thousands separators."""
+        self.set_amount_text(self.text())
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        """Keep the prefix at the start of the text area."""
+        super().resizeEvent(event)
+        option = QStyleOptionFrame()
+        self.initStyleOption(option)
+        area = self.style().subElementRect(
+            QStyle.SubElement.SE_LineEditContents, option, self
+        )
+        self.prefix.setGeometry(
+            area.left(), area.top(), self.textMargins().left(), area.height()
+        )
+
+
 class DateEntry(QLineEdit):
     """An ISO date field: typed text first, a calendar popup as assist.
 
@@ -104,8 +183,7 @@ class DateEntry(QLineEdit):
         # committed by keyboard users.
         self.calendar.activated.connect(self._day_picked)
         self.pick_action = self.addAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown),
-            QLineEdit.ActionPosition.TrailingPosition,
+            chevron_icon(), QLineEdit.ActionPosition.TrailingPosition
         )
         self.pick_action.setToolTip(DATE_PICKER_TOOLTIP)
         self.pick_action.triggered.connect(self._open_calendar)
@@ -148,16 +226,14 @@ class SectionForm(QGroupBox):
         self._advanced_disclosed = False
         self._editors: dict[str, QLineEdit | QComboBox] = {}
         self._rows: dict[str, QFormLayout] = {}
+        self._row_fields: dict[str, QWidget] = {}
         self._error_labels: dict[str, QLabel] = {}
         self._errored: set[str] = set()
         self._advanced_keys = frozenset(
             field.key for field in spec.fields if field.advanced
         )
         layout = QVBoxLayout(self)
-        if spec.description:
-            description = QLabel(spec.description, self)
-            description.setWordWrap(True)
-            layout.addWidget(description)
+        self._add_header(layout, spec)
         self.section_error_label = QLabel("", self)
         self.section_error_label.setObjectName("fieldErrorLabel")
         self.section_error_label.setWordWrap(True)
@@ -184,10 +260,66 @@ class SectionForm(QGroupBox):
                 if isinstance(controlling, QComboBox):
                     controlling.currentIndexChanged.connect(self.refresh_view)
 
+    def _with_side_hint(
+        self, editor: QLineEdit | QComboBox, field: FieldSpec
+    ) -> QWidget:
+        """The row's field: a short entry carries its hint beside it (11.3).
+
+        Amounts, numbers and dates are sized to what they hold, so a
+        long hint would be clipped as a placeholder; it reads in full
+        as muted text in the space the short entry leaves, and stays
+        the tooltip (roadmap 10.4).
+        """
+        if not field.hint or field.kind not in _SIDE_HINT_KINDS:
+            return editor
+        if isinstance(editor, QLineEdit):
+            editor.setPlaceholderText("")
+        row = QWidget(self)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.addWidget(editor)
+        hint = QLabel(field.hint, row)
+        hint.setObjectName("fieldHint")
+        hint.setWordWrap(True)
+        row_layout.addWidget(hint, 1)
+        return row
+
+    def _add_header(self, layout: QVBoxLayout, spec: SectionSpec) -> None:
+        """The one-line summary with the full description behind a toggle.
+
+        A section without a summary shows its description as it is.
+        """
+        self.description_label = QLabel(spec.description, self)
+        self.description_label.setWordWrap(True)
+        self.details_toggle = QPushButton(SHOW_DETAILS_LABEL, self)
+        self.details_toggle.setObjectName("detailsToggle")
+        self.details_toggle.clicked.connect(self.toggle_details)
+        if spec.summary:
+            summary = QLabel(spec.summary, self)
+            summary.setObjectName("sectionSummary")
+            summary.setWordWrap(True)
+            header = QHBoxLayout()
+            header.addWidget(summary, 1)
+            header.addWidget(self.details_toggle)
+            layout.addLayout(header)
+            self.description_label.setVisible(False)
+        else:
+            self.details_toggle.setVisible(False)
+            self.description_label.setVisible(bool(spec.description))
+        layout.addWidget(self.description_label)
+
     @property
     def spec(self) -> SectionSpec:
         """The section spec this form renders."""
         return self._spec
+
+    def toggle_details(self) -> None:
+        """Show or hide the section's full description (roadmap 11.3)."""
+        showing = self.description_label.isHidden()
+        self.description_label.setVisible(showing)
+        self.details_toggle.setText(
+            HIDE_DETAILS_LABEL if showing else SHOW_DETAILS_LABEL
+        )
 
     def _add_field(self, layout: QFormLayout, field: FieldSpec) -> None:
         """Render one field row: marker, editor, tooltip, error label."""
@@ -200,15 +332,21 @@ class SectionForm(QGroupBox):
             for option in field.choices:
                 editor.addItem(option.label, option.value)
         else:
-            editor = (
-                DateEntry(self) if field.kind is FieldKind.DATE else QLineEdit(self)
-            )
+            if field.kind is FieldKind.DATE:
+                editor = DateEntry(self)
+            elif field.kind is FieldKind.MONEY:
+                editor = MoneyEntry(self)
+            else:
+                editor = QLineEdit(self)
             editor.setPlaceholderText(field.hint)
+        _fit_width(editor, field.kind)
         if field.hint:
             editor.setToolTip(field.hint)
         self._editors[field.key] = editor
         self._rows[field.key] = layout
-        layout.addRow(label, editor)
+        row_field = self._with_side_hint(editor, field)
+        self._row_fields[field.key] = row_field
+        layout.addRow(label, row_field)
         error = QLabel("", self)
         error.setObjectName("fieldErrorLabel")
         error.setWordWrap(True)
@@ -247,7 +385,7 @@ class SectionForm(QGroupBox):
                 or bool(values[field.key])
                 or field.key in self._errored
             )
-            self._rows[field.key].setRowVisible(self._editors[field.key], shown)
+            self._rows[field.key].setRowVisible(self._row_fields[field.key], shown)
             any_advanced = any_advanced or (shown and field.advanced)
         if detailed:
             self.advanced_toggle.setVisible(bool(self._advanced_keys))
@@ -282,6 +420,8 @@ class SectionForm(QGroupBox):
         editor = self._editors[key]
         if isinstance(editor, QComboBox):
             editor.setCurrentIndex(editor.findData(value))
+        elif isinstance(editor, MoneyEntry):
+            editor.set_amount_text(value)
         else:
             editor.setText(value)
         if value:
@@ -357,7 +497,7 @@ class RepeatableSection(QWidget):
         layout.addLayout(self._list_layout)
         self.add_button = QPushButton(spec.add_label, self)
         self.add_button.clicked.connect(self.add_entry)
-        layout.addWidget(self.add_button)
+        layout.addLayout(_compact(self.add_button))
 
     def add_entry(self, *, entity_id: str = "") -> SectionForm:
         """Append one more section instance and return its form."""
@@ -369,7 +509,7 @@ class RepeatableSection(QWidget):
         remove = QPushButton(self._spec.remove_label, container)
         remove.clicked.connect(lambda: self._remove_entry(container))
         container_layout.addWidget(form)
-        container_layout.addWidget(remove)
+        container_layout.addLayout(_compact(remove))
         self._list_layout.addWidget(container)
         self._entries.append(container)
         self._forms.append(form)
@@ -441,6 +581,14 @@ class RepeatableSection(QWidget):
         """Drop every section instance."""
         for container in tuple(self._entries):
             self._remove_entry(container)
+
+
+def _compact(button: QPushButton) -> QHBoxLayout:
+    """A row holding ``button`` at its own size, not the window's width."""
+    row = QHBoxLayout()
+    row.addWidget(button)
+    row.addStretch()
+    return row
 
 
 def _owned_rows(section: RepeatableSection, owner: int) -> tuple[dict[str, str], ...]:
@@ -618,7 +766,7 @@ class FactsEntryPane(QWidget):
         content_layout.addWidget(self.state_pension_form)
         content_layout.addWidget(self.wrappers)
         content_layout.addWidget(self.db_pensions)
-        content_layout.addWidget(self.add_partner_button)
+        content_layout.addLayout(_compact(self.add_partner_button))
         content_layout.addWidget(self._partner_group)
         content_layout.addStretch()
 
@@ -658,7 +806,7 @@ class FactsEntryPane(QWidget):
         partner_layout.addWidget(self.partner_state_pension_form)
         partner_layout.addWidget(self.partner_wrappers)
         partner_layout.addWidget(self.partner_db_pensions)
-        partner_layout.addWidget(self.remove_partner_button)
+        partner_layout.addLayout(_compact(self.remove_partner_button))
         self._partner_group.setVisible(False)
 
     @property
@@ -940,6 +1088,7 @@ class FactsEntryPane(QWidget):
 __all__ = [
     "DateEntry",
     "FactsEntryPane",
+    "MoneyEntry",
     "RepeatableSection",
     "ScrollSafeComboBox",
     "SectionForm",
