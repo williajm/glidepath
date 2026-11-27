@@ -791,9 +791,9 @@ and every age gate fall on exact dates. With one workplace pension
 Simple shows 9 fields, against 19 today; with one SIPP, 8. A blank
 relief method on a kind that permits exactly one (a SIPP: relief at
 source) is filled with that mechanic when parsed, in both views — the
-only legal value, not a guess; the engine otherwise rejects
-contributions to a relief-operating kind with no method
-(`_require_permitted_mechanic`).
+only legal value, not a guess; a workplace pension with contributions
+but no method is an inline error on the relief field, where the
+engine would otherwise fail the run (`_require_permitted_mechanic`).
 
 Household spending and the State Pension are standard, not
 essential: the spending need is a figure most people have not worked
@@ -895,13 +895,15 @@ they hold values; clearing the form leaves the bare Simple view.
   Next/Back wizard (editing one figure in a saved plan should not mean
   walking every step); saving per step (partial plans become a state
   to handle).
-- **Sized inputs and formatted money.** Each field carries an
-  app-layer value kind (money, age, percent, date, text) that the
-  shell maps to a width, so ages and amounts are short and names and
-  choices wider, instead of every input spanning the window. Money
-  shows with £ and thousands separators, formatted by the app layer
-  (§4.7); `_SectionReader.money` already accepts both, so parsing is
-  unchanged.
+- **Sized inputs and formatted money.** `FieldKind` gains `MONEY` and
+  `NUMBER`; the shell maps each kind to a width measured in the
+  widget's own font (choices size to their longest option), so ages
+  and amounts are short and names and choices wider, instead of every
+  input spanning the window, and a short entry shows its hint beside
+  it rather than as a clipped placeholder. Money shows with a £ prefix
+  and thousands separators, formatted by the app layer (§4.7,
+  `money_display_text`); `_SectionReader.money` already accepts both,
+  so parsing is unchanged.
 - **Summary cards.** Each account, DB pension and annuity purchase
   collapses to a one-line summary — "Workplace DC pension · £48,000 ·
   £7,350 a year in" — and expands to edit. The app layer builds the
@@ -2941,7 +2943,7 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 
 ### Phase 11 — Facts entry: Simple view and form layout (design record §4.13)
 
-- [ ] 11.1 Simple and Detailed views — *fields and sections carry a
+- [x] 11.1 Simple and Detailed views — *fields and sections carry a
   level (essential / standard / advanced) replacing
   `FieldSpec.advanced`; Simple shows the §4.13 essentials (9 fields
   with one workplace pension, 8 with one SIPP — no spending or State
@@ -2959,24 +2961,27 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   and in Simple shows its spending, State Pension forecast and
   contribution escalation as fields holding values. Depends on 11.5,
   so a Simple plan never silently lacks a State Pension.*
-- [ ] 11.2 Step navigation — *sections become steps in a side list
+- [x] 11.2 Step navigation — *sections become steps in a side list
   (You, Spending, Retirement income, State pension, Accounts, DB
   pensions, Partner; Simple lists fewer), visitable in any order; one
   save submits the whole form; steps holding errors are marked and the
   first error's step opens with its field focused.*
-- [ ] 11.3 Sized inputs, formatted money, lighter controls — *an
-  app-layer value kind per field (money, age, percent, date, text)
-  that the shell maps to a width; money displayed with £ and thousands
-  separators by the app layer, parsing unchanged; section descriptions
-  cut to one line with the rest behind an info toggle; "account"
-  replaces "savings wrapper" in user-facing copy; add and remove
-  actions are compact secondary buttons.*
-- [ ] 11.4 Summary cards for repeatable rows — *each account, DB
+- [x] 11.3 Sized inputs, formatted money, lighter controls — *`FieldKind`
+  gains `MONEY` and `NUMBER`; the shell sizes each kind from the
+  widget's font metrics (choices to their longest option), short
+  entries show their hint beside them rather than as a clipped
+  placeholder; money shows a £ prefix and thousands separators via the
+  app layer's `money_display_text`, parsing unchanged; each section has
+  a one-line `summary` with the description behind "More about this";
+  "account" replaces "savings wrapper" on the form and in the help
+  guide's Facts paragraph (charts and the inspector keep "wrapper");
+  add and remove actions size to their text.*
+- [x] 11.4 Summary cards for repeatable rows — *each account, DB
   pension and annuity purchase collapses to an app-layer one-line
   summary built from its raw values and expands to edit; new and
   errored rows open expanded; entity ids and row removal behave as
   today.*
-- [ ] 11.5 Assumed full State Pension when no forecast is entered —
+- [x] 11.5 Assumed full State Pension when no forecast is entered —
   *a state pension record without a forecast takes a
   `DEFAULT_ASSUMPTION`: the full new State Pension weekly rate (back in
   the tax-year data files, schema v6, with `verified_on`, sources and
