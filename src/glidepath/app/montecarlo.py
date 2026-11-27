@@ -109,6 +109,11 @@ MONTE_CARLO_STALE_MESSAGE: Final = (
 
 SUCCESS_RATE_LABEL: Final = "Success rate"
 
+NO_SPENDING_ENTERED: Final = "no spending entered"
+"""What a success metric reads when the plan has no spending need
+(planning §4.13): nothing is drawn in retirement, so no path can fall
+short and a percentage would claim a test the plan never ran."""
+
 RUIN_LABEL: Final = "Probability of ruin"
 
 _MODE_BY_KEY: Final[Mapping[str, RunMode]] = {
@@ -355,7 +360,12 @@ def build_monte_carlo_panel(
         elif result is None or ending_pot_deflator is None:
             message = NO_MONTE_CARLO_MESSAGE
         else:
-            metrics = _metrics(result, ending_pot_deflator, basis_suffix)
+            metrics = _metrics(
+                result,
+                ending_pot_deflator,
+                basis_suffix,
+                spending_entered=spending_entered(state),
+            )
     return MonteCarloPanelViewModel(
         heading=RUN_MODE_HEADING,
         mode_options=run_mode_options(),
@@ -371,16 +381,32 @@ def build_monte_carlo_panel(
     )
 
 
+def spending_entered(state: PlanState) -> bool:
+    """Whether the plan states a spending need to test (planning §4.13)."""
+    return state.household is not None and state.household.spending is not None
+
+
+def success_text(rate: Decimal, *, spending: bool) -> str:
+    """A success-style rate as text, or the no-spending note (§4.13)."""
+    return format_percent(rate) if spending else NO_SPENDING_ENTERED
+
+
 def _metrics(
-    result: MonteCarloResult, ending_pot_deflator: Decimal, basis_suffix: str
+    result: MonteCarloResult,
+    ending_pot_deflator: Decimal,
+    basis_suffix: str,
+    *,
+    spending_entered: bool,
 ) -> tuple[MonteCarloMetric, ...]:
-    """The success-metrics readout rows (planning §5.2)."""
+    """The success-metrics readout rows (planning §5.2, §4.13)."""
     rows = [
         MonteCarloMetric(
-            label=SUCCESS_RATE_LABEL, value=format_percent(result.success_rate)
+            label=SUCCESS_RATE_LABEL,
+            value=success_text(result.success_rate, spending=spending_entered),
         ),
         MonteCarloMetric(
-            label=RUIN_LABEL, value=format_percent(result.probability_of_ruin)
+            label=RUIN_LABEL,
+            value=success_text(result.probability_of_ruin, spending=spending_entered),
         ),
     ]
     for spec in BAND_SPECS:

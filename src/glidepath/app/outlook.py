@@ -27,7 +27,7 @@ quote buys each person's pension slice at their own age, and each
 person's State Pension forecast stacks on separately.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
@@ -169,11 +169,14 @@ def build_outlook_panel(state: PlanState) -> OutlookPanelViewModel:
         reading=reading,
     )
     monte_carlo = state.monte_carlo
+    panel = None
     if monte_carlo is not None:
         panel = _monte_carlo_panel(context, result, monte_carlo)
-        if panel is not None:
-            return panel
-    return _deterministic_panel(context)
+    if panel is None:
+        panel = _deterministic_panel(context)
+    if household.spending is None:
+        panel = replace(panel, detail=f"{panel.detail}\n{NO_SPENDING_SENTENCE}")
+    return panel
 
 
 def _monte_carlo_panel(
@@ -573,6 +576,14 @@ def _annuity_income(
     return Money(capital.amount * rate)
 
 
+NO_SPENDING_SENTENCE: Final = (
+    "No spending need is entered, so nothing is drawn from the pots in"
+    " retirement — add one under Household spending (Detailed view) to"
+    " test whether the plan lasts."
+)
+"""The card's note for a plan without a spending need (planning §4.13):
+the figures above stand, but the plan is not tested against a need."""
+
 _FORECAST_PREFIXES = ("Your", "Your partner's")
 """State Pension sentence openers by household position (9.31)."""
 
@@ -721,6 +732,7 @@ def _basis_sentence(monte_carlo: MonteCarloResult) -> str:
 __all__ = [
     "DETERMINISTIC_BASIS_SENTENCE",
     "NO_OUTLOOK_MESSAGE",
+    "NO_SPENDING_SENTENCE",
     "OUTLOOK_HEADING",
     "OUTLOOK_NO_PLAN_MESSAGE",
     "OutlookPanelViewModel",

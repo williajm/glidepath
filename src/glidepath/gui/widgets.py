@@ -57,6 +57,7 @@ from glidepath.app import (
     DrawdownRequest,
     FactsFormData,
     FactsSubmissionOutcome,
+    FormView,
     HelpGuideViewModel,
     PlanReport,
     PlanState,
@@ -73,15 +74,18 @@ from glidepath.app import (
     export_cash_flow_csv,
     facts_form_data_from_household,
     facts_saved_message,
+    form_view_from_token,
     format_form_errors,
     has_unsaved_changes,
     initial_plan_state,
     load_plan_state,
+    load_state,
     metric_from_key,
     monte_carlo_running_status,
     parse_facts_form,
     plan_display_name,
     plan_entity_ids,
+    record_facts_view,
     record_last_plan_path,
     report_exported_message,
     run_mode_from_key,
@@ -296,6 +300,8 @@ class MainWindow(QMainWindow):
             view_model.facts_form,
             self._handle_facts_submitted,
             self._handle_cleared,
+            view=self._stored_facts_view(),
+            on_view_changed=self._remember_facts_view,
         )
         self.charts_pane = ChartsPane(
             ChartsPaneCallbacks(
@@ -575,6 +581,32 @@ class MainWindow(QMainWindow):
             self.save_plan()
             return not has_unsaved_changes(self._state)
         return choice == QMessageBox.StandardButton.Discard
+
+    def _stored_facts_view(self) -> FormView:
+        """The facts view the user last chose, Simple by default (§4.13)."""
+        token = None
+        if self._settings_path is not None:
+            token = load_state(self._settings_path).facts_view
+        return form_view_from_token(token)
+
+    def _remember_facts_view(self, view: FormView) -> None:
+        """Record the chosen facts view for the next launch, best-effort.
+
+        A display preference only (§4.13): an unwritable config
+        directory must not disturb the session — worst case the next
+        launch opens in Simple again.
+        """
+        if self._settings_path is None:
+            return
+        try:
+            record_facts_view(self._settings_path, view.value)
+        except OSError:
+            _logger.warning(
+                "Could not remember the facts view in %s; the next launch"
+                " will open in the Simple view.",
+                self._settings_path,
+                exc_info=True,
+            )
 
     def _remember_plan_path(self, path: Path) -> None:
         """Record the plan path for the next launch, best-effort.

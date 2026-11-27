@@ -39,6 +39,7 @@ from glidepath.app import (
 from glidepath.app.montecarlo import (
     MAX_POOL_WORKERS,
     MONTE_CARLO_FAILED_PREFIX,
+    NO_SPENDING_ENTERED,
     PARALLEL_PATHS_MIN,
 )
 from glidepath.app.plan import replanned_state, state_marked_saved
@@ -308,6 +309,20 @@ class TestMonteCarloPanel:
         ]
         assert all(metric.value for metric in panel.metrics)
         assert panel.message == ""
+
+    def test_without_spending_the_success_metrics_say_so(
+        self, mc_state: PlanState
+    ) -> None:
+        """No spending need, nothing drawn: a percentage would mislead (§4.13)."""
+        assert mc_state.household is not None
+        unspent = replace(
+            mc_state, household=replace(mc_state.household, spending=None)
+        )
+        panel = build_charts_view_model(unspent, mode=RunMode.MONTE_CARLO).monte_carlo
+        values = {metric.label: metric.value for metric in panel.metrics}
+        assert values["Success rate"] == NO_SPENDING_ENTERED
+        assert values["Probability of ruin"] == NO_SPENDING_ENTERED
+        assert values["Ending pot, median (today's money)"].startswith("£")
 
     def test_the_panel_echoes_the_run_inputs(
         self, mc_view_model: ChartsViewModel

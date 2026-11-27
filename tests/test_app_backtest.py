@@ -33,7 +33,7 @@ from glidepath.app.backtest import (
     WINDOWS_LABEL,
     WORST_WINDOW_LABEL,
 )
-from glidepath.app.montecarlo import SUCCESS_RATE_LABEL
+from glidepath.app.montecarlo import NO_SPENDING_ENTERED, SUCCESS_RATE_LABEL
 from glidepath.app.plan import replanned_state
 from glidepath.core import (
     BacktestResult,
@@ -231,6 +231,18 @@ class TestBacktestPanel:
         assert SUCCESS_RATE_LABEL in labels
         success = next(r for r in panel.metrics if r.label == SUCCESS_RATE_LABEL)
         assert success.value.endswith("%")
+
+    def test_without_spending_the_success_rate_says_so(
+        self, bt_state: PlanState
+    ) -> None:
+        """No spending need, nothing drawn: no window can fail (§4.13)."""
+        assert bt_state.household is not None
+        unspent = replace(
+            bt_state, household=replace(bt_state.household, spending=None)
+        )
+        panel = build_charts_view_model(unspent).backtest
+        success = next(r for r in panel.metrics if r.label == SUCCESS_RATE_LABEL)
+        assert success.value == NO_SPENDING_ENTERED
 
     def test_names_the_window_span(
         self, bt_state: PlanState, bt_view_model: ChartsViewModel

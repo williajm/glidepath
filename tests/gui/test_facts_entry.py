@@ -32,6 +32,7 @@ from glidepath.app import (
     FactsSubmissionOutcome,
     FieldKind,
     FormError,
+    FormView,
     PersonFormData,
     PlanEntityIds,
     build_facts_form_view_model,
@@ -794,3 +795,125 @@ class TestIncomePreference:
         )
         pane.set_form_data(FactsFormData())
         assert not pane.annuity_purchases.isVisibleTo(pane)
+
+
+def _simple_pane(
+    on_view_changed: Callable[[FormView], None] | None = None,
+) -> FactsEntryPane:
+    """A pane opened in the Simple view (roadmap 11.1)."""
+    return FactsEntryPane(
+        build_facts_form_view_model(),
+        lambda _data: FactsSubmissionOutcome(status=""),
+        lambda: "",
+        view=FormView.SIMPLE,
+        on_view_changed=on_view_changed,
+    )
+
+
+class TestSimpleView:
+    """Simple shows who you are and what you have (planning §4.13)."""
+
+    def test_blank_simple_form_shows_only_the_essentials(self) -> None:
+        """Standard sections stay out of the way until they hold anything."""
+        pane = _simple_pane()
+        assert pane.person_form.isVisibleTo(pane)
+        assert pane.wrappers.isVisibleTo(pane)
+        assert pane.wrappers.add_button.isVisibleTo(pane)
+        assert not pane.spending_form.isVisibleTo(pane)
+        assert not pane.retirement_income_form.isVisibleTo(pane)
+        assert not pane.state_pension_form.isVisibleTo(pane)
+        assert not pane.db_pensions.isVisibleTo(pane)
+        assert not pane.annuity_purchases.isVisibleTo(pane)
+        assert pane.simple_note.isVisibleTo(pane)
+        assert not pane.intro_label.isVisibleTo(pane)
+
+    def test_simple_person_rows_hide_the_standard_fields(self) -> None:
+        """Sex and the advanced access facts are Detailed only."""
+        pane = _simple_pane()
+        form = pane.person_form
+        assert form.editor("date_of_birth").isVisibleTo(form)
+        assert form.editor("employment_income").isVisibleTo(form)
+        assert not form.editor("sex_for_longevity").isVisibleTo(form)
+        assert not form.editor("death_age").isVisibleTo(form)
+        assert not form.advanced_toggle.isVisibleTo(form)
+
+    def test_a_standard_section_holding_a_value_shows(self) -> None:
+        """Data is never hidden: a spending need shows in Simple."""
+        pane = _simple_pane()
+        pane.set_form_data(FactsFormData(spending={"annual_spending_real": "24000"}))
+        assert pane.spending_form.isVisibleTo(pane)
+        form = pane.spending_form
+        assert form.editor("annual_spending_real").isVisibleTo(form)
+        assert not form.editor("go_go_multiplier").isVisibleTo(form)
+
+    def test_an_advanced_field_holding_a_value_shows(self) -> None:
+        """A filled advanced field shows, without the disclosure toggle."""
+        pane = _simple_pane()
+        pane.set_form_data(
+            FactsFormData(persons=(PersonFormData(person={"death_age": "85"}),))
+        )
+        form = pane.person_form
+        assert form.editor("death_age").isVisibleTo(form)
+        assert not form.editor("lsa_used").isVisibleTo(form)
+        assert not form.advanced_toggle.isVisibleTo(form)
+
+    def test_the_relief_choice_follows_the_account_kind(self) -> None:
+        """Only a workplace pension asks how relief is given."""
+        pane = _simple_pane()
+        form = pane.wrappers.add_entry()
+        relief = form.editor("relief_mechanic")
+        assert not relief.isVisibleTo(form)
+        form.set_value("kind", "uk.workplace_dc")
+        assert relief.isVisibleTo(form)
+        form.set_value("kind", "uk.sipp")
+        assert not relief.isVisibleTo(form)
+
+    def test_an_error_reveals_its_hidden_section(self) -> None:
+        """An error on a field Simple hides must still be seen."""
+        pane = _simple_pane()
+        pane._show_errors(  # noqa: SLF001 - the pane's own error renderer
+            (FormError("spending", None, "annual_spending_real", "bad"),)
+        )
+        assert pane.spending_form.isVisibleTo(pane)
+        form = pane.spending_form
+        assert form.editor("annual_spending_real").isVisibleTo(form)
+
+    def test_choosing_detailed_shows_everything_and_reports_once(self) -> None:
+        """The switch shows every section and reports the user's choice."""
+        chosen: list[FormView] = []
+        pane = _simple_pane(chosen.append)
+        pane.view_buttons[FormView.DETAILED].click()
+        assert pane.view is FormView.DETAILED
+        assert chosen == [FormView.DETAILED]
+        assert pane.spending_form.isVisibleTo(pane)
+        assert pane.state_pension_form.isVisibleTo(pane)
+        assert pane.db_pensions.isVisibleTo(pane)
+        assert pane.person_form.editor("sex_for_longevity").isVisibleTo(
+            pane.person_form
+        )
+        assert not pane.simple_note.isVisibleTo(pane)
+        pane.view_buttons[FormView.DETAILED].click()
+        assert chosen == [FormView.DETAILED]
+
+    def test_switching_views_never_changes_what_submits(self) -> None:
+        """Both views collect the same raw text (one form, two views)."""
+        pane = _simple_pane()
+        pane.set_form_data(
+            FactsFormData(
+                persons=(PersonFormData(person={"date_of_birth": "1980-01-01"}),),
+                spending={"annual_spending_real": "24000"},
+            )
+        )
+        simple = pane.form_data()
+        pane.set_view(FormView.DETAILED)
+        assert pane.form_data() == simple
+
+    def test_simple_hides_the_db_add_action(self) -> None:
+        """DB pensions are added in Detailed; existing rows still show."""
+        pane = _simple_pane()
+        assert not pane.db_pensions.add_button.isVisibleTo(pane.db_pensions)
+        pane.set_view(FormView.DETAILED)
+        pane.db_pensions.add_entry()
+        pane.set_view(FormView.SIMPLE)
+        assert pane.db_pensions.isVisibleTo(pane)
+        assert not pane.db_pensions.add_button.isVisibleTo(pane.db_pensions)

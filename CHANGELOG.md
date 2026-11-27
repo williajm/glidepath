@@ -20,11 +20,20 @@ in the release PR and becomes the GitHub Release notes verbatim.
   can leave it out. Saved plans are unchanged: a saved person with no
   State Pension still has none, and opens with that choice selected
   (#237).
-
-### Fixed
-
-- Dropdowns on the facts form show their arrow again, so choice fields
-  no longer look like text boxes (#236).
+- The facts form has a Simple and a Detailed view. Simple asks only
+  who you are and what you have: date of birth, tax residency,
+  retirement age, salary and, for each account, its type, balance and
+  contributions (plus the tax relief method for a workplace pension).
+  Detailed shows everything, as before. Both are the same form, so
+  switching never changes what is saved, and anything you have filled
+  in shows in either view. New users start in Simple; the choice is
+  remembered on this computer, not in the plan file (#232).
+- With no spending need entered, the Monte Carlo and backtest success
+  rates now read "no spending entered" instead of 100%, and the
+  outlook card says nothing is drawn in retirement (#232).
+- A SIPP's contributions take relief at source without asking, and a
+  workplace pension with contributions but no relief method is
+  flagged on the field instead of failing the projection (#232).
 
 ### Changed
 
@@ -46,6 +55,11 @@ in the release PR and becomes the GitHub Release notes verbatim.
   py-serializable, python-discovery). The Windows build tool Nuitka
   moves 4.3.1 → 4.3.4; its licence texts are unchanged. The PySide6
   runtime pin is unchanged.
+
+### Fixed
+
+- Dropdowns on the facts form show their arrow again, so choice fields
+  no longer look like text boxes (#236).
 
 ### Security
 

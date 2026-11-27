@@ -19,8 +19,10 @@ from glidepath.app import (
     STATE_PENSION_LEFT_OUT,
     FactsFormData,
     FieldKind,
+    FieldLevel,
     FormError,
     PersonFormData,
+    SectionSpec,
     build_facts_form_view_model,
     example_facts_form_data,
     facts_form_data_from_household,
@@ -28,6 +30,7 @@ from glidepath.app import (
     format_form_errors,
     parse_facts_form,
     plan_entity_ids,
+    simple_view_shows,
 )
 from glidepath.core import (
     AnnuityBasis,
@@ -62,6 +65,7 @@ from glidepath.regions.uk import (
     ISA_KIND,
     RUK_RESIDENCY,
     SCOTLAND_RESIDENCY,
+    SIPP_KIND,
     WORKPLACE_DC_KIND,
 )
 
@@ -235,12 +239,19 @@ class TestFormSpec:
         }
         assert not form.retirement_income.repeatable
 
-    def test_no_field_is_both_required_and_advanced(self) -> None:
-        """A required field hidden behind a disclosure would trap users."""
+    def test_no_required_field_sits_below_its_section_level(self) -> None:
+        """A required field is visible whenever its section is (§4.13).
+
+        Replaces 10.1's "never both required and advanced": a required
+        field hidden by a disclosure or by the Simple view would trap
+        users, so its level is never below its section's.
+        """
+        rank = {FieldLevel.ESSENTIAL: 0, FieldLevel.STANDARD: 1, FieldLevel.ADVANCED: 2}
         form = build_facts_form_view_model()
         for section in form.sections:
             for spec in section.fields:
-                assert not (spec.required and spec.advanced), spec.key
+                if spec.required:
+                    assert rank[spec.level] <= rank[section.level], spec.key
 
     def test_every_section_tucks_only_optional_detail_away(self) -> None:
         """The advanced sweep names exactly the rarely needed fields."""
@@ -1164,6 +1175,147 @@ class TestAnnuityPurchaseParsing:
         assert error.section == "annuity_purchase"
         assert error.field_key == "survivor_fraction"
         assert "partner" in error.message
+
+
+def _simple_keys(section: SectionSpec, values: dict[str, str]) -> set[str]:
+    """The field keys Simple shows for their own sake, given ``values``."""
+    return {
+        spec.key for spec in section.fields if simple_view_shows(section, spec, values)
+    }
+
+
+class TestSimpleView:
+    """Simple shows who you are and what you have (planning §4.13)."""
+
+    def test_essential_sections_are_the_person_and_accounts(self) -> None:
+        """Only the person and account sections are essential."""
+        form = build_facts_form_view_model()
+        essential = {
+            section.key
+            for section in form.sections
+            if section.level is FieldLevel.ESSENTIAL
+        }
+        assert essential == {"person", "wrapper", "partner", "partner_wrapper"}
+
+    def test_simple_person_fields(self) -> None:
+        """DOB, residency, income and retirement age — nothing else."""
+        person = build_facts_form_view_model().person
+        assert _simple_keys(person, {}) == {
+            "date_of_birth",
+            "tax_residency",
+            "employment_income",
+            "target_retirement_age",
+        }
+
+    def test_simple_account_fields_for_a_sipp(self) -> None:
+        """A SIPP needs no relief choice: it is always relief at source."""
+        wrapper = build_facts_form_view_model().wrapper
+        assert _simple_keys(wrapper, {"kind": str(SIPP_KIND)}) == {
+            "kind",
+            "balance",
+            "employee_contribution",
+            "employer_contribution",
+        }
+
+    def test_a_workplace_pension_adds_the_relief_choice(self) -> None:
+        """Net pay or relief at source must be chosen, so Simple asks."""
+        wrapper = build_facts_form_view_model().wrapper
+        keys = _simple_keys(wrapper, {"kind": str(WORKPLACE_DC_KIND)})
+        assert "relief_mechanic" in keys
+        assert len(keys) == 5
+
+    def test_simple_shows_nine_fields_with_one_workplace_pension(self) -> None:
+        """The §4.13 count: 4 about you + 5 for the account."""
+        form = build_facts_form_view_model()
+        count = sum(
+            len(_simple_keys(section, {"kind": str(WORKPLACE_DC_KIND)}))
+            for section in (form.person, form.wrapper)
+        )
+        assert count == 9
+
+    def test_standard_sections_show_nothing_for_their_own_sake(self) -> None:
+        """Spending, the State Pension and the rest are Detailed only."""
+        form = build_facts_form_view_model()
+        for section in (
+            form.spending,
+            form.retirement_income,
+            form.state_pension,
+            form.db_pension,
+            form.annuity_purchase,
+        ):
+            assert _simple_keys(section, {}) == set(), section.key
+
+    def test_the_view_model_names_both_views_and_the_note(self) -> None:
+        """The switch labels and the Simple note come from the app layer."""
+        form = build_facts_form_view_model()
+        assert set(form.view_labels.values()) == {"Simple", "Detailed"}
+        assert "Detailed" in form.simple_view_note
+
+
+class TestReliefResolution:
+    """A blank relief choice takes the only legal mechanic, or errors (§4.13)."""
+
+    @staticmethod
+    def _wrapper(kind: str, relief: str = "") -> dict[str, str]:
+        """One account with a contribution and the given relief choice."""
+        return {
+            "kind": kind,
+            "balance": "10000",
+            "employee_contribution": "2000",
+            "relief_mechanic": relief,
+        }
+
+    def test_a_sipp_takes_relief_at_source(self) -> None:
+        """A SIPP permits only relief at source, so blank means it."""
+        household = parse(
+            form_data(person_values(), wrappers=(self._wrapper(str(SIPP_KIND)),))
+        )
+        contributions = household.persons[0].wrappers[0].contributions
+        assert contributions is not None
+        assert contributions.relief_mechanic is ReliefMechanic.RELIEF_AT_SOURCE
+
+    def test_the_implied_mechanic_renders_blank(self) -> None:
+        """Round-tripped, the implied mechanic stays a blank choice."""
+        household = parse(
+            form_data(person_values(), wrappers=(self._wrapper(str(SIPP_KIND)),))
+        )
+        [row] = facts_form_data_from_household(household).wrappers
+        assert row["relief_mechanic"] == ""
+
+    def test_a_chosen_mechanic_still_renders(self) -> None:
+        """An explicit workplace choice round-trips as itself."""
+        household = parse(
+            form_data(
+                person_values(),
+                wrappers=(self._wrapper(str(WORKPLACE_DC_KIND), "net_pay"),),
+            )
+        )
+        [row] = facts_form_data_from_household(household).wrappers
+        assert row["relief_mechanic"] == "net_pay"
+
+    def test_a_workplace_pension_without_a_mechanic_errors_inline(self) -> None:
+        """Two legal mechanics: the field must say which, not the run."""
+        result = parse_facts_form(
+            form_data(
+                person_values(), wrappers=(self._wrapper(str(WORKPLACE_DC_KIND)),)
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "wrapper"
+        assert error.field_key == "relief_mechanic"
+        assert "net pay or relief at source" in error.message
+
+    def test_an_isa_takes_no_mechanic(self) -> None:
+        """No relief applies to an ISA: blank stays none, without error."""
+        household = parse(
+            form_data(person_values(), wrappers=(self._wrapper(str(ISA_KIND)),))
+        )
+        contributions = household.persons[0].wrappers[0].contributions
+        assert contributions is not None
+        assert contributions.relief_mechanic is None
 
 
 class TestStatePensionParsing:

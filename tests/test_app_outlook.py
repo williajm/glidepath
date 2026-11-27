@@ -19,6 +19,7 @@ from factories import FreeWrapperRules, money_fact, stub_region
 from glidepath.app import (
     DETERMINISTIC_BASIS_SENTENCE,
     NO_OUTLOOK_MESSAGE,
+    NO_SPENDING_SENTENCE,
     OUTLOOK_HEADING,
     OUTLOOK_NO_PLAN_MESSAGE,
     PlanState,
@@ -337,6 +338,17 @@ class TestSentenceGating:
             "Your assumed full State Pension (no forecast entered) adds"
             " £12,548 a year from age 67"
         ) in panel.detail
+
+    def test_without_spending_the_card_says_nothing_is_drawn(self) -> None:
+        """A plan with no spending need is named as untested (§4.13)."""
+        plan = replace(household(), spending=None)
+        panel = build_outlook_panel(outlook_state(plan))
+        assert panel.detail.endswith(NO_SPENDING_SENTENCE)
+
+    def test_with_spending_the_card_has_no_spending_note(self) -> None:
+        """The note appears only when the need is missing."""
+        panel = build_outlook_panel(outlook_state(household()))
+        assert NO_SPENDING_SENTENCE not in panel.detail
 
     def test_without_a_record_the_state_pension_stays_silent(self) -> None:
         """No record is the explicit leave-out choice: nothing is quoted."""

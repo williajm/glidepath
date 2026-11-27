@@ -97,9 +97,7 @@ overlap, so the stacked alphas deepen naturally toward the median —
 central probability mass reads as colour depth."""
 
 _ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
-_COMBO_ARROW = (
-    resources.files("glidepath.gui").joinpath("assets", "chevron_down.png")
-)
+_COMBO_ARROW = resources.files("glidepath.gui").joinpath("assets", "chevron_down.png")
 """The choice-field chevron, drawn at 2x in the muted ink (#236).
 
 Styling ``QComboBox::drop-down`` makes the stylesheet own the arrow, so

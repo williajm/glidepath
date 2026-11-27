@@ -6,15 +6,18 @@ fields, collect raw text back, and forward it to the submit callback.
 Presentation mechanics live here: required fields carry the app
 layer's marker (roadmap 10.2), hints double as tooltips so guidance
 survives typing (roadmap 10.4), advanced fields sit behind a
-"More options" disclosure per section (roadmap 10.1), and submission
+"More options" disclosure per section (roadmap 10.1), submission
 errors render inline under their fields with the first scrolled into
-view (roadmap 10.2).
+view (roadmap 10.2), and the Simple/Detailed switch shows or hides
+rows and sections by the app layer's levels (roadmap 11.1) — a field
+holding a value, or an error, always shows.
 """
 
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCalendarWidget,
     QComboBox,
     QFormLayout,
@@ -42,9 +45,12 @@ from glidepath.app import (
     FactsFormData,
     FactsFormViewModel,
     FieldKind,
+    FieldLevel,
+    FormView,
     PersonFormData,
     PlanEntityIds,
     SectionSpec,
+    simple_view_shows,
 )
 
 if TYPE_CHECKING:
@@ -125,13 +131,25 @@ class SectionForm(QGroupBox):
     sub-form hidden behind the "More options" toggle; loading a value
     into one, or landing an error on one, reveals them — hidden data
     or hidden errors would read as the app ignoring the user.
+
+    In the Simple view (roadmap 11.1) each row shows only when the app
+    layer's :func:`~glidepath.app.simple_view_shows` says so, or while
+    it holds a value or an error; there is no disclosure toggle.
+    Visibility is re-derived on view changes, loads, errors and the
+    controlling choices of conditional fields — never mid-typing, so a
+    field never vanishes under the cursor.
     """
 
     def __init__(self, spec: SectionSpec, parent: QWidget | None = None) -> None:
         """Render the section's fields as labelled editors."""
         super().__init__(spec.title, parent)
+        self._spec = spec
+        self._view = FormView.DETAILED
+        self._advanced_disclosed = False
         self._editors: dict[str, QLineEdit | QComboBox] = {}
+        self._rows: dict[str, QFormLayout] = {}
         self._error_labels: dict[str, QLabel] = {}
+        self._errored: set[str] = set()
         self._advanced_keys = frozenset(
             field.key for field in spec.fields if field.advanced
         )
@@ -160,6 +178,16 @@ class SectionForm(QGroupBox):
         self._advanced_widget.setVisible(False)
         if not self._advanced_keys:
             self.advanced_toggle.setVisible(False)
+        for field in spec.fields:
+            if field.essential_when is not None:
+                controlling = self._editors.get(field.essential_when[0])
+                if isinstance(controlling, QComboBox):
+                    controlling.currentIndexChanged.connect(self.refresh_view)
+
+    @property
+    def spec(self) -> SectionSpec:
+        """The section spec this form renders."""
+        return self._spec
 
     def _add_field(self, layout: QFormLayout, field: FieldSpec) -> None:
         """Render one field row: marker, editor, tooltip, error label."""
@@ -179,6 +207,7 @@ class SectionForm(QGroupBox):
         if field.hint:
             editor.setToolTip(field.hint)
         self._editors[field.key] = editor
+        self._rows[field.key] = layout
         layout.addRow(label, editor)
         error = QLabel("", self)
         error.setObjectName("fieldErrorLabel")
@@ -194,10 +223,42 @@ class SectionForm(QGroupBox):
 
     def set_advanced_visible(self, *, visible: bool) -> None:
         """Disclose (or tuck away) the section's advanced fields."""
-        self._advanced_widget.setVisible(visible)
+        self._advanced_disclosed = visible
         self.advanced_toggle.setText(
             HIDE_ADVANCED_LABEL if visible else SHOW_ADVANCED_LABEL
         )
+        if self._view is FormView.DETAILED:
+            self._advanced_widget.setVisible(visible)
+
+    def set_view(self, view: FormView) -> None:
+        """Show the section as the Simple or Detailed view (roadmap 11.1)."""
+        self._view = view
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        """Re-derive which rows show in the current view (class docstring)."""
+        detailed = self._view is FormView.DETAILED
+        values = self.values()
+        any_advanced = False
+        for field in self._spec.fields:
+            shown = (
+                detailed
+                or simple_view_shows(self._spec, field, values)
+                or bool(values[field.key])
+                or field.key in self._errored
+            )
+            self._rows[field.key].setRowVisible(self._editors[field.key], shown)
+            any_advanced = any_advanced or (shown and field.advanced)
+        if detailed:
+            self.advanced_toggle.setVisible(bool(self._advanced_keys))
+            self._advanced_widget.setVisible(self._advanced_disclosed)
+        else:
+            self.advanced_toggle.setVisible(False)
+            self._advanced_widget.setVisible(any_advanced)
+
+    def has_content(self) -> bool:
+        """Whether any field holds a value or the section shows an error."""
+        return bool(self._errored) or any(self.values().values())
 
     def toggle_advanced(self) -> None:
         """Flip the advanced-fields disclosure."""
@@ -240,16 +301,20 @@ class SectionForm(QGroupBox):
         """Set the given fields; keys absent from ``values`` are untouched."""
         for key, value in values.items():
             self.set_value(key, value)
+        self.refresh_view()
 
     def set_error(self, field_key: str, message: str) -> None:
         """Show one inline error (an empty key errors the section)."""
         label = self._error_labels.get(field_key, self.section_error_label)
         label.setText(message)
         label.show()
+        self._errored.add(field_key)
         self.reveal(field_key)
+        self.refresh_view()
 
     def clear_errors(self) -> None:
         """Hide every inline error the last submission showed."""
+        self._errored.clear()
         self.section_error_label.hide()
         self.section_error_label.setText("")
         for label in self._error_labels.values():
@@ -266,6 +331,7 @@ class SectionForm(QGroupBox):
         self.clear_errors()
         if self._advanced_keys:
             self.set_advanced_visible(visible=False)
+        self.refresh_view()
 
 
 class RepeatableSection(QWidget):
@@ -281,6 +347,7 @@ class RepeatableSection(QWidget):
         """Render the empty list with its add button."""
         super().__init__(parent)
         self._spec = spec
+        self._view = FormView.DETAILED
         self._entries: list[QWidget] = []
         self._forms: list[SectionForm] = []
         self._entity_ids: list[str] = []
@@ -298,6 +365,7 @@ class RepeatableSection(QWidget):
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         form = SectionForm(self._spec, container)
+        form.set_view(self._view)
         remove = QPushButton(self._spec.remove_label, container)
         remove.clicked.connect(lambda: self._remove_entry(container))
         container_layout.addWidget(form)
@@ -321,6 +389,24 @@ class RepeatableSection(QWidget):
     def forms(self) -> tuple[SectionForm, ...]:
         """The live section instances, in display order."""
         return tuple(self._forms)
+
+    @property
+    def spec(self) -> SectionSpec:
+        """The section spec every row renders."""
+        return self._spec
+
+    def set_view(self, view: FormView) -> None:
+        """Show the rows as the Simple or Detailed view (roadmap 11.1).
+
+        Simple offers the add action only for an essential section
+        (accounts); rows that exist always show, whatever the view.
+        """
+        self._view = view
+        for form in self._forms:
+            form.set_view(view)
+        self.add_button.setVisible(
+            view is FormView.DETAILED or self._spec.level is FieldLevel.ESSENTIAL
+        )
 
     def values_list(self) -> tuple[dict[str, str], ...]:
         """Raw text for every instance, its entity id included, in order."""
@@ -387,19 +473,29 @@ class FactsEntryPane(QWidget):
     never hidden — the partner's additionally only while a partner is
     on the form, and switching back to drawdown-only confirms before
     it deletes the purchase rows.
+
+    The Simple/Detailed switch (roadmap 11.1) re-derives every row's
+    and section's visibility from the app layer's levels: Simple shows
+    the essential sections plus any section or row holding a value or
+    an error, and a one-line note naming what Detailed adds.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - the pane's whole binding surface
         self,
         view_model: FactsFormViewModel,
         on_submit: Callable[[FactsFormData], FactsSubmissionOutcome],
         on_clear: Callable[[], str | None],
         parent: QWidget | None = None,
+        *,
+        view: FormView = FormView.DETAILED,
+        on_view_changed: Callable[[FormView], None] | None = None,
     ) -> None:
-        """Render the form and wire the submit and clear callbacks."""
+        """Render the form and wire the submit, clear and view callbacks."""
         super().__init__(parent)
         self._on_submit = on_submit
         self._on_clear = on_clear
+        self._view = view
+        self._on_view_changed = on_view_changed
         self._remove_partner_title = view_model.remove_partner_label
         self._remove_partner_confirm = view_model.remove_partner_confirm
         self._drawdown_only_title = view_model.retirement_income.title
@@ -425,16 +521,92 @@ class FactsEntryPane(QWidget):
         self.clear_button.clicked.connect(self.clear)
         self.status_label = QLabel("", self)
         self.status_label.setWordWrap(True)
+        self._build_view_switch(view_model)
         self._assemble_layout(view_model)
+        self._apply_view()
+
+    def _build_view_switch(self, view_model: FactsFormViewModel) -> None:
+        """Create the Simple/Detailed switch and the Simple note (11.1)."""
+        self.view_buttons: dict[FormView, QPushButton] = {}
+        self._view_group = QButtonGroup(self)
+        self._view_group.setExclusive(True)
+        for view in FormView:
+            button = QPushButton(view_model.view_labels.get(view, view.value), self)
+            button.setObjectName("viewSwitchButton")
+            button.setCheckable(True)
+            button.setChecked(view is self._view)
+            button.clicked.connect(
+                lambda _checked=False, chosen=view: self._choose_view(chosen)
+            )
+            self._view_group.addButton(button)
+            self.view_buttons[view] = button
+        self.simple_note = QLabel(view_model.simple_view_note, self)
+        self.simple_note.setWordWrap(True)
+        self.simple_note.setObjectName("simpleViewNote")
+
+    @property
+    def view(self) -> FormView:
+        """The view the form currently shows."""
+        return self._view
+
+    def set_view(self, view: FormView) -> None:
+        """Show the form as ``view`` without reporting it as a user choice."""
+        self._view = view
+        self.view_buttons[view].setChecked(True)
+        self._apply_view()
+
+    def _choose_view(self, view: FormView) -> None:
+        """Apply a view the user picked and report it for persistence."""
+        changed = view is not self._view
+        self.set_view(view)
+        if changed and self._on_view_changed is not None:
+            self._on_view_changed(view)
+
+    def _apply_view(self) -> None:
+        """Re-derive every section's and row's visibility (class docstring)."""
+        simple = self._view is FormView.SIMPLE
+        for form in (
+            self.person_form,
+            self.spending_form,
+            self.retirement_income_form,
+            self.state_pension_form,
+            self.partner_form,
+            self.partner_state_pension_form,
+        ):
+            form.set_view(self._view)
+            form.setVisible(
+                not simple
+                or form.spec.level is FieldLevel.ESSENTIAL
+                or form.has_content()
+            )
+        for repeatable in (
+            self.wrappers,
+            self.db_pensions,
+            self.annuity_purchases,
+            self.partner_wrappers,
+            self.partner_db_pensions,
+            self.partner_annuity_purchases,
+        ):
+            repeatable.set_view(self._view)
+        for repeatable in (self.db_pensions, self.partner_db_pensions):
+            repeatable.setVisible(not simple or bool(repeatable.forms))
+        self.simple_note.setVisible(simple)
+        self.intro_label.setVisible(not simple)
         self._sync_annuity_sections()
 
     def _assemble_layout(self, view_model: FactsFormViewModel) -> None:
         """Stack the sections into the scroll area and the button row."""
-        intro = QLabel(view_model.intro, self)
-        intro.setWordWrap(True)
+        self.intro_label = QLabel(view_model.intro, self)
+        self.intro_label.setWordWrap(True)
         content = QWidget(self)
         content_layout = QVBoxLayout(content)
-        content_layout.addWidget(intro)
+        switch_row = QHBoxLayout()
+        for button in self.view_buttons.values():
+            switch_row.addWidget(button)
+        switch_row.addStretch()
+        content_layout.addLayout(switch_row)
+        content_layout.addWidget(self.simple_note)
+        content_layout.addWidget(self.intro_label)
         content_layout.addWidget(self.person_form)
         content_layout.addWidget(self.spending_form)
         content_layout.addWidget(self.retirement_income_form)
@@ -529,7 +701,7 @@ class FactsEntryPane(QWidget):
         self._partner_active = active
         self._partner_group.setVisible(active)
         self.add_partner_button.setVisible(not active)
-        self._sync_annuity_sections()
+        self._apply_view()
 
     def _income_preference(self) -> str:
         """The income-preference token currently selected (10.3)."""
@@ -548,10 +720,11 @@ class FactsEntryPane(QWidget):
         submit); with no rows, the preference alone decides. The
         partner's section additionally needs a partner on the form.
         """
-        visible = (
-            self._income_preference() == INCOME_PREFERENCE_ANNUITY
-            or self._annuity_rows_exist()
+        offered = (
+            self._view is FormView.DETAILED
+            and self._income_preference() == INCOME_PREFERENCE_ANNUITY
         )
+        visible = offered or self._annuity_rows_exist()
         self.annuity_purchases.setVisible(visible)
         self.partner_annuity_purchases.setVisible(visible and self._partner_active)
 
@@ -656,7 +829,7 @@ class FactsEntryPane(QWidget):
             self.partner_annuity_purchases.set_values_list(partner_annuities)
         finally:
             self._syncing_income = False
-        self._sync_annuity_sections()
+        self._apply_view()
 
     def set_entity_ids(self, ids: PlanEntityIds) -> None:
         """Seed every repeatable row's entity id from the saved plan.
@@ -742,6 +915,7 @@ class FactsEntryPane(QWidget):
             form.set_error(error.field_key, error.message)
             if first_target is None:
                 first_target = form.editor_or_none(error.field_key) or form
+        self._apply_view()
         if first_target is not None:
             self._scroll.ensureWidgetVisible(first_target)
             first_target.setFocus()

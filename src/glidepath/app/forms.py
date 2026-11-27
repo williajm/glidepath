@@ -22,6 +22,7 @@ from dataclasses import dataclass, field, fields, is_dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum, auto
+from functools import cache
 from itertools import chain
 from typing import TYPE_CHECKING, Any, Final
 
@@ -65,6 +66,7 @@ from glidepath.regions.uk import (
     SCOTLAND_RESIDENCY,
     SIPP_KIND,
     WORKPLACE_DC_KIND,
+    UkWrapperRuleset,
 )
 
 if TYPE_CHECKING:
@@ -93,15 +95,42 @@ class ChoiceOption:
     label: str
 
 
+class FieldLevel(Enum):
+    """Which view shows a field or section (planning §4.13, roadmap 11.1).
+
+    Both views are the same form — one spec, one parser — and differ
+    only in what they show; a field holding a value, or carrying a
+    submission error, shows in every view regardless of its level.
+    """
+
+    ESSENTIAL = auto()
+    """Shown in Simple and Detailed: who you are and what you have."""
+    STANDARD = auto()
+    """Shown in Detailed only."""
+    ADVANCED = auto()
+    """Detailed only, behind the section's "More options" (roadmap 10.1)."""
+
+
+class FormView(Enum):
+    """The facts form's two views (planning §4.13, roadmap 11.1)."""
+
+    SIMPLE = "simple"
+    DETAILED = "detailed"
+
+
 @dataclass(frozen=True)
 class FieldSpec:
     """One form field a shell renders and returns raw text for.
 
     ``required`` marks the fields a submission cannot omit — shells
-    flag them visibly (roadmap 10.2). ``advanced`` marks the rarely
-    needed fields a shell tucks behind the section's "More options"
-    disclosure (roadmap 10.1); a field holding a value, or carrying a
-    submission error, must be revealed rather than stay hidden.
+    flag them visibly (roadmap 10.2). ``level`` says which view shows
+    the field (§4.13): ``ADVANCED`` fields sit behind the section's
+    "More options" disclosure (roadmap 10.1). ``essential_when`` makes
+    a standard field essential while another field of the same
+    section holds one of the named values — the tax relief method,
+    needed in Simple only for a workplace pension. A field holding a
+    value, or carrying a submission error, must be shown rather than
+    stay hidden, whatever the view.
     """
 
     key: str
@@ -109,13 +138,23 @@ class FieldSpec:
     kind: FieldKind = FieldKind.TEXT
     hint: str = ""
     required: bool = False
-    advanced: bool = False
+    level: FieldLevel = FieldLevel.STANDARD
     choices: tuple[ChoiceOption, ...] = ()
+    essential_when: tuple[str, frozenset[str]] | None = None
+
+    @property
+    def advanced(self) -> bool:
+        """Whether the field sits behind "More options" (roadmap 10.1)."""
+        return self.level is FieldLevel.ADVANCED
 
 
 @dataclass(frozen=True)
 class SectionSpec:
-    """One titled group of fields; repeatable sections list entities."""
+    """One titled group of fields; repeatable sections list entities.
+
+    ``level`` says which view shows the section (§4.13): Simple shows
+    only essential sections, plus any section holding a value.
+    """
 
     key: str
     title: str
@@ -124,6 +163,36 @@ class SectionSpec:
     repeatable: bool = False
     add_label: str = ""
     remove_label: str = ""
+    level: FieldLevel = FieldLevel.STANDARD
+
+
+def simple_view_shows(
+    section: SectionSpec, spec: FieldSpec, values: Mapping[str, str]
+) -> bool:
+    """Whether Simple shows ``spec`` for its own sake (planning §4.13).
+
+    True for an essential field of an essential section, and for a
+    field whose ``essential_when`` condition holds on the section's
+    current ``values``. Shells show any other field too while it holds
+    a value or carries an error — that invariant is theirs to apply,
+    since only they know what the user has typed.
+    """
+    if section.level is not FieldLevel.ESSENTIAL:
+        return False
+    if spec.level is FieldLevel.ESSENTIAL:
+        return True
+    if spec.essential_when is None:
+        return False
+    controlling_key, values_shown_for = spec.essential_when
+    return values.get(controlling_key, "") in values_shown_for
+
+
+def form_view_from_token(token: str | None) -> FormView:
+    """The stored view preference, Simple when absent or unknown (§4.13)."""
+    for view in FormView:
+        if view.value == token:
+            return view
+    return FormView.SIMPLE
 
 
 @dataclass(frozen=True)
@@ -170,6 +239,10 @@ class FactsFormViewModel:
     """The confirmation a shell must show before switching the income
     preference back to drawdown-only while annuity purchases exist —
     the switch deletes every purchase row (roadmap 10.3)."""
+    view_labels: Mapping[FormView, str] = field(default_factory=dict)
+    """The view switch's labels, one per :class:`FormView` (§4.13)."""
+    simple_view_note: str = ""
+    """The one line Simple shows naming what Detailed adds (§4.13)."""
 
     @property
     def sections(self) -> tuple[SectionSpec, ...]:
@@ -287,6 +360,10 @@ _MEMBERSHIP_NEEDS_RATE = (
 _MEMBERSHIP_NEEDS_SALARY = "active membership needs the pensionable salary"
 _LEFT_OUT_WITH_DETAILS = (
     "leave the forecast and deferral blank to leave the State Pension out"
+)
+_RELIEF_NEEDED = (
+    "choose how this pension gets tax relief — your payslip shows net "
+    "pay or relief at source"
 )
 _PROTECTED_NEEDS_FORECAST = (
     "a protected payment is part of the DWP forecast — enter the forecast too"
@@ -723,7 +800,43 @@ def _state_pension_from(reader: _SectionReader) -> StatePensionRecord | None:
         return None
 
 
-def _contributions_from(reader: _SectionReader) -> ContributionSchedule | None:
+@cache
+def _uk_wrapper_rules() -> UkWrapperRuleset:
+    """The shipped UK wrapper rules, for the relief mechanics each kind permits."""
+    return UkWrapperRuleset.from_shipped_data()
+
+
+def _sole_relief_mechanic(kind: WrapperKindId) -> ReliefMechanic | None:
+    """The one relief mechanic ``kind`` permits, if it permits exactly one."""
+    permitted = _uk_wrapper_rules().permitted_relief_mechanics(kind)
+    return next(iter(permitted)) if len(permitted) == 1 else None
+
+
+def _resolved_relief(
+    reader: _SectionReader,
+    kind: WrapperKindId | None,
+    relief: ReliefMechanic | None,
+) -> ReliefMechanic | None:
+    """The relief mechanic contributions to ``kind`` run under (§4.13).
+
+    A blank choice takes the kind's only permitted mechanic (a SIPP is
+    always relief at source) — the one legal value, not a guess; a
+    kind permitting several (a workplace pension) must be told which,
+    so a blank one errors on the field rather than failing the run.
+    """
+    if relief is not None or kind is None:
+        return relief
+    sole = _sole_relief_mechanic(kind)
+    if sole is not None:
+        return sole
+    if _uk_wrapper_rules().permitted_relief_mechanics(kind):
+        reader.error("relief_mechanic", _RELIEF_NEEDED)
+    return None
+
+
+def _contributions_from(
+    reader: _SectionReader, kind: WrapperKindId | None
+) -> ContributionSchedule | None:
     """A wrapper's contribution schedule, or ``None`` when untouched."""
     employee = reader.money("employee_contribution")
     employer = reader.fact_of(reader.money("employer_contribution"))
@@ -733,6 +846,7 @@ def _contributions_from(reader: _SectionReader) -> ContributionSchedule | None:
         if employer is not None or relief is not None or escalation is not None:
             reader.error("employee_contribution", _CONTRIBUTIONS_NEED_EMPLOYEE)
         return None
+    relief = _resolved_relief(reader, kind, relief)
     try:
         return ContributionSchedule(
             employee_amount=Decision(value=employee, recorded_on=reader.recorded_on),
@@ -768,7 +882,7 @@ def _wrapper_from(reader: _SectionReader, entity_id: EntityId) -> Wrapper | None
             "crystallised_balance",
             "Only pension wrappers hold a crystallised balance — leave blank.",
         )
-    contributions = _contributions_from(reader)
+    contributions = _contributions_from(reader, kind)
     allocation = _allocation_from(reader, kind)
     if kind is None or balance is None or not reader.ok:
         return None
@@ -1452,7 +1566,13 @@ def _wrapper_values(wrapper: Wrapper, owner: int) -> dict[str, str]:
         values["employer_contribution"] = (
             "" if employer is None else str(employer.value.amount)
         )
-        values["relief_mechanic"] = "" if relief is None else _RELIEF_KEYS[relief]
+        # The kind's only legal mechanic is the blank choice's meaning, so
+        # it renders blank and stays hidden in Simple (§4.13).
+        values["relief_mechanic"] = (
+            ""
+            if relief is None or relief == _sole_relief_mechanic(wrapper.kind)
+            else _RELIEF_KEYS[relief]
+        )
         values["escalation"] = (
             "" if escalation is None else _ESCALATION_KEYS[escalation]
         )
@@ -1797,6 +1917,7 @@ def _person_section() -> SectionSpec:
             "Facts you state about yourself, plus your target retirement "
             "age — a choice, and the anchor the whole projection swings on."
         ),
+        level=FieldLevel.ESSENTIAL,
         fields=(
             FieldSpec(
                 key="date_of_birth",
@@ -1804,6 +1925,7 @@ def _person_section() -> SectionSpec:
                 kind=FieldKind.DATE,
                 hint="YYYY-MM-DD, e.g. 1980-04-12",
                 required=True,
+                level=FieldLevel.ESSENTIAL,
             ),
             FieldSpec(
                 key="sex_for_longevity",
@@ -1820,6 +1942,7 @@ def _person_section() -> SectionSpec:
                 label="Tax residency",
                 kind=FieldKind.CHOICE,
                 required=True,
+                level=FieldLevel.ESSENTIAL,
                 choices=(
                     _SELECT_OPTION,
                     ChoiceOption(
@@ -1836,31 +1959,33 @@ def _person_section() -> SectionSpec:
                 key="employment_income",
                 label="Employment income (gross, per year)",
                 hint="e.g. 52000",
+                level=FieldLevel.ESSENTIAL,
             ),
             FieldSpec(
                 key="target_retirement_age",
                 label="Target retirement age (your choice)",
                 hint="e.g. 62",
                 required=True,
+                level=FieldLevel.ESSENTIAL,
             ),
             FieldSpec(
                 key="mpaa_triggered_on",
                 label="MPAA triggered on",
                 kind=FieldKind.DATE,
                 hint="YYYY-MM-DD; blank if you have never flexibly accessed a pension",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="lsa_used",
                 label="Lump sum allowance already used",
                 hint="blank if none",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="death_age",
                 label="Model death at age (optional, your choice)",
                 hint="blank means alive to the horizon; e.g. 82",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
         ),
     )
@@ -1888,19 +2013,19 @@ def _spending_section() -> SectionSpec:
                 key="go_go_multiplier",
                 label="Go-go multiplier (first decade retired)",
                 hint="e.g. 1.2; blank means 1",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="slow_go_multiplier",
                 label="Slow-go multiplier (second decade retired)",
                 hint="e.g. 0.9; blank means 1",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="no_go_multiplier",
                 label="No-go multiplier (beyond two decades retired)",
                 hint="e.g. 0.8; blank means 1",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
         ),
     )
@@ -2018,14 +2143,14 @@ def _state_pension_section() -> SectionSpec:
                 key="protected_payment",
                 label="Protected payment (part of the forecast)",
                 hint="blank if none; uprates by CPI only",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             _as_of_field("forecast_as_of", "Forecast as of"),
             FieldSpec(
                 key="deferral_years",
                 label="Years you plan to defer claiming (your choice)",
                 hint="whole months, e.g. 1.25; blank means none",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
         ),
     )
@@ -2047,6 +2172,7 @@ def _wrapper_section() -> SectionSpec:
         repeatable=True,
         add_label="Add wrapper",
         remove_label="Remove this wrapper",
+        level=FieldLevel.ESSENTIAL,
         fields=(
             FieldSpec(
                 key="label",
@@ -2058,6 +2184,7 @@ def _wrapper_section() -> SectionSpec:
                 label="Kind",
                 kind=FieldKind.CHOICE,
                 required=True,
+                level=FieldLevel.ESSENTIAL,
                 choices=(
                     _SELECT_OPTION,
                     ChoiceOption(
@@ -2077,12 +2204,13 @@ def _wrapper_section() -> SectionSpec:
                 label="Balance (pensions: uncrystallised)",
                 hint="e.g. 45000",
                 required=True,
+                level=FieldLevel.ESSENTIAL,
             ),
             FieldSpec(
                 key="crystallised_balance",
                 label="Crystallised balance (already in drawdown)",
                 hint="pensions only; blank if none",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             _as_of_field("balances_as_of", "Balances as of"),
             FieldSpec(
@@ -2098,20 +2226,26 @@ def _wrapper_section() -> SectionSpec:
                 key="employee_contribution",
                 label="Your contribution (gross, per year — your choice)",
                 hint="e.g. 6000; blank if none",
+                level=FieldLevel.ESSENTIAL,
             ),
             FieldSpec(
                 key="employer_contribution",
                 label="Employer contribution (per year)",
                 hint="from your employment terms; blank if none",
+                level=FieldLevel.ESSENTIAL,
             ),
             FieldSpec(
                 key="relief_mechanic",
                 label="Tax relief mechanic",
                 kind=FieldKind.CHOICE,
+                essential_when=("kind", frozenset({str(WORKPLACE_DC_KIND)})),
                 choices=(
                     ChoiceOption(
                         value="",
-                        label="None (ISAs, LISAs, GIA, cash; pensions must pick one)",
+                        label=(
+                            "Not set (a SIPP is always relief at source;"
+                            " ISAs and cash have none)"
+                        ),
                     ),
                     ChoiceOption(value="relief_at_source", label="Relief at source"),
                     ChoiceOption(value="net_pay", label="Net pay"),
@@ -2121,7 +2255,7 @@ def _wrapper_section() -> SectionSpec:
                 key="escalation",
                 label="Contribution escalation",
                 kind=FieldKind.CHOICE,
-                advanced=True,
+                level=FieldLevel.ADVANCED,
                 choices=(
                     ChoiceOption(value="", label="Fixed amount"),
                     ChoiceOption(value="earnings", label="Grows with earnings"),
@@ -2182,61 +2316,61 @@ def _db_pension_section() -> SectionSpec:
                 key="revaluation_cap",
                 label="CPI cap (annual, as a fraction)",
                 hint="e.g. 0.05 for CPI capped at 5%; blank if uncapped",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="revaluation_fixed_rate",
                 label="Fixed rate (annual, as a fraction)",
                 hint="fixed basis only, e.g. 0.03",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="early_late_factors",
                 label="Early/late retirement factors",
                 hint=_FACTORS_MESSAGE.removeprefix("enter "),
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="commutation_factor",
                 label="Commutation factor (£ lump sum per £1 pension)",
                 hint="e.g. 12; blank if not commuting",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="taken_at_age",
                 label="Take benefits at age (your choice)",
                 hint="blank means the normal pension age",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="commuted_fraction",
                 label="Fraction commuted to lump sum (your choice)",
                 hint="0 to 1, e.g. 0.25; blank means none",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="survivor_fraction",
                 label="Survivor pension fraction (scheme fact)",
                 hint="0 to 1, e.g. 0.5; blank means the shipped 50% assumption",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="accrual_rate",
                 label="Accrual rate (fraction of salary per year of service)",
                 hint="e.g. 0.0166667 for a 1/60th scheme; blank if deferred",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="pensionable_salary",
                 label="Pensionable salary (annual)",
                 hint="active members only; often below total pay",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
             FieldSpec(
                 key="active_until_age",
                 label="Active until age (your choice)",
                 hint="blank means until benefits start",
-                advanced=True,
+                level=FieldLevel.ADVANCED,
             ),
         ),
     )
@@ -2299,7 +2433,7 @@ def _annuity_purchase_section() -> SectionSpec:
                 key="survivor_fraction",
                 label="Survivor income (your choice)",
                 kind=FieldKind.CHOICE,
-                advanced=True,
+                level=FieldLevel.ADVANCED,
                 hint=(
                     "A joint-life purchase continues income to the "
                     "surviving partner at this share after the buyer's "
@@ -2340,7 +2474,7 @@ def _partner_section() -> SectionSpec:
                 key=CLAIM_MARRIAGE_ALLOWANCE_KEY,
                 label="Claim marriage allowance when eligible (your choice)",
                 kind=FieldKind.CHOICE,
-                advanced=True,
+                level=FieldLevel.ADVANCED,
                 hint=(
                     "Checked each tax year: whoever's income sits inside "
                     "their personal allowance transfers it to the other, "
@@ -2457,5 +2591,13 @@ def build_facts_form_view_model() -> FactsFormViewModel:
         drawdown_only_confirm=(
             "Switch to drawdown only? The annuity purchases on the form "
             "will be deleted."
+        ),
+        view_labels={FormView.SIMPLE: "Simple", FormView.DETAILED: "Detailed"},
+        simple_view_note=(
+            "Simple asks only who you are and what you have. Switch to "
+            "Detailed to add a spending need, your State Pension "
+            "forecast (the full State Pension is assumed until you do), "
+            "DB pensions, annuities, withdrawal strategies and "
+            "statement dates."
         ),
     )

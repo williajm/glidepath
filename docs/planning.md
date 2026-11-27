@@ -873,13 +873,15 @@ and overriding the user's chosen view is surprising.
 users start in Simple. The chosen view is remembered in the local
 settings file that holds the disclaimer acknowledgement and the last
 plan path (`app/firstrun.py`), not in the plan document, so the view
-adds nothing to the plan schema. The §4.9 launch example keeps its spending
-need and State Pension forecast — a demonstration without a spending
-need would show no drawdown and no failing paths — so on the example
-Simple shows those two fields, as they hold values; clearing the form
-leaves the bare Simple view. The example drops contribution escalation
-(an advanced field) and is re-tuned so it still parses, projects and
-holds together.
+adds nothing to the plan schema. The §4.9 launch example is
+unchanged: it keeps its spending need and State Pension forecast — a
+demonstration without a spending need would show no drawdown and no
+failing paths — and its workplace pension's contribution escalation,
+because a blank escalation means contributions fixed in *nominal*
+terms, which inflation would erode over the persona's 27 working
+years (dropping it cut the seeded 1,000-path success rate from 72.5%
+to 63.3%). On the example, Simple shows those three fields because
+they hold values; clearing the form leaves the bare Simple view.
 
 **Decision: a form, not a grid.** In both views:
 
@@ -2953,10 +2955,10 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   spending entered the success rate reads "no spending entered", not
   100%, and the results name what the plan does not model or only
   assumes; new users start in Simple and the choice persists in local
-  settings, not the plan document; the launch example keeps its
-  spending and State Pension, drops contribution escalation, and still
-  parses, projects and holds together (the §4.9 test). Depends on
-  11.5, so a Simple plan never silently lacks a State Pension.*
+  settings, not the plan document; the launch example is unchanged
+  and in Simple shows its spending, State Pension forecast and
+  contribution escalation as fields holding values. Depends on 11.5,
+  so a Simple plan never silently lacks a State Pension.*
 - [ ] 11.2 Step navigation — *sections become steps in a side list
   (You, Spending, Retirement income, State pension, Accounts, DB
   pensions, Partner; Simple lists fewer), visitable in any order; one

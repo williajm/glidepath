@@ -52,6 +52,10 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
     (
         "Facts — enter what you know",
         (
+            "The Facts tab opens in a Simple view that asks only who you "
+            "are and what you have; switch to Detailed for everything "
+            "below — both are the same form, and anything you have filled "
+            "in shows in either. "
             "The Facts tab captures what you state: your date of birth and "
             "tax residency, planned retirement age, household spending, "
             "your state pension record, each savings wrapper (workplace "
