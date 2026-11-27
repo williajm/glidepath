@@ -769,28 +769,47 @@ sections carry a level too. Simple shows the essential fields of
 essential sections; Detailed shows essential and standard, with
 advanced fields behind each section's "More options" as today.
 
-Simple holds what a first projection needs and most people know:
+Simple holds only what most people know offhand — who they are and
+what they have:
 
 - About you: date of birth, tax residency, target retirement age,
   employment income.
-- Household spending: the annual amount.
-- State pension: the weekly forecast.
 - Each account: kind, balance, your contribution, employer
   contribution, and the tax relief method (the engine rejects
   contributions to a kind that operates relief when no method is
   given — `_require_permitted_mechanic`).
 
-That is 11 fields with one account, against 19 shown today.
-Everything else is standard or advanced, and a hidden field takes only
-the blank meaning the form already documents for it: balances and the
-forecast are dated today, an account is named by its kind, allocation
-follows the glide path, retirement income is drawdown only on fixed
-real spending, and no DB pension or annuity purchase is modelled.
-Simple introduces no default that Detailed would not apply to the same
-blank field, so nothing is guessed (§1). The Simple view says in one
-line what Detailed adds (DB pensions, annuities, withdrawal
-strategies, statement dates). "Add a partner" stays in both views;
-the partner's sections follow the same levels.
+That is 9 fields with one account, against 19 shown today. Household
+spending and the State Pension forecast are standard, not essential:
+the spending need is a figure most people have not worked out, and
+the forecast needs a trip to gov.uk — asking for either up front is
+what makes a form feel heavy. Everything outside Simple is standard or
+advanced, and a hidden field takes only the blank meaning the form
+already documents for it: no spending need and no State Pension are
+modelled, balances are dated today, an account is named by its kind,
+allocation follows the glide path, retirement income is drawdown only
+on fixed real spending, and no DB pension or annuity purchase is
+modelled. Simple introduces no default that Detailed would not apply
+to the same blank field, so nothing is guessed (§1). The Simple view
+says in one line what Detailed adds (spending, the State Pension,
+DB pensions, annuities, withdrawal strategies, statement dates).
+"Add a partner" stays in both views; the partner's sections follow
+the same levels.
+
+**Decision: a plan says what it leaves out.** Without a spending
+need, nothing is withdrawn in retirement (the engine draws only
+against `Household.spending`), so no path can fall short and the
+Monte Carlo success rate — the share of paths with no shortfall —
+would read 100%; without a State Pension forecast, retirement income
+is understated. Both blanks were possible before, but Simple makes
+them the common case, so the results must not read as an answer they
+are not: with no spending entered, the success rate shows "no spending
+entered" instead of a percentage, and the results carry one line
+naming what the plan does not model (spending, the State Pension) and
+where to add it. What a Simple plan can answer without them stays
+intact: the outlook card reads the pots at retirement and the income
+they could buy, and "How much can I draw down?" searches for the
+sustainable spending itself.
 
 **Decision: the §4.12 invariants extend to rows and sections.** A
 field holding a value, or carrying an error, shows in every view; a
@@ -806,9 +825,13 @@ and overriding the user's chosen view is surprising.
 users start in Simple. The chosen view is remembered in the local
 settings file that holds the disclaimer acknowledgement and the last
 plan path (`app/firstrun.py`), not in the plan document, so the plan
-schema does not change. The §4.9 launch example uses only Simple's
-fields — it currently sets contribution escalation, an advanced field
-— and is re-tuned so it still parses, projects and holds together.
+schema does not change. The §4.9 launch example keeps its spending
+need and State Pension forecast — a demonstration without a spending
+need would show no drawdown and no failing paths — so on the example
+Simple shows those two fields, as they hold values; clearing the form
+leaves the bare Simple view. The example drops contribution escalation
+(an advanced field) and is re-tuned so it still parses, projects and
+holds together.
 
 **Decision: a form, not a grid.** In both views:
 
@@ -2848,15 +2871,18 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 
 - [ ] 11.1 Simple and Detailed views — *fields and sections carry a
   level (essential / standard / advanced) replacing
-  `FieldSpec.advanced`; Simple shows the §4.13 essentials (11 fields
-  with one account), Detailed shows everything with advanced fields
-  behind "More options"; a field, row or section holding a value or
-  an error shows in every view; a required field never sits below its
-  section's level (guard test, replacing 10.1's); Simple names in one
-  line what Detailed adds; new users start in Simple and the choice
-  persists in local settings, not the plan document; the launch
-  example uses only Simple's fields and still parses, projects and
-  holds together (the §4.9 test).*
+  `FieldSpec.advanced`; Simple shows the §4.13 essentials (9 fields
+  with one account — no spending or State Pension), Detailed shows
+  everything with advanced fields behind "More options"; a field, row
+  or section holding a value or an error shows in every view; a
+  required field never sits below its section's level (guard test,
+  replacing 10.1's); Simple names in one line what Detailed adds; with
+  no spending entered the success rate reads "no spending entered",
+  not 100%, and the results name what the plan does not model; new
+  users start in Simple and the choice persists in local settings, not
+  the plan document; the launch example keeps its spending and State
+  Pension, drops contribution escalation, and still parses, projects
+  and holds together (the §4.9 test).*
 - [ ] 11.2 Step navigation — *sections become steps in a side list
   (You, Spending, Retirement income, State pension, Accounts, DB
   pensions, Partner; Simple lists fewer), visitable in any order; one
