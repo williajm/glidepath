@@ -985,8 +985,8 @@ def _uk_age_rules() -> UkAgeRules:
     return UkAgeRules.from_shipped_data()
 
 
-def _spa_coverage_problem(date_of_birth: date) -> str | None:
-    """Why no State Pension can be modelled for ``date_of_birth``, if so.
+def _validate_spa_coverage(reader: _SectionReader, person: Person) -> None:
+    """Flag an included State Pension if the age timetable cannot place it.
 
     The State Pension age timetable starts at a shipped date of birth;
     earlier cohorts had phased, pre-2016 rules this planner does not
@@ -994,16 +994,19 @@ def _spa_coverage_problem(date_of_birth: date) -> str | None:
     in time — the user is asked to leave it out rather than the run
     failing.
     """
+    if person.state_pension is None:
+        return
+    age_rules = _uk_age_rules()
     try:
-        _uk_age_rules().state_pension_date(date_of_birth)
+        age_rules.state_pension_date(person.date_of_birth.value)
     except UkAgeError:
-        first = _uk_age_rules().rules.spa_bands[0].dob_from
+        first = age_rules.rules.spa_bands[0].dob_from
         start = "" if first is None else f" on or after {first.day} {first:%B %Y}"
-        return (
+        reader.error(
+            STATE_PENSION_INCLUDED_KEY,
             f"the State Pension can only be modelled for people born{start}"
-            " — choose \u201cNo — leave the State Pension out\u201d"
+            " — choose \u201cNo — leave the State Pension out\u201d",
         )
-    return None
 
 
 @cache
@@ -1528,11 +1531,8 @@ def parse_facts_form(
             ),
             priors[position].id if position < len(priors) else new_entity_id(),
         )
-        if person is not None and person.state_pension is not None:
-            problem = _spa_coverage_problem(person.date_of_birth.value)
-            if problem is not None:
-                pension_reader.error(STATE_PENSION_INCLUDED_KEY, problem)
         if person is not None:
+            _validate_spa_coverage(pension_reader, person)
             persons.append(person)
     claim: Decision[bool] | None = None
     if person_count == len(_PERSON_SECTIONS):

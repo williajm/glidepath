@@ -16,7 +16,8 @@ so this module never touches Qt or a display.
 import json
 import os
 import sys
-from dataclasses import dataclass, replace
+from copy import replace
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
