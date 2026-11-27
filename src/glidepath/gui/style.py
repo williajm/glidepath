@@ -97,6 +97,15 @@ overlap, so the stacked alphas deepen naturally toward the median —
 central probability mass reads as colour depth."""
 
 _ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+_COMBO_ARROW = (
+    resources.files("glidepath.gui").joinpath("assets", "chevron_down.png")
+)
+"""The choice-field chevron, drawn at 2x in the muted ink (#236).
+
+Styling ``QComboBox::drop-down`` makes the stylesheet own the arrow, so
+it must be supplied explicitly or Fusion draws none and choice fields
+pass for text boxes. Stylesheets load images by path, so this is the
+asset's location in the installed package."""
 
 STYLESHEET = f"""
 QGroupBox {{
@@ -131,6 +140,11 @@ QLineEdit:disabled, QComboBox:disabled {{
 QComboBox::drop-down {{
     border: none;
     width: 26px;
+}}
+QComboBox::down-arrow {{
+    image: url("{str(_COMBO_ARROW).replace(chr(92), "/")}");
+    width: 12px;
+    height: 12px;
 }}
 QComboBox QAbstractItemView {{
     background: {_CARD};

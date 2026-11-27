@@ -21,6 +21,11 @@ in the release PR and becomes the GitHub Release notes verbatim.
   State Pension still has none, and opens with that choice selected
   (#237).
 
+### Fixed
+
+- Dropdowns on the facts form show their arrow again, so choice fields
+  no longer look like text boxes (#236).
+
 ### Changed
 
 - Planning notes and the state pension uprating default's basis now
