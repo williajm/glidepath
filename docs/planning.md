@@ -673,6 +673,10 @@ aggregation remains the default presentation.
 
 ### 4.12 Facts-form usability and the retirement-income choice (Phase 10)
 
+> The first decision below is superseded in part by §4.13 (2026-11-27):
+> its disclosure invariants stand, but the form now offers a Simple
+> view built from the same specs.
+
 **Decision: progressive disclosure, not a "simple mode".** A
 simple/advanced mode toggle is a second surface to maintain — the §4.9
 objection to a demo mode applies unchanged — so the form simplifies by
@@ -740,6 +744,109 @@ reading, deflator, annuity quote, and State Pension machinery as the
 percentile card — with a basis line inviting the Monte Carlo run that
 adds the likely range. The card is populated from first launch
 instead of opening with an empty-state instruction.
+
+### 4.13 Simple and Detailed facts views, and a form that is not a grid (Phase 11)
+
+Supersedes in part §4.12's first decision ("progressive disclosure,
+not a 'simple mode'"): its disclosure invariants stand and are
+extended below; its rejection of a second view is replaced.
+
+**Context.** A plan projects from three inputs — date of birth, tax
+residency and target retirement age — yet the form opens showing 11
+fields before any account and 8 more per account, as identical
+label-and-box rows spanning the window's width in one long scroll. A
+new user meets the whole surface at once, and it reads as a
+spreadsheet.
+
+**Decision: one form, two views.** The facts form gains a Simple /
+Detailed switch. Both views are the same form — one set of
+`FieldSpec`/`SectionSpec` specs, one `parse_facts_form`, one
+validation and error path — and differ only in what they show, so the
+second-surface objection of §4.9 and §4.12 does not apply: the switch
+is a disclosure level, not a second form. `FieldSpec.advanced: bool`
+becomes a three-valued level — essential, standard, advanced — and
+sections carry a level too. Simple shows the essential fields of
+essential sections; Detailed shows essential and standard, with
+advanced fields behind each section's "More options" as today.
+
+Simple holds what a first projection needs and most people know:
+
+- About you: date of birth, tax residency, target retirement age,
+  employment income.
+- Household spending: the annual amount.
+- State pension: the weekly forecast.
+- Each account: kind, balance, your contribution, employer
+  contribution, and the tax relief method (the engine rejects
+  contributions to a kind that operates relief when no method is
+  given — `_require_permitted_mechanic`).
+
+That is 11 fields with one account, against 19 shown today.
+Everything else is standard or advanced, and a hidden field takes only
+the blank meaning the form already documents for it: balances and the
+forecast are dated today, an account is named by its kind, allocation
+follows the glide path, retirement income is drawdown only on fixed
+real spending, and no DB pension or annuity purchase is modelled.
+Simple introduces no default that Detailed would not apply to the same
+blank field, so nothing is guessed (§1). The Simple view says in one
+line what Detailed adds (DB pensions, annuities, withdrawal
+strategies, statement dates). "Add a partner" stays in both views;
+the partner's sections follow the same levels.
+
+**Decision: the §4.12 invariants extend to rows and sections.** A
+field holding a value, or carrying an error, shows in every view; a
+section or repeatable row holding any value shows in Simple too, so
+Simple never hides data that would submit. A required field never
+sits below its section's level, so it is visible whenever its section
+is (guard test, replacing 10.1's "never both required and advanced").
+**Rejected:** switching to Detailed automatically when a plan holds
+detail-level data — the invariant already shows that data in place,
+and overriding the user's chosen view is surprising.
+
+**Decision: the view is a display preference, not plan data.** New
+users start in Simple. The chosen view is remembered in the local
+settings file that holds the disclaimer acknowledgement and the last
+plan path (`app/firstrun.py`), not in the plan document, so the plan
+schema does not change. The §4.9 launch example uses only Simple's
+fields — it currently sets contribution escalation, an advanced field
+— and is re-tuned so it still parses, projects and holds together.
+
+**Decision: a form, not a grid.** In both views:
+
+- **Steps.** Sections become steps in a side list — You, Spending,
+  Retirement income, State pension, Accounts, DB pensions, Partner —
+  each a short page; Simple lists fewer. Steps can be visited in any
+  order and one save still submits the whole form, so parsing and
+  error routing are unchanged: a step holding an error is marked in
+  the list, and the first error's step opens with the field focused
+  (10.2's scroll-to-first-error, across steps). **Rejected:** a
+  Next/Back wizard (editing one figure in a saved plan should not mean
+  walking every step); saving per step (partial plans become a state
+  to handle).
+- **Sized inputs and formatted money.** Each field carries an
+  app-layer value kind (money, age, percent, date, text) that the
+  shell maps to a width, so ages and amounts are short and names and
+  choices wider, instead of every input spanning the window. Money
+  shows with £ and thousands separators, formatted by the app layer
+  (§4.7); `_SectionReader.money` already accepts both, so parsing is
+  unchanged.
+- **Summary cards.** Each account, DB pension and annuity purchase
+  collapses to a one-line summary — "Workplace DC pension · £48,000 ·
+  £7,350 a year in" — and expands to edit. The app layer builds the
+  summary from the row's raw values; a new row, or one carrying an
+  error, opens expanded.
+- **Lighter copy and controls.** Each section's description is cut to
+  one line with the rest behind an info toggle; user-facing copy says
+  "account" where it says "savings wrapper" (the domain keeps
+  `Wrapper`); add and remove actions become compact secondary buttons
+  instead of full-width bars.
+
+**Rejected:** a separate simple form or wizard with its own fields
+(two surfaces drifting apart — the objection §4.9 and §4.12 record,
+and the reason both views share one spec); a table editor for
+accounts (the grid look this replaces). **Accepted cost:** every new
+field must choose a level; the step layout reworks `FactsEntryPane`
+and its GUI tests; a Simple user with a DB pension or annuity plans
+switches to Detailed to enter them.
 
 ## 5. Design
 
@@ -2736,6 +2843,37 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   machinery, `DETERMINISTIC_BASIS_SENTENCE` naming what Monte Carlo
   would add) whenever a base projection is held without an aligned
   Monte Carlo run, so the card is populated from first launch.*
+
+### Phase 11 — Facts entry: Simple view and form layout (design record §4.13)
+
+- [ ] 11.1 Simple and Detailed views — *fields and sections carry a
+  level (essential / standard / advanced) replacing
+  `FieldSpec.advanced`; Simple shows the §4.13 essentials (11 fields
+  with one account), Detailed shows everything with advanced fields
+  behind "More options"; a field, row or section holding a value or
+  an error shows in every view; a required field never sits below its
+  section's level (guard test, replacing 10.1's); Simple names in one
+  line what Detailed adds; new users start in Simple and the choice
+  persists in local settings, not the plan document; the launch
+  example uses only Simple's fields and still parses, projects and
+  holds together (the §4.9 test).*
+- [ ] 11.2 Step navigation — *sections become steps in a side list
+  (You, Spending, Retirement income, State pension, Accounts, DB
+  pensions, Partner; Simple lists fewer), visitable in any order; one
+  save submits the whole form; steps holding errors are marked and the
+  first error's step opens with its field focused.*
+- [ ] 11.3 Sized inputs, formatted money, lighter controls — *an
+  app-layer value kind per field (money, age, percent, date, text)
+  that the shell maps to a width; money displayed with £ and thousands
+  separators by the app layer, parsing unchanged; section descriptions
+  cut to one line with the rest behind an info toggle; "account"
+  replaces "savings wrapper" in user-facing copy; add and remove
+  actions are compact secondary buttons.*
+- [ ] 11.4 Summary cards for repeatable rows — *each account, DB
+  pension and annuity purchase collapses to an app-layer one-line
+  summary built from its raw values and expands to edit; new and
+  errored rows open expanded; entity ids and row removal behave as
+  today.*
 
 ## 9. Open questions
 
