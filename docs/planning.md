@@ -775,41 +775,80 @@ what they have:
 - About you: date of birth, tax residency, target retirement age,
   employment income.
 - Each account: kind, balance, your contribution, employer
-  contribution, and the tax relief method (the engine rejects
-  contributions to a kind that operates relief when no method is
-  given — `_require_permitted_mechanic`).
+  contribution — and the tax relief method only for a workplace
+  pension, the one kind that permits more than one
+  (`permitted_relief_mechanics`).
 
-That is 9 fields with one account, against 19 shown today. Household
-spending and the State Pension forecast are standard, not essential:
-the spending need is a figure most people have not worked out, and
-the forecast needs a trip to gov.uk — asking for either up front is
-what makes a form feel heavy. Everything outside Simple is standard or
-advanced, and a hidden field takes only the blank meaning the form
-already documents for it: no spending need and no State Pension are
-modelled, balances are dated today, an account is named by its kind,
+Only date of birth, tax residency, target retirement age and each
+account's kind and balance are required, so the shortest Simple plan
+is those five fields with one pot. Employment income stays in Simple
+because contributions depend on it — pension relief is capped at
+relevant earnings, so without them net pay gets no relief and relief
+at source only the basic amount (`regions/uk/contributions.py`) — and
+"When can I retire?" needs it.
+Date of birth stays rather than an age because the State Pension age
+and every age gate fall on exact dates. With one workplace pension
+Simple shows 9 fields, against 19 today; with one SIPP, 8. A blank
+relief method on a kind that permits exactly one (a SIPP: relief at
+source) is filled with that mechanic when parsed, in both views — the
+only legal value, not a guess; the engine otherwise rejects
+contributions to a relief-operating kind with no method
+(`_require_permitted_mechanic`).
+
+Household spending and the State Pension are standard, not
+essential: the spending need is a figure most people have not worked
+out, and the forecast needs a trip to gov.uk — asking for either up
+front is what makes a form feel heavy. Everything outside Simple is
+standard or advanced, and a hidden field takes only the blank meaning
+the form documents for it, the same in both views: no spending need
+is modelled, the State Pension is the assumed full rate (next
+decision), balances are dated today, an account is named by its kind,
 allocation follows the glide path, retirement income is drawdown only
 on fixed real spending, and no DB pension or annuity purchase is
-modelled. Simple introduces no default that Detailed would not apply
-to the same blank field, so nothing is guessed (§1). The Simple view
-says in one line what Detailed adds (spending, the State Pension,
-DB pensions, annuities, withdrawal strategies, statement dates).
-"Add a partner" stays in both views; the partner's sections follow
-the same levels.
+modelled. The Simple view says in one line what Detailed adds
+(spending, a State Pension forecast, DB pensions, annuities,
+withdrawal strategies, statement dates). "Add a partner" stays in
+both views; the partner's sections follow the same levels.
+
+**Decision: a blank State Pension assumes the full new State Pension
+from State Pension age.** Supersedes in part §5.1's "the forecast is
+the only route to an amount" (#97). The forecast stays the only
+*fact* route and nothing is derived from an NI record, but a person
+with no forecast now gets a default assumption instead of no State
+Pension: the full new State Pension weekly rate, starting at the State
+Pension age `age_rules.toml` gives for their date of birth and uprated
+by the existing uprating assumption. It carries `DEFAULT_ASSUMPTION`
+provenance, shows in "Stated vs assumed", and the results name it
+("assumes the full new State Pension from 67 — add your forecast to
+replace it"). Entering a forecast replaces it; an explicit "no State
+Pension" choice in Detailed models none; a protected payment still
+needs a forecast. The full rate returns to the tax-year data files
+with `verified_on` and sources (#97 removed the `[state_pension]`
+table because nothing read it). **Why:** a plan with no State Pension
+understates retirement income for most UK users, and asking for the
+forecast up front is the friction Simple removes. **Accepted cost:**
+the full rate overstates income for anyone with National Insurance
+gaps or a contracted-out history — the reason #97 made the forecast
+authoritative — so the assumption is always labelled as one, with the
+forecast as the remedy. **Saved plans:** a plan-document migration
+records an explicit "no State Pension" for every saved person without
+a State Pension record, so saved plans project exactly as before; only
+persons added after the change get the assumption.
 
 **Decision: a plan says what it leaves out.** Without a spending
 need, nothing is withdrawn in retirement (the engine draws only
 against `Household.spending`), so no path can fall short and the
 Monte Carlo success rate — the share of paths with no shortfall —
-would read 100%; without a State Pension forecast, retirement income
-is understated. Both blanks were possible before, but Simple makes
-them the common case, so the results must not read as an answer they
-are not: with no spending entered, the success rate shows "no spending
-entered" instead of a percentage, and the results carry one line
-naming what the plan does not model (spending, the State Pension) and
-where to add it. What a Simple plan can answer without them stays
-intact: the outlook card reads the pots at retirement and the income
-they could buy, and "How much can I draw down?" searches for the
-sustainable spending itself.
+would read 100%. A blank spending need was possible before, but
+Simple makes it the common case, so the results must not read as an
+answer they are not: with no spending entered, the success rate shows
+"no spending entered" instead of a percentage, and the results carry
+one line naming what the plan does not model or only assumes (no
+spending need; the assumed State Pension) and where to change it.
+What a Simple plan can answer stays intact: the outlook card reads the
+pots at retirement, the income they could buy and the State Pension
+on top, and "How much can I draw down?" searches for the sustainable
+spending itself.
 
 **Decision: the §4.12 invariants extend to rows and sections.** A
 field holding a value, or carrying an error, shows in every view; a
@@ -824,8 +863,8 @@ and overriding the user's chosen view is surprising.
 **Decision: the view is a display preference, not plan data.** New
 users start in Simple. The chosen view is remembered in the local
 settings file that holds the disclaimer acknowledgement and the last
-plan path (`app/firstrun.py`), not in the plan document, so the plan
-schema does not change. The §4.9 launch example keeps its spending
+plan path (`app/firstrun.py`), not in the plan document, so the view
+adds nothing to the plan schema. The §4.9 launch example keeps its spending
 need and State Pension forecast — a demonstration without a spending
 need would show no drawdown and no failing paths — so on the example
 Simple shows those two fields, as they hold values; clearing the form
@@ -1149,7 +1188,10 @@ year's accrual is measured; a stream already in payment at the
 period open generates no further input amounts.
 
 State pension: the official DWP forecast **is the fact and the only
-route to an amount** (#97). It is authoritative, free, and instant to
+route to an amount** (#97) — superseded in part by §4.13 (roadmap
+11.5): with no forecast, the full new State Pension from State Pension
+age is assumed as a labelled default. The forecast is authoritative,
+free, and instant to
 obtain from gov.uk/check-state-pension, so the model never re-computes
 what DWP has already computed: there is no qualifying-years derivation,
 and a record without a forecast is refused with a clear demand for one
@@ -1832,7 +1874,9 @@ recipient_top_band_scotland = "intermediate"
 ```
 
 There is no `[state_pension]` table: the state pension amount is the
-user's stated DWP forecast, never a shipped rate (#97, §5.1).
+user's stated DWP forecast, never a shipped rate (#97, §5.1). Roadmap
+11.5 brings one back to hold the full new State Pension rate behind
+the §4.13 default assumption.
 
 `age_rules.toml` holds the durable, effective-dated policy parameters that
 are not re-set each tax year: NMPA (55; 57 from 2028-04-06), the SPA
@@ -2872,17 +2916,21 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
 - [ ] 11.1 Simple and Detailed views — *fields and sections carry a
   level (essential / standard / advanced) replacing
   `FieldSpec.advanced`; Simple shows the §4.13 essentials (9 fields
-  with one account — no spending or State Pension), Detailed shows
-  everything with advanced fields behind "More options"; a field, row
-  or section holding a value or an error shows in every view; a
-  required field never sits below its section's level (guard test,
-  replacing 10.1's); Simple names in one line what Detailed adds; with
-  no spending entered the success rate reads "no spending entered",
-  not 100%, and the results name what the plan does not model; new
-  users start in Simple and the choice persists in local settings, not
-  the plan document; the launch example keeps its spending and State
-  Pension, drops contribution escalation, and still parses, projects
-  and holds together (the §4.9 test).*
+  with one workplace pension, 8 with one SIPP — no spending or State
+  Pension fields), Detailed shows everything with advanced fields
+  behind "More options"; the relief method shows in Simple only for a
+  workplace pension, and a blank one on a kind permitting exactly one
+  mechanic parses as that mechanic in both views; a field, row or
+  section holding a value or an error shows in every view; a required
+  field never sits below its section's level (guard test, replacing
+  10.1's); Simple names in one line what Detailed adds; with no
+  spending entered the success rate reads "no spending entered", not
+  100%, and the results name what the plan does not model or only
+  assumes; new users start in Simple and the choice persists in local
+  settings, not the plan document; the launch example keeps its
+  spending and State Pension, drops contribution escalation, and still
+  parses, projects and holds together (the §4.9 test). Depends on
+  11.5, so a Simple plan never silently lacks a State Pension.*
 - [ ] 11.2 Step navigation — *sections become steps in a side list
   (You, Spending, Retirement income, State pension, Accounts, DB
   pensions, Partner; Simple lists fewer), visitable in any order; one
@@ -2900,6 +2948,17 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   summary built from its raw values and expands to edit; new and
   errored rows open expanded; entity ids and row removal behave as
   today.*
+- [ ] 11.5 Assumed full State Pension when no forecast is entered —
+  *a person without a forecast gets a `DEFAULT_ASSUMPTION`: the full
+  new State Pension weekly rate (back in the tax-year data files with
+  `verified_on`, sources and a §6 row) from the State Pension age
+  `age_rules.toml` gives for their date of birth, uprated by the
+  existing assumption; it shows in "Stated vs assumed" and the results
+  name it with the forecast as the remedy; a forecast replaces it; an
+  explicit "no State Pension" choice models none; a protected payment
+  still needs a forecast; a plan-document migration records "no State
+  Pension" for every saved person without a record, so saved plans
+  project exactly as before (§4.13, superseding in part §5.1/#97).*
 
 ## 9. Open questions
 
