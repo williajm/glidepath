@@ -10,10 +10,13 @@ import pytest
 from glidepath.app import (
     DISCLAIMER_BODY,
     FirstRunState,
+    FormView,
     build_shell_view_model,
     default_state_path,
+    form_view_from_token,
     load_state,
     record_disclaimer_acknowledged,
+    record_facts_view,
     record_last_plan_path,
     should_show_disclaimer,
 )
@@ -167,6 +170,60 @@ class TestLastPlanPath:
         state = load_state(path)
         assert state.disclaimer_acknowledged_on is None
         assert state.last_plan_path == Path("plan.glidepath.json")
+
+
+class TestFactsView:
+    """The Simple/Detailed choice is a local preference (roadmap 11.1)."""
+
+    def test_missing_file_opens_in_simple(self, tmp_path: Path) -> None:
+        """No choice recorded yet: new users start in Simple (§4.13)."""
+        token = load_state(tmp_path / "settings.json").facts_view
+        assert token is None
+        assert form_view_from_token(token) is FormView.SIMPLE
+
+    def test_round_trip(self, tmp_path: Path) -> None:
+        """A recorded view reads back as the same view."""
+        path = tmp_path / "settings.json"
+        record_facts_view(path, FormView.DETAILED.value)
+        token = load_state(path).facts_view
+        assert form_view_from_token(token) is FormView.DETAILED
+
+    def test_other_records_keep_the_view(self, tmp_path: Path) -> None:
+        """Recording the plan or the disclaimer never drops the view."""
+        path = tmp_path / "settings.json"
+        record_facts_view(path, FormView.DETAILED.value)
+        record_last_plan_path(path, tmp_path / "plan.glidepath.json")
+        record_disclaimer_acknowledged(path, date(2026, 11, 27))
+        assert load_state(path).facts_view == FormView.DETAILED.value
+
+    def test_recording_the_view_keeps_the_other_fields(self, tmp_path: Path) -> None:
+        """The view record preserves the acknowledgement and the plan."""
+        path = tmp_path / "settings.json"
+        plan = tmp_path / "plan.glidepath.json"
+        record_disclaimer_acknowledged(path, date(2026, 11, 27))
+        record_last_plan_path(path, plan)
+        record_facts_view(path, FormView.SIMPLE.value)
+        state = load_state(path)
+        assert state.disclaimer_acknowledged_on == date(2026, 11, 27)
+        assert state.last_plan_path == plan
+
+    @pytest.mark.parametrize(
+        "content",
+        ['{"schema": 1, "facts_view": 7}', '{"schema": 1, "facts_view": ""}'],
+    )
+    def test_defective_view_degrades_to_simple(
+        self, tmp_path: Path, content: str
+    ) -> None:
+        """A defective record opens Simple rather than guessing."""
+        path = tmp_path / "settings.json"
+        path.write_text(content, encoding="utf-8")
+        token = load_state(path).facts_view
+        assert token is None
+        assert form_view_from_token(token) is FormView.SIMPLE
+
+    def test_unknown_token_opens_in_simple(self) -> None:
+        """A token from some other build falls back to Simple."""
+        assert form_view_from_token("compact") is FormView.SIMPLE
 
 
 class TestDefaultStatePath:

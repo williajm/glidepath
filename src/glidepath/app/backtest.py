@@ -17,8 +17,13 @@ plan.
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Final
 
-from glidepath.app.display import format_money, format_percent
-from glidepath.app.montecarlo import BAND_SPECS, SUCCESS_RATE_LABEL
+from glidepath.app.display import format_money
+from glidepath.app.montecarlo import (
+    BAND_SPECS,
+    SUCCESS_RATE_LABEL,
+    spending_entered,
+    success_text,
+)
 from glidepath.app.plan import PlanState, plan_run_config, region_for, replanned_state
 from glidepath.core import Money, run_windows
 from glidepath.regions.uk import load_returns_history
@@ -199,7 +204,12 @@ def build_backtest_panel(
     elif result is None or ending_pot_deflator is None:
         message = NO_BACKTEST_MESSAGE
     else:
-        metrics = _metrics(result, ending_pot_deflator, basis_suffix)
+        metrics = _metrics(
+            result,
+            ending_pot_deflator,
+            basis_suffix,
+            spending_entered=spending_entered(state),
+        )
         first = result.outcomes[0].start_year
         last = result.outcomes[-1].start_year
         year_placeholder = f"{first}-{last}"
@@ -241,14 +251,22 @@ def _window_value(
 
 
 def _metrics(
-    result: BacktestResult, ending_pot_deflator: Decimal, basis_suffix: str
+    result: BacktestResult,
+    ending_pot_deflator: Decimal,
+    basis_suffix: str,
+    *,
+    spending_entered: bool,
 ) -> tuple[BacktestMetric, ...]:
     """The backtest readout rows, mirroring the Monte Carlo metrics."""
     first = result.outcomes[0].start_year
     last = result.outcomes[-1].start_year
     rows = [
         BacktestMetric(
-            label=SUCCESS_RATE_LABEL, value=format_percent(result.success_rate)
+            label=SUCCESS_RATE_LABEL,
+            value=success_text(
+                result.success_rate,
+                tested=spending_entered or result.success_rate < 1,
+            ),
         ),
         BacktestMetric(
             label=WINDOWS_LABEL,

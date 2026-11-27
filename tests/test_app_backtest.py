@@ -33,7 +33,7 @@ from glidepath.app.backtest import (
     WINDOWS_LABEL,
     WORST_WINDOW_LABEL,
 )
-from glidepath.app.montecarlo import SUCCESS_RATE_LABEL
+from glidepath.app.montecarlo import NO_SPENDING_ENTERED, SUCCESS_RATE_LABEL
 from glidepath.app.plan import replanned_state
 from glidepath.core import (
     BacktestResult,
@@ -229,6 +229,31 @@ class TestBacktestPanel:
         assert panel.message == ""
         labels = [row.label for row in panel.metrics]
         assert SUCCESS_RATE_LABEL in labels
+        success = next(r for r in panel.metrics if r.label == SUCCESS_RATE_LABEL)
+        assert success.value.endswith("%")
+
+    def test_without_spending_the_success_rate_says_so(self) -> None:
+        """No spending need and no failed window: a rate would mislead (§4.13)."""
+        unspent = replace(household(), spending=None)
+        projected = state_with_household(short_horizon_state(), unspent, today=TODAY)
+        run = state_with_backtest(projected, today=TODAY)
+        assert run.backtest is not None
+        assert run.backtest.success_rate == 1
+        panel = build_charts_view_model(run).backtest
+        success = next(r for r in panel.metrics if r.label == SUCCESS_RATE_LABEL)
+        assert success.value == NO_SPENDING_ENTERED
+
+    def test_a_failed_window_shows_its_rate_without_spending(
+        self, bt_state: PlanState
+    ) -> None:
+        """Windows that fell short are a real result, spending or not."""
+        assert bt_state.backtest is not None
+        assert bt_state.backtest.success_rate < 1
+        assert bt_state.household is not None
+        unspent = replace(
+            bt_state, household=replace(bt_state.household, spending=None)
+        )
+        panel = build_charts_view_model(unspent).backtest
         success = next(r for r in panel.metrics if r.label == SUCCESS_RATE_LABEL)
         assert success.value.endswith("%")
 

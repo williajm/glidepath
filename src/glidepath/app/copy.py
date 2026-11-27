@@ -52,13 +52,17 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
     (
         "Facts — enter what you know",
         (
+            "The Facts tab opens in a Simple view that asks only who you "
+            "are and what you have; switch to Detailed for everything "
+            "below — both are the same form, and anything you have filled "
+            "in shows in either. "
             "The Facts tab captures what you state: your date of birth and "
             "tax residency, planned retirement age, household spending, "
-            "your state pension record, each savings wrapper (workplace "
+            "your state pension record, each account (workplace "
             "pension, SIPP, ISA, LISA, general account, or cash) with its "
             "balance, contributions, and optionally its own equity "
             "allocation percentage — blank follows the de-risking glide "
-            "path, 100 models an all-equity wrapper — and any defined "
+            "path, 100 models an all-equity account — and any defined "
             "benefit pension. "
             "The Retirement income section holds two choices: a "
             "preference between drawdown only (the default — everything "
@@ -70,16 +74,19 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "different ages annuitising in stages — and a drawdown withdrawal "
             "strategy: fixed real spending (the default), a fixed "
             "percentage of the pot, guardrails, or natural yield. "
-            "Add one wrapper, DB, or annuity section per item. "
+            "Add one account, DB pension, or annuity section per item. "
             "Fields marked * are required, hovering any field repeats "
             'its guidance, and each section\'s "More options" reveals '
             "its rarely needed fields — anything already filled in, or "
             "in error, is shown automatically. Dates can "
             "be typed or picked from the calendar assist, and the "
             '"as of" dates on balances and your state pension forecast '
-            "default to today when left blank. Your state pension needs "
-            "your official DWP forecast (gov.uk/check-state-pension) — "
-            "the app never re-derives what DWP has already computed. "
+            "default to today when left blank. Your state pension comes "
+            "from your official DWP forecast (gov.uk/check-state-pension) "
+            "— the app never re-derives what DWP has already computed; "
+            "leave it blank and the full new State Pension is assumed "
+            "from your State Pension age, shown as an assumption, or "
+            "choose to leave the State Pension out. "
             'Press "Save facts and project" to run the '
             "projection — if anything cannot be read, the message under "
             "the buttons and a note under each affected field say what "

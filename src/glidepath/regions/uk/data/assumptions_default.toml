@@ -4,7 +4,7 @@
 # user-overridable in the app; §6 announced-policy items are facts, these
 # are estimates.
 
-schema_version = 5
+schema_version = 6
 
 [meta]
 verified_on = 2026-10-28
@@ -181,3 +181,8 @@ basis = "No statutory fraction for private DB schemes - scheme rules govern (PPF
 key = "spending.survivor_multiplier"
 value = "0.70"
 basis = "PLSA/Pensions UK Retirement Living Standards single-vs-couple budget ratios: 13,900/22,500 = 0.62 minimum, 32,700/45,400 = 0.72 moderate, 45,400/62,700 = 0.72 comfortable (retrieved 2026-08-12); 0.70 sits just under the moderate/comfortable ratio"
+
+[[assumption]]
+key = "state_pension.default_fraction"
+value = "1"
+basis = "With no DWP forecast entered, assume the full new State Pension (the tax-year file's published rate) from State Pension age (planning §4.13); optimistic for anyone with National Insurance gaps or contracted-out years - entering the forecast from gov.uk/check-state-pension replaces it"

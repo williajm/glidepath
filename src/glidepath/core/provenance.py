@@ -109,6 +109,7 @@ class AssumptionKey(StrEnum):
     ANNUITY_AGE_ADJUSTMENT = "annuity.age_adjustment"
     DB_SURVIVOR_FRACTION = "db.survivor_fraction"
     SPENDING_SURVIVOR_MULTIPLIER = "spending.survivor_multiplier"
+    STATE_PENSION_DEFAULT_FRACTION = "state_pension.default_fraction"
 
 
 @dataclass(frozen=True, slots=True)

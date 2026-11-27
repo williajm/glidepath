@@ -9,8 +9,54 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Added
+
+- A person without a DWP State Pension forecast is now assumed to get
+  the full new State Pension (£241.30 a week in 2026/27) from their
+  State Pension age, instead of none. It is labelled as an assumption
+  everywhere: "Stated vs assumed" lists it, and the outlook card says
+  "assumed full State Pension (no forecast entered)". Entering your
+  forecast replaces it, and a new "Include a State Pension" choice
+  can leave it out. Saved plans are unchanged: a saved person with no
+  State Pension still has none, and opens with that choice selected.
+  For anyone born before the State Pension age timetable starts
+  (6 October 1954), the form asks you to leave the State Pension out
+  rather than the projection failing (#237).
+- The facts form has a Simple and a Detailed view. Simple asks only
+  who you are and what you have: date of birth, tax residency,
+  retirement age, salary and, for each account, its type, balance and
+  contributions (plus the tax relief method for a workplace pension).
+  Detailed shows everything, as before. Both are the same form, so
+  switching never changes what is saved, and anything you have filled
+  in shows in either view. New users start in Simple; the choice is
+  remembered on this computer, not in the plan file (#232).
+- With no spending need entered, the Monte Carlo and backtest success
+  rates read "no spending entered" instead of 100% (unless a path did
+  fall short, e.g. on an unfundable tax charge, when the rate shows),
+  and the outlook card says the plan is not tested against a spending
+  need (#232).
+- A SIPP's contributions take relief at source without asking, and a
+  workplace pension with contributions but no relief method is
+  flagged on the field instead of failing the projection (#232).
+
 ### Changed
 
+- The facts form reads less like a spreadsheet: amounts, ages and
+  dates use short fields sized to what they hold, amounts show a £
+  sign and thousands separators (typing them was always accepted),
+  short fields show their guidance beside them, each section opens
+  with a one-line summary with the full text behind "More about this",
+  "Savings wrapper" is now "Account" on the form, and the add and
+  remove buttons no longer span the window (#234).
+- Accounts, DB pensions and annuity purchases show as one-line cards
+  — "Workplace DC pension · £48,000 · £7,350 a year paid in" — with
+  Edit to open the fields. A row you add opens ready to type, and a
+  row with an error opens so you see it (#235).
+- The facts form is split into steps in a side list — You, Spending,
+  Retirement income, State Pension, Accounts, DB pensions, Partner —
+  each a short page, visited in any order. One save still submits
+  every step; steps with a problem are marked, and the first one opens
+  with its field focused. Simple lists only the steps it uses (#233).
 - Planning notes and the state pension uprating default's basis now
   reflect Budget 2026 (28 October 2026): savings income rates from
   6 April 2027 are 24% / 44% / 49% (Budget 2025's 22/42/47 raised a
@@ -29,6 +75,11 @@ in the release PR and becomes the GitHub Release notes verbatim.
   py-serializable, python-discovery). The Windows build tool Nuitka
   moves 4.3.1 → 4.3.4; its licence texts are unchanged. The PySide6
   runtime pin is unchanged.
+
+### Fixed
+
+- Dropdowns on the facts form show their arrow again, so choice fields
+  no longer look like text boxes (#236).
 
 ### Security
 

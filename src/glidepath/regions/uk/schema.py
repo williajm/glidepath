@@ -21,8 +21,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from decimal import Decimal
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 """The data-file schema version this code understands.
+
+v6 (roadmap 11.5): tax-year files regain a ``[state_pension]`` table
+holding only the full new State Pension weekly rate — the default
+assumption for a record without a DWP forecast (planning §4.13); the
+forecast stays the only fact route to an amount.
 
 v5 (#189): tax-year files gain ``savings.rates`` — a savings rate
 schedule aligned positionally with the rUK bands, so the separate
@@ -337,6 +342,22 @@ class MarriageAllowanceRules:
 
 
 @dataclass(frozen=True, slots=True)
+class StatePensionRates:
+    """The year's published full new State Pension rate (planning §4.13, §6).
+
+    Read only as the default assumption for a state pension record
+    without a DWP forecast; the forecast, when stated, is the amount.
+    """
+
+    full_weekly_rate: Money
+
+    def __post_init__(self) -> None:
+        """Reject a non-positive rate."""
+        if self.full_weekly_rate.amount <= 0:
+            _fail("StatePensionRates", "full_weekly_rate must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class TaxYearFile:
     """One fully validated ``tax_year_YYYY_YY.toml`` data file."""
 
@@ -349,6 +370,7 @@ class TaxYearFile:
     savings: SavingsRules
     dividend: DividendRules
     marriage_allowance: MarriageAllowanceRules
+    state_pension: StatePensionRates
 
     def __post_init__(self) -> None:
         """Reject unsupported versions and cross-section misalignments."""

@@ -115,8 +115,13 @@ required — leave anything else blank if it does not apply.
   [gov.uk/check-state-pension](https://www.gov.uk/check-state-pension),
   and any "protected payment" it shows. The app uses DWP's figure as
   stated — it never re-derives it.
+- No forecast to hand? Leave it blank: the full new State Pension is
+  assumed from your State Pension age and shown as an assumption until
+  you enter the forecast. If you won't get one, choose "No — leave the
+  State Pension out".
 
-**Each savings account ("wrapper")** — one entry per account
+**Each account** (a pension, ISA or other savings account) — one
+entry per account
 
 - Kind: workplace pension, SIPP, stocks & shares ISA, Lifetime ISA,
   general investment account, or cash savings
@@ -148,13 +153,17 @@ sections; the app then models the household together.
   <img src="screenshots/facts.png" alt="The Facts tab: About you, Household spending, and State pension cards with the example plan's values filled in" width="700">
 </p>
 
-1. Work down the form section by section: **About you**, **Household
-   spending**, **Retirement income**, **State pension**, then one
-   **Savings wrapper** card per account (press *Add wrapper* for each)
-   and a **Defined benefit pension** card if you have one.
+1. The form opens in the **Simple** view, which asks only who you are
+   and what you have: your details on **You**, and one card per
+   account on **Accounts** (press *Add an account* for each). Switch
+   to **Detailed** for everything else — **Spending**, **Retirement
+   income**, your **State Pension** forecast, **DB pensions** — and
+   pick any step in the list on the left. Both views are the same
+   form: anything you fill in shows in either.
 2. Fields marked `*` are required. Hover any field for its guidance;
-   each section's **More options** reveals the rarely needed fields.
-   Dates can be typed as `YYYY-MM-DD` or picked from the calendar.
+   in Detailed, each section's **More options** reveals the rarely
+   needed fields. Dates can be typed as `YYYY-MM-DD` or picked from
+   the calendar.
 3. **Retirement income** holds two choices you can change any time:
    drawdown only (the default — everything stays invested and is drawn
    as needed) or an annuity/mix, and which drawdown withdrawal strategy

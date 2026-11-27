@@ -15,17 +15,24 @@ import pytest
 from glidepath.app import (
     ENTITY_ID_KEY,
     OWNER_KEY,
+    STATE_PENSION_INCLUDED_KEY,
+    STATE_PENSION_LEFT_OUT,
     FactsFormData,
     FieldKind,
+    FieldLevel,
     FormError,
     PersonFormData,
+    SectionSpec,
     build_facts_form_view_model,
     example_facts_form_data,
     facts_form_data_from_household,
     form_cannot_represent,
     format_form_errors,
+    money_display_text,
     parse_facts_form,
     plan_entity_ids,
+    row_summary,
+    simple_view_shows,
 )
 from glidepath.core import (
     AnnuityBasis,
@@ -60,6 +67,7 @@ from glidepath.regions.uk import (
     ISA_KIND,
     RUK_RESIDENCY,
     SCOTLAND_RESIDENCY,
+    SIPP_KIND,
     WORKPLACE_DC_KIND,
 )
 
@@ -212,9 +220,10 @@ class TestFormSpec:
         }
 
     def test_state_pension_section_covers_the_forecast(self) -> None:
-        """The forecast facts and the deferral choice are present (#97)."""
+        """The leave-out choice, forecast facts and deferral are present."""
         keys = {spec.key for spec in build_facts_form_view_model().state_pension.fields}
         assert keys == {
+            STATE_PENSION_INCLUDED_KEY,
             "forecast_weekly_amount",
             "protected_payment",
             "forecast_as_of",
@@ -232,12 +241,19 @@ class TestFormSpec:
         }
         assert not form.retirement_income.repeatable
 
-    def test_no_field_is_both_required_and_advanced(self) -> None:
-        """A required field hidden behind a disclosure would trap users."""
+    def test_no_required_field_sits_below_its_section_level(self) -> None:
+        """A required field is visible whenever its section is (§4.13).
+
+        Replaces 10.1's "never both required and advanced": a required
+        field hidden by a disclosure or by the Simple view would trap
+        users, so its level is never below its section's.
+        """
+        rank = {FieldLevel.ESSENTIAL: 0, FieldLevel.STANDARD: 1, FieldLevel.ADVANCED: 2}
         form = build_facts_form_view_model()
         for section in form.sections:
             for spec in section.fields:
-                assert not (spec.required and spec.advanced), spec.key
+                if spec.required:
+                    assert rank[spec.level] <= rank[section.level], spec.key
 
     def test_every_section_tucks_only_optional_detail_away(self) -> None:
         """The advanced sweep names exactly the rarely needed fields."""
@@ -343,7 +359,7 @@ class TestFormSpec:
                 form.state_pension,
                 "Partner's state pension",
             ),
-            (form.partner_wrapper, form.wrapper, "Partner's savings wrapper"),
+            (form.partner_wrapper, form.wrapper, "Partner's account"),
             (
                 form.partner_db_pension,
                 form.db_pension,
@@ -386,7 +402,8 @@ class TestPersonParsing:
         assert person.tax_residency == RUK_RESIDENCY
         assert person.sex_for_longevity is None
         assert person.employment_income is None
-        assert person.state_pension is None
+        assert person.state_pension is not None
+        assert person.state_pension.forecast_weekly_amount is None
         assert household.spending is None
 
     def test_full_person_facts(self) -> None:
@@ -534,7 +551,7 @@ class TestWrapperParsing:
         assert error.section == "wrapper"
         assert error.index == 1
         assert error.field_key == "label"
-        assert error.message == "another wrapper already carries this name"
+        assert error.message == "another account already has this name"
 
     def test_a_stated_equity_percent_becomes_the_allocation(self) -> None:
         """Entering 100 states full equity; the remainder convention gives 0 bonds."""
@@ -1162,8 +1179,323 @@ class TestAnnuityPurchaseParsing:
         assert "partner" in error.message
 
 
+def _simple_keys(section: SectionSpec, values: dict[str, str]) -> set[str]:
+    """The field keys Simple shows for their own sake, given ``values``."""
+    return {
+        spec.key for spec in section.fields if simple_view_shows(section, spec, values)
+    }
+
+
+class TestSimpleView:
+    """Simple shows who you are and what you have (planning §4.13)."""
+
+    def test_essential_sections_are_the_person_and_accounts(self) -> None:
+        """Only the person and account sections are essential."""
+        form = build_facts_form_view_model()
+        essential = {
+            section.key
+            for section in form.sections
+            if section.level is FieldLevel.ESSENTIAL
+        }
+        assert essential == {"person", "wrapper", "partner", "partner_wrapper"}
+
+    def test_simple_person_fields(self) -> None:
+        """DOB, residency, income and retirement age — nothing else."""
+        person = build_facts_form_view_model().person
+        assert _simple_keys(person, {}) == {
+            "date_of_birth",
+            "tax_residency",
+            "employment_income",
+            "target_retirement_age",
+        }
+
+    def test_simple_account_fields_for_a_sipp(self) -> None:
+        """A SIPP needs no relief choice: it is always relief at source."""
+        wrapper = build_facts_form_view_model().wrapper
+        assert _simple_keys(wrapper, {"kind": str(SIPP_KIND)}) == {
+            "kind",
+            "balance",
+            "employee_contribution",
+            "employer_contribution",
+        }
+
+    def test_a_workplace_pension_adds_the_relief_choice(self) -> None:
+        """Net pay or relief at source must be chosen, so Simple asks."""
+        wrapper = build_facts_form_view_model().wrapper
+        keys = _simple_keys(wrapper, {"kind": str(WORKPLACE_DC_KIND)})
+        assert "relief_mechanic" in keys
+        assert len(keys) == 5
+
+    def test_simple_shows_nine_fields_with_one_workplace_pension(self) -> None:
+        """The §4.13 count: 4 about you + 5 for the account."""
+        form = build_facts_form_view_model()
+        count = sum(
+            len(_simple_keys(section, {"kind": str(WORKPLACE_DC_KIND)}))
+            for section in (form.person, form.wrapper)
+        )
+        assert count == 9
+
+    def test_standard_sections_show_nothing_for_their_own_sake(self) -> None:
+        """Spending, the State Pension and the rest are Detailed only."""
+        form = build_facts_form_view_model()
+        for section in (
+            form.spending,
+            form.retirement_income,
+            form.state_pension,
+            form.db_pension,
+            form.annuity_purchase,
+        ):
+            assert _simple_keys(section, {}) == set(), section.key
+
+    def test_the_view_model_names_both_views_and_the_note(self) -> None:
+        """The switch labels and the Simple note come from the app layer."""
+        form = build_facts_form_view_model()
+        assert set(form.view_labels.values()) == {"Simple", "Detailed"}
+        assert "Detailed" in form.simple_view_note
+
+
+class TestFormPresentation:
+    """Kinds, summaries and amount display (roadmap 11.3)."""
+
+    def test_every_section_has_a_one_line_summary(self) -> None:
+        """Each section opens with one short line, details behind a toggle."""
+        for section in build_facts_form_view_model().sections:
+            assert section.summary, section.key
+            assert "\n" not in section.summary
+
+    def test_amounts_are_money_fields(self) -> None:
+        """Balances, contributions, income and spending are amounts."""
+        form = build_facts_form_view_model()
+        money = {
+            spec.key
+            for section in form.sections
+            for spec in section.fields
+            if spec.kind is FieldKind.MONEY
+        }
+        assert {
+            "employment_income",
+            "annual_spending_real",
+            "forecast_weekly_amount",
+            "balance",
+            "employee_contribution",
+            "employer_contribution",
+            "accrued_annual_pension",
+        } <= money
+        assert "target_retirement_age" not in money
+
+    @pytest.mark.parametrize(
+        ("typed", "shown"),
+        [
+            ("48000", "48,000"),
+            ("1234.5", "1,234.5"),
+            ("230.25", "230.25"),
+            ("£52,000", "52,000"),
+            ("", ""),
+            ("abc", "abc"),
+            ("1e3", "1e3"),
+            ("NaN", "NaN"),
+        ],
+    )
+    def test_money_display_adds_separators_only(self, typed: str, shown: str) -> None:
+        """Digits stay as typed; unreadable text is left for the parser."""
+        assert money_display_text(typed) == shown
+
+    def test_displayed_amounts_parse_back(self) -> None:
+        """The separators the form adds are ones the parser accepts."""
+        household = parse(
+            form_data(
+                person_values(employment_income=money_display_text("52000")),
+            )
+        )
+        income = household.persons[0].employment_income
+        assert income is not None
+        assert income.value == Money(Decimal(52000))
+
+
+class TestSteps:
+    """The side list's steps cover the form exactly (roadmap 11.2)."""
+
+    def test_every_section_sits_on_exactly_one_step(self) -> None:
+        """No section is unreachable, none appears twice."""
+        form = build_facts_form_view_model()
+        placed = [key for step in form.steps for key in step.sections]
+        assert sorted(placed) == sorted(section.key for section in form.sections)
+
+
+class TestRowSummaries:
+    """Each repeatable row reads as one line on its card (roadmap 11.4)."""
+
+    def test_an_account_names_its_kind_balance_and_payments(self) -> None:
+        """Balance and both contributions, with separators."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.wrapper,
+            {
+                "kind": str(WORKPLACE_DC_KIND),
+                "balance": "48000",
+                "employee_contribution": "4200",
+                "employer_contribution": "3150",
+            },
+        )
+        assert line == "Workplace DC pension · £48,000 · £7,350 a year paid in"
+
+    def test_an_account_prefers_its_own_name(self) -> None:
+        """The user's label replaces the kind; blank parts are left out."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.partner_wrapper, {"kind": str(ISA_KIND), "label": "Rainy day"}
+        )
+        assert line == "Rainy day"
+
+    def test_an_empty_account_falls_back_to_the_title(self) -> None:
+        """A row with nothing typed still reads as something."""
+        form = build_facts_form_view_model()
+        assert row_summary(form.wrapper, {}) == form.wrapper.title
+
+    def test_unreadable_contributions_are_left_out(self) -> None:
+        """The card never invents a total the fields do not hold."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.wrapper,
+            {"kind": str(ISA_KIND), "balance": "100", "employee_contribution": "x"},
+        )
+        assert line == "Stocks & shares ISA · £100"
+
+    def test_a_db_pension_names_its_amount_and_age(self) -> None:
+        """The accrued pension and the age it starts."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.db_pension,
+            {"accrued_annual_pension": "8500", "normal_pension_age": "65"},
+        )
+        assert line == "Defined benefit pension · £8,500 a year accrued · from age 65"
+
+    def test_a_db_pension_taken_early_names_the_claim_age(self) -> None:
+        """A chosen claim age wins over the normal pension age."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.db_pension,
+            {
+                "accrued_annual_pension": "8500",
+                "normal_pension_age": "65",
+                "taken_at_age": "60",
+            },
+        )
+        assert line.endswith("from age 60")
+
+    def test_an_account_balance_includes_its_crystallised_part(self) -> None:
+        """A fully crystallised pot never reads as £0."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.wrapper,
+            {"kind": "uk.sipp", "balance": "0", "crystallised_balance": "80000"},
+        )
+        assert line == "SIPP · £80,000"
+
+    def test_an_annuity_names_its_age_share_and_type(self) -> None:
+        """When, how much of the pot, and which product."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.annuity_purchase,
+            {"at_age": "70", "percent_of_pot": "50", "annuity_type": "level"},
+        )
+        assert line == (
+            "Annuity purchase · at age 70 · 50% of the pension pot"
+            " · Level (constant income)"
+        )
+
+    def test_other_sections_read_as_their_title(self) -> None:
+        """Only the repeatable sections have summaries of their own."""
+        form = build_facts_form_view_model()
+        assert row_summary(form.spending, {}) == form.spending.title
+
+
+class TestReliefResolution:
+    """A blank relief choice takes the only legal mechanic, or errors (§4.13)."""
+
+    @staticmethod
+    def _wrapper(kind: str, relief: str = "") -> dict[str, str]:
+        """One account with a contribution and the given relief choice."""
+        return {
+            "kind": kind,
+            "balance": "10000",
+            "employee_contribution": "2000",
+            "relief_mechanic": relief,
+        }
+
+    def test_a_sipp_takes_relief_at_source(self) -> None:
+        """A SIPP permits only relief at source, so blank means it."""
+        household = parse(
+            form_data(person_values(), wrappers=(self._wrapper(str(SIPP_KIND)),))
+        )
+        contributions = household.persons[0].wrappers[0].contributions
+        assert contributions is not None
+        assert contributions.relief_mechanic is ReliefMechanic.RELIEF_AT_SOURCE
+
+    def test_the_implied_mechanic_renders_blank(self) -> None:
+        """Round-tripped, the implied mechanic stays a blank choice."""
+        household = parse(
+            form_data(person_values(), wrappers=(self._wrapper(str(SIPP_KIND)),))
+        )
+        [row] = facts_form_data_from_household(household).wrappers
+        assert row["relief_mechanic"] == ""
+
+    def test_a_chosen_mechanic_still_renders(self) -> None:
+        """An explicit workplace choice round-trips as itself."""
+        household = parse(
+            form_data(
+                person_values(),
+                wrappers=(self._wrapper(str(WORKPLACE_DC_KIND), "net_pay"),),
+            )
+        )
+        [row] = facts_form_data_from_household(household).wrappers
+        assert row["relief_mechanic"] == "net_pay"
+
+    def test_a_workplace_pension_without_a_mechanic_errors_inline(self) -> None:
+        """Two legal mechanics: the field must say which, not the run."""
+        result = parse_facts_form(
+            form_data(
+                person_values(), wrappers=(self._wrapper(str(WORKPLACE_DC_KIND)),)
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "wrapper"
+        assert error.field_key == "relief_mechanic"
+        assert "net pay or relief at source" in error.message
+
+    def test_a_mechanic_the_kind_cannot_take_errors_inline(self) -> None:
+        """Net pay kept after switching to a SIPP is refused on the field.
+
+        Regression (Codex review): an explicit mechanic was passed
+        through unchecked and only failed the projection.
+        """
+        result = parse_facts_form(
+            form_data(
+                person_values(),
+                wrappers=(self._wrapper(str(SIPP_KIND), "net_pay"),),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.field_key == "relief_mechanic"
+
+    def test_an_isa_takes_no_mechanic(self) -> None:
+        """No relief applies to an ISA: blank stays none, without error."""
+        household = parse(
+            form_data(person_values(), wrappers=(self._wrapper(str(ISA_KIND)),))
+        )
+        contributions = household.persons[0].wrappers[0].contributions
+        assert contributions is not None
+        assert contributions.relief_mechanic is None
+
+
 class TestStatePensionParsing:
-    """The state pension section is optional as a whole."""
+    """A blank section assumes the full rate; leaving it out is explicit."""
 
     def test_forecast_facts_parse(self) -> None:
         """The forecast pair parses with its shared as_of date."""
@@ -1187,15 +1519,68 @@ class TestStatePensionParsing:
         assert record.protected_payment.as_of == date(2026, 6, 1)
         assert record.deferral_years.value == Decimal("1.25")
 
-    def test_blank_section_means_not_modelled(self) -> None:
-        """All-blank state pension values leave the record unset."""
+    def test_blank_section_assumes_the_full_rate(self) -> None:
+        """All-blank values write a forecast-less record (§4.13)."""
         household = parse(
             form_data(
                 person=person_values(),
                 state_pension={"forecast_weekly_amount": "", "deferral_years": " "},
             )
         )
+        record = household.persons[0].state_pension
+        assert record is not None
+        assert record.forecast_weekly_amount is None
+        assert record.protected_payment is None
+        assert record.deferral_years.value == Decimal(0)
+
+    def test_absent_section_assumes_the_full_rate(self) -> None:
+        """A section the shell never rendered reads exactly like a blank one."""
+        household = parse(form_data(person=person_values()))
+        record = household.persons[0].state_pension
+        assert record is not None
+        assert record.forecast_weekly_amount is None
+
+    def test_leave_out_choice_models_none(self) -> None:
+        """Only the explicit choice leaves the State Pension out."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                state_pension={STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT},
+            )
+        )
         assert household.persons[0].state_pension is None
+
+    def test_leave_out_with_a_forecast_is_refused(self) -> None:
+        """A forecast contradicts leaving the State Pension out."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                state_pension={
+                    STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT,
+                    "forecast_weekly_amount": "230.25",
+                },
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "state_pension"
+        assert error.field_key == STATE_PENSION_INCLUDED_KEY
+
+    def test_unknown_leave_out_token_is_refused(self) -> None:
+        """The choice accepts only its own token."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                state_pension={STATE_PENSION_INCLUDED_KEY: "maybe"},
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.field_key == STATE_PENSION_INCLUDED_KEY
 
     def test_deferral_defaults_to_zero(self) -> None:
         """Deferral defaults to none when blank."""
@@ -1209,21 +1594,67 @@ class TestStatePensionParsing:
         assert record is not None
         assert record.deferral_years.value == Decimal(0)
 
-    def test_entered_section_without_a_forecast_is_refused(self) -> None:
-        """The DWP forecast is the only route (§5.1) — demanded by field."""
+    def test_a_forecast_date_without_an_amount_errors(self) -> None:
+        """A date alone is never silently dropped (Codex review)."""
         result = parse_facts_form(
-            form_data(
-                person=person_values(),
-                state_pension={"deferral_years": "1"},
-            ),
+            form_data(person_values(), {"forecast_as_of": "2026-06-01"}),
             recorded_on=RECORDED,
             today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
         assert error.section == "state_pension"
-        assert error.field_key == "forecast_weekly_amount"
-        assert "check-state-pension" in error.message
+        assert error.field_key == "forecast_as_of"
+
+    def test_a_birth_date_before_the_timetable_asks_to_leave_it_out(self) -> None:
+        """Before SPA coverage, the pension cannot be placed in time.
+
+        Regression (Codex review): a blank section now assumes the full
+        rate, and the age lookup failed the whole projection for anyone
+        born before the shipped timetable starts. The form says so on
+        the State Pension section instead, naming the way forward.
+        """
+        result = parse_facts_form(
+            form_data(person_values(date_of_birth="1950-03-01")),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "state_pension"
+        assert error.field_key == STATE_PENSION_INCLUDED_KEY
+        assert "6 October 1954" in error.message
+
+    def test_leaving_it_out_lets_an_older_plan_project(self) -> None:
+        """The leave-out choice is the way forward for those dates."""
+        household = parse(
+            form_data(
+                person_values(date_of_birth="1950-03-01"),
+                {STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT},
+            )
+        )
+        assert household.persons[0].state_pension is None
+
+    def test_an_older_partner_is_flagged_on_their_own_section(self) -> None:
+        """The partner's error lands on the partner's State Pension."""
+        result = parse_facts_form(
+            couple_form_data(partner=partner_values(date_of_birth="1950-03-01")),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "partner_state_pension"
+
+    def test_deferral_without_a_forecast_defers_the_assumed_rate(self) -> None:
+        """Deferral applies to the assumed full rate too (§4.13)."""
+        household = parse(
+            form_data(person=person_values(), state_pension={"deferral_years": "1"})
+        )
+        record = household.persons[0].state_pension
+        assert record is not None
+        assert record.forecast_weekly_amount is None
+        assert record.deferral_years.value == Decimal(1)
 
 
 class TestPartnerParsing:
@@ -1265,16 +1696,16 @@ class TestPartnerParsing:
         assert error.field_key == "date_of_birth"
 
     def test_partner_state_pension_errors_land_in_their_section(self) -> None:
-        """The partner's forecast demand errors under its own section."""
+        """The partner's State Pension errors under its own section."""
         result = parse_facts_form(
-            couple_form_data(partner_state_pension={"deferral_years": "1"}),
+            couple_form_data(partner_state_pension={"protected_payment": "12.50"}),
             recorded_on=RECORDED,
             today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
         assert error.section == "partner_state_pension"
-        assert error.field_key == "forecast_weekly_amount"
+        assert error.field_key == "protected_payment"
 
     def test_partner_wrapper_errors_use_owner_scoped_indexes(self) -> None:
         """The row index counts within the partner's rows, not combined."""
@@ -1384,7 +1815,7 @@ class TestPartnerParsing:
         assert error.section == "partner_wrapper"
         assert error.index == 0
         assert error.field_key == "label"
-        assert error.message == "another wrapper already carries this name"
+        assert error.message == "another account already has this name"
 
     def test_duplicate_entity_ids_across_persons_fold_into_an_error(self) -> None:
         """The household-level id rule surfaces as a person-section error."""
@@ -1837,7 +2268,7 @@ class TestValidationMessages:
         assert error.field_key == ""
 
     def test_protected_payment_without_forecast_is_rejected(self) -> None:
-        """A protected payment alone still demands the forecast (§5.1)."""
+        """A protected payment is a slice of the forecast, so needs one (§5.1)."""
         result = parse_facts_form(
             form_data(
                 person=person_values(),
@@ -1849,7 +2280,7 @@ class TestValidationMessages:
         assert result.household is None
         [error] = result.errors
         assert error.section == "state_pension"
-        assert error.field_key == "forecast_weekly_amount"
+        assert error.field_key == "protected_payment"
 
     def test_protected_payment_beyond_the_forecast_is_rejected(self) -> None:
         """The record's cross-field rule surfaces on the section (§5.1)."""
@@ -1970,7 +2401,7 @@ class TestValidationMessages:
             today=TODAY,
         )
         text = format_form_errors(form, result.errors)
-        assert "Savings wrapper 2" in text
+        assert "Account 2" in text
         assert "Balance" in text
         assert "amount of money" in text
 
@@ -2770,10 +3201,50 @@ class TestFormDataFromHousehold:
         assert rendered_person.person["employment_income"] == ""
         assert rendered_person.person["sex_for_longevity"] == ""
         assert rendered.spending == {}
-        assert rendered_person.state_pension == {}
+        assert not any(rendered_person.state_pension.values())
         assert rendered.wrappers == ()
         assert rendered.db_pensions == ()
         assert rendered.annuity_purchases == ()
+
+    def test_assumed_state_pension_round_trips_as_blank(self) -> None:
+        """A forecast-less record renders blank and parses back the same."""
+        household = parse(form_data(person=person_values()))
+        rendered = facts_form_data_from_household(household)
+        [rendered_person] = rendered.persons
+        assert not any(rendered_person.state_pension.values())
+        reparsed = parse(rendered)
+        record = reparsed.persons[0].state_pension
+        assert record is not None
+        assert record.forecast_weekly_amount is None
+
+    def test_left_out_state_pension_round_trips_as_the_choice(self) -> None:
+        """No record renders as the leave-out choice, never as blank."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                state_pension={STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT},
+            )
+        )
+        rendered = facts_form_data_from_household(household)
+        [rendered_person] = rendered.persons
+        assert rendered_person.state_pension == {
+            STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT
+        }
+        assert parse(rendered).persons[0].state_pension is None
+
+    def test_deferral_round_trips_when_set(self) -> None:
+        """A non-zero deferral renders as its value; zero renders blank."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                state_pension={
+                    "forecast_weekly_amount": "230.25",
+                    "deferral_years": "1",
+                },
+            )
+        )
+        [rendered_person] = facts_form_data_from_household(household).persons
+        assert rendered_person.state_pension["deferral_years"] == "1"
 
 
 class TestMarriageAllowanceClaim:

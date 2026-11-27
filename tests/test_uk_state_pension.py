@@ -1,8 +1,9 @@
-"""Tests for the UK state pension scheme (issues 4.3 and #97; planning §5.1, §6).
+"""Tests for the UK state pension scheme (4.3, #97, 11.5; planning §4.13, §5.1).
 
-The official DWP forecast is the fact and the only route to an amount
-(§5.1). Deferral expectations are hand-derived from the shipped
-``age_rules.toml``: +1% per 9 whole weeks deferred.
+The official DWP forecast is the only fact route to an amount (§5.1);
+a record without one takes the shipped full rate (§4.13). Deferral
+expectations are hand-derived from the shipped ``age_rules.toml``:
++1% per 9 whole weeks deferred.
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -11,8 +12,9 @@ from decimal import Decimal
 import pytest
 
 from factories import money_fact
-from glidepath.core import Decision, Money, StatePensionRecord
+from glidepath.core import Decision, Money, StatePensionRate, StatePensionRecord
 from glidepath.regions.uk import UkAgeRules, UkStatePensionError, UkStatePensionScheme
+from glidepath.regions.uk.loader import load_tax_year
 
 RECORDED = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 
@@ -63,17 +65,75 @@ class TestForecastIsTheOnlyRoute:
         entitlement = scheme().entitlement(record, DOB_SPA_67)
         assert entitlement.start_date == date(2037, 6, 15)
 
-    def test_a_record_without_a_forecast_is_refused(self) -> None:
-        """No forecast, no answer — the demand names where to get one.
-
-        A pre-#97 plan that relied on the retired qualifying-years
-        derivation migrates to exactly this record shape, so the
-        message is the migration's upgrade path too.
-        """
+    def test_a_record_without_a_forecast_takes_no_forecast_entitlement(self) -> None:
+        """A forecast-less record is answered by the full-rate route only."""
         uk = scheme()
         record = record_of(deferral="1")
-        with pytest.raises(UkStatePensionError, match="check-state-pension"):
+        with pytest.raises(UkStatePensionError, match="takes the full rate"):
             uk.entitlement(record, DOB_SPA_67)
+
+
+def rate_of(weekly: str, rates_from: date, label: str) -> StatePensionRate:
+    """A published full rate built from compact test parameters."""
+    return StatePensionRate(
+        weekly=Money(Decimal(weekly)), rates_from=rates_from, label=label
+    )
+
+
+class TestFullRateEntitlement:
+    """A record without a forecast takes the shipped full rate (§4.13)."""
+
+    def test_shipped_rate_is_the_tax_year_files(self) -> None:
+        """The scheme reads each shipped file's published rate."""
+        shipped = load_tax_year(2026)
+        [rate] = scheme().full_rates
+        assert rate.weekly == shipped.state_pension.full_weekly_rate
+        assert rate.rates_from == shipped.meta.start_date
+        assert rate.label == shipped.meta.tax_year
+
+    def test_amount_is_the_full_rate_from_spa(self) -> None:
+        """The full rate, annualised at 52 weeks, from the SPA date."""
+        uk = scheme()
+        answer = uk.full_rate_entitlement(record_of(), DOB_SPA_67, date(2026, 11, 27))
+        weekly = uk.full_rates[0].weekly
+        assert answer.rate == uk.full_rates[0]
+        assert answer.entitlement.annual_amount == weekly * WEEKS
+        assert answer.entitlement.cpi_uprated_annual_amount == Money(Decimal(0))
+        assert answer.entitlement.start_date == date(2037, 6, 15)
+        assert answer.entitlement.deferral_uplift == 0
+
+    def test_deferral_shifts_the_start_and_earns_the_uplift(self) -> None:
+        """Deferral applies to the assumed rate exactly as to a forecast."""
+        uk = scheme()
+        record = record_of(deferral="1")
+        answer = uk.full_rate_entitlement(record, DOB_SPA_67, date(2026, 11, 27))
+        forecast = uk.entitlement(record_of(forecast="100", deferral="1"), DOB_SPA_67)
+        assert answer.entitlement.start_date == forecast.start_date
+        assert answer.entitlement.deferral_uplift == forecast.deferral_uplift
+
+    def test_latest_rate_starting_on_or_before_the_date_wins(self) -> None:
+        """A later year's rate applies from its own start date."""
+        older = rate_of("100.00", date(2026, 4, 6), "2026/27")
+        newer = rate_of("110.00", date(2027, 4, 6), "2027/28")
+        uk = UkStatePensionScheme(
+            ages=UkAgeRules.from_shipped_data(), full_rates=(older, newer)
+        )
+        assert (
+            uk.full_rate_entitlement(record_of(), DOB_SPA_67, date(2027, 4, 5)).rate
+            == older
+        )
+        assert (
+            uk.full_rate_entitlement(record_of(), DOB_SPA_67, date(2027, 4, 6)).rate
+            == newer
+        )
+
+    def test_a_date_before_every_shipped_rate_is_refused(self) -> None:
+        """No published rate yet: the message points to the forecast."""
+        uk = scheme()
+        record = record_of()
+        before = date(2020, 1, 1)
+        with pytest.raises(UkStatePensionError, match="check-state-pension"):
+            uk.full_rate_entitlement(record, DOB_SPA_67, before)
 
 
 class _CliffProbe(UkStatePensionScheme):

@@ -18,20 +18,26 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QWidget,
 )
 
 from glidepath.app import (
     ENTITY_ID_KEY,
     HIDE_ADVANCED_LABEL,
+    HIDE_DETAILS_LABEL,
     INCOME_PREFERENCE_ANNUITY,
     INCOME_PREFERENCE_KEY,
     OWNER_KEY,
     REQUIRED_MARKER,
     SHOW_ADVANCED_LABEL,
+    SHOW_DETAILS_LABEL,
+    STEP_ERROR_SUFFIX,
     FactsFormData,
     FactsSubmissionOutcome,
     FieldKind,
     FormError,
+    FormView,
     PersonFormData,
     PlanEntityIds,
     build_facts_form_view_model,
@@ -40,6 +46,7 @@ from glidepath.gui import forms as forms_module
 from glidepath.gui.forms import (
     DateEntry,
     FactsEntryPane,
+    MoneyEntry,
     RepeatableSection,
     ScrollSafeComboBox,
     SectionForm,
@@ -47,6 +54,19 @@ from glidepath.gui.forms import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+def _shown(pane: FactsEntryPane, widget: QWidget) -> bool:
+    """Whether ``widget`` shows on its own step's page (roadmap 11.2).
+
+    Each step is a page of its own, so a section on another step is
+    out of sight without being hidden; this asks the question the
+    visibility tests mean: would the user see it on its step?
+    """
+    for page in pane.step_pages.findChildren(QScrollArea):
+        if page.isAncestorOf(widget):
+            return widget.isVisibleTo(page)
+    return widget.isVisibleTo(pane)
 
 
 def _wheel_tick(combo: QComboBox) -> QWheelEvent:
@@ -69,7 +89,7 @@ class TestSectionForm:
     """One section renders one editor per field spec."""
 
     def test_every_field_gets_the_right_editor(self) -> None:
-        """Choices become combos, dates date entries, the rest line edits."""
+        """Choices become combos, dates date entries, amounts money entries."""
         spec = build_facts_form_view_model().person
         form = SectionForm(spec)
         for field in spec.fields:
@@ -79,7 +99,66 @@ class TestSectionForm:
             else:
                 assert isinstance(editor, QLineEdit)
                 assert isinstance(editor, DateEntry) == (field.kind is FieldKind.DATE)
+                assert isinstance(editor, MoneyEntry) == (field.kind is FieldKind.MONEY)
+
+    def test_short_entries_show_their_hint_beside_them(self) -> None:
+        """Amounts, numbers and dates carry the hint as text, not placeholder.
+
+        A short entry would clip a long placeholder (roadmap 11.3); the
+        free-text entries keep theirs.
+        """
+        spec = build_facts_form_view_model().wrapper
+        form = SectionForm(spec)
+        hints = {
+            label.text()
+            for label in form.findChildren(QLabel)
+            if label.objectName() == "fieldHint"
+        }
+        for field in spec.fields:
+            editor = form.editor(field.key)
+            if not isinstance(editor, QLineEdit) or not field.hint:
+                continue
+            if field.kind is FieldKind.TEXT:
                 assert editor.placeholderText() == field.hint
+            else:
+                assert editor.placeholderText() == ""
+                assert field.hint in hints
+            assert editor.toolTip() == field.hint
+
+    def test_short_entries_are_narrower_than_free_text(self) -> None:
+        """Amounts are sized to what they hold, not the window."""
+        form = SectionForm(build_facts_form_view_model().wrapper)
+        assert form.editor("balance").maximumWidth() < (
+            form.editor("label").maximumWidth()
+        )
+
+    def test_money_entries_show_separators_and_parse_back(self) -> None:
+        """An amount shows as 48,000 with a £ prefix; leaving re-formats."""
+        form = SectionForm(build_facts_form_view_model().wrapper)
+        balance = form.editor("balance")
+        assert isinstance(balance, MoneyEntry)
+        assert balance.prefix.text() == "£"
+        form.set_value("balance", "48000")
+        assert form.values()["balance"] == "48,000"
+        balance.setText("1234.5")
+        balance.editingFinished.emit()
+        assert balance.text() == "1,234.5"
+        balance.setText("not money")
+        balance.editingFinished.emit()
+        assert balance.text() == "not money"
+
+    def test_the_summary_hides_the_full_description(self) -> None:
+        """One line shows; the toggle reveals the rest (roadmap 11.3)."""
+        spec = build_facts_form_view_model().wrapper
+        form = SectionForm(spec)
+        assert spec.summary
+        assert not form.description_label.isVisibleTo(form)
+        form.toggle_details()
+        assert form.description_label.isVisibleTo(form)
+        assert form.details_toggle.text() == HIDE_DETAILS_LABEL
+        form.toggle_details()
+        assert not form.description_label.isVisibleTo(form)
+        assert form.details_toggle.text() == SHOW_DETAILS_LABEL
 
     def test_values_default_to_blank_text_and_first_choice(self) -> None:
         """An untouched form returns blank text and each first option."""
@@ -222,7 +301,7 @@ class TestRepeatableSection:
         assert len(remove_buttons) == 2
         remove_buttons[0].click()
         [(remaining)] = section.values_list()
-        assert remaining["balance"] == "2222"
+        assert remaining["balance"] == "2,222"
 
     def test_rows_carry_their_entity_ids_opaquely(self) -> None:
         """Seeded ids collect back per row without becoming editors."""
@@ -250,7 +329,7 @@ class TestRepeatableSection:
         section.set_values_list(({OWNER_KEY: "1", "balance": "1111"},))
         [values] = section.values_list()
         assert values.get(OWNER_KEY) is None
-        assert values["balance"] == "1111"
+        assert values["balance"] == "1,111"
         [form] = section.forms
         with pytest.raises(KeyError):
             form.editor(OWNER_KEY)
@@ -273,7 +352,7 @@ class TestRepeatableSection:
         remove_buttons[0].click()
         [remaining] = section.values_list()
         assert remaining[ENTITY_ID_KEY] == "id-b"
-        assert remaining["balance"] == "2222"
+        assert remaining["balance"] == "2,222"
 
     def test_added_rows_start_blank_until_reseeded(self) -> None:
         """A user-added row is a new entity until a save mints its id."""
@@ -325,7 +404,7 @@ class TestFactsEntryPane:
         [data] = received
         [person] = data.persons
         assert person.person["date_of_birth"] == "1984-05-20"
-        assert data.wrappers[0]["balance"] == "25000"
+        assert data.wrappers[0]["balance"] == "25,000"
         assert data.wrappers[0][OWNER_KEY] == "0"
         assert data.db_pensions == ()
         assert data.annuity_purchases[0]["at_age"] == "68"
@@ -345,8 +424,8 @@ class TestFactsEntryPane:
         )
         data = pane.form_data()
         assert data.persons[0].person["date_of_birth"] == "1991-06-15"
-        assert data.spending["annual_spending_real"] == "28000"
-        assert [values["balance"] for values in data.wrappers] == ["48000", "16500"]
+        assert data.spending["annual_spending_real"] == "28,000"
+        assert [values["balance"] for values in data.wrappers] == ["48,000", "16,500"]
         assert data.annuity_purchases[0]["percent_of_pot"] == "50"
 
     def test_set_form_data_replaces_previous_contents(self) -> None:
@@ -414,9 +493,9 @@ class TestFactsEntryPanePartner:
         """No partner until asked: sections hidden, add action shown."""
         pane = _pane()
         assert not pane.has_partner
-        assert pane.add_partner_button.isVisibleTo(pane)
-        assert not pane.partner_form.isVisibleTo(pane)
-        assert not pane.partner_wrappers.isVisibleTo(pane)
+        assert _shown(pane, pane.add_partner_button)
+        assert not _shown(pane, pane.partner_form)
+        assert not _shown(pane, pane.partner_wrappers)
         data = pane.form_data()
         assert len(data.persons) == 1
 
@@ -425,11 +504,11 @@ class TestFactsEntryPanePartner:
         pane = _pane()
         pane.add_partner()
         assert pane.has_partner
-        assert not pane.add_partner_button.isVisibleTo(pane)
-        assert pane.partner_form.isVisibleTo(pane)
-        assert pane.partner_state_pension_form.isVisibleTo(pane)
-        assert pane.partner_wrappers.isVisibleTo(pane)
-        assert pane.remove_partner_button.isVisibleTo(pane)
+        assert not _shown(pane, pane.add_partner_button)
+        assert _shown(pane, pane.partner_form)
+        assert _shown(pane, pane.partner_state_pension_form)
+        assert _shown(pane, pane.partner_wrappers)
+        assert _shown(pane, pane.remove_partner_button)
 
     def test_partner_entries_land_in_form_data(self) -> None:
         """Two persons submit, partner rows owner-stamped after mine."""
@@ -439,7 +518,7 @@ class TestFactsEntryPanePartner:
         assert data.persons[1].person["date_of_birth"] == "1986-03-02"
         assert data.persons[1].state_pension["forecast_weekly_amount"] == "230.25"
         owners = [(row[OWNER_KEY], row["balance"]) for row in data.wrappers]
-        assert owners == [("0", "1111"), ("1", "2222")]
+        assert owners == [("0", "1,111"), ("1", "2,222")]
 
     def test_set_form_data_routes_rows_by_owner(self) -> None:
         """A two-person payload activates the partner and splits rows."""
@@ -464,9 +543,9 @@ class TestFactsEntryPanePartner:
         partner_pension = pane.partner_state_pension_form.values()
         assert partner_pension["forecast_weekly_amount"] == "230.25"
         [mine] = pane.wrappers.values_list()
-        assert mine["balance"] == "1111"
+        assert mine["balance"] == "1,111"
         [theirs] = pane.partner_wrappers.values_list()
-        assert theirs["balance"] == "2222"
+        assert theirs["balance"] == "2,222"
 
     def test_set_form_data_with_one_person_deactivates_the_partner(self) -> None:
         """A single-person payload takes the partner off the form."""
@@ -494,12 +573,12 @@ class TestFactsEntryPanePartner:
         pane = _pane_with_partner_entries()
         pane.remove_partner()
         assert not pane.has_partner
-        assert pane.add_partner_button.isVisibleTo(pane)
+        assert _shown(pane, pane.add_partner_button)
         assert pane.partner_form.values()["date_of_birth"] == ""
         assert pane.partner_wrappers.values_list() == ()
         data = pane.form_data()
         assert len(data.persons) == 1
-        assert [row["balance"] for row in data.wrappers] == ["1111"]
+        assert [row["balance"] for row in data.wrappers] == ["1,111"]
 
     def test_remove_button_confirms_before_deleting(
         self, monkeypatch: pytest.MonkeyPatch
@@ -529,7 +608,7 @@ class TestFactsEntryPanePartner:
         assert pane.has_partner
         assert pane.partner_form.values()["date_of_birth"] == "1986-03-02"
         [row] = pane.partner_wrappers.values_list()
-        assert row["balance"] == "2222"
+        assert row["balance"] == "2,222"
 
     def test_set_entity_ids_splits_the_combined_ids_by_row_count(self) -> None:
         """Ids arrive mine-first and land on the owning sections."""
@@ -722,7 +801,7 @@ class TestIncomePreference:
         pane.retirement_income_form.set_value(
             INCOME_PREFERENCE_KEY, INCOME_PREFERENCE_ANNUITY
         )
-        assert pane.annuity_purchases.isVisibleTo(pane)
+        assert _shown(pane, pane.annuity_purchases)
 
     def test_the_partner_section_also_needs_a_partner(self) -> None:
         """The partner's purchases sit under the preference, couples only.
@@ -735,11 +814,11 @@ class TestIncomePreference:
         pane.retirement_income_form.set_value(
             INCOME_PREFERENCE_KEY, INCOME_PREFERENCE_ANNUITY
         )
-        assert not pane.partner_annuity_purchases.isVisibleTo(pane)
+        assert not _shown(pane, pane.partner_annuity_purchases)
         pane.add_partner()
-        assert pane.partner_annuity_purchases.isVisibleTo(pane)
+        assert _shown(pane, pane.partner_annuity_purchases)
         pane.remove_partner()
-        assert not pane.partner_annuity_purchases.isVisibleTo(pane)
+        assert not _shown(pane, pane.partner_annuity_purchases)
 
     def test_switching_back_confirms_then_deletes_the_rows(
         self, monkeypatch: pytest.MonkeyPatch
@@ -757,7 +836,7 @@ class TestIncomePreference:
         )
         pane.retirement_income_form.set_value(INCOME_PREFERENCE_KEY, "")
         assert pane.form_data().annuity_purchases == ()
-        assert not pane.annuity_purchases.isVisibleTo(pane)
+        assert not _shown(pane, pane.annuity_purchases)
 
     def test_declining_the_confirm_keeps_the_rows_and_reverts(
         self, monkeypatch: pytest.MonkeyPatch
@@ -778,13 +857,13 @@ class TestIncomePreference:
         assert row["at_age"] == "68"
         values = pane.retirement_income_form.values()
         assert values[INCOME_PREFERENCE_KEY] == INCOME_PREFERENCE_ANNUITY
-        assert pane.annuity_purchases.isVisibleTo(pane)
+        assert _shown(pane, pane.annuity_purchases)
 
     def test_loaded_rows_show_even_with_a_blank_preference(self) -> None:
         """Rows on the form are never hidden by the preference."""
         pane = _pane()
         pane.set_form_data(FactsFormData(annuity_purchases=({"at_age": "68"},)))
-        assert pane.annuity_purchases.isVisibleTo(pane)
+        assert _shown(pane, pane.annuity_purchases)
 
     def test_loading_a_drawdown_plan_hides_the_sections_again(self) -> None:
         """A plan without purchases returns to the compact form."""
@@ -793,4 +872,307 @@ class TestIncomePreference:
             INCOME_PREFERENCE_KEY, INCOME_PREFERENCE_ANNUITY
         )
         pane.set_form_data(FactsFormData())
-        assert not pane.annuity_purchases.isVisibleTo(pane)
+        assert not _shown(pane, pane.annuity_purchases)
+
+
+def _simple_pane(
+    on_view_changed: Callable[[FormView], None] | None = None,
+) -> FactsEntryPane:
+    """A pane opened in the Simple view (roadmap 11.1)."""
+    return FactsEntryPane(
+        build_facts_form_view_model(),
+        lambda _data: FactsSubmissionOutcome(status=""),
+        lambda: "",
+        view=FormView.SIMPLE,
+        on_view_changed=on_view_changed,
+    )
+
+
+class TestSimpleView:
+    """Simple shows who you are and what you have (planning §4.13)."""
+
+    def test_blank_simple_form_shows_only_the_essentials(self) -> None:
+        """Standard sections stay out of the way until they hold anything."""
+        pane = _simple_pane()
+        assert _shown(pane, pane.person_form)
+        assert _shown(pane, pane.wrappers)
+        assert _shown(pane, pane.wrappers.add_button)
+        assert not _shown(pane, pane.spending_form)
+        assert not _shown(pane, pane.retirement_income_form)
+        assert not _shown(pane, pane.state_pension_form)
+        assert not _shown(pane, pane.db_pensions)
+        assert not _shown(pane, pane.annuity_purchases)
+        assert _shown(pane, pane.simple_note)
+        assert not _shown(pane, pane.intro_label)
+
+    def test_simple_person_rows_hide_the_standard_fields(self) -> None:
+        """Sex and the advanced access facts are Detailed only."""
+        pane = _simple_pane()
+        form = pane.person_form
+        assert form.editor("date_of_birth").isVisibleTo(form)
+        assert form.editor("employment_income").isVisibleTo(form)
+        assert not form.editor("sex_for_longevity").isVisibleTo(form)
+        assert not form.editor("death_age").isVisibleTo(form)
+        assert not form.advanced_toggle.isVisibleTo(form)
+
+    def test_a_standard_section_holding_a_value_shows(self) -> None:
+        """Data is never hidden: a spending need shows in Simple."""
+        pane = _simple_pane()
+        pane.set_form_data(FactsFormData(spending={"annual_spending_real": "24000"}))
+        assert _shown(pane, pane.spending_form)
+        form = pane.spending_form
+        assert form.editor("annual_spending_real").isVisibleTo(form)
+        assert not form.editor("go_go_multiplier").isVisibleTo(form)
+
+    def test_an_advanced_field_holding_a_value_shows(self) -> None:
+        """A filled advanced field shows, without the disclosure toggle."""
+        pane = _simple_pane()
+        pane.set_form_data(
+            FactsFormData(persons=(PersonFormData(person={"death_age": "85"}),))
+        )
+        form = pane.person_form
+        assert form.editor("death_age").isVisibleTo(form)
+        assert not form.editor("lsa_used").isVisibleTo(form)
+        assert not form.advanced_toggle.isVisibleTo(form)
+
+    def test_the_relief_choice_follows_the_account_kind(self) -> None:
+        """Only a workplace pension asks how relief is given."""
+        pane = _simple_pane()
+        form = pane.wrappers.add_entry()
+        relief = form.editor("relief_mechanic")
+        assert not relief.isVisibleTo(form)
+        form.set_value("kind", "uk.workplace_dc")
+        assert relief.isVisibleTo(form)
+        form.set_value("kind", "uk.sipp")
+        assert not relief.isVisibleTo(form)
+
+    def test_an_error_reveals_its_hidden_section(self) -> None:
+        """An error on a field Simple hides must still be seen."""
+        pane = _simple_pane()
+        pane._show_errors(  # noqa: SLF001 - the pane's own error renderer
+            (FormError("spending", None, "annual_spending_real", "bad"),)
+        )
+        assert _shown(pane, pane.spending_form)
+        form = pane.spending_form
+        assert form.editor("annual_spending_real").isVisibleTo(form)
+
+    def test_choosing_detailed_shows_everything_and_reports_once(self) -> None:
+        """The switch shows every section and reports the user's choice."""
+        chosen: list[FormView] = []
+        pane = _simple_pane(chosen.append)
+        pane.view_buttons[FormView.DETAILED].click()
+        assert pane.view is FormView.DETAILED
+        assert chosen == [FormView.DETAILED]
+        assert _shown(pane, pane.spending_form)
+        assert _shown(pane, pane.state_pension_form)
+        assert _shown(pane, pane.db_pensions)
+        assert pane.person_form.editor("sex_for_longevity").isVisibleTo(
+            pane.person_form
+        )
+        assert not _shown(pane, pane.simple_note)
+        pane.view_buttons[FormView.DETAILED].click()
+        assert chosen == [FormView.DETAILED]
+
+    def test_switching_views_never_changes_what_submits(self) -> None:
+        """Both views collect the same raw text (one form, two views)."""
+        pane = _simple_pane()
+        pane.set_form_data(
+            FactsFormData(
+                persons=(PersonFormData(person={"date_of_birth": "1980-01-01"}),),
+                spending={"annual_spending_real": "24000"},
+            )
+        )
+        simple = pane.form_data()
+        pane.set_view(FormView.DETAILED)
+        assert pane.form_data() == simple
+
+    def test_a_half_filled_row_keeps_its_required_fields_in_simple(self) -> None:
+        """A row holding anything shows every field it still needs.
+
+        Regression (Codex review): a DB pension started in Detailed hid
+        its blank statement date and pension age in Simple.
+        """
+        pane = _pane()
+        form = pane.db_pensions.add_entry()
+        form.set_value("accrued_annual_pension", "8500")
+        pane.set_view(FormView.SIMPLE)
+        assert form.editor("statement_date").isVisibleTo(form)
+        assert form.editor("normal_pension_age").isVisibleTo(form)
+        assert not form.editor("commutation_factor").isVisibleTo(form)
+
+    def test_simple_hides_the_db_add_action(self) -> None:
+        """DB pensions are added in Detailed; existing rows still show."""
+        pane = _simple_pane()
+        assert not pane.db_pensions.add_button.isVisibleTo(pane.db_pensions)
+        pane.set_view(FormView.DETAILED)
+        pane.db_pensions.add_entry()
+        pane.set_view(FormView.SIMPLE)
+        assert _shown(pane, pane.db_pensions)
+        assert not pane.db_pensions.add_button.isVisibleTo(pane.db_pensions)
+
+
+class TestRowCards:
+    """Repeatable rows collapse to one-line cards (roadmap 11.4)."""
+
+    def test_a_row_the_user_adds_opens_ready_to_type(self) -> None:
+        """A new row shows its fields and a Done action."""
+        section = RepeatableSection(build_facts_form_view_model().wrapper)
+        form = section.add_entry()
+        assert section.is_expanded(form)
+
+    def test_loaded_rows_start_as_their_summaries(self) -> None:
+        """Saved rows show one line each; the fields stay closed."""
+        pane = _pane()
+        pane.set_form_data(
+            FactsFormData(
+                wrappers=(
+                    {
+                        "kind": "uk.isa",
+                        "balance": "16500",
+                        "employee_contribution": "4800",
+                    },
+                ),
+            )
+        )
+        [form] = pane.wrappers.forms
+        assert not pane.wrappers.is_expanded(form)
+        summaries = [
+            label.text()
+            for label in pane.wrappers.findChildren(QLabel)
+            if label.objectName() == "rowSummary"
+        ]
+        assert summaries == ["Stocks & shares ISA · £16,500 · £4,800 a year paid in"]
+
+    def test_done_closes_the_row_and_refreshes_its_summary(self) -> None:
+        """Typed values show on the card once the row is closed."""
+        section = RepeatableSection(build_facts_form_view_model().wrapper)
+        form = section.add_entry()
+        form.set_value("kind", "uk.sipp")
+        form.set_value("balance", "1000")
+        section.set_expanded(form, expanded=False)
+        assert not section.is_expanded(form)
+        summary = next(
+            label
+            for label in section.findChildren(QLabel)
+            if label.objectName() == "rowSummary"
+        )
+        assert summary.text() == "SIPP · £1,000"
+        section.set_expanded(form, expanded=True)
+        assert section.is_expanded(form)
+
+    def test_an_error_opens_its_row(self) -> None:
+        """A closed row carrying an error is opened so it is seen."""
+        pane = _pane()
+        pane.set_form_data(FactsFormData(wrappers=({"kind": "uk.isa"},)))
+        [form] = pane.wrappers.forms
+        assert not pane.wrappers.is_expanded(form)
+        pane._show_errors(  # noqa: SLF001 - the pane's own error renderer
+            (FormError("wrapper", 0, "balance", "this field is required"),)
+        )
+        assert pane.wrappers.is_expanded(form)
+
+    def test_closed_rows_still_submit_and_keep_their_ids(self) -> None:
+        """Closing a card changes what shows, never what submits."""
+        pane = _pane()
+        pane.set_form_data(
+            FactsFormData(
+                wrappers=({ENTITY_ID_KEY: "w-1", "kind": "uk.isa", "balance": "500"},)
+            )
+        )
+        [row] = pane.form_data().wrappers
+        assert row[ENTITY_ID_KEY] == "w-1"
+        assert row["balance"] == "500"
+
+
+def _listed(pane: FactsEntryPane) -> list[str]:
+    """The keys of the steps the side list offers, in order."""
+    steps = build_facts_form_view_model().steps
+    return [step.key for step in steps if pane.step_listed(step.key)]
+
+
+class TestSteps:
+    """Sections are steps in a side list (roadmap 11.2)."""
+
+    def test_detailed_lists_every_step(self) -> None:
+        """All seven steps, starting on You."""
+        pane = _pane()
+        assert _listed(pane) == [
+            "you",
+            "spending",
+            "retirement_income",
+            "state_pension",
+            "accounts",
+            "db_pensions",
+            "partner",
+        ]
+        assert pane.current_step == "you"
+
+    def test_simple_lists_only_steps_with_something_to_show(self) -> None:
+        """A blank Simple form: you, your accounts, and a partner."""
+        pane = _simple_pane()
+        assert _listed(pane) == ["you", "accounts", "partner"]
+        pane.set_form_data(FactsFormData(spending={"annual_spending_real": "24000"}))
+        assert _listed(pane) == ["you", "spending", "accounts", "partner"]
+
+    def test_any_step_can_be_visited(self) -> None:
+        """Steps are pages, visited in any order."""
+        pane = _pane()
+        pane.show_step("db_pensions")
+        assert pane.current_step == "db_pensions"
+        pane.show_step("you")
+        assert pane.current_step == "you"
+
+    def test_a_step_dropping_out_hands_over_to_the_first(self) -> None:
+        """Switching to Simple on a Detailed-only step returns to You."""
+        pane = _pane()
+        pane.show_step("db_pensions")
+        pane.set_view(FormView.SIMPLE)
+        assert pane.current_step == "you"
+
+    def test_errors_flag_their_steps_and_open_the_first(self) -> None:
+        """Each errored step is marked; the first error's page shows."""
+        pane = _pane()
+        pane._show_errors(  # noqa: SLF001 - the pane's own error renderer
+            (
+                FormError("spending", None, "annual_spending_real", "bad"),
+                FormError("person", None, "date_of_birth", "required"),
+            )
+        )
+        assert pane.current_step == "spending"
+        texts = [
+            pane.step_list.item(row).text() for row in range(pane.step_list.count())
+        ]
+        assert texts[0] == "You" + STEP_ERROR_SUFFIX
+        assert texts[1] == "Spending" + STEP_ERROR_SUFFIX
+        assert texts[2] == "Retirement income"
+
+    def test_a_new_submission_clears_the_flags(self) -> None:
+        """Flags last only until the next submission renders."""
+        pane = _pane()
+        pane._show_errors(  # noqa: SLF001 - the pane's own error renderer
+            (FormError("spending", None, "annual_spending_real", "bad"),)
+        )
+        pane.submit()
+        assert pane.step_list.item(1).text() == "Spending"
+
+    def test_replacing_the_form_clears_the_flags(self) -> None:
+        """Opening another plan never keeps the last plan's warnings."""
+        pane = _pane()
+        pane._show_errors(  # noqa: SLF001 - the pane's own error renderer
+            (FormError("spending", None, "annual_spending_real", "bad"),)
+        )
+        pane.set_form_data(FactsFormData())
+        assert pane.step_list.item(1).text() == "Spending"
+
+    def test_one_save_submits_every_step(self) -> None:
+        """What submits never depends on which page is showing."""
+        pane = _pane()
+        pane.set_form_data(
+            FactsFormData(
+                persons=(PersonFormData(person={"date_of_birth": "1980-01-01"}),),
+                spending={"annual_spending_real": "24000"},
+            )
+        )
+        on_you = pane.form_data()
+        pane.show_step("accounts")
+        assert pane.form_data() == on_you

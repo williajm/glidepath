@@ -673,6 +673,10 @@ aggregation remains the default presentation.
 
 ### 4.12 Facts-form usability and the retirement-income choice (Phase 10)
 
+> The first decision below is superseded in part by §4.13 (2026-11-27):
+> its disclosure invariants stand, but the form now offers a Simple
+> view built from the same specs.
+
 **Decision: progressive disclosure, not a "simple mode".** A
 simple/advanced mode toggle is a second surface to maintain — the §4.9
 objection to a demo mode applies unchanged — so the form simplifies by
@@ -740,6 +744,194 @@ reading, deflator, annuity quote, and State Pension machinery as the
 percentile card — with a basis line inviting the Monte Carlo run that
 adds the likely range. The card is populated from first launch
 instead of opening with an empty-state instruction.
+
+### 4.13 Simple and Detailed facts views, and a form that is not a grid (Phase 11)
+
+Supersedes in part §4.12's first decision ("progressive disclosure,
+not a 'simple mode'"): its disclosure invariants stand and are
+extended below; its rejection of a second view is replaced.
+
+**Context.** A plan projects from three inputs — date of birth, tax
+residency and target retirement age — yet the form opens showing 11
+fields before any account and 8 more per account, as identical
+label-and-box rows spanning the window's width in one long scroll. A
+new user meets the whole surface at once, and it reads as a
+spreadsheet.
+
+**Decision: one form, two views.** The facts form gains a Simple /
+Detailed switch. Both views are the same form — one set of
+`FieldSpec`/`SectionSpec` specs, one `parse_facts_form`, one
+validation and error path — and differ only in what they show, so the
+second-surface objection of §4.9 and §4.12 does not apply: the switch
+is a disclosure level, not a second form. `FieldSpec.advanced: bool`
+becomes a three-valued level — essential, standard, advanced — and
+sections carry a level too. Simple shows the essential fields of
+essential sections; Detailed shows essential and standard, with
+advanced fields behind each section's "More options" as today.
+
+Simple holds only what most people know offhand — who they are and
+what they have:
+
+- About you: date of birth, tax residency, target retirement age,
+  employment income.
+- Each account: kind, balance, your contribution, employer
+  contribution — and the tax relief method only for a workplace
+  pension, the one kind that permits more than one
+  (`permitted_relief_mechanics`).
+
+Only date of birth, tax residency, target retirement age and each
+account's kind and balance are required, so the shortest Simple plan
+is those five fields with one pot. Employment income stays in Simple
+because contributions depend on it — pension relief is capped at
+relevant earnings, so without them net pay gets no relief and relief
+at source only the basic amount (`regions/uk/contributions.py`) — and
+"When can I retire?" needs it.
+Date of birth stays rather than an age because the State Pension age
+and every age gate fall on exact dates. With one workplace pension
+Simple shows 9 fields, against 19 today; with one SIPP, 8. A blank
+relief method on a kind that permits exactly one (a SIPP: relief at
+source) is filled with that mechanic when parsed, in both views — the
+only legal value, not a guess; a workplace pension with contributions
+but no method is an inline error on the relief field, where the
+engine would otherwise fail the run (`_require_permitted_mechanic`).
+
+Household spending and the State Pension are standard, not
+essential: the spending need is a figure most people have not worked
+out, and the forecast needs a trip to gov.uk — asking for either up
+front is what makes a form feel heavy. Everything outside Simple is
+standard or advanced, and a hidden field takes only the blank meaning
+the form documents for it, the same in both views: no spending need
+is modelled, the State Pension is the assumed full rate (next
+decision), balances are dated today, an account is named by its kind,
+allocation follows the glide path, retirement income is drawdown only
+on fixed real spending, and no DB pension or annuity purchase is
+modelled. The Simple view says in one line what Detailed adds
+(spending, a State Pension forecast, DB pensions, annuities,
+withdrawal strategies, statement dates). "Add a partner" stays in
+both views; the partner's sections follow the same levels.
+
+**Decision: a blank State Pension assumes the full new State Pension
+from State Pension age.** Supersedes in part §5.1's "the forecast is
+the only route to an amount" (#97). The forecast stays the only
+*fact* route and nothing is derived from an NI record, but a person
+with no forecast now gets a default assumption instead of no State
+Pension: the full new State Pension weekly rate from the tax-year
+data file, starting at the State Pension age `age_rules.toml` gives
+for their date of birth, scaled by `state_pension.default_fraction`
+(default 1) and uprated by the existing uprating assumption. The run
+records it on its provenance (`AssumedStatePension`), it shows in
+"Stated vs assumed", and the outlook card names it ("assumed full
+State Pension (no forecast entered)"). Entering a forecast replaces
+it; an explicit "No — leave the State Pension out" choice models none;
+deferral applies to either; a protected payment still needs a
+forecast. The full rate returns to the tax-year data files with
+`verified_on` and sources (#97 removed the `[state_pension]` table
+because nothing read it). **Representation:** a state pension record
+*without a forecast* is the assumed full rate, and *no record* is no
+State Pension — the facts form writes the former for a blank section
+and the latter only for the explicit choice. **Why:** a plan with no
+State Pension understates retirement income for most UK users, and
+asking for the forecast up front is the friction Simple removes.
+**Accepted cost:** the full rate overstates income for anyone with
+National Insurance gaps or a contracted-out history — the reason #97
+made the forecast authoritative — so the assumption is always
+labelled as one, with the forecast as the remedy. **Before the timetable:** the State Pension
+age timetable starts at a shipped date of birth (§6); for anyone born
+earlier neither a forecast nor the assumption can be placed in time,
+so the facts form errors on that person's State Pension section and
+asks for "No — leave the State Pension out" rather than the run
+failing. **Saved plans:**
+no migration and no schema change — a saved person without a record
+still has no State Pension (the form shows the leave-out choice), so
+saved plans project exactly as before; pre-#97 records without a
+forecast, which could not project at all, now take the assumed rate.
+**Rejected:** making *no record* mean the assumption, with a new
+leave-out field and a migration to preserve saved plans — more schema
+and the same outcome.
+
+**Decision: a plan says what it leaves out.** Without a spending
+need, nothing is withdrawn in retirement (the engine draws only
+against `Household.spending`), so no path can fall short and the
+Monte Carlo success rate — the share of paths with no shortfall —
+would read 100%. A blank spending need was possible before, but
+Simple makes it the common case, so the results must not read as an
+answer they are not: with no spending entered and no shortfall on any
+path or backtest window, the success rate shows "no spending entered"
+instead of a percentage — a recorded shortfall (an unfundable tax
+charge needs no spending plan) always shows its rate — and the
+results carry one line naming what the plan does not model or only
+assumes (no annual spending need; the assumed State Pension, with its
+share of the full rate when not 100%) and where to change it.
+What a Simple plan can answer stays intact: the outlook card reads the
+pots at retirement, the income they could buy and the State Pension
+on top, and "How much can I draw down?" searches for the sustainable
+spending itself.
+
+**Decision: the §4.12 invariants extend to rows and sections.** A
+field holding a value, or carrying an error, shows in every view; a
+section or repeatable row holding any value shows in Simple too, so
+Simple never hides data that would submit. A required field never
+sits below its section's level (guard test, replacing 10.1's "never
+both required and advanced"), and in Simple a required field shows
+whenever its section or row holds anything, so it is visible
+whenever its section is.
+**Rejected:** switching to Detailed automatically when a plan holds
+detail-level data — the invariant already shows that data in place,
+and overriding the user's chosen view is surprising.
+
+**Decision: the view is a display preference, not plan data.** New
+users start in Simple. The chosen view is remembered in the local
+settings file that holds the disclaimer acknowledgement and the last
+plan path (`app/firstrun.py`), not in the plan document, so the view
+adds nothing to the plan schema. The §4.9 launch example is
+unchanged: it keeps its spending need and State Pension forecast — a
+demonstration without a spending need would show no drawdown and no
+failing paths — and its workplace pension's contribution escalation,
+because a blank escalation means contributions fixed in *nominal*
+terms, which inflation would erode over the persona's 27 working
+years (dropping it cut the seeded 1,000-path success rate from 72.5%
+to 63.3%). On the example, Simple shows those three fields because
+they hold values; clearing the form leaves the bare Simple view.
+
+**Decision: a form, not a grid.** In both views:
+
+- **Steps.** Sections become steps in a side list — You, Spending,
+  Retirement income, State pension, Accounts, DB pensions, Partner —
+  each a short page; Simple lists fewer. Steps can be visited in any
+  order and one save still submits the whole form, so parsing and
+  error routing are unchanged: a step holding an error is marked in
+  the list, and the first error's step opens with the field focused
+  (10.2's scroll-to-first-error, across steps). **Rejected:** a
+  Next/Back wizard (editing one figure in a saved plan should not mean
+  walking every step); saving per step (partial plans become a state
+  to handle).
+- **Sized inputs and formatted money.** `FieldKind` gains `MONEY` and
+  `NUMBER`; the shell maps each kind to a width measured in the
+  widget's own font (choices size to their longest option), so ages
+  and amounts are short and names and choices wider, instead of every
+  input spanning the window, and a short entry shows its hint beside
+  it rather than as a clipped placeholder. Money shows with a £ prefix
+  and thousands separators, formatted by the app layer (§4.7,
+  `money_display_text`); `_SectionReader.money` already accepts both,
+  so parsing is unchanged.
+- **Summary cards.** Each account, DB pension and annuity purchase
+  collapses to a one-line summary — "Workplace DC pension · £48,000 ·
+  £7,350 a year in" — and expands to edit. The app layer builds the
+  summary from the row's raw values; a new row, or one carrying an
+  error, opens expanded.
+- **Lighter copy and controls.** Each section's description is cut to
+  one line with the rest behind an info toggle; user-facing copy says
+  "account" where it says "savings wrapper" (the domain keeps
+  `Wrapper`); add and remove actions become compact secondary buttons
+  instead of full-width bars.
+
+**Rejected:** a separate simple form or wizard with its own fields
+(two surfaces drifting apart — the objection §4.9 and §4.12 record,
+and the reason both views share one spec); a table editor for
+accounts (the grid look this replaces). **Accepted cost:** every new
+field must choose a level; the step layout reworks `FactsEntryPane`
+and its GUI tests; a Simple user with a DB pension or annuity plans
+switches to Detailed to enter them.
 
 ## 5. Design
 
@@ -1019,13 +1211,20 @@ year's accrual is measured; a stream already in payment at the
 period open generates no further input amounts.
 
 State pension: the official DWP forecast **is the fact and the only
-route to an amount** (#97). It is authoritative, free, and instant to
-obtain from gov.uk/check-state-pension, so the model never re-computes
-what DWP has already computed: there is no qualifying-years derivation,
-and a record without a forecast is refused with a clear demand for one
-(the facts form requires the forecast whenever the section is filled
-in; pre-#97 plans that stored qualifying years migrate by dropping
-those fields and fail projection with the same demand). Any protected
+fact route to an amount** (#97). It is authoritative, free, and
+instant to obtain from gov.uk/check-state-pension, so the model never
+re-computes what DWP has already computed: there is no
+qualifying-years derivation. A record without a forecast assumes the
+full new State Pension instead (§4.13, roadmap 11.5) — the rate
+published in the tax-year file for the latest tax year starting on or
+before the run's `today`, scaled by `state_pension.default_fraction`,
+uprated by one whole year of the uprating rule per tax year since, and
+recorded on the run's provenance as an `AssumedStatePension` so every
+screen names it; a person with no record has no state pension. The
+facts form writes a forecast-less record for a blank section and no
+record only for the explicit leave-out choice; pre-#97 plans that
+stored qualifying years migrate by dropping those fields and now take
+the assumed full rate. Any protected
 payment is recorded separately because it uprates by CPI only, not the
 full uprating policy. Conventions (roadmap 4.3): the forecast weekly
 amount is the DWP total, of which `protected_payment` is the CPI-only
@@ -1610,7 +1809,7 @@ header). Loader rules: money/rates are TOML **strings** parsed to
 validation into frozen dataclasses, unknown keys error.
 
 ```toml
-schema_version = 5
+schema_version = 6
 
 [meta]
 tax_year    = "2026/27"
@@ -1699,10 +1898,19 @@ rates = [  # aligned positionally with the rUK bands (dividends are UK-wide)
 transferable_amount         = "1260"  # 10% of the PA, rounded up to the nearest £10
 recipient_top_band_ruk      = "basic"
 recipient_top_band_scotland = "intermediate"
+
+# Full new State Pension: the §4.13 default for a person without a
+# DWP forecast (roadmap 11.5).
+[state_pension]
+full_weekly_rate = "241.30"
 ```
 
-There is no `[state_pension]` table: the state pension amount is the
-user's stated DWP forecast, never a shipped rate (#97, §5.1).
+The `[state_pension]` table holds only `full_weekly_rate`, the full new
+State Pension for the year (data-file schema v6, roadmap 11.5). It is
+read solely as the §4.13 default for a person without a DWP forecast —
+the forecast, when stated, is the amount (#97, §5.1) — and is carried,
+never indexed, into synthesized future years: the engine uprates it
+under the state pension uprating assumption.
 
 `age_rules.toml` holds the durable, effective-dated policy parameters that
 are not re-set each tax year: NMPA (55; 57 from 2028-04-06), the SPA
@@ -1916,7 +2124,7 @@ the GIA/cash wrappers bring these into the model).
 
 | Figure | Value | Source |
 | --- | --- | --- |
-| Full new state pension | **£241.30/week** (£12,547.60/yr) 2026/27 | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [DWP rates 2026–27](https://www.gov.uk/government/publications/benefit-and-pension-rates-2026-to-2027/proposed-benefit-and-pension-rates-2026-to-2027) |
+| Full new state pension | **£241.30/week** (£12,547.60/yr) 2026/27 — re-verified 2026-11-27; shipped in the tax-year file's `[state_pension]` table as the §4.13 default for a person without a forecast | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [DWP rates 2026–27](https://www.gov.uk/government/publications/benefit-and-pension-rates-2026-to-2027/proposed-benefit-and-pension-rates-2026-to-2027) |
 | April 2026 uprating | 4.8%, earnings-driven (AWE 4.8% > CPI 3.8% > 2.5%) | [Government Actuary report, 2026 up-rating order](https://www.gov.uk/government/publications/report-to-parliament-on-the-2026-re-rating-and-up-rating-orders/report-by-the-government-actuary-on-the-draft-social-security-benefits-up-rating-order-2026-and-the-draft-social-security-contributions-regulation) |
 | Full basic (old) state pension | £184.90/week (context) | DWP rates page |
 | Qualifying years | 35 full (pre-2016 contracted-out caveats); 10 minimum — context only: the model never derives an amount from qualifying years (#97, §5.1) | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [new state pension](https://www.gov.uk/new-state-pension) |
@@ -1999,6 +2207,12 @@ that strategy runs or the plan holds a GIA/cash wrapper.*
 | --- | --- | --- |
 | `db.survivor_fraction` | 50% | No statutory fraction for private DB schemes — scheme rules govern (§6, PPF); the major public-service legacy schemes all pay 50%. Overridable per scheme via the DB pension's `survivor_fraction` fact ([PPF on DB beliefs](https://www.ppf.co.uk/blog-posts/defined-benefit-pension-beliefs)) |
 | `spending.survivor_multiplier` | 0.70 × household spending | PLSA/Pensions UK Retirement Living Standards single-vs-couple budget ratios — £13,900/£22,500 = 0.62 (Minimum), £32,700/£45,400 = 0.72 (Moderate), £45,400/£62,700 = 0.72 (Comfortable), retrieved 2026-08-12 ([retirementlivingstandards.org.uk](https://www.retirementlivingstandards.org.uk/)); 0.70 sits just under the Moderate/Comfortable ratio (§9 open question 9, resolved) |
+
+### State Pension without a forecast
+
+| Key | Default | Basis |
+| --- | --- | --- |
+| `state_pension.default_fraction` | 1 × the full new State Pension | A person with no DWP forecast entered is assumed to receive the full new State Pension (the tax-year file's published rate, §6) from State Pension age (§4.13). Optimistic for anyone with National Insurance gaps or contracted-out years; entering the forecast from [gov.uk/check-state-pension](https://www.gov.uk/check-state-pension) replaces it |
 
 ## 8. Phased roadmap — issue basis
 
@@ -2736,6 +2950,61 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   machinery, `DETERMINISTIC_BASIS_SENTENCE` naming what Monte Carlo
   would add) whenever a base projection is held without an aligned
   Monte Carlo run, so the card is populated from first launch.*
+
+### Phase 11 — Facts entry: Simple view and form layout (design record §4.13)
+
+- [x] 11.1 Simple and Detailed views — *fields and sections carry a
+  level (essential / standard / advanced) replacing
+  `FieldSpec.advanced`; Simple shows the §4.13 essentials (9 fields
+  with one workplace pension, 8 with one SIPP — no spending or State
+  Pension fields), Detailed shows everything with advanced fields
+  behind "More options"; the relief method shows in Simple only for a
+  workplace pension, and a blank one on a kind permitting exactly one
+  mechanic parses as that mechanic in both views; a field, row or
+  section holding a value or an error shows in every view; a required
+  field never sits below its section's level (guard test, replacing
+  10.1's); Simple names in one line what Detailed adds; with no
+  spending entered the success rate reads "no spending entered", not
+  100%, and the results name what the plan does not model or only
+  assumes; new users start in Simple and the choice persists in local
+  settings, not the plan document; the launch example is unchanged
+  and in Simple shows its spending, State Pension forecast and
+  contribution escalation as fields holding values. Depends on 11.5,
+  so a Simple plan never silently lacks a State Pension.*
+- [x] 11.2 Step navigation — *sections become steps in a side list
+  (You, Spending, Retirement income, State pension, Accounts, DB
+  pensions, Partner; Simple lists fewer), visitable in any order; one
+  save submits the whole form; steps holding errors are marked and the
+  first error's step opens with its field focused.*
+- [x] 11.3 Sized inputs, formatted money, lighter controls — *`FieldKind`
+  gains `MONEY` and `NUMBER`; the shell sizes each kind from the
+  widget's font metrics (choices to their longest option), short
+  entries show their hint beside them rather than as a clipped
+  placeholder; money shows a £ prefix and thousands separators via the
+  app layer's `money_display_text`, parsing unchanged; each section has
+  a one-line `summary` with the description behind "More about this";
+  "account" replaces "savings wrapper" on the form and in the help
+  guide's Facts paragraph (charts and the inspector keep "wrapper");
+  add and remove actions size to their text.*
+- [x] 11.4 Summary cards for repeatable rows — *each account, DB
+  pension and annuity purchase collapses to an app-layer one-line
+  summary built from its raw values and expands to edit; new and
+  errored rows open expanded; entity ids and row removal behave as
+  today.*
+- [x] 11.5 Assumed full State Pension when no forecast is entered —
+  *a state pension record without a forecast takes a
+  `DEFAULT_ASSUMPTION`: the full new State Pension weekly rate (back in
+  the tax-year data files, schema v6, with `verified_on`, sources and
+  the §6 row) for the latest tax year starting on or before `today`,
+  scaled by `state_pension.default_fraction` and uprated a whole year
+  per tax year since, from the State Pension age `age_rules.toml`
+  gives for the date of birth; the run records it as an
+  `AssumedStatePension` and the outlook card names it; a forecast
+  replaces it; a blank facts-form section writes the forecast-less
+  record and the explicit "No — leave the State Pension out" choice
+  writes none; a protected payment still needs a forecast; saved plans
+  project exactly as before with no migration (§4.13, superseding in
+  part §5.1/#97).*
 
 ## 9. Open questions
 

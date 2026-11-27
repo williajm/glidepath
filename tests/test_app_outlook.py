@@ -19,6 +19,7 @@ from factories import FreeWrapperRules, money_fact, stub_region
 from glidepath.app import (
     DETERMINISTIC_BASIS_SENTENCE,
     NO_OUTLOOK_MESSAGE,
+    NO_SPENDING_SENTENCE,
     OUTLOOK_HEADING,
     OUTLOOK_NO_PLAN_MESSAGE,
     PlanState,
@@ -326,9 +327,48 @@ class TestSentenceGating:
         assert "State Pension forecast adds £11,973 a year from age 67." in panel.detail
         assert "all told" not in panel.detail
 
-    def test_without_a_forecast_the_state_pension_stays_silent(self) -> None:
-        """A legacy record with no official forecast quotes nothing."""
+    def test_without_a_forecast_the_assumed_full_rate_is_named(self) -> None:
+        """A record with no forecast quotes the full rate, labelled (§4.13).
+
+        £241.30 a week (the shipped 2026/27 rate) x 52 = £12,547.60.
+        """
         plan = household(state_pension=state_pension_record(forecast=None))
+        panel = build_outlook_panel(outlook_state(plan))
+        assert (
+            "Your assumed full State Pension (no forecast entered) adds"
+            " £12,548 a year from age 67"
+        ) in panel.detail
+
+    def test_without_spending_the_card_says_nothing_is_drawn(self) -> None:
+        """A plan with no spending need is named as untested (§4.13)."""
+        plan = replace(household(), spending=None)
+        panel = build_outlook_panel(outlook_state(plan))
+        assert panel.detail.endswith(NO_SPENDING_SENTENCE)
+
+    def test_with_spending_the_card_has_no_spending_note(self) -> None:
+        """The note appears only when the need is missing."""
+        panel = build_outlook_panel(outlook_state(household()))
+        assert NO_SPENDING_SENTENCE not in panel.detail
+
+    def test_a_partial_default_is_not_called_full(self) -> None:
+        """A 50% default fraction is quoted as 50%, never as "full"."""
+        plan = household(state_pension=state_pension_record(forecast=None))
+        projected = state_with_household(short_horizon_state(), plan, today=TODAY)
+        outcome = state_with_override(
+            projected,
+            "state_pension.default_fraction",
+            "0.5",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        panel = build_outlook_panel(outcome.state)
+        assert "assumed State Pension (50.0% of the full rate)" in panel.detail
+        assert "full State Pension (no forecast" not in panel.detail
+
+    def test_without_a_record_the_state_pension_stays_silent(self) -> None:
+        """No record is the explicit leave-out choice: nothing is quoted."""
+        plan = household(state_pension=None)
         panel = build_outlook_panel(outlook_state(plan))
         assert "State Pension" not in panel.detail
 

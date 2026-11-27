@@ -27,10 +27,11 @@ quote buys each person's pension slice at their own age, and each
 person's State Pension forecast stacks on separately.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
+from glidepath.app.display import format_percent
 from glidepath.app.plan import region_for
 from glidepath.core import (
     AnnuityRateTable,
@@ -169,11 +170,14 @@ def build_outlook_panel(state: PlanState) -> OutlookPanelViewModel:
         reading=reading,
     )
     monte_carlo = state.monte_carlo
+    panel = None
     if monte_carlo is not None:
         panel = _monte_carlo_panel(context, result, monte_carlo)
-        if panel is not None:
-            return panel
-    return _deterministic_panel(context)
+    if panel is None:
+        panel = _deterministic_panel(context)
+    if household.spending is None:
+        panel = replace(panel, detail=f"{panel.detail}\n{NO_SPENDING_SENTENCE}")
+    return panel
 
 
 def _monte_carlo_panel(
@@ -573,6 +577,15 @@ def _annuity_income(
     return Money(capital.amount * rate)
 
 
+NO_SPENDING_SENTENCE: Final = (
+    "No annual spending need is entered, so the plan is not tested"
+    " against one — add it under Household spending (Detailed view)."
+)
+"""The card's note for a plan without a spending need (planning §4.13):
+the figures above stand, but the plan is not tested against a need.
+True whatever the withdrawal strategy — a fixed-percentage draw still
+runs with no need entered."""
+
 _FORECAST_PREFIXES = ("Your", "Your partner's")
 """State Pension sentence openers by household position (9.31)."""
 
@@ -592,13 +605,13 @@ def _state_pension_lines(
         for position, person in enumerate(context.persons)
         if (quote := _state_pension_quote(person, context.provenance)) is not None
     ]
-    total = sum((annual for _, (annual, _) in quotes), _ZERO_MONEY)
+    total = sum((quote.annual for _, quote in quotes), _ZERO_MONEY)
     lines = []
-    for count, (position, (annual, start)) in enumerate(quotes, start=1):
+    for count, (position, quote) in enumerate(quotes, start=1):
         prefix = _FORECAST_PREFIXES[position]
+        source = quote.source
         sentence = (
-            f"{prefix} State Pension forecast adds {_pounds(annual)}"
-            f" a year from {start}"
+            f"{prefix} {source} adds {_pounds(quote.annual)} a year from {quote.start}"
         )
         if count == len(quotes) and annuity_income is not None:
             combined = annuity_income + total
@@ -607,21 +620,35 @@ def _state_pension_lines(
     return lines
 
 
+@dataclass(frozen=True)
+class _StatePensionQuote:
+    """One person's State Pension as the card quotes it."""
+
+    annual: Money
+    start: str
+    source: str = "State Pension forecast"
+    """What the amount is, as the card names it."""
+
+
 def _state_pension_quote(
     person: Person, provenance: RunProvenance
-) -> tuple[Money, str] | None:
-    """One person's (annual amount, start-age phrase), or ``None``.
+) -> _StatePensionQuote | None:
+    """One person's State Pension quote, or ``None``.
 
     The DWP forecast states today's rates as of its own date; a stale
     forecast is quoted as the run opened it — the §4.8 roll-forward
     the engine disclosed — so the card and the projection uprate the
     same way. Deferral-uplifted and protected payment included; the
-    start age keeps the timetable's month-level precision. ``None``
-    without a usable forecast.
+    start age keeps the timetable's month-level precision. A record
+    without a forecast is quoted from the full rate the run assumed
+    (planning §4.13), flagged so the card names the assumption.
+    ``None`` when no State Pension is modelled.
     """
     record = person.state_pension
     if record is None:
         return None
+    if record.forecast_weekly_amount is None:
+        return _assumed_quote(person, provenance)
     try:
         entitlement = UkStatePensionScheme.from_shipped_data().entitlement(
             record, person.date_of_birth.value
@@ -635,7 +662,38 @@ def _state_pension_quote(
         base = weekly * _WEEKS_PER_YEAR
     annual = base * (_ONE + entitlement.deferral_uplift)
     start = _age_phrase(person.date_of_birth.value, entitlement.start_date)
-    return annual, start
+    return _StatePensionQuote(annual=annual, start=start)
+
+
+def _assumed_quote(
+    person: Person, provenance: RunProvenance
+) -> _StatePensionQuote | None:
+    """The full-rate State Pension the run assumed for ``person`` (§4.13).
+
+    Read from the run's own record of the assumption — the rate it
+    opened with, scaled and uprated — so the card never re-derives it;
+    ``None`` when the run assumed none (a zero default fraction).
+    """
+    for assumed in provenance.assumed_state_pensions:
+        if assumed.person == person.id:
+            annual = (
+                assumed.opening_weekly
+                * _WEEKS_PER_YEAR
+                * (_ONE + assumed.deferral_uplift)
+            )
+            start = _age_phrase(person.date_of_birth.value, assumed.start_date)
+            share = (
+                "full State Pension"
+                if assumed.fraction == _ONE
+                else f"State Pension ({format_percent(assumed.fraction)} of the full"
+                " rate)"
+            )
+            return _StatePensionQuote(
+                annual=annual,
+                start=start,
+                source=f"assumed {share} (no forecast entered)",
+            )
+    return None
 
 
 def _rolled_forecast_weekly(person: Person, provenance: RunProvenance) -> Money | None:
@@ -683,6 +741,7 @@ def _basis_sentence(monte_carlo: MonteCarloResult) -> str:
 __all__ = [
     "DETERMINISTIC_BASIS_SENTENCE",
     "NO_OUTLOOK_MESSAGE",
+    "NO_SPENDING_SENTENCE",
     "OUTLOOK_HEADING",
     "OUTLOOK_NO_PLAN_MESSAGE",
     "OutlookPanelViewModel",

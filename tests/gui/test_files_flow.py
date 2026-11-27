@@ -16,6 +16,7 @@ from PySide6.QtCore import QStandardPaths
 from PySide6.QtWidgets import QMessageBox
 
 from glidepath.app import (
+    FormView,
     build_shell_view_model,
     example_facts_form_data,
     load_state,
@@ -61,6 +62,35 @@ class TestSaveFlow:
         assert plan.exists()
         assert str(plan) in window.statusBar().currentMessage()
         assert load_state(settings).last_plan_path == plan
+
+    def test_the_facts_view_choice_is_remembered(self, tmp_path: Path) -> None:
+        """Choosing Detailed persists; the next window opens in it (11.1)."""
+        settings = tmp_path / "settings.json"
+        window = _window_with_example(settings)
+        assert window.facts_pane.view is FormView.SIMPLE
+        window.facts_pane.view_buttons[FormView.DETAILED].click()
+        assert load_state(settings).facts_view == FormView.DETAILED.value
+        reopened = _window_with_example(settings)
+        assert reopened.facts_pane.view is FormView.DETAILED
+
+    def test_an_unwritable_view_record_warns_and_keeps_the_view(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A failed settings write never disturbs the session."""
+        window = _window_with_example(tmp_path / "settings.json")
+
+        def unwritable(_settings: Path, _view: str) -> None:
+            msg = "config directory is read-only"
+            raise OSError(msg)
+
+        monkeypatch.setattr(widgets, "record_facts_view", unwritable)
+        with caplog.at_level(logging.WARNING):
+            window.facts_pane.view_buttons[FormView.DETAILED].click()
+        assert window.facts_pane.view is FormView.DETAILED
+        assert "Could not remember the facts view" in caplog.text
 
     def test_save_with_unwritable_settings_saves_and_warns(
         self,
@@ -410,7 +440,7 @@ class TestPlanReplacement:
             assert current.read_bytes() == original
         if action == "open":
             values = window.facts_pane.person_form.values()
-            assert values["employment_income"] == "52000"
+            assert values["employment_income"] == "52,000"
         else:
             assert window.facts_pane.wrappers.values_list() == ()
             assert window.inspector_pane.facts_table.rowCount() == 0
@@ -425,7 +455,7 @@ def test_saving_before_reopening_the_same_file_loads_the_saved_edits(
         widgets, "QMessageBox", _message_box_answering(QMessageBox.StandardButton.Save)
     )
     assert window.open_plan(current)
-    assert window.facts_pane.person_form.values()["employment_income"] == "61000"
+    assert window.facts_pane.person_form.values()["employment_income"] == "61,000"
 
 
 class TestCloseFlow:

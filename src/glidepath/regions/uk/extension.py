@@ -467,6 +467,7 @@ def extend_tax_year(
             savings=base.savings,
             dividend=base.dividend,
             marriage_allowance=base.marriage_allowance,
+            state_pension=base.state_pension,
         )
     factor = cpi.growth_factor**steps
     lower_steps = _indexation_steps(
@@ -514,4 +515,8 @@ def extend_tax_year(
                 base.marriage_allowance, ruk.personal_allowance
             )
         ),
+        # Carried, never indexed: the full State Pension rate is read
+        # only from shipped files, and uprated by the engine under the
+        # state pension uprating assumption (planning §4.13).
+        state_pension=base.state_pension,
     )

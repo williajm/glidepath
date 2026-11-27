@@ -97,6 +97,13 @@ overlap, so the stacked alphas deepen naturally toward the median —
 central probability mass reads as colour depth."""
 
 _ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+_COMBO_ARROW = resources.files("glidepath.gui").joinpath("assets", "chevron_down.png")
+"""The choice-field chevron, drawn at 2x in the muted ink (#236).
+
+Styling ``QComboBox::drop-down`` makes the stylesheet own the arrow, so
+it must be supplied explicitly or Fusion draws none and choice fields
+pass for text boxes. Stylesheets load images by path, so this is the
+asset's location in the installed package."""
 
 STYLESHEET = f"""
 QGroupBox {{
@@ -131,6 +138,11 @@ QLineEdit:disabled, QComboBox:disabled {{
 QComboBox::drop-down {{
     border: none;
     width: 26px;
+}}
+QComboBox::down-arrow {{
+    image: url("{str(_COMBO_ARROW).replace(chr(92), "/")}");
+    width: 12px;
+    height: 12px;
 }}
 QComboBox QAbstractItemView {{
     background: {_CARD};
@@ -320,16 +332,41 @@ QLabel#answerLabel {{
 QLabel#fieldErrorLabel {{
     color: {ERROR_TEXT};
 }}
-QPushButton#advancedToggle {{
+QPushButton#advancedToggle, QPushButton#detailsToggle {{
     background: transparent;
     border: none;
     color: {ACCENT_TEXT};
     padding: 2px 0;
     text-align: left;
 }}
-QPushButton#advancedToggle:hover {{
+QPushButton#advancedToggle:hover, QPushButton#detailsToggle:hover {{
     color: {ACCENT};
     text-decoration: underline;
+}}
+QFrame#rowCard {{
+    background: {_CARD};
+    border: 1px solid {_BORDER};
+    border-radius: 8px;
+}}
+QGroupBox[flat="true"] {{
+    border: none;
+    margin-top: 0;
+    padding: 0;
+}}
+QLabel#rowSummary {{
+    font-weight: 600;
+}}
+QPushButton#viewSwitchButton {{
+    padding: 5px 18px;
+}}
+QPushButton#viewSwitchButton:checked {{
+    background: {_TINT_PRESSED};
+    border-color: {ACCENT};
+    color: {ACCENT_TEXT};
+}}
+QLabel#sectionSummary, QLabel#simpleViewNote, QLabel#moneyPrefix,
+QLabel#fieldHint {{
+    color: {_MUTED};
 }}
 """
 
@@ -347,6 +384,13 @@ def app_icon() -> QIcon:
         pixmap.loadFromData(_asset_bytes(f"icon_{size}.png"))
         icon.addPixmap(pixmap)
     return icon
+
+
+def chevron_icon() -> QIcon:
+    """The muted down-chevron the choice fields use, for other openers."""
+    pixmap = QPixmap()
+    pixmap.loadFromData(_asset_bytes("chevron_down.png"))
+    return QIcon(pixmap)
 
 
 def wordmark_pixmap() -> QPixmap:
@@ -389,5 +433,6 @@ __all__ = [
     "STYLESHEET",
     "app_icon",
     "apply_theme",
+    "chevron_icon",
     "wordmark_pixmap",
 ]

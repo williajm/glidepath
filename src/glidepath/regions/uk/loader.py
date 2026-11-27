@@ -45,6 +45,7 @@ from glidepath.regions.uk.schema import (
     SpaBand,
     SpaDateBand,
     StatePensionDeferral,
+    StatePensionRates,
     TaxBand,
     TaxYearFile,
     TaxYearMeta,
@@ -414,6 +415,18 @@ def _parse_marriage_allowance(raw: object, context: str) -> MarriageAllowanceRul
     return rules
 
 
+def _parse_state_pension(raw: object, context: str) -> StatePensionRates:
+    """Parse the ``[state_pension]`` table (planning §4.13)."""
+    table = _Table(raw, context)
+    rates = StatePensionRates(
+        full_weekly_rate=_money(
+            table.take("full_weekly_rate"), f"{context}.full_weekly_rate"
+        ),
+    )
+    table.finish()
+    return rates
+
+
 def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFile:
     """Parse and strictly validate one tax-year TOML document."""
     root = _load_document(text, context)
@@ -434,6 +447,9 @@ def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFil
     marriage_allowance = _parse_marriage_allowance(
         root.take("marriage_allowance"), f"{context}.marriage_allowance"
     )
+    state_pension = _parse_state_pension(
+        root.take("state_pension"), f"{context}.state_pension"
+    )
     root.finish()
     return TaxYearFile(
         schema_version=schema_version,
@@ -445,6 +461,7 @@ def parse_tax_year(text: str, *, context: str = "<tax-year data>") -> TaxYearFil
         savings=savings,
         dividend=dividend,
         marriage_allowance=marriage_allowance,
+        state_pension=state_pension,
     )
 
 
