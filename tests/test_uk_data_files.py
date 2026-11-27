@@ -26,7 +26,7 @@ def test_tax_year_2026_27_meta() -> None:
     assert meta.tax_year == "2026/27"
     assert meta.start_date == date(2026, 4, 6)
     assert meta.end_date == date(2027, 4, 5)
-    assert meta.verified_on == date(2026, 8, 11)
+    assert meta.verified_on == date(2026, 11, 27)
     assert meta.sources
     assert all(source.startswith("https://") for source in meta.sources)
 
@@ -138,6 +138,12 @@ def test_marriage_allowance_figures() -> None:
     assert rules.transferable_amount == Money(Decimal(1260))
     assert rules.recipient_top_band_ruk == "basic"
     assert rules.recipient_top_band_scotland == "intermediate"
+
+
+def test_full_new_state_pension_rate() -> None:
+    """The full new State Pension matches §6: £241.30 a week in 2026/27."""
+    rates = load_tax_year(2026).state_pension
+    assert rates.full_weekly_rate == Money(Decimal("241.30"))
 
 
 def test_nmpa_schedule() -> None:

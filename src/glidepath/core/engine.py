@@ -227,6 +227,7 @@ from glidepath.core.returns import (
     nominal_rate,
 )
 from glidepath.core.state_pension import (
+    AssumedStatePension,
     StatePensionEntitlement,
     StatePensionUprating,
 )
@@ -270,6 +271,7 @@ _ZERO = Money(Decimal(0))
 _ONE = Decimal(1)
 _MINUS_ONE = Decimal(-1)
 _MONTHS_PER_YEAR = Decimal(12)
+_WHOLE_MONTHS_PER_YEAR = 12
 _GROSS_UP_ITERATION_CAP = 48
 """Fixed-point iteration cap for the net-need gross-up (§5.2 step 4)."""
 _NET_TOLERANCE = Money(Decimal("0.005"))
@@ -784,6 +786,7 @@ def run(
         region_data_version=region.data_version,
         seed=config.seed,
         balance_roll_forwards=projection.roll_forwards,
+        assumed_state_pensions=projection.assumed_state_pensions,
     )
     return ProjectionResult(snapshots=snapshots, provenance=provenance, config=config)
 
@@ -854,6 +857,19 @@ class _Projection:
         """
         return tuple(
             record for person in self._persons for record in person.roll_forwards
+        )
+
+    @property
+    def assumed_state_pensions(self) -> tuple[AssumedStatePension, ...]:
+        """The full-rate state pensions assumed while seeding (§4.13).
+
+        Person order; a person whose record states a forecast, or who
+        has no record, contributes nothing.
+        """
+        return tuple(
+            person.assumed_state_pension
+            for person in self._persons
+            if person.assumed_state_pension is not None
         )
 
     def execute(self) -> tuple[PeriodSnapshot, ...]:
@@ -1566,6 +1582,7 @@ class _PersonProjection:
     _mpaa_at_contributions: date | None = None
     _db_streams: list[_DbStream] = field(default_factory=list)
     _sp_stream: _StatePensionStream | None = None
+    _assumed_sp: AssumedStatePension | None = None
     _annuity_streams: list[_AnnuityStream] = field(default_factory=list)
     _lsa_used: Money = _ZERO
     _mpaa_triggered_on: date | None = None
@@ -1603,6 +1620,11 @@ class _PersonProjection:
     def roll_forwards(self) -> tuple[BalanceRollForward, ...]:
         """The §4.8 adjustments recorded seeding this person's ledger."""
         return tuple(self._roll_forwards)
+
+    @property
+    def assumed_state_pension(self) -> AssumedStatePension | None:
+        """The full-rate state pension assumed for this person, if any."""
+        return self._assumed_sp
 
     def seed(self) -> None:
         """Seed the LSA/MPAA ledgers and opening balances from facts."""
@@ -1918,6 +1940,9 @@ class _PersonProjection:
         if person.state_pension is None:
             return
         record = person.state_pension
+        if record.forecast_weekly_amount is None:
+            self._seed_assumed_state_pension(record, cpi)
+            return
         entitlement = self.region.state_pension.entitlement(
             record, person.date_of_birth.value
         )
@@ -1930,6 +1955,76 @@ class _PersonProjection:
             self.tracked.get(AssumptionKey.POLICY_STATE_PENSION_UPRATING).value
         )
         entitlement = self._rolled_entitlement(record, entitlement, uprating, cpi)
+        self._sp_stream = _StatePensionStream(
+            entitlement=entitlement, uprating=uprating
+        )
+
+    def _seed_assumed_state_pension(
+        self, record: StatePensionRecord, cpi: Decimal
+    ) -> None:
+        """Seed the full-rate stream for a record without a forecast (§4.13).
+
+        The region's published full rate — for the latest period starting
+        on or before ``today`` — is scaled by the
+        ``state_pension.default_fraction`` assumption and uprated by one
+        whole year of the uprating rule for each 6 April-style period
+        boundary between the rate's ``rates_from`` and ``today``
+        (statutory upratings land whole, as in the in-run stream). The
+        result is recorded as an :class:`AssumedStatePension` so the
+        assumption is named in the run's provenance, never silent.
+
+        Raises:
+            EngineError: If the fraction assumption falls outside [0, 1].
+        """
+        fraction = decimal_assumption_value(
+            self.tracked.get(AssumptionKey.STATE_PENSION_DEFAULT_FRACTION)
+        )
+        if not Decimal(0) <= fraction <= _ONE:
+            msg = (
+                "state_pension.default_fraction must lie between 0 and 1,"
+                f" got {fraction}"
+            )
+            raise EngineError(msg)
+        if fraction == 0:
+            return
+        today = self.config.today
+        person = self.person
+        answer = self.region.state_pension.full_rate_entitlement(
+            record, person.date_of_birth.value, today
+        )
+        uprating = StatePensionUprating.from_assumption_value(
+            self.tracked.get(AssumptionKey.POLICY_STATE_PENSION_UPRATING).value
+        )
+        upratings = (
+            whole_months_between(answer.rate.rates_from, today)
+            // _WHOLE_MONTHS_PER_YEAR
+        )
+        scale = fraction * revaluation_factor_for_months(
+            uprating.annual_rate(cpi), upratings * _WHOLE_MONTHS_PER_YEAR
+        )
+        base = answer.entitlement
+        entitlement = StatePensionEntitlement(
+            start_date=base.start_date,
+            annual_amount=(base.annual_amount * scale).quantized(),
+            cpi_uprated_annual_amount=(
+                base.cpi_uprated_annual_amount * fraction
+            ).quantized(),
+            deferral_uplift=base.deferral_uplift,
+        )
+        self._assumed_sp = AssumedStatePension(
+            person=person.id,
+            full_weekly=answer.rate.weekly,
+            rate_label=answer.rate.label,
+            rates_from=answer.rate.rates_from,
+            fraction=fraction,
+            opening_weekly=(answer.rate.weekly * scale).quantized(),
+            start_date=base.start_date,
+            deferral_uplift=base.deferral_uplift,
+        )
+        if entitlement.annual_amount <= _ZERO and (
+            entitlement.cpi_uprated_annual_amount <= _ZERO
+        ):
+            return
         self._sp_stream = _StatePensionStream(
             entitlement=entitlement, uprating=uprating
         )

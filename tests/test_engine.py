@@ -45,6 +45,7 @@ from glidepath.core import (
     FeeSchedule,
     FixedPercentWithdrawalStrategy,
     FixedRealWithdrawalStrategy,
+    FullRateEntitlement,
     GlidePathConfig,
     GlidePathPoint,
     GrowthTaxTreatment,
@@ -63,6 +64,7 @@ from glidepath.core import (
     Person,
     PersonPeriodResult,
     PlannedOutflow,
+    ProjectionResult,
     Provenance,
     Rate,
     Region,
@@ -78,6 +80,7 @@ from glidepath.core import (
     SchemePayment,
     SpendingPlan,
     StatePensionEntitlement,
+    StatePensionRate,
     StatePensionRecord,
     TaxFreeCashStrategy,
     TaxInput,
@@ -559,6 +562,8 @@ class StubStatePension:
     cpi_annual: Money = ZERO
     start_age: int = 67
     uplift: Decimal = Decimal(0)
+    full_weekly: Money = ZERO
+    rates_from: date = date(2026, 4, 6)
 
     def entitlement(
         self, record: StatePensionRecord, date_of_birth: date
@@ -571,6 +576,25 @@ class StubStatePension:
             annual_amount=self.annual,
             cpi_uprated_annual_amount=self.cpi_annual,
             deferral_uplift=self.uplift,
+        )
+
+    def full_rate_entitlement(
+        self, record: StatePensionRecord, date_of_birth: date, on: date
+    ) -> FullRateEntitlement:
+        """The configured full rate, published from ``rates_from``."""
+        del on
+        start = date_age_attained(date_of_birth, self.start_age)
+        months = int(record.deferral_years.value * Decimal(12))
+        return FullRateEntitlement(
+            entitlement=StatePensionEntitlement(
+                start_date=add_months(start, months),
+                annual_amount=self.full_weekly * Decimal(52),
+                cpi_uprated_annual_amount=ZERO,
+                deferral_uplift=self.uplift,
+            ),
+            rate=StatePensionRate(
+                weekly=self.full_weekly, rates_from=self.rates_from, label="stub"
+            ),
         )
 
 
@@ -2473,6 +2497,122 @@ class TestPensionIncome:
         assert "db_pension[db-1].commuted_fraction" in decision_labels
         assert "db_pension[db-1].active_membership.active_until_age" in decision_labels
         assert "person[person-1].state_pension.deferral_years" in decision_labels
+
+
+def assumed_sp_record(deferral: str = "0") -> StatePensionRecord:
+    """A record without a forecast: the full rate is assumed (§4.13)."""
+    return StatePensionRecord(
+        forecast_weekly_amount=None,
+        protected_payment=None,
+        deferral_years=Decision(value=Decimal(deferral), recorded_on=RECORDED),
+    )
+
+
+class TestAssumedFullStatePension:
+    """A record without a forecast assumes the region's full rate (§4.13)."""
+
+    @staticmethod
+    def _run(
+        fraction: Decimal,
+        *,
+        rates_from: date = date(2026, 1, 1),
+        overrides: dict[str, object] | None = None,
+    ) -> ProjectionResult:
+        """One saver past SPA, the stub publishing £200 a week."""
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=assumed_sp_record(),
+            )
+        )
+        scheme = StubStatePension(
+            full_weekly=Money(Decimal(200)), rates_from=rates_from, start_age=66
+        )
+        values: dict[str, object] = {
+            "state_pension.default_fraction": fraction,
+            "policy.state_pension.uprating": TRIPLE_LOCK,
+        }
+        values.update(overrides or {})
+        return run(
+            plan,
+            assumptions_with(values),
+            stub_region(state_pension=scheme),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2026, 12, 31)),
+        )
+
+    def test_full_rate_is_paid_and_recorded(self) -> None:
+        """200 a week x 52 = 10,400, named on the run's provenance."""
+        result = self._run(Decimal(1))
+        [period] = result.snapshots
+        assert period.persons[0].state_pension_income == Money(Decimal("10400.00"))
+        [assumed] = result.provenance.assumed_state_pensions
+        assert assumed.person == "person-1"
+        assert assumed.full_weekly == Money(Decimal(200))
+        assert assumed.fraction == Decimal(1)
+        assert assumed.opening_weekly == Money(Decimal("200.00"))
+        assert assumed.rate_label == "stub"
+        keys_read = {entry.key for entry in result.provenance.assumptions}
+        assert AssumptionKey.STATE_PENSION_DEFAULT_FRACTION in keys_read
+
+    def test_fraction_scales_the_rate(self) -> None:
+        """Half the full rate is 5,200 a year."""
+        result = self._run(Decimal("0.5"))
+        [period] = result.snapshots
+        assert period.persons[0].state_pension_income == Money(Decimal("5200.00"))
+        [assumed] = result.provenance.assumed_state_pensions
+        assert assumed.opening_weekly == Money(Decimal("100.00"))
+
+    def test_an_older_rate_is_uprated_a_whole_year_per_year(self) -> None:
+        """A rate published a year before today takes one 2.5% uprating.
+
+        CPI 2% under the triple-lock proxy (floor 2.5%, margin 0.5%)
+        uprates 200 to 205 a week: 10,660 a year.
+        """
+        result = self._run(
+            Decimal(1),
+            rates_from=date(2025, 1, 1),
+            overrides={
+                "inflation.cpi": Decimal("0.02"),
+                "policy.state_pension.uprating": TRIPLE_LOCK,
+            },
+        )
+        [period] = result.snapshots
+        assert period.persons[0].state_pension_income == Money(Decimal("10660.00"))
+        [assumed] = result.provenance.assumed_state_pensions
+        assert assumed.opening_weekly == Money(Decimal("205.00"))
+
+    def test_zero_fraction_assumes_none(self) -> None:
+        """A zero default fraction models no State Pension and records none."""
+        result = self._run(Decimal(0))
+        [period] = result.snapshots
+        assert period.persons[0].state_pension_income == ZERO
+        assert result.provenance.assumed_state_pensions == ()
+
+    def test_fraction_above_one_is_refused(self) -> None:
+        """The fraction is a share of the full rate: [0, 1] only."""
+        fraction = Decimal("1.5")
+        with pytest.raises(EngineError, match="default_fraction must lie"):
+            self._run(fraction)
+
+    def test_a_forecast_records_no_assumption(self) -> None:
+        """A stated forecast is the amount; nothing is assumed."""
+        plan = household_of(
+            person_of(
+                (),
+                date_of_birth=date(1960, 1, 1),
+                retire_at=60,
+                state_pension=sp_record(as_of=date(2026, 1, 1)),
+            )
+        )
+        result = run(
+            plan,
+            assumptions_with({"policy.state_pension.uprating": TRIPLE_LOCK}),
+            stub_region(state_pension=StubStatePension(annual=Money(Decimal(10000)))),
+            RunConfig(today=date(2026, 1, 1), horizon_end=date(2026, 12, 31)),
+        )
+        assert result.provenance.assumed_state_pensions == ()
 
 
 class TestActiveDBAccrual:

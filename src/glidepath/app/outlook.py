@@ -592,13 +592,17 @@ def _state_pension_lines(
         for position, person in enumerate(context.persons)
         if (quote := _state_pension_quote(person, context.provenance)) is not None
     ]
-    total = sum((annual for _, (annual, _) in quotes), _ZERO_MONEY)
+    total = sum((quote.annual for _, quote in quotes), _ZERO_MONEY)
     lines = []
-    for count, (position, (annual, start)) in enumerate(quotes, start=1):
+    for count, (position, quote) in enumerate(quotes, start=1):
         prefix = _FORECAST_PREFIXES[position]
+        source = (
+            "assumed full State Pension (no forecast entered)"
+            if quote.assumed
+            else "State Pension forecast"
+        )
         sentence = (
-            f"{prefix} State Pension forecast adds {_pounds(annual)}"
-            f" a year from {start}"
+            f"{prefix} {source} adds {_pounds(quote.annual)} a year from {quote.start}"
         )
         if count == len(quotes) and annuity_income is not None:
             combined = annuity_income + total
@@ -607,21 +611,34 @@ def _state_pension_lines(
     return lines
 
 
+@dataclass(frozen=True)
+class _StatePensionQuote:
+    """One person's State Pension as the card quotes it."""
+
+    annual: Money
+    start: str
+    assumed: bool
+
+
 def _state_pension_quote(
     person: Person, provenance: RunProvenance
-) -> tuple[Money, str] | None:
-    """One person's (annual amount, start-age phrase), or ``None``.
+) -> _StatePensionQuote | None:
+    """One person's State Pension quote, or ``None``.
 
     The DWP forecast states today's rates as of its own date; a stale
     forecast is quoted as the run opened it — the §4.8 roll-forward
     the engine disclosed — so the card and the projection uprate the
     same way. Deferral-uplifted and protected payment included; the
-    start age keeps the timetable's month-level precision. ``None``
-    without a usable forecast.
+    start age keeps the timetable's month-level precision. A record
+    without a forecast is quoted from the full rate the run assumed
+    (planning §4.13), flagged so the card names the assumption.
+    ``None`` when no State Pension is modelled.
     """
     record = person.state_pension
     if record is None:
         return None
+    if record.forecast_weekly_amount is None:
+        return _assumed_quote(person, provenance)
     try:
         entitlement = UkStatePensionScheme.from_shipped_data().entitlement(
             record, person.date_of_birth.value
@@ -635,7 +652,28 @@ def _state_pension_quote(
         base = weekly * _WEEKS_PER_YEAR
     annual = base * (_ONE + entitlement.deferral_uplift)
     start = _age_phrase(person.date_of_birth.value, entitlement.start_date)
-    return annual, start
+    return _StatePensionQuote(annual=annual, start=start, assumed=False)
+
+
+def _assumed_quote(
+    person: Person, provenance: RunProvenance
+) -> _StatePensionQuote | None:
+    """The full-rate State Pension the run assumed for ``person`` (§4.13).
+
+    Read from the run's own record of the assumption — the rate it
+    opened with, scaled and uprated — so the card never re-derives it;
+    ``None`` when the run assumed none (a zero default fraction).
+    """
+    for assumed in provenance.assumed_state_pensions:
+        if assumed.person == person.id:
+            annual = (
+                assumed.opening_weekly
+                * _WEEKS_PER_YEAR
+                * (_ONE + assumed.deferral_uplift)
+            )
+            start = _age_phrase(person.date_of_birth.value, assumed.start_date)
+            return _StatePensionQuote(annual=annual, start=start, assumed=True)
+    return None
 
 
 def _rolled_forecast_weekly(person: Person, provenance: RunProvenance) -> Money | None:

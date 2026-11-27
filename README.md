@@ -41,7 +41,8 @@ What it models today (UK, single or couple):
 - **Defined benefit pensions** — deferred entitlements or active
   CARE-style accrual, with revaluation, early/late factors and
   commutation; **state pension** from your official DWP forecast,
-  including deferral.
+  including deferral — or, until you enter one, the full new State
+  Pension from State Pension age, labelled as an assumption.
 - **Tax** — rUK and Scottish income tax from verified 2026/27 data
   files; pension allowances (AA/taper/MPAA, lump-sum allowance).
 - **Couples** — an optional partner, modelled end to end: one pooled

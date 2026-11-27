@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from glidepath.core.periods import Period
     from glidepath.core.provenance import Assumption, Decision, Fact
     from glidepath.core.returns import PeriodReturns
+    from glidepath.core.state_pension import AssumedStatePension
     from glidepath.core.tax import TaxResult
     from glidepath.core.wrappers import WrapperKindId
 
@@ -344,6 +345,11 @@ class RunProvenance:
     wrapper balances and the state pension forecast's weekly rates —
     empty when every such fact was stated within a whole month of the
     run start.
+
+    ``assumed_state_pensions`` lists, in person order, every state
+    pension the run assumed at the full rate for a record without a
+    forecast (planning §4.13) — the amount opened with and what it was
+    built from — so the assumption is named wherever results are shown.
     """
 
     facts: tuple[LabelledFact, ...]
@@ -352,6 +358,7 @@ class RunProvenance:
     region_data_version: str
     seed: int | None
     balance_roll_forwards: tuple[BalanceRollForward, ...] = ()
+    assumed_state_pensions: tuple[AssumedStatePension, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

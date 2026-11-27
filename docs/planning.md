@@ -815,25 +815,34 @@ from State Pension age.** Supersedes in part §5.1's "the forecast is
 the only route to an amount" (#97). The forecast stays the only
 *fact* route and nothing is derived from an NI record, but a person
 with no forecast now gets a default assumption instead of no State
-Pension: the full new State Pension weekly rate, starting at the State
-Pension age `age_rules.toml` gives for their date of birth and uprated
-by the existing uprating assumption. It carries `DEFAULT_ASSUMPTION`
-provenance, shows in "Stated vs assumed", and the results name it
-("assumes the full new State Pension from 67 — add your forecast to
-replace it"). Entering a forecast replaces it; an explicit "no State
-Pension" choice in Detailed models none; a protected payment still
-needs a forecast. The full rate returns to the tax-year data files
-with `verified_on` and sources (#97 removed the `[state_pension]`
-table because nothing read it). **Why:** a plan with no State Pension
-understates retirement income for most UK users, and asking for the
-forecast up front is the friction Simple removes. **Accepted cost:**
-the full rate overstates income for anyone with National Insurance
-gaps or a contracted-out history — the reason #97 made the forecast
-authoritative — so the assumption is always labelled as one, with the
-forecast as the remedy. **Saved plans:** a plan-document migration
-records an explicit "no State Pension" for every saved person without
-a State Pension record, so saved plans project exactly as before; only
-persons added after the change get the assumption.
+Pension: the full new State Pension weekly rate from the tax-year
+data file, starting at the State Pension age `age_rules.toml` gives
+for their date of birth, scaled by `state_pension.default_fraction`
+(default 1) and uprated by the existing uprating assumption. The run
+records it on its provenance (`AssumedStatePension`), it shows in
+"Stated vs assumed", and the outlook card names it ("assumed full
+State Pension (no forecast entered)"). Entering a forecast replaces
+it; an explicit "No — leave the State Pension out" choice models none;
+deferral applies to either; a protected payment still needs a
+forecast. The full rate returns to the tax-year data files with
+`verified_on` and sources (#97 removed the `[state_pension]` table
+because nothing read it). **Representation:** a state pension record
+*without a forecast* is the assumed full rate, and *no record* is no
+State Pension — the facts form writes the former for a blank section
+and the latter only for the explicit choice. **Why:** a plan with no
+State Pension understates retirement income for most UK users, and
+asking for the forecast up front is the friction Simple removes.
+**Accepted cost:** the full rate overstates income for anyone with
+National Insurance gaps or a contracted-out history — the reason #97
+made the forecast authoritative — so the assumption is always
+labelled as one, with the forecast as the remedy. **Saved plans:**
+no migration and no schema change — a saved person without a record
+still has no State Pension (the form shows the leave-out choice), so
+saved plans project exactly as before; pre-#97 records without a
+forecast, which could not project at all, now take the assumed rate.
+**Rejected:** making *no record* mean the assumption, with a new
+leave-out field and a migration to preserve saved plans — more schema
+and the same outcome.
 
 **Decision: a plan says what it leaves out.** Without a spending
 need, nothing is withdrawn in retirement (the engine draws only
@@ -1188,16 +1197,20 @@ year's accrual is measured; a stream already in payment at the
 period open generates no further input amounts.
 
 State pension: the official DWP forecast **is the fact and the only
-route to an amount** (#97) — superseded in part by §4.13 (roadmap
-11.5): with no forecast, the full new State Pension from State Pension
-age is assumed as a labelled default. The forecast is authoritative,
-free, and instant to
-obtain from gov.uk/check-state-pension, so the model never re-computes
-what DWP has already computed: there is no qualifying-years derivation,
-and a record without a forecast is refused with a clear demand for one
-(the facts form requires the forecast whenever the section is filled
-in; pre-#97 plans that stored qualifying years migrate by dropping
-those fields and fail projection with the same demand). Any protected
+fact route to an amount** (#97). It is authoritative, free, and
+instant to obtain from gov.uk/check-state-pension, so the model never
+re-computes what DWP has already computed: there is no
+qualifying-years derivation. A record without a forecast assumes the
+full new State Pension instead (§4.13, roadmap 11.5) — the rate
+published in the tax-year file for the latest tax year starting on or
+before the run's `today`, scaled by `state_pension.default_fraction`,
+uprated by one whole year of the uprating rule per tax year since, and
+recorded on the run's provenance as an `AssumedStatePension` so every
+screen names it; a person with no record has no state pension. The
+facts form writes a forecast-less record for a blank section and no
+record only for the explicit leave-out choice; pre-#97 plans that
+stored qualifying years migrate by dropping those fields and now take
+the assumed full rate. Any protected
 payment is recorded separately because it uprates by CPI only, not the
 full uprating policy. Conventions (roadmap 4.3): the forecast weekly
 amount is the DWP total, of which `protected_payment` is the CPI-only
@@ -1782,7 +1795,7 @@ header). Loader rules: money/rates are TOML **strings** parsed to
 validation into frozen dataclasses, unknown keys error.
 
 ```toml
-schema_version = 5
+schema_version = 6
 
 [meta]
 tax_year    = "2026/27"
@@ -1871,12 +1884,19 @@ rates = [  # aligned positionally with the rUK bands (dividends are UK-wide)
 transferable_amount         = "1260"  # 10% of the PA, rounded up to the nearest £10
 recipient_top_band_ruk      = "basic"
 recipient_top_band_scotland = "intermediate"
+
+# Full new State Pension: the §4.13 default for a person without a
+# DWP forecast (roadmap 11.5).
+[state_pension]
+full_weekly_rate = "241.30"
 ```
 
-There is no `[state_pension]` table: the state pension amount is the
-user's stated DWP forecast, never a shipped rate (#97, §5.1). Roadmap
-11.5 brings one back to hold the full new State Pension rate behind
-the §4.13 default assumption.
+The `[state_pension]` table holds only `full_weekly_rate`, the full new
+State Pension for the year (data-file schema v6, roadmap 11.5). It is
+read solely as the §4.13 default for a person without a DWP forecast —
+the forecast, when stated, is the amount (#97, §5.1) — and is carried,
+never indexed, into synthesized future years: the engine uprates it
+under the state pension uprating assumption.
 
 `age_rules.toml` holds the durable, effective-dated policy parameters that
 are not re-set each tax year: NMPA (55; 57 from 2028-04-06), the SPA
@@ -2090,7 +2110,7 @@ the GIA/cash wrappers bring these into the model).
 
 | Figure | Value | Source |
 | --- | --- | --- |
-| Full new state pension | **£241.30/week** (£12,547.60/yr) 2026/27 | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [DWP rates 2026–27](https://www.gov.uk/government/publications/benefit-and-pension-rates-2026-to-2027/proposed-benefit-and-pension-rates-2026-to-2027) |
+| Full new state pension | **£241.30/week** (£12,547.60/yr) 2026/27 — re-verified 2026-11-27; shipped in the tax-year file's `[state_pension]` table as the §4.13 default for a person without a forecast | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [DWP rates 2026–27](https://www.gov.uk/government/publications/benefit-and-pension-rates-2026-to-2027/proposed-benefit-and-pension-rates-2026-to-2027) |
 | April 2026 uprating | 4.8%, earnings-driven (AWE 4.8% > CPI 3.8% > 2.5%) | [Government Actuary report, 2026 up-rating order](https://www.gov.uk/government/publications/report-to-parliament-on-the-2026-re-rating-and-up-rating-orders/report-by-the-government-actuary-on-the-draft-social-security-benefits-up-rating-order-2026-and-the-draft-social-security-contributions-regulation) |
 | Full basic (old) state pension | £184.90/week (context) | DWP rates page |
 | Qualifying years | 35 full (pre-2016 contracted-out caveats); 10 minimum — context only: the model never derives an amount from qualifying years (#97, §5.1) | [what you'll get](https://www.gov.uk/new-state-pension/what-youll-get); [new state pension](https://www.gov.uk/new-state-pension) |
@@ -2173,6 +2193,12 @@ that strategy runs or the plan holds a GIA/cash wrapper.*
 | --- | --- | --- |
 | `db.survivor_fraction` | 50% | No statutory fraction for private DB schemes — scheme rules govern (§6, PPF); the major public-service legacy schemes all pay 50%. Overridable per scheme via the DB pension's `survivor_fraction` fact ([PPF on DB beliefs](https://www.ppf.co.uk/blog-posts/defined-benefit-pension-beliefs)) |
 | `spending.survivor_multiplier` | 0.70 × household spending | PLSA/Pensions UK Retirement Living Standards single-vs-couple budget ratios — £13,900/£22,500 = 0.62 (Minimum), £32,700/£45,400 = 0.72 (Moderate), £45,400/£62,700 = 0.72 (Comfortable), retrieved 2026-08-12 ([retirementlivingstandards.org.uk](https://www.retirementlivingstandards.org.uk/)); 0.70 sits just under the Moderate/Comfortable ratio (§9 open question 9, resolved) |
+
+### State Pension without a forecast
+
+| Key | Default | Basis |
+| --- | --- | --- |
+| `state_pension.default_fraction` | 1 × the full new State Pension | A person with no DWP forecast entered is assumed to receive the full new State Pension (the tax-year file's published rate, §6) from State Pension age (§4.13). Optimistic for anyone with National Insurance gaps or contracted-out years; entering the forecast from [gov.uk/check-state-pension](https://www.gov.uk/check-state-pension) replaces it |
 
 ## 8. Phased roadmap — issue basis
 
@@ -2949,16 +2975,19 @@ widgets in `glidepath.gui` stay thin so a web shell can be added later.
   errored rows open expanded; entity ids and row removal behave as
   today.*
 - [ ] 11.5 Assumed full State Pension when no forecast is entered —
-  *a person without a forecast gets a `DEFAULT_ASSUMPTION`: the full
-  new State Pension weekly rate (back in the tax-year data files with
-  `verified_on`, sources and a §6 row) from the State Pension age
-  `age_rules.toml` gives for their date of birth, uprated by the
-  existing assumption; it shows in "Stated vs assumed" and the results
-  name it with the forecast as the remedy; a forecast replaces it; an
-  explicit "no State Pension" choice models none; a protected payment
-  still needs a forecast; a plan-document migration records "no State
-  Pension" for every saved person without a record, so saved plans
-  project exactly as before (§4.13, superseding in part §5.1/#97).*
+  *a state pension record without a forecast takes a
+  `DEFAULT_ASSUMPTION`: the full new State Pension weekly rate (back in
+  the tax-year data files, schema v6, with `verified_on`, sources and
+  the §6 row) for the latest tax year starting on or before `today`,
+  scaled by `state_pension.default_fraction` and uprated a whole year
+  per tax year since, from the State Pension age `age_rules.toml`
+  gives for the date of birth; the run records it as an
+  `AssumedStatePension` and the outlook card names it; a forecast
+  replaces it; a blank facts-form section writes the forecast-less
+  record and the explicit "No — leave the State Pension out" choice
+  writes none; a protected payment still needs a forecast; saved plans
+  project exactly as before with no migration (§4.13, superseding in
+  part §5.1/#97).*
 
 ## 9. Open questions
 

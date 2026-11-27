@@ -285,10 +285,11 @@ _MEMBERSHIP_NEEDS_RATE = (
     "enter the accrual rate to record active membership; blank means deferred"
 )
 _MEMBERSHIP_NEEDS_SALARY = "active membership needs the pensionable salary"
-_FORECAST_REQUIRED = (
-    "an official DWP forecast is required — free and instant from "
-    "gov.uk/check-state-pension; leave the whole section blank to skip "
-    "the state pension"
+_LEFT_OUT_WITH_DETAILS = (
+    "leave the forecast and deferral blank to leave the State Pension out"
+)
+_PROTECTED_NEEDS_FORECAST = (
+    "a protected payment is part of the DWP forecast — enter the forecast too"
 )
 _MULTIPLIERS_NEED_SPENDING = (
     "enter the annual spending need for the stage multipliers to scale"
@@ -386,6 +387,11 @@ REQUIRED_MARKER: Final = "*"
 """The marker a shell appends to a required field's label (10.2)."""
 
 _SEXES: Mapping[str, Sex] = {"female": Sex.FEMALE, "male": Sex.MALE}
+STATE_PENSION_INCLUDED_KEY: Final = "included"
+"""The state pension section's include-or-leave-out choice (§4.13)."""
+STATE_PENSION_LEFT_OUT: Final = "no"
+"""The choice token that leaves the person's State Pension out."""
+_STATE_PENSION_LEFT_OUT_OPTIONS: Mapping[str, bool] = {STATE_PENSION_LEFT_OUT: True}
 _RESIDENCIES: Mapping[str, TaxResidencyId] = {
     str(RUK_RESIDENCY): RUK_RESIDENCY,
     str(SCOTLAND_RESIDENCY): SCOTLAND_RESIDENCY,
@@ -493,10 +499,6 @@ class _SectionReader:
     def raw(self, field_key: str) -> str:
         """The stripped raw text for ``field_key`` (empty when absent)."""
         return self._values.get(field_key, "").strip()
-
-    def any_entered(self) -> bool:
-        """Whether the user typed anything at all into this section."""
-        return any(value.strip() for value in self._values.values())
 
     def date_value(self, field_key: str, *, required: bool = False) -> date | None:
         """An ISO date, or ``None`` when blank or unparsable."""
@@ -686,16 +688,26 @@ def _withdrawal_strategy_from(
 
 
 def _state_pension_from(reader: _SectionReader) -> StatePensionRecord | None:
-    """The state pension record, or ``None`` when wholly blank (§5.1)."""
-    if not reader.any_entered():
-        return None
+    """The state pension record, or ``None`` when left out (§4.13).
+
+    A blank forecast is not a blank State Pension: the record then has
+    no forecast and the engine assumes the full rate (planning §4.13).
+    Only the explicit leave-out choice models none.
+    """
+    left_out = reader.choice(
+        STATE_PENSION_INCLUDED_KEY, _STATE_PENSION_LEFT_OUT_OPTIONS
+    )
     forecast = reader.fact_of(reader.money("forecast_weekly_amount"), "forecast_as_of")
     protected = reader.fact_of(reader.money("protected_payment"), "forecast_as_of")
     deferral = reader.decimal_value("deferral_years")
     if not reader.ok:
         return None
-    if forecast is None:
-        reader.error("forecast_weekly_amount", _FORECAST_REQUIRED)
+    if left_out:
+        if forecast is not None or protected is not None or deferral is not None:
+            reader.error(STATE_PENSION_INCLUDED_KEY, _LEFT_OUT_WITH_DETAILS)
+        return None
+    if forecast is None and protected is not None:
+        reader.error("protected_payment", _PROTECTED_NEEDS_FORECAST)
         return None
     try:
         return StatePensionRecord(
@@ -1382,9 +1394,15 @@ def _retirement_income_values(household: Household) -> dict[str, str]:
 
 
 def _state_pension_values(record: StatePensionRecord | None) -> dict[str, str]:
-    """The state pension section's raw text, empty when skipped."""
+    """The state pension section's raw text (§4.13).
+
+    No record is the explicit leave-out choice; a record without a
+    forecast (the assumed full rate) renders as a blank section. A zero
+    deferral renders blank — its documented blank meaning — so a blank
+    section stays blank after a save and reload.
+    """
     if record is None:
-        return {}
+        return {STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT}
     forecast = record.forecast_weekly_amount
     protected = record.protected_payment
     # The form dates the forecast pair from one shared as_of field, so
@@ -1398,7 +1416,9 @@ def _state_pension_values(record: StatePensionRecord | None) -> dict[str, str]:
         "forecast_as_of": (
             "" if forecast_dated is None else forecast_dated.as_of.isoformat()
         ),
-        "deferral_years": str(record.deferral_years.value),
+        "deferral_years": (
+            "" if record.deferral_years.value == 0 else str(record.deferral_years.value)
+        ),
     }
 
 
@@ -1960,23 +1980,39 @@ def _retirement_income_section() -> SectionSpec:
 
 
 def _state_pension_section() -> SectionSpec:
-    """The state pension section (official DWP forecast only, §5.1)."""
+    """The state pension section (DWP forecast, else assumed full rate, §4.13)."""
     return SectionSpec(
         key="state_pension",
         title="State pension",
         description=(
             "Your official DWP forecast is the fact — free and instant "
-            "from gov.uk/check-state-pension — and the only route to a "
-            "state pension amount. A forecast dated a whole month or "
-            "more before today is uprated to today at the assumed "
-            "uprating policy. Leave the whole section blank to skip "
-            "the state pension."
+            "from gov.uk/check-state-pension. Leave it blank and the full "
+            "new State Pension is assumed from State Pension age, shown "
+            "as an assumption; enter the forecast to replace it, or "
+            "choose to leave the State Pension out. A forecast dated a "
+            "whole month or more before today is uprated to today at the "
+            "assumed uprating policy."
         ),
         fields=(
             FieldSpec(
+                key=STATE_PENSION_INCLUDED_KEY,
+                label="Include a State Pension",
+                kind=FieldKind.CHOICE,
+                choices=(
+                    ChoiceOption(
+                        value="",
+                        label="Yes — your forecast, or the full rate if blank",
+                    ),
+                    ChoiceOption(
+                        value=STATE_PENSION_LEFT_OUT,
+                        label="No — leave the State Pension out",
+                    ),
+                ),
+            ),
+            FieldSpec(
                 key="forecast_weekly_amount",
                 label="Forecast weekly amount",
-                hint="from your DWP forecast, e.g. 230.25",
+                hint="from your DWP forecast, e.g. 230.25; blank assumes the full rate",
             ),
             FieldSpec(
                 key="protected_payment",

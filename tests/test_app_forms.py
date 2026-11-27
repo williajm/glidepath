@@ -15,6 +15,8 @@ import pytest
 from glidepath.app import (
     ENTITY_ID_KEY,
     OWNER_KEY,
+    STATE_PENSION_INCLUDED_KEY,
+    STATE_PENSION_LEFT_OUT,
     FactsFormData,
     FieldKind,
     FormError,
@@ -212,9 +214,10 @@ class TestFormSpec:
         }
 
     def test_state_pension_section_covers_the_forecast(self) -> None:
-        """The forecast facts and the deferral choice are present (#97)."""
+        """The leave-out choice, forecast facts and deferral are present."""
         keys = {spec.key for spec in build_facts_form_view_model().state_pension.fields}
         assert keys == {
+            STATE_PENSION_INCLUDED_KEY,
             "forecast_weekly_amount",
             "protected_payment",
             "forecast_as_of",
@@ -386,7 +389,8 @@ class TestPersonParsing:
         assert person.tax_residency == RUK_RESIDENCY
         assert person.sex_for_longevity is None
         assert person.employment_income is None
-        assert person.state_pension is None
+        assert person.state_pension is not None
+        assert person.state_pension.forecast_weekly_amount is None
         assert household.spending is None
 
     def test_full_person_facts(self) -> None:
@@ -1163,7 +1167,7 @@ class TestAnnuityPurchaseParsing:
 
 
 class TestStatePensionParsing:
-    """The state pension section is optional as a whole."""
+    """A blank section assumes the full rate; leaving it out is explicit."""
 
     def test_forecast_facts_parse(self) -> None:
         """The forecast pair parses with its shared as_of date."""
@@ -1187,15 +1191,68 @@ class TestStatePensionParsing:
         assert record.protected_payment.as_of == date(2026, 6, 1)
         assert record.deferral_years.value == Decimal("1.25")
 
-    def test_blank_section_means_not_modelled(self) -> None:
-        """All-blank state pension values leave the record unset."""
+    def test_blank_section_assumes_the_full_rate(self) -> None:
+        """All-blank values write a forecast-less record (§4.13)."""
         household = parse(
             form_data(
                 person=person_values(),
                 state_pension={"forecast_weekly_amount": "", "deferral_years": " "},
             )
         )
+        record = household.persons[0].state_pension
+        assert record is not None
+        assert record.forecast_weekly_amount is None
+        assert record.protected_payment is None
+        assert record.deferral_years.value == Decimal(0)
+
+    def test_absent_section_assumes_the_full_rate(self) -> None:
+        """A section the shell never rendered reads exactly like a blank one."""
+        household = parse(form_data(person=person_values()))
+        record = household.persons[0].state_pension
+        assert record is not None
+        assert record.forecast_weekly_amount is None
+
+    def test_leave_out_choice_models_none(self) -> None:
+        """Only the explicit choice leaves the State Pension out."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                state_pension={STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT},
+            )
+        )
         assert household.persons[0].state_pension is None
+
+    def test_leave_out_with_a_forecast_is_refused(self) -> None:
+        """A forecast contradicts leaving the State Pension out."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                state_pension={
+                    STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT,
+                    "forecast_weekly_amount": "230.25",
+                },
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "state_pension"
+        assert error.field_key == STATE_PENSION_INCLUDED_KEY
+
+    def test_unknown_leave_out_token_is_refused(self) -> None:
+        """The choice accepts only its own token."""
+        result = parse_facts_form(
+            form_data(
+                person=person_values(),
+                state_pension={STATE_PENSION_INCLUDED_KEY: "maybe"},
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.field_key == STATE_PENSION_INCLUDED_KEY
 
     def test_deferral_defaults_to_zero(self) -> None:
         """Deferral defaults to none when blank."""
@@ -1209,21 +1266,15 @@ class TestStatePensionParsing:
         assert record is not None
         assert record.deferral_years.value == Decimal(0)
 
-    def test_entered_section_without_a_forecast_is_refused(self) -> None:
-        """The DWP forecast is the only route (§5.1) — demanded by field."""
-        result = parse_facts_form(
-            form_data(
-                person=person_values(),
-                state_pension={"deferral_years": "1"},
-            ),
-            recorded_on=RECORDED,
-            today=TODAY,
+    def test_deferral_without_a_forecast_defers_the_assumed_rate(self) -> None:
+        """Deferral applies to the assumed full rate too (§4.13)."""
+        household = parse(
+            form_data(person=person_values(), state_pension={"deferral_years": "1"})
         )
-        assert result.household is None
-        [error] = result.errors
-        assert error.section == "state_pension"
-        assert error.field_key == "forecast_weekly_amount"
-        assert "check-state-pension" in error.message
+        record = household.persons[0].state_pension
+        assert record is not None
+        assert record.forecast_weekly_amount is None
+        assert record.deferral_years.value == Decimal(1)
 
 
 class TestPartnerParsing:
@@ -1265,16 +1316,16 @@ class TestPartnerParsing:
         assert error.field_key == "date_of_birth"
 
     def test_partner_state_pension_errors_land_in_their_section(self) -> None:
-        """The partner's forecast demand errors under its own section."""
+        """The partner's State Pension errors under its own section."""
         result = parse_facts_form(
-            couple_form_data(partner_state_pension={"deferral_years": "1"}),
+            couple_form_data(partner_state_pension={"protected_payment": "12.50"}),
             recorded_on=RECORDED,
             today=TODAY,
         )
         assert result.household is None
         [error] = result.errors
         assert error.section == "partner_state_pension"
-        assert error.field_key == "forecast_weekly_amount"
+        assert error.field_key == "protected_payment"
 
     def test_partner_wrapper_errors_use_owner_scoped_indexes(self) -> None:
         """The row index counts within the partner's rows, not combined."""
@@ -1837,7 +1888,7 @@ class TestValidationMessages:
         assert error.field_key == ""
 
     def test_protected_payment_without_forecast_is_rejected(self) -> None:
-        """A protected payment alone still demands the forecast (§5.1)."""
+        """A protected payment is a slice of the forecast, so needs one (§5.1)."""
         result = parse_facts_form(
             form_data(
                 person=person_values(),
@@ -1849,7 +1900,7 @@ class TestValidationMessages:
         assert result.household is None
         [error] = result.errors
         assert error.section == "state_pension"
-        assert error.field_key == "forecast_weekly_amount"
+        assert error.field_key == "protected_payment"
 
     def test_protected_payment_beyond_the_forecast_is_rejected(self) -> None:
         """The record's cross-field rule surfaces on the section (§5.1)."""
@@ -2770,10 +2821,50 @@ class TestFormDataFromHousehold:
         assert rendered_person.person["employment_income"] == ""
         assert rendered_person.person["sex_for_longevity"] == ""
         assert rendered.spending == {}
-        assert rendered_person.state_pension == {}
+        assert not any(rendered_person.state_pension.values())
         assert rendered.wrappers == ()
         assert rendered.db_pensions == ()
         assert rendered.annuity_purchases == ()
+
+    def test_assumed_state_pension_round_trips_as_blank(self) -> None:
+        """A forecast-less record renders blank and parses back the same."""
+        household = parse(form_data(person=person_values()))
+        rendered = facts_form_data_from_household(household)
+        [rendered_person] = rendered.persons
+        assert not any(rendered_person.state_pension.values())
+        reparsed = parse(rendered)
+        record = reparsed.persons[0].state_pension
+        assert record is not None
+        assert record.forecast_weekly_amount is None
+
+    def test_left_out_state_pension_round_trips_as_the_choice(self) -> None:
+        """No record renders as the leave-out choice, never as blank."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                state_pension={STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT},
+            )
+        )
+        rendered = facts_form_data_from_household(household)
+        [rendered_person] = rendered.persons
+        assert rendered_person.state_pension == {
+            STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT
+        }
+        assert parse(rendered).persons[0].state_pension is None
+
+    def test_deferral_round_trips_when_set(self) -> None:
+        """A non-zero deferral renders as its value; zero renders blank."""
+        household = parse(
+            form_data(
+                person=person_values(),
+                state_pension={
+                    "forecast_weekly_amount": "230.25",
+                    "deferral_years": "1",
+                },
+            )
+        )
+        [rendered_person] = facts_form_data_from_household(household).persons
+        assert rendered_person.state_pension["deferral_years"] == "1"
 
 
 class TestMarriageAllowanceClaim:

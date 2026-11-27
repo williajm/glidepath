@@ -9,6 +9,18 @@ in the release PR and becomes the GitHub Release notes verbatim.
 
 ## [Unreleased]
 
+### Added
+
+- A person without a DWP State Pension forecast is now assumed to get
+  the full new State Pension (£241.30 a week in 2026/27) from their
+  State Pension age, instead of none. It is labelled as an assumption
+  everywhere: "Stated vs assumed" lists it, and the outlook card says
+  "assumed full State Pension (no forecast entered)". Entering your
+  forecast replaces it, and a new "Include a State Pension" choice
+  can leave it out. Saved plans are unchanged: a saved person with no
+  State Pension still has none, and opens with that choice selected
+  (#237).
+
 ### Changed
 
 - Planning notes and the state pension uprating default's basis now

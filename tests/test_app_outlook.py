@@ -326,9 +326,21 @@ class TestSentenceGating:
         assert "State Pension forecast adds £11,973 a year from age 67." in panel.detail
         assert "all told" not in panel.detail
 
-    def test_without_a_forecast_the_state_pension_stays_silent(self) -> None:
-        """A legacy record with no official forecast quotes nothing."""
+    def test_without_a_forecast_the_assumed_full_rate_is_named(self) -> None:
+        """A record with no forecast quotes the full rate, labelled (§4.13).
+
+        £241.30 a week (the shipped 2026/27 rate) x 52 = £12,547.60.
+        """
         plan = household(state_pension=state_pension_record(forecast=None))
+        panel = build_outlook_panel(outlook_state(plan))
+        assert (
+            "Your assumed full State Pension (no forecast entered) adds"
+            " £12,548 a year from age 67"
+        ) in panel.detail
+
+    def test_without_a_record_the_state_pension_stays_silent(self) -> None:
+        """No record is the explicit leave-out choice: nothing is quoted."""
+        plan = household(state_pension=None)
         panel = build_outlook_panel(outlook_state(plan))
         assert "State Pension" not in panel.detail
 

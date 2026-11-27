@@ -77,9 +77,12 @@ HELP_GUIDE_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
             "in error, is shown automatically. Dates can "
             "be typed or picked from the calendar assist, and the "
             '"as of" dates on balances and your state pension forecast '
-            "default to today when left blank. Your state pension needs "
-            "your official DWP forecast (gov.uk/check-state-pension) — "
-            "the app never re-derives what DWP has already computed. "
+            "default to today when left blank. Your state pension comes "
+            "from your official DWP forecast (gov.uk/check-state-pension) "
+            "— the app never re-derives what DWP has already computed; "
+            "leave it blank and the full new State Pension is assumed "
+            "from your State Pension age, shown as an assumption, or "
+            "choose to leave the State Pension out. "
             'Press "Save facts and project" to run the '
             "projection — if anything cannot be read, the message under "
             "the buttons and a note under each affected field say what "

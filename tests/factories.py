@@ -23,6 +23,7 @@ from glidepath.core import (
     ContributionTaxTreatment,
     ContributionTerms,
     Fact,
+    FullRateEntitlement,
     GrowthTaxTreatment,
     HouseholdAssessment,
     MemberContributionOutcome,
@@ -33,6 +34,7 @@ from glidepath.core import (
     ReliefMechanic,
     SchemeInput,
     StatePensionEntitlement,
+    StatePensionRate,
     StatePensionRecord,
     TaxInput,
     TaxLine,
@@ -212,6 +214,15 @@ class NoStatePension:
             annual_amount=_ZERO,
             cpi_uprated_annual_amount=_ZERO,
             deferral_uplift=Decimal(0),
+        )
+
+    def full_rate_entitlement(
+        self, record: StatePensionRecord, date_of_birth: date, on: date
+    ) -> FullRateEntitlement:
+        """A zero full rate, published from ``on``."""
+        return FullRateEntitlement(
+            entitlement=self.entitlement(record, date_of_birth),
+            rate=StatePensionRate(weekly=_ZERO, rates_from=on, label="stub"),
         )
 
 

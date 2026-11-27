@@ -1,13 +1,21 @@
 """State pension records and the region boundary (roadmap 4.3; planning §5.1).
 
 The core holds the user's :class:`StatePensionRecord` — the official
-DWP forecast is the fact and the only route to an amount (planning
-§5.1); the model never re-derives what DWP has already computed — and
-the :class:`StatePensionScheme` protocol (planning §4.2) a region
+DWP forecast is the only *fact* route to an amount (planning §5.1);
+the model never re-derives what DWP has already computed — and the
+:class:`StatePensionScheme` protocol (planning §4.2) a region
 implements over its data files. The region answers with a
 :class:`StatePensionEntitlement`: an exact start date (state pension
 age plus any deferral, an income entitlement per §4.1) and annual
 amounts split by uprating treatment, in the rates the forecast states.
+
+A record without a forecast assumes the region's full rate instead
+(planning §4.13): the region answers with a
+:class:`FullRateEntitlement` — the full rate as published for a stated
+date — and the engine scales it by the
+``state_pension.default_fraction`` assumption and uprates it to the
+run start, recording the result as an :class:`AssumedStatePension` so
+the assumption is always named, never silent.
 
 Uprating is the engine's concern, governed by the
 ``policy.state_pension.uprating`` assumption (planning §7) parsed here
@@ -31,6 +39,7 @@ from glidepath.core.money import Money
 if TYPE_CHECKING:
     from datetime import date
 
+    from glidepath.core.entities import EntityId
     from glidepath.core.provenance import Decision, Fact
 
 _ZERO = Decimal(0)
@@ -43,16 +52,18 @@ _UPRATING_CONTEXT = "policy.state_pension.uprating"
 class StatePensionRecord:
     """One person's state pension position (planning §5.1).
 
-    The official DWP forecast is the fact and the only route to an
-    amount — free and instant from gov.uk/check-state-pension — so the
-    model never re-derives what DWP has already computed;
+    The official DWP forecast is the only *fact* route to an amount —
+    free and instant from gov.uk/check-state-pension — so the model
+    never re-derives what DWP has already computed;
     ``protected_payment`` is the slice of that forecast that uprates by
     CPI only (a pre-2016 transitional amount), so it may not appear
-    without one. ``forecast_weekly_amount`` is optional only so plans
-    saved before the forecast became mandatory still load; a region
-    refuses to answer for a record without one. ``deferral_years``
-    shifts the start past state pension age in whole months and earns
-    the region's deferral increments.
+    without one. A record whose ``forecast_weekly_amount`` is ``None``
+    assumes the region's full rate, scaled by the
+    ``state_pension.default_fraction`` assumption (planning §4.13); a
+    person with no record at all has no state pension modelled.
+    ``deferral_years`` shifts the start past state pension age in whole
+    months and earns the region's deferral increments, whichever route
+    supplies the amount.
     """
 
     forecast_weekly_amount: Fact[Money] | None
@@ -130,19 +141,93 @@ class StatePensionEntitlement:
             raise ValueError(msg)
 
 
+@dataclass(frozen=True, slots=True)
+class StatePensionRate:
+    """A region's published full state pension rate (planning §4.13).
+
+    ``weekly`` is the rate payable from ``rates_from`` — the start of
+    the period it was published for — and ``label`` names that period
+    for display (e.g. ``2026/27``). Rates published for a period before
+    the run start are uprated to it by the engine.
+    """
+
+    weekly: Money
+    rates_from: date
+    label: str
+
+    def __post_init__(self) -> None:
+        """Reject a negative rate and an unnamed period."""
+        if self.weekly < _ZERO_MONEY:
+            msg = "StatePensionRate.weekly must be non-negative"
+            raise ValueError(msg)
+        if not self.label:
+            msg = "StatePensionRate.label must not be empty"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class FullRateEntitlement:
+    """A region's full-rate answer for a record without a forecast (§4.13).
+
+    ``entitlement`` carries the start date and deferral uplift the
+    record earns, with the full rate as its policy-uprated amount and
+    no CPI-only slice; ``rate`` is the published rate it was built from,
+    in the rates of ``rate.rates_from``.
+    """
+
+    entitlement: StatePensionEntitlement
+    rate: StatePensionRate
+
+
+@dataclass(frozen=True, slots=True)
+class AssumedStatePension:
+    """The state pension a run assumed for one person (planning §4.13).
+
+    Recorded in the run's provenance whenever a record without a
+    forecast was given the region's full rate, so every screen can
+    name the assumption: ``full_weekly`` is the published rate for
+    ``rate_label``, ``fraction`` the ``state_pension.default_fraction``
+    applied, and ``opening_weekly`` the weekly amount the run opened
+    with — scaled, and uprated from ``rates_from`` to the run start.
+    ``start_date`` is when it begins paying (state pension age plus
+    any deferral) and ``deferral_uplift`` the increment fraction that
+    deferral earns on the rate payable then.
+    """
+
+    person: EntityId
+    full_weekly: Money
+    rate_label: str
+    rates_from: date
+    fraction: Decimal
+    opening_weekly: Money
+    start_date: date
+    deferral_uplift: Decimal = _ZERO
+
+
 class StatePensionScheme(Protocol):
     """Region-supplied state pension rules (planning §4.2).
 
     Turns a record into an entitlement using the region's data: the
     state pension age timetable and deferral increments from the age
-    rules. The amount itself is the record's stated DWP forecast — the
-    region computes no rates of its own (planning §5.1).
+    rules. A record's stated DWP forecast supplies the amount; a record
+    without one takes the region's published full rate (planning
+    §4.13).
     """
 
     def entitlement(
         self, record: StatePensionRecord, date_of_birth: date
     ) -> StatePensionEntitlement:
         """The record's entitlement in the rates the forecast states."""
+        ...
+
+    def full_rate_entitlement(
+        self, record: StatePensionRecord, date_of_birth: date, on: date
+    ) -> FullRateEntitlement:
+        """The full-rate entitlement for a record without a forecast.
+
+        Built from the latest full rate published for a period that
+        starts on or before ``on`` (the run's ``today``).
+        """
         ...
 
 

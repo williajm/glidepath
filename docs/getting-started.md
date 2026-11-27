@@ -115,6 +115,10 @@ required — leave anything else blank if it does not apply.
   [gov.uk/check-state-pension](https://www.gov.uk/check-state-pension),
   and any "protected payment" it shows. The app uses DWP's figure as
   stated — it never re-derives it.
+- No forecast to hand? Leave it blank: the full new State Pension is
+  assumed from your State Pension age and shown as an assumption until
+  you enter the forecast. If you won't get one, choose "No — leave the
+  State Pension out".
 
 **Each savings account ("wrapper")** — one entry per account
 
