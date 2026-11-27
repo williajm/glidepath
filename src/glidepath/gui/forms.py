@@ -13,6 +13,7 @@ rows and sections by the app layer's levels (roadmap 11.1) — a field
 holding a value, or an error, always shows.
 """
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QDate, Qt
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QCalendarWidget,
     QComboBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -37,6 +39,8 @@ from PySide6.QtWidgets import (
 
 from glidepath.app import (
     DATE_PICKER_TOOLTIP,
+    DONE_ROW_LABEL,
+    EDIT_ROW_LABEL,
     ENTITY_ID_KEY,
     HIDE_ADVANCED_LABEL,
     HIDE_DETAILS_LABEL,
@@ -55,6 +59,7 @@ from glidepath.app import (
     PlanEntityIds,
     SectionSpec,
     money_display_text,
+    row_summary,
     simple_view_shows,
 )
 from glidepath.gui.style import chevron_icon
@@ -474,6 +479,16 @@ class SectionForm(QGroupBox):
         self.refresh_view()
 
 
+@dataclass
+class _RowCard:
+    """One row's card: its frame, fields, summary line and edit toggle."""
+
+    frame: QFrame
+    form: SectionForm
+    summary: QLabel
+    toggle: QPushButton
+
+
 class RepeatableSection(QWidget):
     """A list of :class:`SectionForm` instances with add/remove controls.
 
@@ -481,6 +496,12 @@ class RepeatableSection(QWidget):
     user added), so deleting or reordering rows keeps every surviving
     entity's identity — the id travels with its row, never with its
     position (§4.3).
+
+    Each row is a card (roadmap 11.4): a one-line summary from the app
+    layer's :func:`~glidepath.app.row_summary` with Edit and Remove
+    actions, its fields shown only while it is open. A row the user
+    adds opens ready to type; loaded rows start closed; a row carrying
+    an error is opened so the error is seen.
     """
 
     def __init__(self, spec: SectionSpec, parent: QWidget | None = None) -> None:
@@ -490,6 +511,7 @@ class RepeatableSection(QWidget):
         self._view = FormView.DETAILED
         self._entries: list[QWidget] = []
         self._forms: list[SectionForm] = []
+        self._cards: list[_RowCard] = []
         self._entity_ids: list[str] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -499,28 +521,67 @@ class RepeatableSection(QWidget):
         self.add_button.clicked.connect(self.add_entry)
         layout.addLayout(_compact(self.add_button))
 
-    def add_entry(self, *, entity_id: str = "") -> SectionForm:
-        """Append one more section instance and return its form."""
-        container = QWidget(self)
+    def add_entry(self, *, entity_id: str = "", expanded: bool = True) -> SectionForm:
+        """Append one more section instance and return its form.
+
+        A row the user adds opens ready to type; loading passes
+        ``expanded=False`` so saved rows show as their summaries.
+        """
+        container = QFrame(self)
+        container.setObjectName("rowCard")
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
         form = SectionForm(self._spec, container)
+        form.setTitle("")
+        form.setFlat(True)
+        form_layout = form.layout()
+        if form_layout is not None:
+            form_layout.setContentsMargins(0, 0, 0, 0)
         form.set_view(self._view)
+        summary = QLabel("", container)
+        summary.setObjectName("rowSummary")
+        summary.setWordWrap(True)
+        toggle = QPushButton(DONE_ROW_LABEL, container)
         remove = QPushButton(self._spec.remove_label, container)
         remove.clicked.connect(lambda: self._remove_entry(container))
+        header = QHBoxLayout()
+        header.addWidget(summary, 1)
+        header.addWidget(toggle)
+        header.addWidget(remove)
+        container_layout.addLayout(header)
         container_layout.addWidget(form)
-        container_layout.addLayout(_compact(remove))
+        card = _RowCard(frame=container, form=form, summary=summary, toggle=toggle)
+        toggle.clicked.connect(
+            lambda: self.set_expanded(card.form, expanded=card.form.isHidden())
+        )
         self._list_layout.addWidget(container)
         self._entries.append(container)
         self._forms.append(form)
+        self._cards.append(card)
         self._entity_ids.append(entity_id)
+        self.set_expanded(form, expanded=expanded)
         return form
+
+    def _card(self, form: SectionForm) -> _RowCard:
+        """The card holding ``form``."""
+        return self._cards[self._forms.index(form)]
+
+    def is_expanded(self, form: SectionForm) -> bool:
+        """Whether ``form``'s row shows its fields."""
+        return not self._card(form).form.isHidden()
+
+    def set_expanded(self, form: SectionForm, *, expanded: bool) -> None:
+        """Open a row's fields, or close it to its refreshed summary."""
+        card = self._card(form)
+        card.form.setVisible(expanded)
+        card.toggle.setText(DONE_ROW_LABEL if expanded else EDIT_ROW_LABEL)
+        card.summary.setText(row_summary(self._spec, card.form.values()))
 
     def _remove_entry(self, container: QWidget) -> None:
         """Drop one section instance — and its entity id — from the list."""
         index = self._entries.index(container)
         del self._entries[index]
         del self._forms[index]
+        del self._cards[index]
         del self._entity_ids[index]
         self._list_layout.removeWidget(container)
         container.deleteLater()
@@ -565,10 +626,13 @@ class RepeatableSection(QWidget):
         reserved = (ENTITY_ID_KEY, OWNER_KEY)
         self.clear()
         for values in values_list:
-            form = self.add_entry(entity_id=values.get(ENTITY_ID_KEY, ""))
+            form = self.add_entry(
+                entity_id=values.get(ENTITY_ID_KEY, ""), expanded=False
+            )
             form.set_values(
                 {key: value for key, value in values.items() if key not in reserved}
             )
+            self.set_expanded(form, expanded=False)
 
     def set_entity_ids(self, entity_ids: Sequence[str]) -> None:
         """Re-seed every row's entity id, e.g. after a successful save."""
@@ -1048,6 +1112,19 @@ class FactsEntryPane(QWidget):
             return forms[position]
         return None
 
+    def _open_row(self, form: SectionForm) -> None:
+        """Open the card holding ``form``, if it is a repeatable row."""
+        for repeatable in (
+            self.wrappers,
+            self.db_pensions,
+            self.annuity_purchases,
+            self.partner_wrappers,
+            self.partner_db_pensions,
+            self.partner_annuity_purchases,
+        ):
+            if form in repeatable.forms:
+                repeatable.set_expanded(form, expanded=True)
+
     def _clear_all_errors(self) -> None:
         """Hide every inline error before the next submission renders."""
         for form in self._all_section_forms():
@@ -1061,6 +1138,7 @@ class FactsEntryPane(QWidget):
             if form is None:
                 continue
             form.set_error(error.field_key, error.message)
+            self._open_row(form)
             if first_target is None:
                 first_target = form.editor_or_none(error.field_key) or form
         self._apply_view()

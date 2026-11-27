@@ -481,6 +481,106 @@ SHOW_DETAILS_LABEL: Final = "More about this"
 HIDE_DETAILS_LABEL: Final = "Less"
 """The toggle that tucks a section's full description away (11.3)."""
 
+EDIT_ROW_LABEL: Final = "Edit"
+"""The action that opens a collapsed row's fields (roadmap 11.4)."""
+
+DONE_ROW_LABEL: Final = "Done"
+"""The action that collapses an open row back to its summary (11.4)."""
+
+
+def _choice_label(section: SectionSpec, key: str, value: str) -> str:
+    """The display label of ``value`` in ``section``'s ``key`` choice."""
+    for spec in section.fields:
+        if spec.key == key:
+            for option in spec.choices:
+                if option.value == value:
+                    return option.label
+    return value
+
+
+def _amount_sum(*texts: str) -> Decimal | None:
+    """The sum of the readable amounts among ``texts``; ``None`` if none."""
+    total: Decimal | None = None
+    for text in texts:
+        cleaned = text.replace("£", "").replace(",", "").strip()
+        if not cleaned:
+            continue
+        try:
+            amount = Decimal(cleaned)
+        except InvalidOperation:
+            continue
+        if amount.is_finite():
+            total = amount if total is None else total + amount
+    return total
+
+
+def _account_summary(section: SectionSpec, values: Mapping[str, str]) -> list[str]:
+    """An account row's summary parts: name, balance, money paid in."""
+    kind = values.get("kind", "")
+    name = values.get("label", "").strip()
+    if not name and kind:
+        name = _choice_label(section, "kind", kind)
+    parts = [name or section.title]
+    balance = values.get("balance", "").strip()
+    if balance:
+        parts.append(f"£{money_display_text(balance)}")
+    paid_in = _amount_sum(
+        values.get("employee_contribution", ""),
+        values.get("employer_contribution", ""),
+    )
+    if paid_in:
+        parts.append(f"£{money_display_text(str(paid_in))} a year paid in")
+    return parts
+
+
+def _db_pension_summary(section: SectionSpec, values: Mapping[str, str]) -> list[str]:
+    """A DB pension row's summary parts: the pension and when it starts."""
+    parts = [section.title]
+    accrued = values.get("accrued_annual_pension", "").strip()
+    if accrued:
+        parts.append(f"£{money_display_text(accrued)} a year")
+    age = values.get("normal_pension_age", "").strip()
+    if age:
+        parts.append(f"from age {age}")
+    return parts
+
+
+def _annuity_summary(section: SectionSpec, values: Mapping[str, str]) -> list[str]:
+    """An annuity row's summary parts: when, how much, which kind."""
+    parts = [section.title]
+    age = values.get("at_age", "").strip()
+    if age:
+        parts.append(f"at age {age}")
+    percent = values.get(PERCENT_OF_POT_KEY, "").strip()
+    if percent:
+        parts.append(f"{percent}% of the pension pot")
+    kind = values.get("annuity_type", "")
+    if kind:
+        parts.append(_choice_label(section, "annuity_type", kind))
+    return parts
+
+
+def row_summary(section: SectionSpec, values: Mapping[str, str]) -> str:
+    """One repeatable row as a single line for its card (roadmap 11.4).
+
+    Built from the row's raw text — what will submit — so the card can
+    never claim more than the fields hold: an account reads "Workplace
+    DC pension · £48,000 · £7,350 a year paid in", a DB pension its
+    annual amount and start age, an annuity purchase its age, share
+    and type. Blank parts are left out.
+    """
+    base = section.key.removeprefix("partner_")
+    builders: Mapping[
+        str, Callable[[SectionSpec, Mapping[str, str]], list[str]]
+    ] = {
+        "wrapper": _account_summary,
+        "db_pension": _db_pension_summary,
+        "annuity_purchase": _annuity_summary,
+    }
+    builder = builders.get(base)
+    parts = [section.title] if builder is None else builder(section, values)
+    return " · ".join(parts)
+
 
 def money_display_text(text: str) -> str:
     """An amount as the form shows it: thousands separators (roadmap 11.3).

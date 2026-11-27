@@ -31,6 +31,7 @@ from glidepath.app import (
     money_display_text,
     parse_facts_form,
     plan_entity_ids,
+    row_summary,
     simple_view_shows,
 )
 from glidepath.core import (
@@ -1309,6 +1310,72 @@ class TestFormPresentation:
         income = household.persons[0].employment_income
         assert income is not None
         assert income.value == Money(Decimal(52000))
+
+
+class TestRowSummaries:
+    """Each repeatable row reads as one line on its card (roadmap 11.4)."""
+
+    def test_an_account_names_its_kind_balance_and_payments(self) -> None:
+        """Balance and both contributions, with separators."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.wrapper,
+            {
+                "kind": str(WORKPLACE_DC_KIND),
+                "balance": "48000",
+                "employee_contribution": "4200",
+                "employer_contribution": "3150",
+            },
+        )
+        assert line == "Workplace DC pension · £48,000 · £7,350 a year paid in"
+
+    def test_an_account_prefers_its_own_name(self) -> None:
+        """The user's label replaces the kind; blank parts are left out."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.partner_wrapper, {"kind": str(ISA_KIND), "label": "Rainy day"}
+        )
+        assert line == "Rainy day"
+
+    def test_an_empty_account_falls_back_to_the_title(self) -> None:
+        """A row with nothing typed still reads as something."""
+        form = build_facts_form_view_model()
+        assert row_summary(form.wrapper, {}) == form.wrapper.title
+
+    def test_unreadable_contributions_are_left_out(self) -> None:
+        """The card never invents a total the fields do not hold."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.wrapper,
+            {"kind": str(ISA_KIND), "balance": "100", "employee_contribution": "x"},
+        )
+        assert line == "Stocks & shares ISA · £100"
+
+    def test_a_db_pension_names_its_amount_and_age(self) -> None:
+        """The annual pension and the age it starts."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.db_pension,
+            {"accrued_annual_pension": "8500", "normal_pension_age": "65"},
+        )
+        assert line == "Defined benefit pension · £8,500 a year · from age 65"
+
+    def test_an_annuity_names_its_age_share_and_type(self) -> None:
+        """When, how much of the pot, and which product."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.annuity_purchase,
+            {"at_age": "70", "percent_of_pot": "50", "annuity_type": "level"},
+        )
+        assert line == (
+            "Annuity purchase · at age 70 · 50% of the pension pot"
+            " · Level (constant income)"
+        )
+
+    def test_other_sections_read_as_their_title(self) -> None:
+        """Only the repeatable sections have summaries of their own."""
+        form = build_facts_form_view_model()
+        assert row_summary(form.spending, {}) == form.spending.title
 
 
 class TestReliefResolution:

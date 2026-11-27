@@ -979,3 +979,76 @@ class TestSimpleView:
         pane.set_view(FormView.SIMPLE)
         assert pane.db_pensions.isVisibleTo(pane)
         assert not pane.db_pensions.add_button.isVisibleTo(pane.db_pensions)
+
+
+class TestRowCards:
+    """Repeatable rows collapse to one-line cards (roadmap 11.4)."""
+
+    def test_a_row_the_user_adds_opens_ready_to_type(self) -> None:
+        """A new row shows its fields and a Done action."""
+        section = RepeatableSection(build_facts_form_view_model().wrapper)
+        form = section.add_entry()
+        assert section.is_expanded(form)
+
+    def test_loaded_rows_start_as_their_summaries(self) -> None:
+        """Saved rows show one line each; the fields stay closed."""
+        pane = _pane()
+        pane.set_form_data(
+            FactsFormData(
+                wrappers=(
+                    {
+                        "kind": "uk.isa",
+                        "balance": "16500",
+                        "employee_contribution": "4800",
+                    },
+                ),
+            )
+        )
+        [form] = pane.wrappers.forms
+        assert not pane.wrappers.is_expanded(form)
+        summaries = [
+            label.text()
+            for label in pane.wrappers.findChildren(QLabel)
+            if label.objectName() == "rowSummary"
+        ]
+        assert summaries == ["Stocks & shares ISA · £16,500 · £4,800 a year paid in"]
+
+    def test_done_closes_the_row_and_refreshes_its_summary(self) -> None:
+        """Typed values show on the card once the row is closed."""
+        section = RepeatableSection(build_facts_form_view_model().wrapper)
+        form = section.add_entry()
+        form.set_value("kind", "uk.sipp")
+        form.set_value("balance", "1000")
+        section.set_expanded(form, expanded=False)
+        assert not section.is_expanded(form)
+        summary = next(
+            label
+            for label in section.findChildren(QLabel)
+            if label.objectName() == "rowSummary"
+        )
+        assert summary.text() == "SIPP · £1,000"
+        section.set_expanded(form, expanded=True)
+        assert section.is_expanded(form)
+
+    def test_an_error_opens_its_row(self) -> None:
+        """A closed row carrying an error is opened so it is seen."""
+        pane = _pane()
+        pane.set_form_data(FactsFormData(wrappers=({"kind": "uk.isa"},)))
+        [form] = pane.wrappers.forms
+        assert not pane.wrappers.is_expanded(form)
+        pane._show_errors(  # noqa: SLF001 - the pane's own error renderer
+            (FormError("wrapper", 0, "balance", "this field is required"),)
+        )
+        assert pane.wrappers.is_expanded(form)
+
+    def test_closed_rows_still_submit_and_keep_their_ids(self) -> None:
+        """Closing a card changes what shows, never what submits."""
+        pane = _pane()
+        pane.set_form_data(
+            FactsFormData(
+                wrappers=({ENTITY_ID_KEY: "w-1", "kind": "uk.isa", "balance": "500"},)
+            )
+        )
+        [row] = pane.form_data().wrappers
+        assert row[ENTITY_ID_KEY] == "w-1"
+        assert row["balance"] == "500"

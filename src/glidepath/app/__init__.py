@@ -105,6 +105,8 @@ from glidepath.app.firstrun import (
     record_last_plan_path,
 )
 from glidepath.app.forms import (
+    DONE_ROW_LABEL,
+    EDIT_ROW_LABEL,
     ENTITY_ID_KEY,
     HIDE_ADVANCED_LABEL,
     HIDE_DETAILS_LABEL,
@@ -137,6 +139,7 @@ from glidepath.app.forms import (
     money_display_text,
     parse_facts_form,
     plan_entity_ids,
+    row_summary,
     simple_view_shows,
 )
 from glidepath.app.inspector import (
@@ -244,11 +247,13 @@ __all__ = [
     "DISCLAIMER_BODY",
     "DISCLAIMER_DECLINE_LABEL",
     "DISCLAIMER_TITLE",
+    "DONE_ROW_LABEL",
     "DRAWDOWN_AGE_MESSAGE",
     "DRAWDOWN_NO_PLAN_MESSAGE",
     "DRAWDOWN_RUNNING_MESSAGE",
     "DRAWDOWN_STALE_MESSAGE",
     "DRAWDOWN_SUCCESS_MESSAGE",
+    "EDIT_ROW_LABEL",
     "ENTITY_ID_KEY",
     "HELP_GUIDE_INTRO",
     "HELP_GUIDE_SECTIONS",
@@ -399,6 +404,7 @@ __all__ = [
     "record_facts_view",
     "record_last_plan_path",
     "report_exported_message",
+    "row_summary",
     "run_mode_from_key",
     "run_mode_key",
     "save_plan_state",

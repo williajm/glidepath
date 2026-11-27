@@ -44,6 +44,10 @@ in the release PR and becomes the GitHub Release notes verbatim.
   with a one-line summary with the full text behind "More about this",
   "Savings wrapper" is now "Account" on the form, and the add and
   remove buttons no longer span the window (#234).
+- Accounts, DB pensions and annuity purchases show as one-line cards
+  — "Workplace DC pension · £48,000 · £7,350 a year paid in" — with
+  Edit to open the fields. A row you add opens ready to type, and a
+  row with an error opens so you see it (#235).
 - Planning notes and the state pension uprating default's basis now
   reflect Budget 2026 (28 October 2026): savings income rates from
   6 April 2027 are 24% / 44% / 49% (Budget 2025's 22/42/47 raised a

@@ -343,6 +343,19 @@ QPushButton#advancedToggle:hover, QPushButton#detailsToggle:hover {{
     color: {ACCENT};
     text-decoration: underline;
 }}
+QFrame#rowCard {{
+    background: {_CARD};
+    border: 1px solid {_BORDER};
+    border-radius: 8px;
+}}
+QGroupBox[flat="true"] {{
+    border: none;
+    margin-top: 0;
+    padding: 0;
+}}
+QLabel#rowSummary {{
+    font-weight: 600;
+}}
 QPushButton#viewSwitchButton {{
     padding: 5px 18px;
 }}
