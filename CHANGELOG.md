@@ -48,6 +48,11 @@ in the release PR and becomes the GitHub Release notes verbatim.
   — "Workplace DC pension · £48,000 · £7,350 a year paid in" — with
   Edit to open the fields. A row you add opens ready to type, and a
   row with an error opens so you see it (#235).
+- The facts form is split into steps in a side list — You, Spending,
+  Retirement income, State Pension, Accounts, DB pensions, Partner —
+  each a short page, visited in any order. One save still submits
+  every step; steps with a problem are marked, and the first one opens
+  with its field focused. Simple lists only the steps it uses (#233).
 - Planning notes and the state pension uprating default's basis now
   reflect Budget 2026 (28 October 2026): savings income rates from
   6 April 2027 are 24% / 44% / 49% (Budget 2025's 22/42/47 raised a

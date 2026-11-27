@@ -211,6 +211,24 @@ def form_view_from_token(token: str | None) -> FormView:
 
 
 @dataclass(frozen=True)
+class FormStep:
+    """One step of the facts form's side list (roadmap 11.2).
+
+    ``sections`` names the :class:`SectionSpec` keys the step's page
+    holds, in display order. Steps can be visited in any order; one
+    save still submits every step.
+    """
+
+    key: str
+    label: str
+    sections: tuple[str, ...]
+
+
+STEP_ERROR_SUFFIX: Final = " ⚠"
+"""Appended to a step's label while a section on it shows an error."""
+
+
+@dataclass(frozen=True)
 class FactsFormViewModel:
     """The whole facts entry screen (roadmap 8.2, 9.31).
 
@@ -258,6 +276,8 @@ class FactsFormViewModel:
     """The view switch's labels, one per :class:`FormView` (§4.13)."""
     simple_view_note: str = ""
     """The one line Simple shows naming what Detailed adds (§4.13)."""
+    steps: tuple[FormStep, ...] = ()
+    """The side list's steps, each naming the sections on its page (11.2)."""
 
     @property
     def sections(self) -> tuple[SectionSpec, ...]:
@@ -570,9 +590,7 @@ def row_summary(section: SectionSpec, values: Mapping[str, str]) -> str:
     and type. Blank parts are left out.
     """
     base = section.key.removeprefix("partner_")
-    builders: Mapping[
-        str, Callable[[SectionSpec, Mapping[str, str]], list[str]]
-    ] = {
+    builders: Mapping[str, Callable[[SectionSpec, Mapping[str, str]], list[str]]] = {
         "wrapper": _account_summary,
         "db_pension": _db_pension_summary,
         "annuity_purchase": _annuity_summary,
@@ -2775,6 +2793,34 @@ def build_facts_form_view_model() -> FactsFormViewModel:
             "will be deleted."
         ),
         view_labels={FormView.SIMPLE: "Simple", FormView.DETAILED: "Detailed"},
+        steps=(
+            FormStep(key="you", label="You", sections=("person",)),
+            FormStep(key="spending", label="Spending", sections=("spending",)),
+            FormStep(
+                key="retirement_income",
+                label="Retirement income",
+                sections=(
+                    "retirement_income",
+                    "annuity_purchase",
+                    "partner_annuity_purchase",
+                ),
+            ),
+            FormStep(
+                key="state_pension", label="State Pension", sections=("state_pension",)
+            ),
+            FormStep(key="accounts", label="Accounts", sections=("wrapper",)),
+            FormStep(key="db_pensions", label="DB pensions", sections=("db_pension",)),
+            FormStep(
+                key="partner",
+                label="Partner",
+                sections=(
+                    "partner",
+                    "partner_state_pension",
+                    "partner_wrapper",
+                    "partner_db_pension",
+                ),
+            ),
+        ),
         simple_view_note=(
             "Simple asks only who you are and what you have. Switch to "
             "Detailed to add a spending need, your State Pension "

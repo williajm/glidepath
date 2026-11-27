@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QDate, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCalendarWidget,
@@ -27,10 +28,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QStyle,
     QStyleOptionFrame,
     QVBoxLayout,
@@ -50,10 +54,12 @@ from glidepath.app import (
     REQUIRED_MARKER,
     SHOW_ADVANCED_LABEL,
     SHOW_DETAILS_LABEL,
+    STEP_ERROR_SUFFIX,
     FactsFormData,
     FactsFormViewModel,
     FieldKind,
     FieldLevel,
+    FormStep,
     FormView,
     PersonFormData,
     PlanEntityIds,
@@ -62,7 +68,7 @@ from glidepath.app import (
     row_summary,
     simple_view_shows,
 )
-from glidepath.gui.style import chevron_icon
+from glidepath.gui.style import ERROR_TEXT, chevron_icon
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -110,6 +116,12 @@ size to their longest option instead, so no option is ever clipped."""
 _WIDTH_ALLOWANCE_CHARS = 5
 """Room for the padding, the border, and a prefix or picker icon."""
 _SIDE_HINT_KINDS = frozenset({FieldKind.MONEY, FieldKind.NUMBER, FieldKind.DATE})
+_PARTNER_GROUP_SECTIONS = frozenset(
+    {"partner", "partner_state_pension", "partner_wrapper", "partner_db_pension"}
+)
+"""The sections that arrive together when a partner is added (§4.11)."""
+_LIST_PAD_CHARS = 6
+"""Room beside the longest step label for the list's padding."""
 """Short entries whose hint reads beside them, not as a placeholder."""
 
 
@@ -805,38 +817,83 @@ class FactsEntryPane(QWidget):
         self.simple_note.setVisible(simple)
         self.intro_label.setVisible(not simple)
         self._sync_annuity_sections()
+        self._sync_steps()
 
-    def _assemble_layout(self, view_model: FactsFormViewModel) -> None:
-        """Stack the sections into the scroll area and the button row."""
-        self.intro_label = QLabel(view_model.intro, self)
-        self.intro_label.setWordWrap(True)
+    def _section_widgets(self) -> dict[str, QWidget]:
+        """Every section's widget, keyed like its spec."""
+        return {
+            "person": self.person_form,
+            "spending": self.spending_form,
+            "retirement_income": self.retirement_income_form,
+            "annuity_purchase": self.annuity_purchases,
+            "partner_annuity_purchase": self.partner_annuity_purchases,
+            "state_pension": self.state_pension_form,
+            "wrapper": self.wrappers,
+            "db_pension": self.db_pensions,
+            "partner": self.partner_form,
+            "partner_state_pension": self.partner_state_pension_form,
+            "partner_wrapper": self.partner_wrappers,
+            "partner_db_pension": self.partner_db_pensions,
+        }
+
+    def _step_page(self, step: FormStep) -> QScrollArea:
+        """One step's page: its sections, scrolling on their own.
+
+        The partner's sections arrive together behind the add-partner
+        action, as one group (§4.11); the annuity sections sit under the
+        preference that reveals them (roadmap 10.3).
+        """
+        widgets = self._section_widgets()
         content = QWidget(self)
         content_layout = QVBoxLayout(content)
+        for key in step.sections:
+            if key in _PARTNER_GROUP_SECTIONS:
+                if key == step.sections[0]:
+                    content_layout.addLayout(_compact(self.add_partner_button))
+                    content_layout.addWidget(self._partner_group)
+                continue
+            content_layout.addWidget(widgets[key])
+        content_layout.addStretch()
+        page = QScrollArea(self)
+        page.setWidgetResizable(True)
+        page.setWidget(content)
+        return page
+
+    def _assemble_layout(self, view_model: FactsFormViewModel) -> None:
+        """The switch on top, the step list beside its pages, the buttons."""
+        self.intro_label = QLabel(view_model.intro, self)
+        self.intro_label.setWordWrap(True)
         switch_row = QHBoxLayout()
         for button in self.view_buttons.values():
             switch_row.addWidget(button)
         switch_row.addStretch()
-        content_layout.addLayout(switch_row)
-        content_layout.addWidget(self.simple_note)
-        content_layout.addWidget(self.intro_label)
-        content_layout.addWidget(self.person_form)
-        content_layout.addWidget(self.spending_form)
-        content_layout.addWidget(self.retirement_income_form)
-        # Both annuity sections sit directly under the preference that
-        # reveals them (roadmap 10.3) — disclosure next to its control.
-        # The partner's shows only while a partner is on the form.
-        content_layout.addWidget(self.annuity_purchases)
-        content_layout.addWidget(self.partner_annuity_purchases)
-        content_layout.addWidget(self.state_pension_form)
-        content_layout.addWidget(self.wrappers)
-        content_layout.addWidget(self.db_pensions)
-        content_layout.addLayout(_compact(self.add_partner_button))
-        content_layout.addWidget(self._partner_group)
-        content_layout.addStretch()
 
-        self._scroll = QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setWidget(content)
+        self._steps = view_model.steps
+        self.step_list = QListWidget(self)
+        self.step_list.setObjectName("stepList")
+        self.step_pages = QStackedWidget(self)
+        self._pages: list[QScrollArea] = []
+        for step in self._steps:
+            item = QListWidgetItem(step.label, self.step_list)
+            item.setData(Qt.ItemDataRole.UserRole, step.key)
+            page = self._step_page(step)
+            self._pages.append(page)
+            self.step_pages.addWidget(page)
+        self.step_list.currentRowChanged.connect(self.step_pages.setCurrentIndex)
+        widest = max(
+            (step.label + STEP_ERROR_SUFFIX for step in self._steps),
+            key=len,
+            default="",
+        )
+        self.step_list.setFixedWidth(
+            self.step_list.fontMetrics().horizontalAdvance(
+                widest + "0" * _LIST_PAD_CHARS
+            )
+        )
+        self.step_list.setCurrentRow(0)
+        body = QHBoxLayout()
+        body.addWidget(self.step_list)
+        body.addWidget(self.step_pages, 1)
 
         buttons = QWidget(self)
         buttons_layout = QHBoxLayout(buttons)
@@ -846,7 +903,10 @@ class FactsEntryPane(QWidget):
         buttons_layout.addWidget(self.submit_button)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(self._scroll)
+        layout.addLayout(switch_row)
+        layout.addWidget(self.simple_note)
+        layout.addWidget(self.intro_label)
+        layout.addLayout(body, 1)
         layout.addWidget(self.status_label)
         layout.addWidget(buttons)
 
@@ -914,6 +974,61 @@ class FactsEntryPane(QWidget):
         self._partner_group.setVisible(active)
         self.add_partner_button.setVisible(not active)
         self._apply_view()
+
+    @property
+    def current_step(self) -> str:
+        """The key of the step whose page is showing."""
+        return self._steps[self.step_list.currentRow()].key
+
+    def show_step(self, key: str) -> None:
+        """Show the page of the step named ``key``."""
+        for row, step in enumerate(self._steps):
+            if step.key == key:
+                self.step_list.setCurrentRow(row)
+                return
+
+    def step_listed(self, key: str) -> bool:
+        """Whether the step named ``key`` is offered in the side list."""
+        for row, step in enumerate(self._steps):
+            if step.key == key:
+                return not self.step_list.item(row).isHidden()
+        return False
+
+    def _sync_steps(self) -> None:
+        """List the steps whose pages hold anything to show (roadmap 11.2).
+
+        Detailed lists every step; Simple only those with a section it
+        shows — the person, accounts and the add-partner action always,
+        any other step once it holds a value or an error. A page that
+        drops out of the list hands over to the first listed step.
+        """
+        if not hasattr(self, "_steps"):
+            return
+        widgets = self._section_widgets()
+        simple = self._view is FormView.SIMPLE
+        for row, step in enumerate(self._steps):
+            listed = (
+                not simple
+                or any(key in _PARTNER_GROUP_SECTIONS for key in step.sections)
+                or any(not widgets[key].isHidden() for key in step.sections)
+            )
+            self.step_list.item(row).setHidden(not listed)
+        current = self.step_list.currentRow()
+        if current < 0 or self.step_list.item(current).isHidden():
+            for row in range(self.step_list.count()):
+                if not self.step_list.item(row).isHidden():
+                    self.step_list.setCurrentRow(row)
+                    break
+
+    def _mark_steps(self, sections: set[str]) -> None:
+        """Flag each step whose page holds an errored section (11.2)."""
+        for row, step in enumerate(self._steps):
+            item = self.step_list.item(row)
+            errored = any(key in sections for key in step.sections)
+            item.setText(step.label + (STEP_ERROR_SUFFIX if errored else ""))
+            item.setForeground(
+                QColor(ERROR_TEXT) if errored else self.step_list.palette().text()
+            )
 
     def _income_preference(self) -> str:
         """The income-preference token currently selected (10.3)."""
@@ -1129,21 +1244,36 @@ class FactsEntryPane(QWidget):
         """Hide every inline error before the next submission renders."""
         for form in self._all_section_forms():
             form.clear_errors()
+        self._mark_steps(set())
 
     def _show_errors(self, errors: Sequence[FormError]) -> None:
-        """Render each error inline and scroll the first into view (10.2)."""
+        """Render each error inline; open the first one's step (10.2, 11.2).
+
+        Every step holding an errored section is flagged in the side
+        list, and the page of the first error is shown with its field
+        scrolled into view and focused.
+        """
         first_target: QWidget | None = None
+        first_section = ""
+        errored: set[str] = set()
         for error in errors:
             form = self._section_form(error.section, error.index)
             if form is None:
                 continue
             form.set_error(error.field_key, error.message)
             self._open_row(form)
+            errored.add(error.section)
             if first_target is None:
                 first_target = form.editor_or_none(error.field_key) or form
+                first_section = error.section
         self._apply_view()
+        self._mark_steps(errored)
         if first_target is not None:
-            self._scroll.ensureWidgetVisible(first_target)
+            for row, step in enumerate(self._steps):
+                if first_section in step.sections:
+                    self.step_list.setCurrentRow(row)
+                    self._pages[row].ensureWidgetVisible(first_target)
+                    break
             first_target.setFocus()
 
     def submit(self) -> None:

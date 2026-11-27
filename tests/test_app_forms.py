@@ -1312,6 +1312,16 @@ class TestFormPresentation:
         assert income.value == Money(Decimal(52000))
 
 
+class TestSteps:
+    """The side list's steps cover the form exactly (roadmap 11.2)."""
+
+    def test_every_section_sits_on_exactly_one_step(self) -> None:
+        """No section is unreachable, none appears twice."""
+        form = build_facts_form_view_model()
+        placed = [key for step in form.steps for key in step.sections]
+        assert sorted(placed) == sorted(section.key for section in form.sections)
+
+
 class TestRowSummaries:
     """Each repeatable row reads as one line on its card (roadmap 11.4)."""
 
