@@ -31,6 +31,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
+from glidepath.app.display import format_percent
 from glidepath.app.plan import region_for
 from glidepath.core import (
     AnnuityRateTable,
@@ -577,12 +578,13 @@ def _annuity_income(
 
 
 NO_SPENDING_SENTENCE: Final = (
-    "No spending need is entered, so nothing is drawn from the pots in"
-    " retirement — add one under Household spending (Detailed view) to"
-    " test whether the plan lasts."
+    "No annual spending need is entered, so the plan is not tested"
+    " against one — add it under Household spending (Detailed view)."
 )
 """The card's note for a plan without a spending need (planning §4.13):
-the figures above stand, but the plan is not tested against a need."""
+the figures above stand, but the plan is not tested against a need.
+True whatever the withdrawal strategy — a fixed-percentage draw still
+runs with no need entered."""
 
 _FORECAST_PREFIXES = ("Your", "Your partner's")
 """State Pension sentence openers by household position (9.31)."""
@@ -607,11 +609,7 @@ def _state_pension_lines(
     lines = []
     for count, (position, quote) in enumerate(quotes, start=1):
         prefix = _FORECAST_PREFIXES[position]
-        source = (
-            "assumed full State Pension (no forecast entered)"
-            if quote.assumed
-            else "State Pension forecast"
-        )
+        source = quote.source
         sentence = (
             f"{prefix} {source} adds {_pounds(quote.annual)} a year from {quote.start}"
         )
@@ -628,7 +626,8 @@ class _StatePensionQuote:
 
     annual: Money
     start: str
-    assumed: bool
+    source: str = "State Pension forecast"
+    """What the amount is, as the card names it."""
 
 
 def _state_pension_quote(
@@ -663,7 +662,7 @@ def _state_pension_quote(
         base = weekly * _WEEKS_PER_YEAR
     annual = base * (_ONE + entitlement.deferral_uplift)
     start = _age_phrase(person.date_of_birth.value, entitlement.start_date)
-    return _StatePensionQuote(annual=annual, start=start, assumed=False)
+    return _StatePensionQuote(annual=annual, start=start)
 
 
 def _assumed_quote(
@@ -683,7 +682,17 @@ def _assumed_quote(
                 * (_ONE + assumed.deferral_uplift)
             )
             start = _age_phrase(person.date_of_birth.value, assumed.start_date)
-            return _StatePensionQuote(annual=annual, start=start, assumed=True)
+            share = (
+                "full State Pension"
+                if assumed.fraction == _ONE
+                else f"State Pension ({format_percent(assumed.fraction)} of the full"
+                " rate)"
+            )
+            return _StatePensionQuote(
+                annual=annual,
+                start=start,
+                source=f"assumed {share} (no forecast entered)",
+            )
     return None
 
 

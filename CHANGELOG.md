@@ -18,8 +18,10 @@ in the release PR and becomes the GitHub Release notes verbatim.
   "assumed full State Pension (no forecast entered)". Entering your
   forecast replaces it, and a new "Include a State Pension" choice
   can leave it out. Saved plans are unchanged: a saved person with no
-  State Pension still has none, and opens with that choice selected
-  (#237).
+  State Pension still has none, and opens with that choice selected.
+  For anyone born before the State Pension age timetable starts
+  (6 October 1954), the form asks you to leave the State Pension out
+  rather than the projection failing (#237).
 - The facts form has a Simple and a Detailed view. Simple asks only
   who you are and what you have: date of birth, tax residency,
   retirement age, salary and, for each account, its type, balance and
@@ -29,8 +31,10 @@ in the release PR and becomes the GitHub Release notes verbatim.
   in shows in either view. New users start in Simple; the choice is
   remembered on this computer, not in the plan file (#232).
 - With no spending need entered, the Monte Carlo and backtest success
-  rates now read "no spending entered" instead of 100%, and the
-  outlook card says nothing is drawn in retirement (#232).
+  rates read "no spending entered" instead of 100% (unless a path did
+  fall short, e.g. on an unfundable tax charge, when the rate shows),
+  and the outlook card says the plan is not tested against a spending
+  need (#232).
 - A SIPP's contributions take relief at source without asking, and a
   workplace pension with contributions but no relief method is
   flagged on the field instead of failing the projection (#232).

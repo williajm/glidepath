@@ -66,6 +66,8 @@ from glidepath.regions.uk import (
     SCOTLAND_RESIDENCY,
     SIPP_KIND,
     WORKPLACE_DC_KIND,
+    UkAgeError,
+    UkAgeRules,
     UkWrapperRuleset,
 )
 
@@ -396,6 +398,10 @@ _MEMBERSHIP_NEEDS_SALARY = "active membership needs the pensionable salary"
 _LEFT_OUT_WITH_DETAILS = (
     "leave the forecast and deferral blank to leave the State Pension out"
 )
+_RELIEF_NOT_PERMITTED = "this kind of account cannot take that tax relief method"
+_FORECAST_DATE_WITHOUT_AMOUNT = (
+    "a forecast date needs the forecast amount — enter it, or clear the date"
+)
 _RELIEF_NEEDED = (
     "choose how this pension gets tax relief — your payslip shows net "
     "pay or relief at source"
@@ -541,9 +547,11 @@ def _account_summary(section: SectionSpec, values: Mapping[str, str]) -> list[st
     if not name and kind:
         name = _choice_label(section, "kind", kind)
     parts = [name or section.title]
-    balance = values.get("balance", "").strip()
-    if balance:
-        parts.append(f"£{money_display_text(balance)}")
+    balance = _amount_sum(
+        values.get("balance", ""), values.get("crystallised_balance", "")
+    )
+    if balance is not None:
+        parts.append(f"£{money_display_text(str(balance))}")
     paid_in = _amount_sum(
         values.get("employee_contribution", ""),
         values.get("employer_contribution", ""),
@@ -554,12 +562,20 @@ def _account_summary(section: SectionSpec, values: Mapping[str, str]) -> list[st
 
 
 def _db_pension_summary(section: SectionSpec, values: Mapping[str, str]) -> list[str]:
-    """A DB pension row's summary parts: the pension and when it starts."""
+    """A DB pension row's summary parts: the pension and when it starts.
+
+    The amount is the accrued pension as stated, before any early or
+    late factor or commutation; the age is the chosen claim age when
+    one is set, else the normal pension age.
+    """
     parts = [section.title]
     accrued = values.get("accrued_annual_pension", "").strip()
     if accrued:
-        parts.append(f"£{money_display_text(accrued)} a year")
-    age = values.get("normal_pension_age", "").strip()
+        parts.append(f"£{money_display_text(accrued)} a year accrued")
+    age = (
+        values.get("taken_at_age", "").strip()
+        or values.get("normal_pension_age", "").strip()
+    )
     if age:
         parts.append(f"from age {age}")
     return parts
@@ -938,6 +954,8 @@ def _state_pension_from(reader: _SectionReader) -> StatePensionRecord | None:
     forecast = reader.fact_of(reader.money("forecast_weekly_amount"), "forecast_as_of")
     protected = reader.fact_of(reader.money("protected_payment"), "forecast_as_of")
     deferral = reader.decimal_value("deferral_years")
+    if forecast is None and protected is None and reader.raw("forecast_as_of"):
+        reader.error("forecast_as_of", _FORECAST_DATE_WITHOUT_AMOUNT)
     if not reader.ok:
         return None
     if left_out:
@@ -962,6 +980,33 @@ def _state_pension_from(reader: _SectionReader) -> StatePensionRecord | None:
 
 
 @cache
+def _uk_age_rules() -> UkAgeRules:
+    """The shipped UK age rules, for the State Pension age timetable."""
+    return UkAgeRules.from_shipped_data()
+
+
+def _spa_coverage_problem(date_of_birth: date) -> str | None:
+    """Why no State Pension can be modelled for ``date_of_birth``, if so.
+
+    The State Pension age timetable starts at a shipped date of birth;
+    earlier cohorts had phased, pre-2016 rules this planner does not
+    model, so neither a forecast nor the assumed full rate can be placed
+    in time — the user is asked to leave it out rather than the run
+    failing.
+    """
+    try:
+        _uk_age_rules().state_pension_date(date_of_birth)
+    except UkAgeError:
+        first = _uk_age_rules().rules.spa_bands[0].dob_from
+        start = "" if first is None else f" on or after {first.day} {first:%B %Y}"
+        return (
+            f"the State Pension can only be modelled for people born{start}"
+            " — choose \u201cNo — leave the State Pension out\u201d"
+        )
+    return None
+
+
+@cache
 def _uk_wrapper_rules() -> UkWrapperRuleset:
     """The shipped UK wrapper rules, for the relief mechanics each kind permits."""
     return UkWrapperRuleset.from_shipped_data()
@@ -983,14 +1028,20 @@ def _resolved_relief(
     A blank choice takes the kind's only permitted mechanic (a SIPP is
     always relief at source) — the one legal value, not a guess; a
     kind permitting several (a workplace pension) must be told which,
-    so a blank one errors on the field rather than failing the run.
+    and a chosen mechanic the kind does not permit (net pay on a SIPP
+    or an ISA) is refused — both on the field rather than failing the
+    run.
     """
-    if relief is not None or kind is None:
+    if kind is None:
         return relief
-    sole = _sole_relief_mechanic(kind)
-    if sole is not None:
-        return sole
-    if _uk_wrapper_rules().permitted_relief_mechanics(kind):
+    permitted = _uk_wrapper_rules().permitted_relief_mechanics(kind)
+    if relief is not None:
+        if relief not in permitted:
+            reader.error("relief_mechanic", _RELIEF_NOT_PERMITTED)
+        return relief
+    if len(permitted) == 1:
+        return next(iter(permitted))
+    if permitted:
         reader.error("relief_mechanic", _RELIEF_NEEDED)
     return None
 
@@ -1463,9 +1514,10 @@ def parse_facts_form(
     persons: list[Person] = []
     for position, person_data in enumerate(data.persons):
         person_section, pension_section = _PERSON_SECTIONS[position]
-        state_pension = _state_pension_from(
-            _SectionReader(context, pension_section, person_data.state_pension)
+        pension_reader = _SectionReader(
+            context, pension_section, person_data.state_pension
         )
+        state_pension = _state_pension_from(pension_reader)
         person = _person_from(
             _SectionReader(context, person_section, person_data.person),
             _PersonParts(
@@ -1476,6 +1528,10 @@ def parse_facts_form(
             ),
             priors[position].id if position < len(priors) else new_entity_id(),
         )
+        if person is not None and person.state_pension is not None:
+            problem = _spa_coverage_problem(person.date_of_birth.value)
+            if problem is not None:
+                pension_reader.error(STATE_PENSION_INCLUDED_KEY, problem)
         if person is not None:
             persons.append(person)
     claim: Decision[bool] | None = None

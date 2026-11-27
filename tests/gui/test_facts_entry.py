@@ -986,6 +986,20 @@ class TestSimpleView:
         pane.set_view(FormView.DETAILED)
         assert pane.form_data() == simple
 
+    def test_a_half_filled_row_keeps_its_required_fields_in_simple(self) -> None:
+        """A row holding anything shows every field it still needs.
+
+        Regression (Codex review): a DB pension started in Detailed hid
+        its blank statement date and pension age in Simple.
+        """
+        pane = _pane()
+        form = pane.db_pensions.add_entry()
+        form.set_value("accrued_annual_pension", "8500")
+        pane.set_view(FormView.SIMPLE)
+        assert form.editor("statement_date").isVisibleTo(form)
+        assert form.editor("normal_pension_age").isVisibleTo(form)
+        assert not form.editor("commutation_factor").isVisibleTo(form)
+
     def test_simple_hides_the_db_add_action(self) -> None:
         """DB pensions are added in Detailed; existing rows still show."""
         pane = _simple_pane()
@@ -1139,6 +1153,15 @@ class TestSteps:
             (FormError("spending", None, "annual_spending_real", "bad"),)
         )
         pane.submit()
+        assert pane.step_list.item(1).text() == "Spending"
+
+    def test_replacing_the_form_clears_the_flags(self) -> None:
+        """Opening another plan never keeps the last plan's warnings."""
+        pane = _pane()
+        pane._show_errors(  # noqa: SLF001 - the pane's own error renderer
+            (FormError("spending", None, "annual_spending_real", "bad"),)
+        )
+        pane.set_form_data(FactsFormData())
         assert pane.step_list.item(1).text() == "Spending"
 
     def test_one_save_submits_every_step(self) -> None:

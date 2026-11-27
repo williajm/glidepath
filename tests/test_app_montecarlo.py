@@ -310,19 +310,37 @@ class TestMonteCarloPanel:
         assert all(metric.value for metric in panel.metrics)
         assert panel.message == ""
 
-    def test_without_spending_the_success_metrics_say_so(
+    def test_without_spending_the_success_metrics_say_so(self) -> None:
+        """No spending need and no shortfall: a rate would mislead (§4.13)."""
+        unspent = replace(household(), spending=None)
+        projected = state_with_household(short_horizon_state(), unspent, today=TODAY)
+        run = state_with_monte_carlo(projected, "7", "3", today=TODAY)
+        assert run.monte_carlo is not None
+        assert run.monte_carlo.probability_of_ruin == 0
+        panel = build_charts_view_model(run, mode=RunMode.MONTE_CARLO).monte_carlo
+        values = {metric.label: metric.value for metric in panel.metrics}
+        assert values["Success rate"] == NO_SPENDING_ENTERED
+        assert values["Probability of ruin"] == NO_SPENDING_ENTERED
+        assert values["Ending pot, median (today's money)"].startswith("£")
+
+    def test_a_recorded_shortfall_shows_its_rate_without_spending(
         self, mc_state: PlanState
     ) -> None:
-        """No spending need, nothing drawn: a percentage would mislead (§4.13)."""
+        """Paths that fell short are a real result, spending or not.
+
+        An unfundable tax charge is a shortfall with no spending plan at
+        all, so the note must never hide failed paths (Codex review).
+        """
+        assert mc_state.monte_carlo is not None
+        assert mc_state.monte_carlo.probability_of_ruin > 0
         assert mc_state.household is not None
         unspent = replace(
             mc_state, household=replace(mc_state.household, spending=None)
         )
         panel = build_charts_view_model(unspent, mode=RunMode.MONTE_CARLO).monte_carlo
         values = {metric.label: metric.value for metric in panel.metrics}
-        assert values["Success rate"] == NO_SPENDING_ENTERED
-        assert values["Probability of ruin"] == NO_SPENDING_ENTERED
-        assert values["Ending pot, median (today's money)"].startswith("£")
+        assert values["Success rate"].endswith("%")
+        assert values["Probability of ruin"].endswith("%")
 
     def test_the_panel_echoes_the_run_inputs(
         self, mc_view_model: ChartsViewModel

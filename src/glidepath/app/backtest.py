@@ -263,7 +263,10 @@ def _metrics(
     rows = [
         BacktestMetric(
             label=SUCCESS_RATE_LABEL,
-            value=success_text(result.success_rate, spending=spending_entered),
+            value=success_text(
+                result.success_rate,
+                tested=spending_entered or result.success_rate < 1,
+            ),
         ),
         BacktestMetric(
             label=WINDOWS_LABEL,

@@ -835,7 +835,12 @@ asking for the forecast up front is the friction Simple removes.
 **Accepted cost:** the full rate overstates income for anyone with
 National Insurance gaps or a contracted-out history — the reason #97
 made the forecast authoritative — so the assumption is always
-labelled as one, with the forecast as the remedy. **Saved plans:**
+labelled as one, with the forecast as the remedy. **Before the timetable:** the State Pension
+age timetable starts at a shipped date of birth (§6); for anyone born
+earlier neither a forecast nor the assumption can be placed in time,
+so the facts form errors on that person's State Pension section and
+asks for "No — leave the State Pension out" rather than the run
+failing. **Saved plans:**
 no migration and no schema change — a saved person without a record
 still has no State Pension (the form shows the leave-out choice), so
 saved plans project exactly as before; pre-#97 records without a
@@ -850,10 +855,13 @@ against `Household.spending`), so no path can fall short and the
 Monte Carlo success rate — the share of paths with no shortfall —
 would read 100%. A blank spending need was possible before, but
 Simple makes it the common case, so the results must not read as an
-answer they are not: with no spending entered, the success rate shows
-"no spending entered" instead of a percentage, and the results carry
-one line naming what the plan does not model or only assumes (no
-spending need; the assumed State Pension) and where to change it.
+answer they are not: with no spending entered and no shortfall on any
+path or backtest window, the success rate shows "no spending entered"
+instead of a percentage — a recorded shortfall (an unfundable tax
+charge needs no spending plan) always shows its rate — and the
+results carry one line naming what the plan does not model or only
+assumes (no annual spending need; the assumed State Pension, with its
+share of the full rate when not 100%) and where to change it.
 What a Simple plan can answer stays intact: the outlook card reads the
 pots at retirement, the income they could buy and the State Pension
 on top, and "How much can I draw down?" searches for the sustainable
@@ -863,8 +871,10 @@ spending itself.
 field holding a value, or carrying an error, shows in every view; a
 section or repeatable row holding any value shows in Simple too, so
 Simple never hides data that would submit. A required field never
-sits below its section's level, so it is visible whenever its section
-is (guard test, replacing 10.1's "never both required and advanced").
+sits below its section's level (guard test, replacing 10.1's "never
+both required and advanced"), and in Simple a required field shows
+whenever its section or row holds anything, so it is visible
+whenever its section is.
 **Rejected:** switching to Detailed automatically when a plan holds
 detail-level data — the invariant already shows that data in place,
 and overriding the user's chosen view is surprising.

@@ -386,9 +386,14 @@ def spending_entered(state: PlanState) -> bool:
     return state.household is not None and state.household.spending is not None
 
 
-def success_text(rate: Decimal, *, spending: bool) -> str:
-    """A success-style rate as text, or the no-spending note (§4.13)."""
-    return format_percent(rate) if spending else NO_SPENDING_ENTERED
+def success_text(rate: Decimal, *, tested: bool) -> str:
+    """A success-style rate as text, or the no-spending note (§4.13).
+
+    ``tested`` is whether the rate measures anything: a spending need
+    was entered, or some path fell short anyway (an unfundable tax
+    charge is a shortfall with no spending plan at all).
+    """
+    return format_percent(rate) if tested else NO_SPENDING_ENTERED
 
 
 def _metrics(
@@ -399,14 +404,15 @@ def _metrics(
     spending_entered: bool,
 ) -> tuple[MonteCarloMetric, ...]:
     """The success-metrics readout rows (planning §5.2, §4.13)."""
+    tested = spending_entered or result.probability_of_ruin > 0
     rows = [
         MonteCarloMetric(
             label=SUCCESS_RATE_LABEL,
-            value=success_text(result.success_rate, spending=spending_entered),
+            value=success_text(result.success_rate, tested=tested),
         ),
         MonteCarloMetric(
             label=RUIN_LABEL,
-            value=success_text(result.probability_of_ruin, spending=spending_entered),
+            value=success_text(result.probability_of_ruin, tested=tested),
         ),
     ]
     for spec in BAND_SPECS:

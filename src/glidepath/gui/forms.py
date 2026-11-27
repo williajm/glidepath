@@ -229,7 +229,9 @@ class SectionForm(QGroupBox):
 
     In the Simple view (roadmap 11.1) each row shows only when the app
     layer's :func:`~glidepath.app.simple_view_shows` says so, or while
-    it holds a value or an error; there is no disclosure toggle.
+    it holds a value or an error — and a required field whenever the
+    section holds anything, so a half-filled row never hides what it
+    still needs; there is no disclosure toggle.
     Visibility is re-derived on view changes, loads, errors and the
     controlling choices of conditional fields — never mid-typing, so a
     field never vanishes under the cursor.
@@ -394,6 +396,7 @@ class SectionForm(QGroupBox):
         """Re-derive which rows show in the current view (class docstring)."""
         detailed = self._view is FormView.DETAILED
         values = self.values()
+        holds_anything = any(values.values()) or bool(self._errored)
         any_advanced = False
         for field in self._spec.fields:
             shown = (
@@ -401,6 +404,7 @@ class SectionForm(QGroupBox):
                 or simple_view_shows(self._spec, field, values)
                 or bool(values[field.key])
                 or field.key in self._errored
+                or (field.required and holds_anything)
             )
             self._rows[field.key].setRowVisible(self._row_fields[field.key], shown)
             any_advanced = any_advanced or (shown and field.advanced)
@@ -493,12 +497,13 @@ class SectionForm(QGroupBox):
 
 @dataclass
 class _RowCard:
-    """One row's card: its frame, fields, summary line and edit toggle."""
+    """One row: its frame, fields, summary line, edit toggle and entity id."""
 
     frame: QFrame
     form: SectionForm
     summary: QLabel
     toggle: QPushButton
+    entity_id: str
 
 
 class RepeatableSection(QWidget):
@@ -521,10 +526,7 @@ class RepeatableSection(QWidget):
         super().__init__(parent)
         self._spec = spec
         self._view = FormView.DETAILED
-        self._entries: list[QWidget] = []
-        self._forms: list[SectionForm] = []
         self._cards: list[_RowCard] = []
-        self._entity_ids: list[str] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._list_layout = QVBoxLayout()
@@ -554,28 +556,31 @@ class RepeatableSection(QWidget):
         summary.setWordWrap(True)
         toggle = QPushButton(DONE_ROW_LABEL, container)
         remove = QPushButton(self._spec.remove_label, container)
-        remove.clicked.connect(lambda: self._remove_entry(container))
         header = QHBoxLayout()
         header.addWidget(summary, 1)
         header.addWidget(toggle)
         header.addWidget(remove)
         container_layout.addLayout(header)
         container_layout.addWidget(form)
-        card = _RowCard(frame=container, form=form, summary=summary, toggle=toggle)
+        card = _RowCard(
+            frame=container,
+            form=form,
+            summary=summary,
+            toggle=toggle,
+            entity_id=entity_id,
+        )
         toggle.clicked.connect(
             lambda: self.set_expanded(card.form, expanded=card.form.isHidden())
         )
+        remove.clicked.connect(lambda: self._remove_card(card))
         self._list_layout.addWidget(container)
-        self._entries.append(container)
-        self._forms.append(form)
         self._cards.append(card)
-        self._entity_ids.append(entity_id)
         self.set_expanded(form, expanded=expanded)
         return form
 
     def _card(self, form: SectionForm) -> _RowCard:
         """The card holding ``form``."""
-        return self._cards[self._forms.index(form)]
+        return next(card for card in self._cards if card.form is form)
 
     def is_expanded(self, form: SectionForm) -> bool:
         """Whether ``form``'s row shows its fields."""
@@ -588,20 +593,16 @@ class RepeatableSection(QWidget):
         card.toggle.setText(DONE_ROW_LABEL if expanded else EDIT_ROW_LABEL)
         card.summary.setText(row_summary(self._spec, card.form.values()))
 
-    def _remove_entry(self, container: QWidget) -> None:
-        """Drop one section instance — and its entity id — from the list."""
-        index = self._entries.index(container)
-        del self._entries[index]
-        del self._forms[index]
-        del self._cards[index]
-        del self._entity_ids[index]
-        self._list_layout.removeWidget(container)
-        container.deleteLater()
+    def _remove_card(self, card: _RowCard) -> None:
+        """Drop one row — and with it its entity id — from the list."""
+        self._cards.remove(card)
+        self._list_layout.removeWidget(card.frame)
+        card.frame.deleteLater()
 
     @property
     def forms(self) -> tuple[SectionForm, ...]:
         """The live section instances, in display order."""
-        return tuple(self._forms)
+        return tuple(card.form for card in self._cards)
 
     @property
     def spec(self) -> SectionSpec:
@@ -615,8 +616,8 @@ class RepeatableSection(QWidget):
         (accounts); rows that exist always show, whatever the view.
         """
         self._view = view
-        for form in self._forms:
-            form.set_view(view)
+        for card in self._cards:
+            card.form.set_view(view)
         self.add_button.setVisible(
             view is FormView.DETAILED or self._spec.level is FieldLevel.ESSENTIAL
         )
@@ -624,8 +625,8 @@ class RepeatableSection(QWidget):
     def values_list(self) -> tuple[dict[str, str], ...]:
         """Raw text for every instance, its entity id included, in order."""
         return tuple(
-            {ENTITY_ID_KEY: entity_id, **form.values()}
-            for entity_id, form in zip(self._entity_ids, self._forms, strict=True)
+            {ENTITY_ID_KEY: card.entity_id, **card.form.values()}
+            for card in self._cards
         )
 
     def set_values_list(self, values_list: Sequence[Mapping[str, str]]) -> None:
@@ -648,15 +649,16 @@ class RepeatableSection(QWidget):
 
     def set_entity_ids(self, entity_ids: Sequence[str]) -> None:
         """Re-seed every row's entity id, e.g. after a successful save."""
-        if len(entity_ids) != len(self._forms):
+        if len(entity_ids) != len(self._cards):
             msg = "one entity id per section instance required"
             raise ValueError(msg)
-        self._entity_ids = list(entity_ids)
+        for card, entity_id in zip(self._cards, entity_ids, strict=True):
+            card.entity_id = entity_id
 
     def clear(self) -> None:
         """Drop every section instance."""
-        for container in tuple(self._entries):
-            self._remove_entry(container)
+        for card in tuple(self._cards):
+            self._remove_card(card)
 
 
 def _compact(button: QPushButton) -> QHBoxLayout:
@@ -1156,6 +1158,7 @@ class FactsEntryPane(QWidget):
             self.partner_annuity_purchases.set_values_list(partner_annuities)
         finally:
             self._syncing_income = False
+        self._mark_steps(set())
         self._apply_view()
 
     def set_entity_ids(self, ids: PlanEntityIds) -> None:

@@ -1362,13 +1362,35 @@ class TestRowSummaries:
         assert line == "Stocks & shares ISA · £100"
 
     def test_a_db_pension_names_its_amount_and_age(self) -> None:
-        """The annual pension and the age it starts."""
+        """The accrued pension and the age it starts."""
         form = build_facts_form_view_model()
         line = row_summary(
             form.db_pension,
             {"accrued_annual_pension": "8500", "normal_pension_age": "65"},
         )
-        assert line == "Defined benefit pension · £8,500 a year · from age 65"
+        assert line == "Defined benefit pension · £8,500 a year accrued · from age 65"
+
+    def test_a_db_pension_taken_early_names_the_claim_age(self) -> None:
+        """A chosen claim age wins over the normal pension age."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.db_pension,
+            {
+                "accrued_annual_pension": "8500",
+                "normal_pension_age": "65",
+                "taken_at_age": "60",
+            },
+        )
+        assert line.endswith("from age 60")
+
+    def test_an_account_balance_includes_its_crystallised_part(self) -> None:
+        """A fully crystallised pot never reads as £0."""
+        form = build_facts_form_view_model()
+        line = row_summary(
+            form.wrapper,
+            {"kind": "uk.sipp", "balance": "0", "crystallised_balance": "80000"},
+        )
+        assert line == "SIPP · £80,000"
 
     def test_an_annuity_names_its_age_share_and_type(self) -> None:
         """When, how much of the pot, and which product."""
@@ -1443,6 +1465,24 @@ class TestReliefResolution:
         assert error.section == "wrapper"
         assert error.field_key == "relief_mechanic"
         assert "net pay or relief at source" in error.message
+
+    def test_a_mechanic_the_kind_cannot_take_errors_inline(self) -> None:
+        """Net pay kept after switching to a SIPP is refused on the field.
+
+        Regression (Codex review): an explicit mechanic was passed
+        through unchecked and only failed the projection.
+        """
+        result = parse_facts_form(
+            form_data(
+                person_values(),
+                wrappers=(self._wrapper(str(SIPP_KIND), "net_pay"),),
+            ),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.field_key == "relief_mechanic"
 
     def test_an_isa_takes_no_mechanic(self) -> None:
         """No relief applies to an ISA: blank stays none, without error."""
@@ -1553,6 +1593,58 @@ class TestStatePensionParsing:
         record = household.persons[0].state_pension
         assert record is not None
         assert record.deferral_years.value == Decimal(0)
+
+    def test_a_forecast_date_without_an_amount_errors(self) -> None:
+        """A date alone is never silently dropped (Codex review)."""
+        result = parse_facts_form(
+            form_data(person_values(), {"forecast_as_of": "2026-06-01"}),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "state_pension"
+        assert error.field_key == "forecast_as_of"
+
+    def test_a_birth_date_before_the_timetable_asks_to_leave_it_out(self) -> None:
+        """Before SPA coverage, the pension cannot be placed in time.
+
+        Regression (Codex review): a blank section now assumes the full
+        rate, and the age lookup failed the whole projection for anyone
+        born before the shipped timetable starts. The form says so on
+        the State Pension section instead, naming the way forward.
+        """
+        result = parse_facts_form(
+            form_data(person_values(date_of_birth="1950-03-01")),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "state_pension"
+        assert error.field_key == STATE_PENSION_INCLUDED_KEY
+        assert "6 October 1954" in error.message
+
+    def test_leaving_it_out_lets_an_older_plan_project(self) -> None:
+        """The leave-out choice is the way forward for those dates."""
+        household = parse(
+            form_data(
+                person_values(date_of_birth="1950-03-01"),
+                {STATE_PENSION_INCLUDED_KEY: STATE_PENSION_LEFT_OUT},
+            )
+        )
+        assert household.persons[0].state_pension is None
+
+    def test_an_older_partner_is_flagged_on_their_own_section(self) -> None:
+        """The partner's error lands on the partner's State Pension."""
+        result = parse_facts_form(
+            couple_form_data(partner=partner_values(date_of_birth="1950-03-01")),
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert result.household is None
+        [error] = result.errors
+        assert error.section == "partner_state_pension"
 
     def test_deferral_without_a_forecast_defers_the_assumed_rate(self) -> None:
         """Deferral applies to the assumed full rate too (§4.13)."""

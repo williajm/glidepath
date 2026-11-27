@@ -350,6 +350,22 @@ class TestSentenceGating:
         panel = build_outlook_panel(outlook_state(household()))
         assert NO_SPENDING_SENTENCE not in panel.detail
 
+    def test_a_partial_default_is_not_called_full(self) -> None:
+        """A 50% default fraction is quoted as 50%, never as "full"."""
+        plan = household(state_pension=state_pension_record(forecast=None))
+        projected = state_with_household(short_horizon_state(), plan, today=TODAY)
+        outcome = state_with_override(
+            projected,
+            "state_pension.default_fraction",
+            "0.5",
+            recorded_on=RECORDED,
+            today=TODAY,
+        )
+        assert outcome.error is None
+        panel = build_outlook_panel(outcome.state)
+        assert "assumed State Pension (50.0% of the full rate)" in panel.detail
+        assert "full State Pension (no forecast" not in panel.detail
+
     def test_without_a_record_the_state_pension_stays_silent(self) -> None:
         """No record is the explicit leave-out choice: nothing is quoted."""
         plan = household(state_pension=None)
